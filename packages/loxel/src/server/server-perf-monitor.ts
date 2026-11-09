@@ -2,12 +2,14 @@
  * Server-side (Bun) continuous performance monitor.
  *
  * Measures event loop lag via setTimeout drift and memory via
- * process.memoryUsage(). Reports through the server logger at debug level.
+ * process.memoryUsage(), and reports the subprocess spawning of the same window
+ * (spawn-metrics.ts). Reports through the server logger at debug level.
  * Follows the stress-detector.ts disposable pattern.
  */
 import { computeLagStats } from "@/lib/perf-lag-stats";
 
 import { logger } from "./logger";
+import { drainSpawnStats } from "./spawn-metrics";
 
 const log = logger.child("perf");
 
@@ -52,14 +54,16 @@ function collectAndReport(): void {
 
   const lagStats = computeLagStats(lagSamples, lagSampleCount, LAG_RING_SIZE);
 
-  const ctx: Record<string, unknown> = { memory };
+  const spawns = drainSpawnStats();
+
+  const ctx: Record<string, unknown> = { memory, spawns };
   if (lagStats) ctx.eventLoopLag = lagStats;
 
   log.debug("server metrics", ctx);
 
   // Escalate anomalies
   if (lagStats && lagStats.max > HIGH_LAG_MS) {
-    log.warn("server event loop lag", { ...lagStats });
+    log.warn("server event loop lag", { ...lagStats, spawns });
   }
   if (memory.rssMB > HIGH_RSS_MB) {
     log.warn("high server memory", memory);

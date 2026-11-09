@@ -46,6 +46,7 @@ class LspReferenceProvider implements monaco.languages.ReferenceProvider {
     context: monaco.languages.ReferenceContext,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.Location[] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentReferences({

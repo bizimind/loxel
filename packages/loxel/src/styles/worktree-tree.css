@@ -1,0 +1,230 @@
+/*
+ * The sidebar's worktree tree (components/sidebar/WorktreeTree.tsx). The collapsed rail and the
+ * expanded list are the same elements: `.wt-tree-expanded` switches the geometry and the
+ * transitions animate between the two, in step with the sidebar's width transition.
+ *
+ * Positions are rail coordinates: groups have no horizontal insets, so a row's padding is its
+ * icon's x. Custom properties set by the component:
+ *   tree:  --wt-icon-size, --wt-knob-inset (how far inside the parent icon's corner the knob sits)
+ *   row:   --wt-icon-size, --wt-pad (icon x on the rail), --wt-pad-expanded
+ *   group: --wt-group-color, --wt-line-x and --wt-line-x-expanded (where the knob's line runs),
+ *          and optionally --wt-knob-text
+ */
+
+.wt-tree {
+  --wt-ease: 150ms ease-out;
+  --wt-row-gap: 3px;
+  /* Two text lines, with room for the highlight around the icon */
+  --wt-row-expanded-height: 2.25rem;
+  --wt-knob: 18px;
+  --wt-border: 1.5px;
+}
+
+/* ── Rows ── */
+
+.wt-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  height: calc(var(--wt-icon-size) + 2 * var(--wt-row-gap));
+  padding: 0 0.5rem 0 var(--wt-pad);
+  outline: none;
+  cursor: pointer;
+  transition:
+    height var(--wt-ease),
+    padding-left var(--wt-ease);
+}
+.wt-tree-expanded .wt-row {
+  height: var(--wt-row-expanded-height);
+  padding-left: var(--wt-pad-expanded);
+}
+
+/* Hover, selection and keyboard cursor: an inset highlight that starts just left of the icon. */
+.wt-row::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: calc(var(--wt-pad) - 4px);
+  right: 4px;
+  border-radius: 6px;
+  pointer-events: none;
+  transition:
+    background-color 100ms,
+    left var(--wt-ease);
+}
+.wt-tree-expanded .wt-row::before {
+  left: calc(var(--wt-pad-expanded) - 6px);
+}
+.wt-tree-expanded .wt-row:hover::before {
+  background-color: color-mix(in srgb, var(--primary) 50%, transparent);
+}
+.wt-tree-expanded .wt-row[data-active]::before {
+  background-color: var(--primary);
+}
+.wt-tree-expanded .wt-row[data-drop-inside]::before {
+  background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.wt-tree-expanded .wt-row:focus-visible::before {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.wt-tree:not(.wt-tree-expanded) .wt-row:focus-visible .wt-row-icon,
+.wt-tree:not(.wt-tree-expanded) .wt-row[data-drop-inside] .wt-row-icon {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.wt-row-icon {
+  position: relative;
+  flex: none;
+  border-radius: 30%;
+}
+/* The active worktree is folded away below this one. */
+.wt-row-icon[data-active-inside] {
+  outline: 1.5px dashed var(--ring);
+  outline-offset: 2.5px;
+}
+
+.wt-row-label {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  opacity: 0;
+  transition: opacity 80ms;
+}
+.wt-tree-expanded .wt-row-label {
+  opacity: 1;
+  transition: opacity 150ms 70ms;
+}
+
+.wt-drop-line {
+  position: absolute;
+  z-index: 2;
+  left: calc(var(--wt-pad) - 4px);
+  right: 4px;
+  height: 2px;
+  border-radius: 9999px;
+  background-color: var(--ring);
+  pointer-events: none;
+}
+/* A ring at the line's start, so the level it lands at is visible at a glance. */
+.wt-drop-line::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--ring);
+  background-color: var(--card);
+}
+.wt-tree-expanded .wt-drop-line {
+  left: calc(var(--wt-pad-expanded) - 4px);
+}
+.wt-drop-line[data-zone="before"] {
+  top: 0;
+}
+.wt-drop-line[data-zone="after"] {
+  bottom: 0;
+}
+
+/* ── The knob: folds a group, on the parent icon's bottom-left corner ── */
+
+.wt-knob {
+  position: absolute;
+  z-index: 2;
+  /* Centered --wt-knob-inset inside the icon's bottom-left corner */
+  left: calc(var(--wt-pad) + var(--wt-knob-inset) - var(--wt-knob) / 2);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset) - var(--wt-knob) / 2);
+  display: grid;
+  place-items: center;
+  min-width: var(--wt-knob);
+  height: var(--wt-knob);
+  padding: 0 3px;
+  border: 1.5px solid var(--card);
+  border-radius: 9999px;
+  background-color: var(--wt-group-color);
+  color: var(--wt-knob-text, #fff);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: none;
+  transition:
+    left var(--wt-ease),
+    top var(--wt-ease),
+    filter 100ms;
+}
+/* A larger click target than the knob itself. */
+.wt-knob::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 9999px;
+}
+.wt-knob:hover {
+  filter: brightness(1.15);
+}
+.wt-tree-expanded .wt-knob {
+  left: calc(var(--wt-pad-expanded) + var(--wt-knob-inset) - var(--wt-knob) / 2);
+  top: calc(
+    (var(--wt-row-expanded-height) + var(--wt-icon-size)) / 2 - var(--wt-knob-inset) -
+      var(--wt-knob) / 2
+  );
+}
+
+/* ── Groups: a worktree with the worktrees nested below it ── */
+
+.wt-group {
+  /* Faint: the group color at about half strength */
+  --wt-group-stroke: color-mix(in oklch, var(--wt-group-color) 52%, transparent);
+  position: relative;
+  padding-bottom: 3px;
+}
+
+/*
+ * On the rail, a bracket runs down from the knob and turns along the bottom of the group, fading
+ * out to the right.
+ */
+.wt-group::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--wt-line-x) - var(--wt-border) / 2);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset));
+  right: 0;
+  bottom: 1px;
+  border-left: var(--wt-border) solid var(--wt-group-stroke);
+  border-bottom: var(--wt-border) solid var(--wt-group-stroke);
+  border-bottom-left-radius: 12px;
+  corner-bottom-left-shape: squircle;
+  mask: linear-gradient(90deg, #000, rgb(0 0 0 / 0.47) 16px, transparent 30px);
+  pointer-events: none;
+  transition: opacity var(--wt-ease);
+}
+
+/* Expanded, a tree line runs down from the knob instead; it slides there from the bracket's line. */
+.wt-group::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--wt-line-x) - 0.5px);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset));
+  bottom: 4px;
+  width: 1px;
+  background-color: color-mix(in oklch, var(--foreground) 20%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    left var(--wt-ease),
+    top var(--wt-ease),
+    opacity var(--wt-ease);
+}
+.wt-tree-expanded .wt-group::before {
+  opacity: 0;
+}
+.wt-tree-expanded .wt-group::after {
+  left: calc(var(--wt-line-x-expanded) - 0.5px);
+  top: calc((var(--wt-row-expanded-height) + var(--wt-icon-size)) / 2 - var(--wt-knob-inset));
+  opacity: 1;
+}

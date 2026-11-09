@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { showToast } from "@/components/ui/toast";
 import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -47,40 +48,72 @@ function decrementPending(worktreePath: string): void {
   }
 }
 
+/**
+ * Why an editor's content is being written: `explicit` for Cmd+S (and re-creating a deleted file),
+ * `auto` for autosave and for flushing unsaved edits (unmount, a move carrying them over).
+ */
+export type SaveReason = "auto" | "explicit";
+
 export interface SaveOptions {
   format?: boolean;
   formattingSettings?: FormattingSettings;
 }
 
 /**
- * Content returned by the file-write response, keyed by nonce.
+ * Content returned by the file-write response, keyed by nonce, with the editor that saved it.
  * When the WS echo arrives, the client can use this instead of fetching.
  * Entries auto-expire after 2 seconds to handle duplicate FS events
  * (the same nonce may appear in multiple file_content_changed messages).
  */
-const savedContentByNonce = new Map<string, string>();
+const savedContentByNonce = new Map<string, { content: string; editorKey: string }>();
 
 const STASH_EXPIRY_MS = 2_000;
 
-/** Retrieve stashed content for a nonce (kept alive for duplicate FS events). */
-export function consumeSavedContent(nonce: string): string | undefined {
-  return savedContentByNonce.get(nonce);
+/**
+ * Retrieve stashed content for a nonce saved by `editorKey` (kept alive for duplicate FS events).
+ * Other editors of the same file get nothing: the content may already be outdated by a later save
+ * of the saving editor, which only that editor can tell, so they read the file instead.
+ */
+export function consumeSavedContent(nonce: string, editorKey: string): string | undefined {
+  const saved = savedContentByNonce.get(nonce);
+  return saved?.editorKey === editorKey ? saved.content : undefined;
 }
 
-function stashContent(nonce: string, content: string): void {
-  savedContentByNonce.set(nonce, content);
+/**
+ * Format notices already shown this session. A missing formatter would otherwise toast on every
+ * save (and autosave) until the user installs it.
+ */
+const shownFormatNotices = new Set<string>();
+
+function showFormatNotice(notice: string): void {
+  if (shownFormatNotices.has(notice)) return;
+  shownFormatNotices.add(notice);
+  showToast(notice, "info");
+}
+
+function stashContent(nonce: string, content: string, editorKey: string): void {
+  savedContentByNonce.set(nonce, { content, editorKey });
   setTimeout(() => savedContentByNonce.delete(nonce), STASH_EXPIRY_MS);
 }
 
+/**
+ * Write editor content with a fresh nonce. Resolves to whether the server accepted the write;
+ * completion of the save is still the nonce echo. Callers that keep the content elsewhere on
+ * failure (e.g. a move carrying edits) use the result; others can ignore it.
+ *
+ * `editorKey` names the editor-state entry that tracks the save; it is the file path except for
+ * editors that are not the file's own tab (see `useEditorStateStore`).
+ */
 export async function saveEditorContent(
   filePath: string,
   content: string,
   worktreePath?: string | null,
   options?: SaveOptions,
-): Promise<void> {
+  editorKey: string = filePath,
+): Promise<boolean> {
   const nonce = crypto.randomUUID();
   const wtKey = worktreePath ?? "";
-  useEditorStateStore.getState().markSaving(filePath, nonce);
+  useEditorStateStore.getState().markSaving(editorKey, nonce);
   if (wtKey) incrementPending(wtKey);
   try {
     const result = await api.writeFileContent({
@@ -94,25 +127,28 @@ export async function saveEditorContent(
     // Stash the written content (may be formatted) so the WS echo handler
     // can use it directly instead of fetching via HTTP.
     if (result.content !== undefined) {
-      stashContent(nonce, result.content);
+      stashContent(nonce, result.content, editorKey);
     }
+    if (result.formatNotice) showFormatNotice(result.formatNotice);
     // State transition is handled by the WebSocket file_content_changed echo
     // (matched by nonce in handleDiskChange). Safety timeout ensures we don't
     // stay stuck if the echo is lost (watcher miss, WS disconnect).
     setTimeout(() => {
-      const entry = useEditorStateStore.getState().files.get(filePath);
+      const entry = useEditorStateStore.getState().files.get(editorKey);
       if (entry && entry.pendingNonces.has(nonce)) {
         frontendLog
           .child("files")
           .warn("Save echo timeout — nonce not confirmed, resetting to dirty", { filePath });
-        useEditorStateStore.getState().handleSaveError(filePath, nonce);
+        useEditorStateStore.getState().handleSaveError(editorKey, nonce);
       }
     }, 10_000);
+    return true;
   } catch (err) {
     frontendLog
       .child("files")
       .error("Failed to save file", { filePath, error: err instanceof Error ? err : undefined });
-    useEditorStateStore.getState().handleSaveError(filePath, nonce);
+    useEditorStateStore.getState().handleSaveError(editorKey, nonce);
+    return false;
   } finally {
     if (wtKey) decrementPending(wtKey);
   }

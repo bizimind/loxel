@@ -1,109 +1,132 @@
-import type { ServerWebSocket, Subprocess } from "bun";
+import { fileURLToPath } from "node:url";
 
 import {
-  type BaseLspSession,
-  type LspPosition,
-  type SpawnOptions,
-  StdioLspManager,
-  buildLineOffsets,
-  offsetAt,
-} from "./stdio-lsp-manager";
+  DOCUMENT_INDENTATION_METHOD,
+  type DocumentIndentation,
+  documentIndentationParamsSchema,
+} from "@/api/lsp-indentation-model";
+import { isRecord } from "@/lib/is-record";
+import { TS_SOURCE_EXTENSIONS } from "@/lib/typescript-files";
+
+import { fileUri } from "./lsp-file-uri";
+import { WorktreeLspManager, type WtLspSession, workspaceFolders } from "./stdio-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
-const TS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|mjs|cts|cjs|json|jsonc)$/i;
+const TS_EXTENSIONS = new RegExp(
+  `\\.(?:${[...TS_SOURCE_EXTENSIONS, "json", "jsonc"].join("|")})$`,
+  "i",
+);
 
-interface PendingRequest {
-  method: string;
-  /** loxel:// textDocument URI (if scoped to a document). */
-  uri?: string;
-}
+/**
+ * Monaco's script languages, which TypeScript takes by language id whatever the file is called:
+ * extensionless scripts named by their shebang, and files a file association gives one of these.
+ */
+const SCRIPT_LANGUAGE_IDS = new Set(["typescript", "javascript", "tsx", "jsx"]);
 
-interface DocumentState {
-  content: string;
-  /** Monotonically incremented on every didChange for this URI. */
-  version: number;
-}
+/**
+ * JSON paths: their live editor models use `file://` URIs (`fileSchemeLanguages`),
+ * unlike TS/JS models, which use `loxel://HEAD/`.
+ */
+const JSON_PATH = /\.jsonc?$/i;
 
-interface TsLspSession extends BaseLspSession {
-  wtPath: string;
-  pendingRequests: Map<number | string, PendingRequest>;
-  /**
-   * Loxel URI → full text + version, kept in sync from client didOpen/didChange.
-   * Separate from the base's `documentContents` because TS tracks a document
-   * version in addition to the text.
-   */
-  tsDocuments: Map<string, DocumentState>;
-}
-
-interface TsLspContext {
-  wtPath: string;
-}
-
-interface LspRange {
-  start: LspPosition;
-  end: LspPosition;
-}
-
-interface LspContentChange {
-  range?: LspRange;
-  text: string;
+/**
+ * Translate a client→server JSON-RPC body: `loxel://HEAD/<abs path>` (TS/JS editor models) →
+ * `file:///<abs path>`. Case-insensitive because Monaco's `Uri.toString()` lowercases the
+ * authority. `file://` URIs (JSON editor models) pass through.
+ */
+export function toServerUris(body: string): string {
+  return body.replace(/loxel:\/\/head\//gi, "file:///");
 }
 
 /**
- * Manages `tsc --lsp -stdio` child processes, one per WebSocket connection.
- * Each `/ws/ts-lsp?wt=<path>` connection gets its own TypeScript rooted at the
- * worktree path. Translates loxel://HEAD/... ↔ file:///... URIs and augments
- * semantic token responses with custom JSX tokens.
+ * Translate a server→client JSON-RPC body: `file:///<abs path>` → `loxel://HEAD/<abs path>`, the
+ * URI of a TS/JS editor model (and the authority casing CodeEditorPanel uses), so diagnostics,
+ * references and edits land on the open models. JSON files keep `file://`, which is what their
+ * editor models use.
  */
-export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
+export function toClientUris(body: string): string {
+  // The path runs until the end of the JSON string, a markdown link or the URI's query/fragment.
+  return body.replace(/file:\/\/\/([^\s"'\\#?()<>[\]`]*)/g, (uri: string, uriPath: string) =>
+    JSON_PATH.test(uriPath) ? uri : `loxel://HEAD/${uriPath}`,
+  );
+}
+
+/**
+ * TypeScript 7's user preferences, by the raw names it reads at the top of a settings section.
+ * TypeScript keeps one set per server: the `js/ts` section covers TS and JS files alike.
+ */
+const PREFERENCES = {
+  includeCompletionsForModuleExports: true,
+  includeCompletionsForImportStatements: true,
+  includeAutomaticOptionalChainCompletions: true,
+  importModuleSpecifierPreference: "shortest",
+  // Whether they show is the editor's inlay hints setting. Names on literal arguments only, where
+  // the call doesn't say what the value means: `all` is about 3 to 4 times as many on real JavaScript.
+  includeInlayParameterNameHints: "literals",
+  includeInlayVariableTypeHints: true,
+  includeInlayFunctionLikeReturnTypeHints: true,
+  // Loxel never fetches dependencies by itself: TypeScript would otherwise run `npm` for `@types`.
+  automaticTypeAcquisitionEnabled: false,
+} as const;
+
+/**
+ * The `js/ts` settings section: the preferences, plus the format settings TypeScript indents the
+ * code of quick fixes and completions with (its default is 4 spaces).
+ */
+function typeScriptSettings(indentation: DocumentIndentation | null): Record<string, unknown> {
+  if (!indentation) return { ...PREFERENCES };
+  // Capped: TypeScript builds each indentation string in full, and an `.editorconfig` can say 1e9.
+  const tabSize = Math.min(indentation.tabSize, MAX_INDENT_COLUMNS);
+  const indentSize = Math.min(indentation.indentSize, MAX_INDENT_COLUMNS);
+  const format = { tabSize, indentSize, convertTabsToSpaces: indentation.insertSpaces };
+  return { ...PREFERENCES, format };
+}
+
+const MAX_INDENT_COLUMNS = 16;
+
+/** Client requests whose edits TypeScript indents with its format settings. */
+const INDENTED_EDIT_REQUESTS = new Set([
+  "textDocument/codeAction",
+  "textDocument/completion",
+  "completionItem/resolve",
+]);
+
+interface SessionIndentation {
+  /** Each live editor model's indentation, by file path. */
+  documents: Map<string, DocumentIndentation>;
+  /** What TypeScript indents with now; absent while it has its default. */
+  current?: DocumentIndentation;
+}
+
+/**
+ * Manages `tsc --lsp -stdio` child processes, one per worktree. Translates loxel://HEAD/... ↔
+ * file:///... URIs, gives TypeScript Loxel's preferences, and gives `.tsx`/`.jsx` documents the
+ * language ids TypeScript expects.
+ *
+ * TypeScript applies one set of format settings to every file, so the bridge keeps each document's
+ * indentation (the client's `loxel/documentIndentation` notifications) and, before forwarding a
+ * request whose edits TypeScript indents, switches the settings to that document's indentation
+ * when they differ. TypeScript applies a configuration change before it reads the next request.
+ */
+export class TsLspManager extends WorktreeLspManager {
+  protected override readonly forwardWatchedFiles = true;
+  private readonly indentation = new WeakMap<WtLspSession, SessionIndentation>();
+  /** Open documents whose URI has no TS/JS extension, by the URI their `didOpen` carried. */
+  private readonly openScripts = new WeakMap<WtLspSession, Set<string>>();
+
   constructor() {
     super("ts-lsp");
   }
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Hooks
-
   protected resolveBinary(): string | null {
     return resolveTypeScriptBinary();
-  }
-
-  protected override getSessionKey(context: TsLspContext): string {
-    return context.wtPath;
   }
 
   protected override spawnArgs(): readonly string[] {
     return ["--lsp", "-stdio"];
   }
 
-  protected override spawnOptions(context: TsLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected override buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: TsLspContext,
-  ): TsLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-      pendingRequests: new Map(),
-      tsDocuments: new Map(),
-    };
-  }
-
-  protected override handleClientData(session: TsLspSession, data: string): void {
+  protected override handleClientData(session: WtLspSession, data: string): void {
     let outgoing = data;
     try {
       const parsed: unknown = JSON.parse(data);
@@ -111,37 +134,25 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
         const msg = parsed as { id?: number | string; method?: string; params?: unknown };
 
         if (msg.method !== undefined) {
-          if (this.shouldDropForNonTsUri(msg.method, msg.params)) return;
-
-          const mutated = this.trackDocumentLifecycle(session, msg.method, msg.params);
-
-          if (msg.id !== undefined) {
-            const pending: PendingRequest = { method: msg.method };
-            const params = msg.params;
-            if (
-              typeof params === "object" &&
-              params !== null &&
-              "textDocument" in params &&
-              typeof (params as { textDocument: unknown }).textDocument === "object" &&
-              (params as { textDocument: { uri?: unknown } }).textDocument !== null
-            ) {
-              const uri = (params as { textDocument: { uri?: unknown } }).textDocument.uri;
-              if (typeof uri === "string") pending.uri = uri;
-            }
-            session.pendingRequests.set(msg.id, pending);
+          if (msg.method === DOCUMENT_INDENTATION_METHOD) {
+            this.setDocumentIndentation(session, msg.params);
+            return;
           }
+          if (msg.method === "textDocument/didOpen") this.rememberScript(session, msg.params);
+          if (this.shouldDropForNonTsUri(session, msg.method, msg.params)) return;
 
           // Inject rootUri/workspaceFolders so TypeScript knows which project to load.
           if (msg.method === "initialize") {
             outgoing = this.augmentInitializeRequest(session, parsed as Record<string, unknown>);
-          } else if (mutated) {
+          } else if (msg.method === "textDocument/didOpen" && setReactLanguageId(msg.params)) {
             outgoing = JSON.stringify(parsed);
-          }
-
-          // After server acks init, push TS preferences so TypeScript enables
-          // module-export completions, inlay hints, etc. in steady state too.
-          if (msg.method === "initialized") {
-            queueMicrotask(() => this.sendConfigUpdate(session));
+          } else if (msg.method === "textDocument/didClose") {
+            const uri = textDocumentUri(msg.params);
+            if (uri) this.openScripts.get(session)?.delete(uri);
+            const path = documentPath(uri);
+            if (path) this.sessionIndentation(session).documents.delete(path);
+          } else if (INDENTED_EDIT_REQUESTS.has(msg.method)) {
+            this.indentLike(session, requestDocumentPath(msg.method, msg.params));
           }
         }
       }
@@ -149,154 +160,97 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       // Not JSON — forward verbatim.
     }
 
-    // Translate loxel://HEAD/... → file:///... so TypeScript sees real file paths.
-    // Case-insensitive because Monaco may preserve or normalize the authority
-    // component depending on URI construction path.
-    const translated = outgoing.replace(/loxel:\/\/head\//gi, "file:///");
-    this.writeToStdin(session, translated);
+    this.writeToStdin(session, toServerUris(outgoing));
   }
 
-  protected override handleServerFrame(session: TsLspSession, body: string): void {
+  protected override handleServerFrame(session: WtLspSession, body: string): void {
     // Server→client requests we fulfill locally (TypeScript blocks on
     // workspace/configuration until we answer).
     if (this.handleServerRequest(session, body)) return;
-
-    const intercepted = this.interceptServerMessage(session, body);
-    // An empty string means the interceptor consumed the message.
-    if (intercepted === "") return;
-
-    // Translate file:///... → loxel://HEAD/... for the client. Matches the
-    // authority casing CodeEditorPanel uses when constructing model URIs.
-    const translated = intercepted.replaceAll("file:///", "loxel://HEAD/");
-    session.ws.send(translated);
+    session.ws.send(toClientUris(body));
   }
 
   // ---------------------------------------------------------------------------
 
-  private sendConfigUpdate(session: TsLspSession): void {
+  private sessionIndentation(session: WtLspSession): SessionIndentation {
+    let state = this.indentation.get(session);
+    if (!state) {
+      state = { documents: new Map() };
+      this.indentation.set(session, state);
+    }
+    return state;
+  }
+
+  private setDocumentIndentation(session: WtLspSession, params: unknown): void {
+    const parsed = documentIndentationParamsSchema.safeParse(params);
+    if (!parsed.success) {
+      this.log.warn("Ignoring a malformed document indentation", { error: parsed.error.message });
+      return;
+    }
+    const path = documentPath(parsed.data.textDocument.uri);
+    if (path) this.sessionIndentation(session).documents.set(path, parsed.data.indentation);
+  }
+
+  /** Switch TypeScript's format settings to the indentation of the document at `path`. */
+  private indentLike(session: WtLspSession, path: string | null): void {
+    const state = this.sessionIndentation(session);
+    const indentation = path ? state.documents.get(path) : undefined;
+    if (!indentation || sameIndentation(indentation, state.current)) return;
+    state.current = indentation;
     const msg = JSON.stringify({
       jsonrpc: "2.0",
       method: "workspace/didChangeConfiguration",
-      params: {
-        settings: {
-          typescript: {
-            preferences: {
-              includeCompletionsForModuleExports: true,
-              includeCompletionsForImportStatements: true,
-              includeCompletionsWithInsertText: true,
-              includeCompletionsWithSnippetText: true,
-              includeAutomaticOptionalChainCompletions: true,
-              allowIncompleteCompletions: true,
-              importModuleSpecifierPreference: "shortest",
-              includePackageJsonAutoImports: "auto",
-            },
-          },
-          javascript: {
-            preferences: {
-              includeCompletionsForModuleExports: true,
-              includeCompletionsForImportStatements: true,
-              includeCompletionsWithInsertText: true,
-              allowIncompleteCompletions: true,
-            },
-          },
-        },
-      },
+      params: { settings: { "js/ts": typeScriptSettings(indentation) } },
     });
     this.writeToStdin(session, msg);
   }
 
-  private augmentInitializeRequest(session: TsLspSession, msg: Record<string, unknown>): string {
-    const rootUri = `file://${session.wtPath}`;
-    const workspaceName = session.wtPath.split("/").pop() || session.wtPath;
+  private augmentInitializeRequest(session: WtLspSession, msg: Record<string, unknown>): string {
     const params = (msg.params as Record<string, unknown> | undefined) ?? {};
-    params.rootUri = rootUri;
+    params.rootUri = fileUri(session.wtPath);
     params.rootPath = session.wtPath;
-    params.workspaceFolders = [{ uri: rootUri, name: workspaceName }];
-    params.initializationOptions = {
-      preferences: {
-        includeCompletionsForModuleExports: true,
-        includeCompletionsForImportStatements: true,
-        includeCompletionsWithInsertText: true,
-        includeCompletionsWithSnippetText: true,
-        includeAutomaticOptionalChainCompletions: true,
-        allowIncompleteCompletions: true,
-      },
-    };
+    params.workspaceFolders = workspaceFolders(session.wtPath);
+    // TypeScript reads these as the `js/ts` section when the client cannot answer
+    // `workspace/configuration` (monaco-lsp-client does not).
+    params.initializationOptions = { userPreferences: typeScriptSettings(null) };
     msg.params = params;
     return JSON.stringify(msg);
   }
 
-  /** Returns true if the params object was mutated and must be re-serialized. */
-  private trackDocumentLifecycle(session: TsLspSession, method: string, params: unknown): boolean {
-    if (typeof params !== "object" || params === null) return false;
-    let mutated = false;
-
-    if (method === "textDocument/didOpen") {
-      const p = params as { textDocument?: { uri?: string; text?: string; languageId?: string } };
-      if (p.textDocument?.uri && typeof p.textDocument.text === "string") {
-        session.tsDocuments.set(p.textDocument.uri, { content: p.textDocument.text, version: 0 });
-      }
-      // Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but LSP
-      // needs `typescriptreact`/`javascriptreact` for TypeScript to enable JSX mode.
-      if (p.textDocument?.uri) {
-        const uri = p.textDocument.uri;
-        const current = p.textDocument.languageId;
-        if (/\.tsx$/i.test(uri) && current !== "typescriptreact") {
-          p.textDocument.languageId = "typescriptreact";
-          mutated = true;
-        } else if (/\.jsx$/i.test(uri) && current !== "javascriptreact") {
-          p.textDocument.languageId = "javascriptreact";
-          mutated = true;
-        }
-      }
-    } else if (method === "textDocument/didChange") {
-      const p = params as { textDocument?: { uri?: string }; contentChanges?: LspContentChange[] };
-      const uri = p.textDocument?.uri;
-      const changes = p.contentChanges;
-      if (!uri || !Array.isArray(changes)) return mutated;
-      const state = session.tsDocuments.get(uri);
-      if (state === undefined) return mutated;
-      let content = state.content;
-      for (const change of changes) {
-        if (!change.range) {
-          content = change.text;
-          continue;
-        }
-        const offsets = buildLineOffsets(content);
-        const start = offsetAt(offsets, content.length, change.range.start);
-        const end = offsetAt(offsets, content.length, change.range.end);
-        content = content.slice(0, start) + change.text + content.slice(end);
-      }
-      session.tsDocuments.set(uri, { content, version: state.version + 1 });
-    } else if (method === "textDocument/didClose") {
-      const p = params as { textDocument?: { uri?: string } };
-      if (p.textDocument?.uri) session.tsDocuments.delete(p.textDocument.uri);
+  /** A script language's `didOpen` for a URI without an extension lets the document through. */
+  private rememberScript(session: WtLspSession, params: unknown): void {
+    const textDocument = isRecord(params) ? params.textDocument : undefined;
+    if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
+    if (typeof textDocument.languageId !== "string") return;
+    if (TS_EXTENSIONS.test(textDocument.uri)) return;
+    if (!SCRIPT_LANGUAGE_IDS.has(textDocument.languageId)) return;
+    let scripts = this.openScripts.get(session);
+    if (!scripts) {
+      scripts = new Set();
+      this.openScripts.set(session, scripts);
     }
-    return mutated;
+    scripts.add(textDocument.uri);
   }
 
   /**
-   * Drop textDocument/* notifications/requests whose URI targets a file TypeScript
-   * doesn't understand (e.g. `.astro`, `.vue`). The TS LSP client has no
-   * languageId filter, so Monaco sends every open model to us.
+   * Drop textDocument/* notifications/requests whose URI targets a file TypeScript doesn't
+   * understand: one with neither a TS/JS/JSON extension nor a script language at `didOpen` (JSON
+   * language models with other names, such as `.babelrc`). Only `didOpen` carries a language.
    */
-  private shouldDropForNonTsUri(method: string, params: unknown): boolean {
+  private shouldDropForNonTsUri(session: WtLspSession, method: string, params: unknown): boolean {
     if (!method.startsWith("textDocument/")) return false;
-    if (typeof params !== "object" || params === null) return false;
-    const td = (params as { textDocument?: unknown }).textDocument;
-    if (typeof td !== "object" || td === null) return false;
-    const uri = (td as { uri?: unknown }).uri;
-    if (typeof uri !== "string") return false;
-    return !TS_EXTENSIONS.test(uri);
+    const uri = textDocumentUri(params);
+    if (uri === undefined) return false;
+    return !TS_EXTENSIONS.test(uri) && !this.openScripts.get(session)?.has(uri);
   }
 
   /**
    * Handle server→client requests locally (don't forward to the WebSocket
-   * client). Returns true if consumed. TypeScript sends `workspace/configuration`
-   * immediately after `initialized` and blocks until it's answered — so we
-   * reply inline with our canned TS/JS preferences.
+   * client). Returns true if consumed. TypeScript asks for `workspace/configuration`
+   * after `initialized` if the client advertises it, and blocks until it's answered,
+   * so we reply inline with the current settings.
    */
-  private handleServerRequest(session: TsLspSession, body: string): boolean {
+  private handleServerRequest(session: WtLspSession, body: string): boolean {
     let msg: unknown;
     try {
       msg = JSON.parse(body);
@@ -311,23 +265,8 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       const items = ((m.params as { items?: unknown[] } | undefined)?.items ?? []) as Array<{
         section?: string;
       }>;
-      const prefs = {
-        includeCompletionsForModuleExports: true,
-        includeCompletionsForImportStatements: true,
-        includeCompletionsWithInsertText: true,
-        includeCompletionsWithSnippetText: true,
-        includeAutomaticOptionalChainCompletions: true,
-        allowIncompleteCompletions: true,
-        importModuleSpecifierPreference: "shortest" as const,
-        includePackageJsonAutoImports: "auto" as const,
-      };
-      const result = items.map((item) => {
-        const section = (item.section ?? "").toLowerCase();
-        if (section === "typescript" || section === "javascript" || section === "js/ts") {
-          return { preferences: prefs };
-        }
-        return {};
-      });
+      const settings = typeScriptSettings(this.sessionIndentation(session).current ?? null);
+      const result = items.map((item) => (item.section === "js/ts" ? settings : null));
       this.writeToStdin(session, JSON.stringify({ jsonrpc: "2.0", id: m.id, result }));
       return true;
     }
@@ -335,8 +274,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     // client/(un)registerCapability: DO NOT swallow. TypeScript announces the
     // semantic-tokens capability dynamically via client/registerCapability,
     // and if we ack it locally the real Monaco client never sees the
-    // registration — so no semantic-token provider is registered and our
-    // JSX augmentation has no provider legend to sit on.
+    // registration, so no semantic-token provider is registered.
     if (m.method === "client/registerCapability" || m.method === "client/unregisterCapability") {
       return false;
     }
@@ -348,23 +286,59 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
 
     return false;
   }
+}
 
-  private interceptServerMessage(session: TsLspSession, body: string): string {
-    let msg: unknown;
-    try {
-      msg = JSON.parse(body);
-    } catch {
-      return body;
-    }
-    if (typeof msg !== "object" || msg === null || !("id" in msg) || !("result" in msg)) {
-      return body;
-    }
+function sameIndentation(a: DocumentIndentation, b: DocumentIndentation | undefined): boolean {
+  return (
+    a.tabSize === b?.tabSize && a.indentSize === b.indentSize && a.insertSpaces === b.insertSpaces
+  );
+}
 
-    const response = msg as { id: number | string; result: unknown };
-    const pending = session.pendingRequests.get(response.id);
-    if (!pending) return body;
-    session.pendingRequests.delete(response.id);
+export function textDocumentUri(params: unknown): string | undefined {
+  const textDocument = isRecord(params) ? params.textDocument : undefined;
+  return isRecord(textDocument) && typeof textDocument.uri === "string"
+    ? textDocument.uri
+    : undefined;
+}
 
-    return body;
+/**
+ * The file a request's edits are for: its text document, or for `completionItem/resolve` the file
+ * TypeScript recorded in the item's data.
+ */
+function requestDocumentPath(method: string, params: unknown): string | null {
+  if (method !== "completionItem/resolve") return documentPath(textDocumentUri(params));
+  const data = isRecord(params) ? params.data : undefined;
+  return isRecord(data) && typeof data.fileName === "string" ? data.fileName : null;
+}
+
+/** The file path of a client or server document URI, or null for any other URI. */
+export function documentPath(uri: string | undefined): string | null {
+  if (uri === undefined) return null;
+  const serverUri = toServerUris(uri);
+  if (!serverUri.startsWith("file:")) return null;
+  try {
+    return fileURLToPath(serverUri);
+  } catch {
+    return null;
   }
+}
+
+const REACT_LANGUAGE_IDS = new Map([
+  ["tsx", "typescriptreact"],
+  ["jsx", "javascriptreact"],
+]);
+
+/**
+ * Monaco reports `tsx`/`jsx` for these files, but TypeScript needs `typescriptreact` /
+ * `javascriptreact` in a `textDocument/didOpen` to enable JSX mode. The extension decides, or the
+ * language id for a file a file association names. True when it changed `params`.
+ */
+export function setReactLanguageId(params: unknown): boolean {
+  const textDocument = isRecord(params) ? params.textDocument : undefined;
+  if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return false;
+  const extension = /\.([jt]sx)$/i.exec(textDocument.uri)?.[1]?.toLowerCase();
+  const languageId = REACT_LANGUAGE_IDS.get(extension ?? String(textDocument.languageId));
+  if (!languageId || textDocument.languageId === languageId) return false;
+  textDocument.languageId = languageId;
+  return true;
 }

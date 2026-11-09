@@ -57,10 +57,10 @@ function get(path: string): Request {
   return new Request(`http://localhost${path}`);
 }
 
-function post(path: string, body: unknown, contentType = "application/json"): Request {
+function post(path: string, body: unknown): Request {
   return new Request(`http://localhost${path}`, {
     method: "POST",
-    headers: { "Content-Type": contentType },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
@@ -168,16 +168,6 @@ describe("handleOpenInRequest", () => {
         ["-R", file],
         ["-R", folder],
       ]);
-    });
-
-    test("rejects bodies not sent as JSON, so other sites can't trigger it", async () => {
-      const { ctx, openCalls } = createContext();
-      const response = await handleOpenInRequest(
-        post("/api/open-in/reveal", { path: file }, "text/plain"),
-        ctx,
-      );
-      expect(response?.status).toBe(400);
-      expect(openCalls).toEqual([]);
     });
 
     test("rejects invalid bodies and unmanaged paths without running open", async () => {

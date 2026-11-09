@@ -3,6 +3,13 @@ import * as monaco from "monaco-editor";
 import type { Position, Range, TextDocumentIdentifier } from "../types";
 
 export interface ITextModelBridge {
+  /**
+   * Whether `model` is one the client syncs to the server (its language and the
+   * client's model filter match). Providers answer only for these models, so
+   * read-only views the server never opened get no requests.
+   */
+  isSyncedModel(textModel: monaco.editor.ITextModel): boolean;
+
   translate(
     textModel: monaco.editor.ITextModel,
     monacoPos: monaco.Position,

@@ -1,7 +1,8 @@
 ---
 title: Drafts
 description: Markdown and Excalidraw files outside your repo, and how to move them in.
-order: 11
+section: "Tasks & context"
+order: 4
 ---
 
 Drafts let you sketch a design doc or architecture diagram before deciding where it lives in your repo. They exist outside any git tree — no branch, no staging, no tracking — until you explicitly move them in.
@@ -28,7 +29,7 @@ Both autosave on the same schedule as the code editor.
 | New markdown draft     | `Cmd+N` or `Cmd+Shift+M` |
 | New Excalidraw drawing | `Cmd+Shift+D`            |
 
-New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab.
+New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab (or `Cmd+Shift+R` while it is the active tab).
 
 ---
 
@@ -62,7 +63,7 @@ Loxel moves the file and any open editor for it keeps working — no need to reo
 
 ## Workflow example
 
-A common pattern when working with the coding agent:
+A common pattern when working with a coding agent:
 
 1. `Cmd+N` — open a markdown draft and outline the approach
 2. Point the agent at the draft — paste its contents or its path into the prompt
@@ -76,5 +77,5 @@ The same works for architecture diagrams: `Cmd+Shift+D`, sketch the system, drag
 ## See also
 
 - [Editor](/docs/editor) — autosave behavior that applies equally to drafts; format on save
-- [Coding Agent](/docs/coding-agent) — handing draft context documents to the agent
-- [Worktrees & Projects](/docs/worktrees-and-projects) — drafts are scoped per project + worktree, just like layout state
+- [Running Coding Agents](/docs/coding-agents) — running the agent you hand your drafts to
+- [Worktrees & Tasks](/docs/worktrees-and-tasks) — drafts are scoped per project + worktree, just like the rest of a task's context

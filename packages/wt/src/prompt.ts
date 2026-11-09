@@ -129,3 +129,25 @@ export function pickWorktree(
     },
   });
 }
+
+export type SetupChoice<T extends string> = T | "skip" | "explain";
+
+/** Ask what to do about one `wt init` check: apply one of its actions, skip it, or explain more. */
+export function selectSetupChoice<T extends string>(
+  message: string,
+  actions: Array<{ id: T; title: string; recommended: boolean }>,
+): Promise<SetupChoice<T>> {
+  const recommended = actions.find((action) => action.recommended);
+  return select<SetupChoice<T>>({
+    message,
+    default: recommended?.id ?? "skip",
+    choices: [
+      ...actions.map((action) => ({
+        name: `Apply: ${action.title}${action.recommended ? " (recommended)" : ""}`,
+        value: action.id,
+      })),
+      { name: "Skip", value: "skip" as const },
+      { name: "Explain", value: "explain" as const },
+    ],
+  });
+}

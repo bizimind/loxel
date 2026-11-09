@@ -61,6 +61,32 @@ describe("ProjectFileMenu copy items", () => {
     expect(writeText).toHaveBeenCalledWith("components");
   });
 
+  test("Compare Files names the other file and runs the comparison", () => {
+    const onCompare = mock(() => {});
+    const onClose = mock(() => {});
+    render(
+      <ProjectFileMenu
+        open
+        position={{ x: 0, y: 0 }}
+        filePath="/repo/b.ts"
+        isDir={false}
+        onClose={onClose}
+        compareWith="/repo/src/a.ts"
+        onCompare={onCompare}
+      />,
+    );
+
+    expect(screen.getByText("with a.ts")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Compare Files"));
+    expect(onCompare).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("hides Compare Files without a file to compare with", () => {
+    renderMenu({ filePath: "/repo/b.ts" });
+    expect(screen.queryByText("Compare Files")).toBeNull();
+  });
+
   test("hides Copy Relative Path without a relative path", () => {
     renderMenu({ filePath: "/repo", isDir: true });
 

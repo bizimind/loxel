@@ -26,14 +26,18 @@ import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import { installSoftLineBreaks } from "@/components/editor/soft-line-break";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
   useDiskSyncedContent,
+  useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
 import {
@@ -245,6 +249,8 @@ function scrollCursorNearTop(view: ProseMirrorView): void {
 
 interface MarkdownEditorProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   line?: number;
   column?: number;
   onClose?: () => void;
@@ -254,6 +260,7 @@ interface MarkdownEditorProps {
 
 export function MarkdownEditor({
   filePath,
+  movedFrom,
   line,
   column,
   onClose,
@@ -300,6 +307,8 @@ export function MarkdownEditor({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
+    recreateFile,
     cacheKey,
     isError,
     save,
@@ -320,17 +329,10 @@ export function MarkdownEditor({
   });
 
   // Keep save option refs in sync with formatting settings.
-  const formattingSettings = useSettingsStore((s) => s.editor.formatting);
-  const markdownOutput = formattingSettings.markdownOutput;
+  useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
+  const markdownOutput = useSettingsStore((s) => s.editor.formatting.markdownOutput);
   // Value key so async settings hydration (same values, new object) doesn't remount the editor.
   const markdownOutputKey = JSON.stringify(markdownOutput);
-  saveOptionsRef.current = formattingSettings.enabled
-    ? { format: true, formattingSettings }
-    : undefined;
-  autoSaveOptionsRef.current =
-    formattingSettings.enabled && formattingSettings.formatOnAutoSave
-      ? { format: true, formattingSettings }
-      : undefined;
 
   // Frontmatter state — kept as React state so FrontmatterEditor re-renders on change.
   // The ref mirrors the state for synchronous reads inside Crepe callbacks.
@@ -427,6 +429,8 @@ export function MarkdownEditor({
       crepe.editor.use(plugin);
     }
 
+    installSoftLineBreaks(crepe.editor);
+
     // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
     // remark-stringify at init, so changes recreate the editor via the effect deps below.
     crepe.editor.config((ctx) => {
@@ -497,7 +501,7 @@ export function MarkdownEditor({
                 if (!cancelled) scrollCursorNearTop(view);
               });
             }
-            view.focus();
+            if (isActivatedPanel(panelApi)) view.focus();
           } else {
             const savedPos = editorSelectionCache.get(effectCacheKey);
             if (savedPos !== undefined) {
@@ -509,7 +513,7 @@ export function MarkdownEditor({
               // New editor — place cursor at end
               const end = doc.content.size;
               view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(end))));
-              view.focus();
+              if (isActivatedPanel(panelApi)) view.focus();
             }
           }
 
@@ -679,7 +683,7 @@ export function MarkdownEditor({
         const pos = Math.min(targetPos, doc.content.size);
         view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(pos))));
         scrollCursorNearTop(view);
-        view.focus();
+        if (isActivatedPanel(panelApi)) view.focus();
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -874,7 +878,9 @@ export function MarkdownEditor({
     });
   }, [cacheKey]);
 
-  if (isError) {
+  // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
+  // be re-created; only a file that never loaded has nothing to show.
+  if (isError && diskContent === null) {
     return (
       <div
         className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -890,6 +896,8 @@ export function MarkdownEditor({
       className="group/editor relative flex h-full w-full flex-col overflow-hidden"
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

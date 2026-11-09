@@ -2,14 +2,14 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, sep } from "node:path";
 
-import { $ } from "bun";
-
 import type { StatusInfo } from "@/api/git-models";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
+import type { FileMoveSource } from "@/api/ws-protocol";
 
+import { FileMoveDetector } from "./file-move-detector";
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
-import { getStatus, readOnlyGitEnv } from "./git-commands";
+import { getStatus, gitText, readOnlyGitEnv, runGit } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -21,6 +21,18 @@ export interface ProjectFilesServiceOptions {
    * relative to this root.
    */
   gitStatus?: boolean;
+  /**
+   * Called with the absolute paths of each batch of watcher events, before the refresh pass that
+   * handles them. Git-ignored directories are already filtered out.
+   */
+  onPathsChanged?: (paths: string[]) => void;
+  /**
+   * Called with the worktree-relative, `/`-separated path of each raw watcher event dropped because
+   * it lies in a git-ignored directory, unbatched (an install sends many).
+   */
+  onIgnoredPathChanged?: (relPath: string) => void;
+  /** Called with absolute paths when a tracked file (see `trackFile`) was renamed or moved. */
+  onFileMoved?: (oldPath: string, newPath: string, source: FileMoveSource) => void;
 }
 
 /** Work accumulated while a refresh pass is running, applied by the next pass as one unit. */
@@ -35,6 +47,8 @@ interface PendingRefresh {
    * (checkout, reset, stash) and may have rewritten files whose events FSEvents dropped.
    */
   rescanAll: boolean;
+  /** Some of the changes arrived while a Loxel file operation ran: moves among them are Loxel's. */
+  duringOperation: boolean;
   waiters: Array<() => void>;
 }
 
@@ -91,6 +105,7 @@ export class ProjectFilesService {
   private stopped = false;
 
   private syncService: FilesSyncService;
+  private moveDetector: FileMoveDetector;
 
   constructor(
     private worktreeCwd: string,
@@ -105,6 +120,7 @@ export class ProjectFilesService {
     private onStatusChanged?: (status: StatusInfo) => void,
     private options: ProjectFilesServiceOptions = {},
   ) {
+    this.moveDetector = new FileMoveDetector(worktreeCwd);
     this.syncService = new FilesSyncService({
       watchDir: worktreeCwd,
       recursive: true,
@@ -114,12 +130,21 @@ export class ProjectFilesService {
         // Without git there is no ignored set; still skip the churn of repos nested in the tree.
         if (options.gitStatus === false && /(^|\/)\.git(\/|$)/.test(normalized)) return false;
         for (const ignoredDir of this.ignoredDirs) {
-          if (normalized === ignoredDir || normalized.startsWith(ignoredDir + "/")) return false;
+          if (normalized === ignoredDir || normalized.startsWith(ignoredDir + "/")) {
+            options.onIgnoredPathChanged?.(normalized);
+            return false;
+          }
         }
         return true;
       },
       normalizeKey: (filename) => filename.replaceAll(sep, "/"),
-      onFlush: (changes) => this.request((work) => addChanges(work, changes)),
+      onFlush: (changes) => {
+        options.onPathsChanged?.(changes.map((change) => join(worktreeCwd, change.key)));
+        return this.request((work) => {
+          addChanges(work, changes);
+          this.noteOperation(work);
+        });
+      },
       onUnknownChange: () =>
         this.request((work) => {
           work.rescanAll = true;
@@ -161,6 +186,22 @@ export class ProjectFilesService {
   /** The most recent status snapshot, or null before the first successful read. */
   getStatusSnapshot(): StatusInfo | null {
     return this.status;
+  }
+
+  /**
+   * Remember a file an editor read or wrote, so a later rename or move of it is reported through
+   * `onFileMoved` instead of as a deletion.
+   */
+  trackFile(relPath: string): Promise<void> {
+    return this.moveDetector.track(relPath);
+  }
+
+  /**
+   * Mark a Loxel file operation (rename, move, undo, …) on this tree as running; moves seen
+   * meanwhile are reported with source `loxel`. Call the returned function when it ends.
+   */
+  beginOperation(): () => void {
+    return this.moveDetector.beginOperation();
   }
 
   /**
@@ -240,6 +281,7 @@ export class ProjectFilesService {
         work,
         keys.map((key) => ({ key, nonces: [] })),
       );
+      this.noteOperation(work);
     });
   }
 
@@ -255,6 +297,11 @@ export class ProjectFilesService {
   }
 
   // --- Private implementation ---
+
+  /** Attribute the changes being queued to Loxel if one of its file operations is running. */
+  private noteOperation(work: PendingRefresh): void {
+    if (this.moveDetector.isOperationActive()) work.duringOperation = true;
+  }
 
   /**
    * Merge work into the next pass and make sure the drain loop runs. The returned promise
@@ -324,6 +371,21 @@ export class ProjectFilesService {
     }
     if (this.stopped) return;
 
+    // Moves before change events, so editors follow a moved file before they would hear that
+    // its old path is gone (they ignore the old path once the move is applied).
+    const moves = await this.moveDetector.detect(
+      work.changes.keys(),
+      work.duringOperation ? "loxel" : "external",
+    );
+    if (this.stopped) return;
+    for (const move of moves) {
+      this.options.onFileMoved?.(
+        join(this.worktreeCwd, move.from),
+        join(this.worktreeCwd, move.to),
+        move.source,
+      );
+    }
+
     // Emit per-file change events for editor live updates
     if (this.onFileChanged) {
       for (const [key, nonces] of work.changes) {
@@ -391,15 +453,15 @@ export class ProjectFilesService {
         }
         return null;
       }),
-      $`git -C ${this.worktreeCwd} ls-files --others --ignored --exclude-standard --directory -z`
-        .env(readOnlyGitEnv())
-        .text()
-        .catch((err: unknown) => {
-          if (existsSync(this.worktreeCwd)) {
-            log.error("Failed to list ignored files for file tree", { error: err });
-          }
-          return null;
-        }),
+      gitText(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], {
+        cwd: this.worktreeCwd,
+        env: readOnlyGitEnv(this.worktreeCwd),
+      }).catch((err: unknown) => {
+        if (existsSync(this.worktreeCwd)) {
+          log.error("Failed to list ignored files for file tree", { error: err });
+        }
+        return null;
+      }),
     ]);
     if (this.stopped || !status) return null;
 
@@ -469,18 +531,18 @@ export class ProjectFilesService {
   private async checkIgnored(paths: string[]): Promise<Set<string>> {
     if (paths.length === 0) return new Set();
     // NUL-separated both ways: otherwise names with quotes or non-ASCII bytes come back quoted.
-    // Non-empty by the guard above — Bun's shell never closes stdin for an empty Buffer.
-    const input = Buffer.from(paths.join("\0"));
-    const result = await $`git -C ${this.worktreeCwd} check-ignore --stdin -z < ${input}`
-      .env(readOnlyGitEnv())
-      .nothrow()
-      .quiet();
+    const result = await runGit(["check-ignore", "--stdin", "-z"], {
+      cwd: this.worktreeCwd,
+      env: readOnlyGitEnv(this.worktreeCwd),
+      stdin: paths.join("\0"),
+      nothrow: true,
+    });
     // Exit code 1 just means none of the paths are ignored.
     if (result.exitCode !== 0 && result.exitCode !== 1) {
-      log.warn("git check-ignore failed", { stderr: result.stderr.toString().trim() });
+      log.warn("git check-ignore failed", { stderr: result.stderr.trim() });
       return new Set();
     }
-    return new Set(result.stdout.toString().split("\0").filter(Boolean));
+    return new Set(result.stdout.split("\0").filter(Boolean));
   }
 
   private async readAndClassifyDir(dir: string): Promise<DirEntry[]> {
@@ -629,7 +691,13 @@ function markParentsModified(dirStatusMap: Map<string, ProjectFileStatus>, path:
 }
 
 function emptyPendingRefresh(): PendingRefresh {
-  return { changes: new Map(), purgeDirs: new Set(), rescanAll: false, waiters: [] };
+  return {
+    changes: new Map(),
+    purgeDirs: new Set(),
+    rescanAll: false,
+    duringOperation: false,
+    waiters: [],
+  };
 }
 
 /** Merge a flush batch into pending work, keeping every nonce matched for a key. */

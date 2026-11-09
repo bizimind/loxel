@@ -1,0 +1,224 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+import { isRecord } from "@/lib/is-record";
+
+import {
+  dirsUpToRoot,
+  type FileFormatter,
+  type FormatterSpawnOptions,
+  type LanguageFormatter,
+  projectNodeBinDirs,
+} from "./language-formatter";
+import { envBinDir, getPythonEnvNow, VENV_DIR_NAMES } from "./python-env";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
+import { bundledRuff } from "./ruff-lsp-manager";
+import { isEnvShippedByRepo } from "./shipped-by-repo";
+import { readToml, recordAt } from "./toml-file";
+
+/** Exported for tests. */
+export const BUNDLED_RUFF_FORMAT_RESTRICTION =
+  "Format on save runs Loxel's own ruff, not the project's.";
+/** Exported for tests. */
+export const BLACK_FORMAT_RESTRICTION = "Format on save doesn't run Black.";
+/** A build without the bundled ruff, such as a dev run before `build:language-servers`. */
+const NO_BUNDLED_RUFF_NOTICE =
+  "Format on save skipped: Loxel's own ruff isn't in this build, and the project's runs once the repository is trusted.";
+
+export const pythonFormatter: LanguageFormatter = {
+  extensions: ["py", "pyi"],
+  detect: (dir, wtRoot) => {
+    const formatter = detectPythonFormatter(dir, wtRoot);
+    return formatter && { ...formatter, prepare: () => prepareForTrust(formatter, dir, wtRoot) };
+  },
+  spawnOptions: pythonSpawnOptions,
+};
+
+async function pythonSpawnOptions(
+  command: string,
+  dir: string,
+  wtRoot: string,
+): Promise<FormatterSpawnOptions> {
+  // A command given as a path does not go through PATH, and an environment's tools are installed
+  // with the project's dependencies, so only a trusted repository runs them.
+  const venvBin =
+    command.includes("/") || !isRepoTrusted(wtRoot)
+      ? undefined
+      : await findVenvBin(dir, wtRoot, command);
+  return { binDirs: venvBin ? [venvBin] : projectNodeBinDirs(command, wtRoot) };
+}
+
+interface PythonFormatter {
+  command: "ruff" | "black";
+  args: string;
+}
+
+/**
+ * The detected formatter as it runs now: unchanged in a trusted repository. In an untrusted one,
+ * since a project's formatter is installed with its dependencies, ruff is Loxel's own, reported
+ * when the project's environment has its own, and black is skipped and reported: Loxel ships none,
+ * and the save goes out unformatted. Asked on every save, so a change of trust applies at once,
+ * and what it decides is pinned in `spawn`, so a change after it cannot mix the two.
+ */
+async function prepareForTrust(
+  formatter: PythonFormatter,
+  dir: string,
+  wtRoot: string,
+): Promise<FileFormatter> {
+  if (isRepoTrusted(wtRoot)) {
+    const options = await pythonSpawnOptions(formatter.command, dir, wtRoot);
+    return { ...formatter, spawn: { ...options, cwd: wtRoot } };
+  }
+  if (formatter.command === "black") {
+    reportRepoRestriction(wtRoot, BLACK_FORMAT_RESTRICTION);
+    return { ...formatter, spawn: { skip: {} } };
+  }
+  const ruff = bundledRuff();
+  if (!ruff) return { ...formatter, spawn: { skip: { notice: NO_BUNDLED_RUFF_NOTICE } } };
+  if (await findVenvBin(dir, wtRoot, "ruff")) {
+    reportRepoRestriction(wtRoot, BUNDLED_RUFF_FORMAT_RESTRICTION);
+  }
+  return { command: ruff, args: formatter.args, spawn: { cwd: wtRoot, binDirs: [] } };
+}
+
+/** `--force-exclude` makes ruff honor its `exclude` settings for stdin input (it echoes excluded files unchanged). */
+const RUFF: PythonFormatter = {
+  command: "ruff",
+  args: "format --force-exclude --stdin-filename {file}",
+};
+
+/** Black applies `force-exclude` to `--stdin-filename` on its own, and infers stub style from `.pyi`. */
+const BLACK: PythonFormatter = { command: "black", args: "--quiet --stdin-filename {file} -" };
+
+/** Ruff's own config file names, highest precedence first (as ruff resolves them). */
+const RUFF_CONFIG_FILES = [".ruff.toml", "ruff.toml"];
+
+/**
+ * Pick the Python formatter for files under `startDir`, walking up to `wtRoot`; ruff and black
+ * then resolve their own nested config from `--stdin-filename`.
+ *
+ * A ruff config or dependency often exists for the linter alone, while black's only job is
+ * formatting. So the nearest directory with a formatting signal decides: a ruff config with a
+ * `format` table selects ruff, a `[tool.black]` table or black dependency selects black. A ruff
+ * config without `format`, or a ruff dependency, selects ruff only when no such signal exists up
+ * to the root. A bare `pyproject.toml` formats nothing, like prettier and oxfmt need a config or
+ * dependency: formatting a project with a tool it never chose would rewrite every file it saves.
+ *
+ * Not cached: a save costs a few `existsSync` calls per directory level plus parsing the
+ * `pyproject.toml` files on the way, negligible next to spawning the formatter.
+ */
+function detectPythonFormatter(startDir: string, wtRoot: string): PythonFormatter | null {
+  let ruffWithoutFormat = false;
+  for (const dir of dirsUpToRoot(startDir, wtRoot)) {
+    const pyproject = readToml(join(dir, "pyproject.toml"));
+    const tool = recordAt(pyproject, "tool");
+    const ruff = readRuffConfig(dir) ?? recordAt(tool, "ruff");
+    const declared = pyproject ? declaredDependencies(pyproject) : [];
+    if (recordAt(ruff, "format")) return RUFF;
+    if (recordAt(tool, "black") || declared.includes("black")) return BLACK;
+    if (ruff || declared.includes("ruff")) ruffWithoutFormat = true;
+  }
+  return ruffWithoutFormat ? RUFF : null;
+}
+
+/**
+ * The directory holding `command` in the Python environment for files under `startDir`, so a
+ * formatter pinned in the project's dev dependencies wins over global installs: the nearest
+ * sub-project virtual environment (`.venv` / `venv` / `env` holding a `pyvenv.cfg`) between
+ * `startDir` and `wtRoot`, else the worktree's own environment from the shared resolution
+ * (override, activated environment, Pixi, Poetry, ...), else a virtual environment at `wtRoot`.
+ * Environments the repository ships any part of are skipped (`isEnvShippedByRepo`, the rule and
+ * cache every Python feature shares).
+ */
+export async function findVenvBin(
+  startDir: string,
+  wtRoot: string,
+  command: string,
+): Promise<string | undefined> {
+  const root = resolve(wtRoot);
+  const venvsIn = (dir: string) => VENV_DIR_NAMES.map((name) => join(dir, name));
+  const subprojectVenvs = dirsUpToRoot(startDir, root)
+    .filter((dir) => dir !== root)
+    .flatMap(venvsIn);
+  for (const venv of subprojectVenvs) {
+    const bin = await venvBinWith(root, venv, command);
+    if (bin) return bin;
+  }
+  // The last resolution: a save should not wait for a re-resolution after a `pip install`.
+  const env = await getPythonEnvNow(root);
+  if (env?.envPath) {
+    const bin = await binWith(root, env.envPath, dirname(env.pythonPath), command);
+    if (bin) return bin;
+  }
+  for (const venv of venvsIn(root)) {
+    const bin = await venvBinWith(root, venv, command);
+    if (bin) return bin;
+  }
+  return undefined;
+}
+
+/** {@link binWith} for a directory that is a virtual environment (has a `pyvenv.cfg`). */
+function venvBinWith(wtRoot: string, venv: string, command: string): Promise<string | undefined> {
+  if (!existsSync(join(venv, "pyvenv.cfg"))) return Promise.resolve(undefined);
+  return binWith(wtRoot, venv, envBinDir(venv), command);
+}
+
+/** `binDir` of the environment at `envPath` when it holds `command` and the repository ships none of it. */
+async function binWith(
+  wtRoot: string,
+  envPath: string,
+  binDir: string,
+  command: string,
+): Promise<string | undefined> {
+  const executable = Bun.which(command, { PATH: binDir });
+  if (!executable || (await isEnvShippedByRepo(wtRoot, envPath, executable))) return undefined;
+  return binDir;
+}
+
+/** The ruff config table from `.ruff.toml` / `ruff.toml` in `dir` (empty when unparsable). */
+function readRuffConfig(dir: string): Record<string, unknown> | undefined {
+  for (const name of RUFF_CONFIG_FILES) {
+    const path = join(dir, name);
+    if (existsSync(path)) return readToml(path) ?? {};
+  }
+  return undefined;
+}
+
+/**
+ * Normalized names of the packages a `pyproject.toml` depends on: PEP 621 dependencies and
+ * extras, PEP 735 dependency groups, uv, Poetry and PDM dev dependencies, and Hatch environments.
+ */
+function declaredDependencies(pyproject: Record<string, unknown>): string[] {
+  const project = recordAt(pyproject, "project");
+  const tool = recordAt(pyproject, "tool");
+  const poetry = recordAt(tool, "poetry");
+  const requirements = [
+    project?.dependencies,
+    ...Object.values(recordAt(project, "optional-dependencies") ?? {}),
+    ...Object.values(recordAt(pyproject, "dependency-groups") ?? {}),
+    recordAt(tool, "uv")?.["dev-dependencies"],
+    ...Object.values(recordAt(recordAt(tool, "pdm"), "dev-dependencies") ?? {}),
+    ...Object.values(recordAt(recordAt(tool, "hatch"), "envs") ?? {}).flatMap((env) =>
+      isRecord(env) ? [env.dependencies, env["extra-dependencies"]] : [],
+    ),
+  ].flatMap((list) => (Array.isArray(list) ? list : []));
+  const poetryTables = [
+    recordAt(poetry, "dependencies"),
+    recordAt(poetry, "dev-dependencies"),
+    ...Object.values(recordAt(poetry, "group") ?? {}).map((g) => recordAt(g, "dependencies")),
+  ];
+  return [
+    ...requirements.flatMap((r) => (typeof r === "string" ? [requirementName(r)] : [])),
+    ...poetryTables.flatMap((t) => Object.keys(t ?? {})),
+  ].map(normalizePackageName);
+}
+
+/** The distribution name at the start of a PEP 508 requirement (`"ruff>=0.5"` → `"ruff"`). */
+function requirementName(requirement: string): string {
+  return /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(requirement)?.[1] ?? "";
+}
+
+/** PEP 503 name normalization. */
+function normalizePackageName(name: string): string {
+  return name.toLowerCase().replace(/[-_.]+/g, "-");
+}

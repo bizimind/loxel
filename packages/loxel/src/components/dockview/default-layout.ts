@@ -194,11 +194,6 @@ export function syncTerminalsFromLayout(api: DockviewApi): void {
   getCurrentWorktreeToolsBar().setState({ terminals });
 }
 
-export type SplitPosition = {
-  referencePanel: string;
-  direction: "right" | "left" | "above" | "below";
-};
-
 /**
  * Gap-filling panel title: scans existing panel titles and returns the first
  * unused number. E.g. if "Terminal" and "Terminal 3" exist, returns "Terminal 2".

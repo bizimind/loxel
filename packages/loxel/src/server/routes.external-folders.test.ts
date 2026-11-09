@@ -9,6 +9,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import { ExternalFilesService } from "./external-files-service";
 import { ExternalFolderRegistry, ExternalFoldersService } from "./external-folders-service";
 import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
+import { NodeModulesChanges } from "./node-modules-changes";
 import { ProjectFilesService } from "./project-files-service";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
@@ -37,7 +38,11 @@ describe("Others folders routes", () => {
     const externalFoldersService = new ExternalFoldersService({
       wtPath: wt,
       history: fileOpsHistory,
-      registry: new ExternalFolderRegistry({ onDirChanged: () => {}, onFileChanged: () => {} }),
+      registry: new ExternalFolderRegistry({
+        onDirChanged: () => {},
+        onFileChanged: () => {},
+        onFileMoved: () => {},
+      }),
       storage: { load: () => [], save: () => {} },
       conflict: () => null,
       onListChanged: () => {},
@@ -55,12 +60,14 @@ describe("Others folders routes", () => {
       projectPath: wt,
       worktreeWatcher: null,
       filesService,
+      nodeModulesChanges: new NodeModulesChanges(wt, () => {}),
       fileOpsService: new FileOperationsService(wt, { git: false, history: fileOpsHistory }),
       fileOpsHistory,
       detachedFilesService: {} as WorktreeResources["detachedFilesService"],
       externalFilesService,
       externalFoldersService,
       subscribers: new Set(),
+      unsubscribeToolchainStatuses: [],
     };
 
     sent = [];
@@ -74,6 +81,7 @@ describe("Others folders routes", () => {
         sent.push({ windowId, msg });
         return windowConnected;
       },
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: (path) => externalFolderConflict([project], path, "/home/me"),
       getProject: () => undefined,
       findProjectForPath: (path) =>
@@ -93,11 +101,16 @@ describe("Others folders routes", () => {
       },
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
-      formatContent: async () => null,
+      updateTomlSchemas: () => {},
+      formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 
@@ -193,6 +206,56 @@ describe("Others folders routes", () => {
 
     expect(write.status).toBe(200);
     expect(await read.json()).toEqual({ content: "new" });
+  });
+
+  describe("GET /api/file-content?preview=1", () => {
+    const contentUrl = (path: string, query: string) =>
+      `/api/file-content?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(wt)}${query}`;
+
+    test("reads a file outside every tree without adding it to Others", async () => {
+      const file = join(root, "lib.py");
+      await writeFile(file, "def f(): ...");
+
+      const preview = await get(contentUrl(file, "&preview=1"));
+
+      expect(await preview.json()).toEqual({ content: "def f(): ..." });
+      expect(resources.externalFilesService.listFiles()).toEqual([]);
+      // Opening it in an editor adds it.
+      await get(contentUrl(file, ""));
+      expect(resources.externalFilesService.listFiles().map((e) => e.path)).toEqual([file]);
+    });
+
+    test("reads worktree files and reports missing ones as deleted", async () => {
+      await writeFile(join(wt, "src", "a.ts"), "a");
+
+      const read = await get(contentUrl(join(wt, "src", "a.ts"), "&preview=1"));
+      const missing = await get(contentUrl(join(root, "nope.py"), "&preview=1"));
+
+      expect(await read.json()).toEqual({ content: "a" });
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toMatchObject({ code: "ENOENT" });
+    });
+
+    test("opening a file outside every tree reports it missing only for a known worktree", async () => {
+      const path = encodeURIComponent(join(root, "gone.py"));
+
+      const known = await get(contentUrl(join(root, "gone.py"), ""));
+      expect(known.status).toBe(404);
+      expect(await known.json()).toMatchObject({ code: "ENOENT" });
+
+      const unknown = await get(`/api/file-content?path=${path}&wt=%2Fnot-subscribed`);
+      expect(unknown.status).toBe(404);
+      expect(await unknown.json()).not.toHaveProperty("code");
+    });
+
+    test("needs a known worktree for a file outside every tree", async () => {
+      const file = join(root, "lib.py");
+      await writeFile(file, "x");
+
+      const read = await get(`/api/file-content?path=${encodeURIComponent(file)}&preview=1`);
+
+      expect(read.status).toBe(404);
+    });
   });
 
   describe("file operations", () => {

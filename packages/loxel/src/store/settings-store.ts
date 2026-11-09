@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import {
   DEFAULT_SCROLLBACK_LINES,
-  type AgentSessionOptions,
   DEFAULT_NOTIFICATION_SEQUENCES,
   type NotificationSequences,
 } from "@/api/ws-protocol";
@@ -20,55 +20,13 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
-export interface ApiKeyError {
-  err: string;
-}
-
-export function isApiKeyError(apiKey: string | ApiKeyError): apiKey is ApiKeyError {
-  return typeof apiKey === "object" && apiKey !== null && "err" in apiKey;
-}
-
-export interface ModelEntry {
-  id: string;
-  label: string;
-  provider: "openrouter";
-  modelId: string;
-  apiKey: string | ApiKeyError;
-}
-
-export type AgentFunction =
-  | "planner"
-  | "executor"
-  | "fallback"
-  | "judge"
-  | "websearch"
-  | "websearchFallback";
-
-export const AGENT_FUNCTIONS: { key: AgentFunction; label: string }[] = [
-  { key: "planner", label: "Planner" },
-  { key: "executor", label: "Executor" },
-  { key: "fallback", label: "Fallback" },
-  { key: "judge", label: "Judge" },
-  { key: "websearch", label: "WebSearch" },
-  { key: "websearchFallback", label: "WS Fallback" },
-];
-
-export interface CodingAgentSettings {
-  /** ID of the model used for all functions by default. */
-  baseModelId: string;
-  /** Per-function overrides. Values are ModelEntry IDs. Absent = use base model. */
-  functionOverrides: Partial<Record<AgentFunction, string>>;
-  /** Default session mode for new agent sessions. */
-  defaultMode?: "execute" | "plan";
-  /** Default tool profile for new agent sessions. */
-  defaultProfile?: "execute" | "plan" | "minimal";
-}
-
 export interface TerminalSettings {
   /** Maximum number of lines kept in terminal scrollback history. */
   scrollbackLines: number;
   /** Which OSC notification sequences to detect. */
   notificationSequences: NotificationSequences;
+  /** Activate the worktree's Python environment in new terminals. */
+  activatePythonEnv: boolean;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -101,28 +59,171 @@ import type {
 } from "@/lib/formatting-model";
 import { DEFAULT_FORMATTING_SETTINGS, parseMarkdownOutputSettings } from "@/lib/formatting-model";
 
+/** When an editor shows inlay hints; the values of Monaco's `inlayHints.enabled`. */
+export type InlayHintsMode = "on" | "off" | "onUnlessPressed" | "offUnlessPressed";
+
 export interface EditorSettings {
   indentation: IndentationDefaults;
+  inlayHints: InlayHintsMode;
   overrides: IndentationOverride[];
   formatting: FormattingSettings;
 }
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentation: { tabSize: 2, insertSpaces: true },
+  // On, as in VS Code, and what every language server that emits hints has shown until now.
+  inlayHints: "on",
   overrides: [],
   formatting: structuredClone(DEFAULT_FORMATTING_SETTINGS),
 };
 
-/** Resolve indentation config for a given file path (extension match → default). */
-export function resolveIndentation(editor: EditorSettings, filePath: string): IndentationDefaults {
-  const lastSlash = filePath.lastIndexOf("/");
-  const basename = filePath.slice(lastSlash + 1);
-  if (!basename.includes(".")) return editor.indentation;
-  const ext = basename.split(".").pop()!.toLowerCase();
-  if (!ext) return editor.indentation;
-  const override = editor.overrides.find((o) => o.extension.toLowerCase() === ext);
-  if (override) return { tabSize: override.tabSize, insertSpaces: override.insertSpaces };
-  return editor.indentation;
+export interface BuiltinIndentation extends IndentationDefaults {
+  /** The language's syntax requires this style, so it outranks detection from the content. */
+  required?: boolean;
+}
+
+/**
+ * Built-in indentation for languages whose convention, set by their formatter or official style
+ * guide (for the C family, their main IDEs), differs from the global default, keyed by resolved
+ * (highlighter) language ID. Languages whose common formatters disagree (Java, Swift, shell) are
+ * left to the default.
+ */
+export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
+  // The C family has no single style; 4 is the default of VS Code, CLion and Xcode.
+  ["c", { tabSize: 4, insertSpaces: true }],
+  ["cpp", { tabSize: 4, insertSpaces: true }],
+  ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
+  ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
+  ["go.work", { tabSize: 4, insertSpaces: false }], // go work use
+  ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
+  ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
+  // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
+  // space-indented continuation lines can outnumber the recipes. 4 is only the tab's display width.
+  ["make", { tabSize: 4, insertSpaces: false, required: true }],
+  ["objective-c", { tabSize: 4, insertSpaces: true }],
+  ["objective-cpp", { tabSize: 4, insertSpaces: true }],
+  ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
+  ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["razor", { tabSize: 4, insertSpaces: true }], // ASP.NET Core and Blazor templates
+  ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
+]);
+
+/** Indentation for one file. `indentSize` differs from `tabSize` only when an `.editorconfig` sets them apart. */
+export interface ResolvedIndentation extends IndentationDefaults {
+  indentSize: number;
+}
+
+/** The indentation properties one source sets; the ones it leaves out come from the next source. */
+export type IndentationLayer = Partial<ResolvedIndentation>;
+
+/** Where an indentation property came from, in precedence order (see `resolveIndentation`). */
+export type IndentationSource =
+  | "file"
+  | "editorconfig"
+  | "override"
+  | "detected"
+  | "language"
+  | "default";
+
+export interface IndentationInputs {
+  /** The file's resolved (highlighter) language ID. */
+  language: string | null;
+  /** The file's `.editorconfig` properties. */
+  editorConfig?: EditorConfigProperties;
+  /** Detected from the file's content (`detectIndentation`). */
+  detected?: IndentationLayer;
+  /** Chosen for this file in its open tab (the indentation status item). */
+  fileChoice?: IndentationLayer;
+}
+
+export interface IndentationResolution {
+  indentation: ResolvedIndentation;
+  sources: Record<keyof ResolvedIndentation, IndentationSource>;
+  /** The per-extension override matching the file, whether or not a higher source outranks it. */
+  override: IndentationOverride | null;
+}
+
+/**
+ * Resolve indentation for a file, property by property (`insertSpaces`, `tabSize`, `indentSize`):
+ * each comes from the first of these sources that sets it.
+ *
+ * 1. The choice made for this file in its open tab.
+ * 2. The file's `.editorconfig`: the project's committed convention, which its formatters follow
+ *    too, so it outranks Loxel's settings, as it does in VS Code and JetBrains IDEs.
+ * 3. The user's per-extension override, which applies to every project.
+ * 4. Detection from the file's content, so editing an existing file keeps its style.
+ * 5. The built-in default for the file's resolved language. One its syntax requires (make's tabs)
+ *    comes before detection instead.
+ * 6. The global default, which sets every property.
+ */
+export function resolveIndentation(
+  editor: EditorSettings,
+  filePath: string,
+  { language, editorConfig = {}, detected = {}, fileChoice = {} }: IndentationInputs,
+): IndentationResolution {
+  const override = findIndentationOverride(editor.overrides, filePath) ?? null;
+  const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
+  const detectedLayer: [IndentationSource, IndentationLayer] = ["detected", detected];
+  const languageLayer: [IndentationSource, IndentationLayer] = [
+    "language",
+    builtin ? defaultsLayer(builtin) : {},
+  ];
+  const layers: [IndentationSource, IndentationLayer][] = [
+    ["file", fileChoice],
+    ["editorconfig", editorConfigLayer(editorConfig)],
+    ["override", override ? defaultsLayer(override) : {}],
+    ...(builtin?.required ? [languageLayer, detectedLayer] : [detectedLayer, languageLayer]),
+    ["default", defaultsLayer(editor.indentation)],
+  ];
+  const [insertSpaces, insertSpacesSource] = resolveProperty(layers, "insertSpaces");
+  const [tabSize, tabSizeSource] = resolveProperty(layers, "tabSize");
+  const [indentSize, indentSizeSource] = resolveProperty(layers, "indentSize");
+  return {
+    indentation: { insertSpaces, tabSize, indentSize },
+    sources: {
+      insertSpaces: insertSpacesSource,
+      tabSize: tabSizeSource,
+      indentSize: indentSizeSource,
+    },
+    override,
+  };
+}
+
+function resolveProperty<K extends keyof ResolvedIndentation>(
+  layers: [IndentationSource, IndentationLayer][],
+  key: K,
+): [ResolvedIndentation[K], IndentationSource] {
+  for (const [source, layer] of layers) {
+    const value = layer[key];
+    if (value !== undefined) return [value, source];
+  }
+  throw new Error(`No indentation source sets ${key}`);
+}
+
+function defaultsLayer({ tabSize, insertSpaces }: IndentationDefaults): IndentationLayer {
+  return { tabSize, insertSpaces, indentSize: tabSize };
+}
+
+function editorConfigLayer(editorConfig: EditorConfigProperties): IndentationLayer {
+  const layer: IndentationLayer = {};
+  if (editorConfig.indentStyle) layer.insertSpaces = editorConfig.indentStyle === "space";
+  // Not `indentSize`: `tab_width` is a tab's display width and says nothing about indentation.
+  if (editorConfig.tabWidth !== undefined) layer.tabSize = editorConfig.tabWidth;
+  if (editorConfig.indentSize !== undefined) layer.indentSize = editorConfig.indentSize;
+  return layer;
+}
+
+function findIndentationOverride(
+  overrides: IndentationOverride[],
+  filePath: string,
+): IndentationOverride | undefined {
+  const basename = filePath.slice(filePath.lastIndexOf("/") + 1);
+  const dot = basename.lastIndexOf(".");
+  if (dot === -1) return undefined;
+  const ext = basename.slice(dot + 1).toLowerCase();
+  if (!ext) return undefined;
+  return overrides.find((o) => o.extension.toLowerCase() === ext);
 }
 
 /** Per-zone default: size + which panel is active, or `false` (zone closed). */
@@ -191,6 +292,20 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/docker-bake.override.hcl", "dockerbake"),
   fa("**/*.docker-bake.hcl", "dockerbake"),
 
+  // pip requirements and constraints files (pip-tools inputs use .in).
+  fa("**/requirements*.txt", "pip-requirements"),
+  fa("**/requirements*.in", "pip-requirements"),
+  fa("**/requirements/*.txt", "pip-requirements"),
+  fa("**/constraints*.txt", "pip-requirements"),
+
+  // Cargo's older config name; `config` alone says nothing about the format.
+  fa("**/.cargo/config", "toml"),
+
+  // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
+  // also hold files like module.modulemap, and anything with an extension resolves on its own.
+  fa("**/c++/v1/**/!(*.*)", "cpp"),
+  fa("**/include/c++/**/!(*.*)", "cpp"),
+
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),
 
@@ -235,7 +350,7 @@ export const selectEffectiveFileAssociations = createBuiltinMergeSelector(
 );
 
 // ---------------------------------------------------------------------------
-// JSON / YAML Schema Mappings
+// JSON / YAML / TOML Schema Mappings
 // ---------------------------------------------------------------------------
 
 export interface SchemaMapping {
@@ -268,6 +383,50 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     enabled: true,
   },
   {
+    id: builtinId("**/jsconfig.json"),
+    glob: "**/jsconfig.json",
+    url: "https://json.schemastore.org/jsconfig.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{.babelrc,.babelrc.json,babel.config.json}"),
+    glob: "**/{.babelrc,.babelrc.json,babel.config.json}",
+    url: "https://json.schemastore.org/babelrc.json",
+    enabled: true,
+  },
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can ask for (Monaco's
+  // JSON worker gets schemas inline and would report the reference as a problem on every file).
+  {
+    id: builtinId("**/.eslintrc.{yml,yaml}"),
+    glob: "**/.eslintrc.{yml,yaml}",
+    url: "https://json.schemastore.org/eslintrc.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/lerna.json"),
+    glob: "**/lerna.json",
+    url: "https://json.schemastore.org/lerna.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.lintstagedrc{,.json,.yml,.yaml}"),
+    glob: "**/.lintstagedrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/lintstagedrc.schema.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/pnpm-workspace.yaml"),
+    glob: "**/pnpm-workspace.yaml",
+    url: "https://json.schemastore.org/pnpm-workspace.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.prettierrc{,.json,.yml,.yaml}"),
+    glob: "**/.prettierrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/prettierrc.json",
+    enabled: true,
+  },
+  {
     id: builtinId(".github/workflows/*.{yml,yaml}"),
     glob: ".github/workflows/*.{yml,yaml}",
     url: "https://json.schemastore.org/github-workflow",
@@ -279,29 +438,73 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     url: "https://json.schemastore.org/github-action",
     enabled: true,
   },
+  {
+    id: builtinId("**/pyproject.toml"),
+    glob: "**/pyproject.toml",
+    url: "https://json.schemastore.org/pyproject.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/Cargo.toml"),
+    glob: "**/Cargo.toml",
+    url: "https://json.schemastore.org/cargo.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.cargo/config.toml"),
+    glob: "**/.cargo/config.toml",
+    url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/rust-toolchain.toml"),
+    glob: "**/rust-toolchain.toml",
+    url: "https://json.schemastore.org/rust-toolchain.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{ruff,.ruff}.toml"),
+    glob: "**/{ruff,.ruff}.toml",
+    url: "https://json.schemastore.org/ruff.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/uv.toml"),
+    glob: "**/uv.toml",
+    url: "https://json.schemastore.org/uv.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{rustfmt,.rustfmt}.toml"),
+    glob: "**/{rustfmt,.rustfmt}.toml",
+    url: "https://json.schemastore.org/rustfmt.json",
+    enabled: true,
+  },
 ];
 
+/**
+ * User entries first: Tombi applies the first schema matching a TOML file, so a user mapping
+ * overrides a built-in one for the same file. JSON and YAML combine every matching schema.
+ */
 export const selectEffectiveSchemas = createBuiltinMergeSelector(
   (s) => s.schemas,
   BUILTIN_SCHEMA_DEFAULTS,
   "builtin:",
+  true,
 );
 
 type SettingsSection =
   | "general"
-  | "codingAgent"
-  | "models"
   | "keybindings"
   | "layout"
   | "terminal"
   | "editor"
   | "schemas"
   | "fileAssociations"
+  | "security"
   | "worktrees";
 
 export interface SettingsState {
-  models: ModelEntry[];
-  codingAgent: CodingAgentSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
@@ -311,21 +514,12 @@ export interface SettingsState {
   fileAssociations: FileAssociation[];
   /** Auto-reveal active editor file in project explorer on tab switch. */
   autoRevealInExplorer: boolean;
+  /** Check for updates when the server starts. The server reads this from the persisted settings. */
+  autoCheckForUpdates: boolean;
 
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
-
-  // Model actions
-  addModel: (model: Omit<ModelEntry, "id">) => void;
-  updateModel: (id: string, updates: Partial<Omit<ModelEntry, "id">>) => void;
-  removeModel: (id: string) => void;
-
-  // Coding agent actions
-  setBaseModelId: (modelId: string) => void;
-  setFunctionOverride: (fn: AgentFunction, modelId: string | null) => void;
-  setDefaultMode: (mode: CodingAgentSettings["defaultMode"]) => void;
-  setDefaultProfile: (profile: CodingAgentSettings["defaultProfile"]) => void;
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
@@ -337,6 +531,7 @@ export interface SettingsState {
 
   // Editor actions
   updateEditorIndentation: (partial: Partial<IndentationDefaults>) => void;
+  setEditorInlayHints: (mode: InlayHintsMode) => void;
   addEditorOverride: (extension: string, tabSize: number, insertSpaces: boolean) => void;
   updateEditorOverride: (id: string, updates: Partial<Omit<IndentationOverride, "id">>) => void;
   removeEditorOverride: (id: string) => void;
@@ -371,6 +566,9 @@ export interface SettingsState {
   // Auto-reveal
   setAutoRevealInExplorer: (enabled: boolean) => void;
 
+  // Updates
+  setAutoCheckForUpdates: (enabled: boolean) => void;
+
   // Wt config actions
 
   // UI actions
@@ -395,6 +593,35 @@ const DEFAULT_LAYOUT: LayoutSettings = {
   zonePanelOrder: buildDefaultZonePanelOrder(),
 };
 
+/**
+ * Takes a removed panel out of persisted layout settings: its zone opens with the zone's first
+ * remaining panel instead, or closed when none remain.
+ */
+function stripPanelFromLayout(layout: unknown, panelId: string): void {
+  if (typeof layout !== "object" || layout === null) return;
+  const { zonePanelOrder, zoneDefaults } = layout as Record<string, unknown>;
+  const order =
+    typeof zonePanelOrder === "object" && zonePanelOrder !== null
+      ? (zonePanelOrder as Record<string, unknown>)
+      : {};
+  const remaining = (zone: string): unknown[] => {
+    const panels = order[zone];
+    return Array.isArray(panels) ? panels.filter((id) => id !== panelId) : [];
+  };
+  for (const zone of Object.keys(order)) {
+    if (Array.isArray(order[zone])) order[zone] = remaining(zone);
+  }
+  if (typeof zoneDefaults !== "object" || zoneDefaults === null) return;
+  const defaults = zoneDefaults as Record<string, unknown>;
+  for (const [zone, value] of Object.entries(defaults)) {
+    if (typeof value !== "object" || value === null) continue;
+    const zoneDefault = value as Record<string, unknown>;
+    if (zoneDefault.activePanel !== panelId) continue;
+    const [first] = remaining(zone);
+    defaults[zone] = first === undefined ? false : { ...zoneDefault, activePanel: first };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -402,68 +629,20 @@ const DEFAULT_LAYOUT: LayoutSettings = {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      models: [],
-      codingAgent: { baseModelId: "", functionOverrides: {} },
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
+        activatePythonEnv: true,
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
+      autoCheckForUpdates: true,
 
       isOpen: false,
       activeSection: "general",
-
-      // -- Model CRUD --
-
-      addModel: (model) =>
-        set((s) => ({ models: [...s.models, { ...model, id: crypto.randomUUID() }] })),
-
-      updateModel: (id, updates) =>
-        set((s) => ({ models: s.models.map((m) => (m.id === id ? { ...m, ...updates } : m)) })),
-
-      removeModel: (id) =>
-        set((s) => {
-          const models = s.models.filter((m) => m.id !== id);
-          const codingAgent = { ...s.codingAgent };
-
-          // Clear dangling references
-          if (codingAgent.baseModelId === id) {
-            codingAgent.baseModelId = "";
-          }
-          const overrides = { ...codingAgent.functionOverrides };
-          for (const [fn, modelId] of Object.entries(overrides)) {
-            if (modelId === id) delete overrides[fn as AgentFunction];
-          }
-          codingAgent.functionOverrides = overrides;
-
-          return { models, codingAgent };
-        }),
-
-      // -- Coding agent --
-
-      setBaseModelId: (modelId) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, baseModelId: modelId } })),
-
-      setFunctionOverride: (fn, modelId) =>
-        set((s) => {
-          const overrides = { ...s.codingAgent.functionOverrides };
-          if (modelId) {
-            overrides[fn] = modelId;
-          } else {
-            delete overrides[fn];
-          }
-          return { codingAgent: { ...s.codingAgent, functionOverrides: overrides } };
-        }),
-
-      setDefaultMode: (mode) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultMode: mode } })),
-
-      setDefaultProfile: (profile) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultProfile: profile } })),
 
       // -- Terminal --
 
@@ -519,6 +698,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((s) => ({
           editor: { ...s.editor, indentation: { ...s.editor.indentation, ...partial } },
         })),
+
+      setEditorInlayHints: (mode) => set((s) => ({ editor: { ...s.editor, inlayHints: mode } })),
 
       addEditorOverride: (extension, tabSize, insertSpaces) =>
         set((s) => {
@@ -678,6 +859,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoRevealInExplorer: (enabled) => set({ autoRevealInExplorer: enabled }),
 
+      // -- Updates --
+
+      setAutoCheckForUpdates: (enabled) => set({ autoCheckForUpdates: enabled }),
+
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -687,16 +872,15 @@ export const useSettingsStore = create<SettingsState>()(
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
       partialize: (state) => ({
-        models: state.models,
-        codingAgent: state.codingAgent,
         layout: state.layout,
         terminal: state.terminal,
         editor: state.editor,
         schemas: state.schemas,
         fileAssociations: state.fileAssociations,
         autoRevealInExplorer: state.autoRevealInExplorer,
+        autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 11,
+      version: 15,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -721,64 +905,6 @@ export const useSettingsStore = create<SettingsState>()(
             layout.zonePanelOrder = order;
             delete layout.panelDefaultZones;
           }
-        }
-
-        if (version <= 1) {
-          // v1 → v2: flat CodingAgentSettings → models library + baseModelId + overrides
-          const oldAgent =
-            typeof state.codingAgent === "object" && state.codingAgent !== null
-              ? (state.codingAgent as Record<string, string>)
-              : undefined;
-          const models: ModelEntry[] = [];
-
-          const apiKey = oldAgent?.openrouterApiKey ?? "";
-          if (apiKey) {
-            let baseModelId: string;
-            const modelFields = [
-              oldAgent?.plannerModel,
-              oldAgent?.executorModel,
-              oldAgent?.fallbackModel,
-              oldAgent?.judgeModel,
-              oldAgent?.websearchModel,
-              oldAgent?.websearchFallbackModel,
-            ].filter((v): v is string => Boolean(v));
-            const uniqueModelIds = [...new Set(modelFields)];
-
-            for (const modelId of uniqueModelIds) {
-              models.push({
-                id: crypto.randomUUID(),
-                label: modelId,
-                provider: "openrouter",
-                modelId,
-                apiKey,
-              });
-            }
-
-            const baseModelModelId = oldAgent?.plannerModel || uniqueModelIds[0] || "";
-            const baseEntry = models.find((m) => m.modelId === baseModelModelId);
-            baseModelId = baseEntry?.id ?? "";
-
-            const functionOverrides: Partial<Record<AgentFunction, string>> = {};
-            const fnMapping: [AgentFunction, string][] = [
-              ["planner", oldAgent?.plannerModel || ""],
-              ["executor", oldAgent?.executorModel || ""],
-              ["fallback", oldAgent?.fallbackModel || ""],
-              ["judge", oldAgent?.judgeModel || ""],
-              ["websearch", oldAgent?.websearchModel || ""],
-              ["websearchFallback", oldAgent?.websearchFallbackModel || ""],
-            ];
-            for (const [fn, mId] of fnMapping) {
-              if (mId && mId !== baseModelModelId) {
-                const entry = models.find((m) => m.modelId === mId);
-                if (entry) functionOverrides[fn] = entry.id;
-              }
-            }
-
-            state.codingAgent = { baseModelId, functionOverrides };
-          } else {
-            state.codingAgent = { baseModelId: "", functionOverrides: {} };
-          }
-          state.models = models;
         }
 
         if (version <= 2) {
@@ -855,7 +981,44 @@ export const useSettingsStore = create<SettingsState>()(
         }
 
         if (version <= 10) {
-          // v10 → v11: add markdown output markers to formatting settings
+          // v10 → v11: add Python environment activation to terminal settings
+          const terminal =
+            typeof state.terminal === "object" && state.terminal !== null
+              ? (state.terminal as Record<string, unknown>)
+              : undefined;
+          if (terminal && typeof terminal.activatePythonEnv !== "boolean") {
+            terminal.activatePythonEnv = true;
+          }
+        }
+
+        if (version <= 11) {
+          // v11 → v12: add automatic update check setting
+          if (typeof state.autoCheckForUpdates !== "boolean") {
+            state.autoCheckForUpdates = true;
+          }
+        }
+
+        if (version <= 12) {
+          // v12 → v13: the built-in coding agent was removed. Its settings, and the steps that
+          // used to shape them, are gone for rows of every older version.
+          delete state.models;
+          delete state.codingAgent;
+          stripPanelFromLayout(state.layout, "forkTree");
+        }
+
+        if (version <= 13) {
+          // v13 → v14: add the inlay hints setting to editor
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
+              : undefined;
+          if (editor && !editor.inlayHints) {
+            editor.inlayHints = DEFAULT_EDITOR_SETTINGS.inlayHints;
+          }
+        }
+
+        if (version <= 14) {
+          // v14 → v15: add markdown output markers to formatting settings
           const editor =
             typeof state.editor === "object" && state.editor !== null
               ? (state.editor as Record<string, unknown>)
@@ -880,42 +1043,6 @@ export const useSettingsStore = create<SettingsState>()(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Map AgentFunction keys to ModelRouterOptions property names (casing differs for webSearch). */
-const ROUTER_KEY_MAP: Record<AgentFunction, string> = {
-  planner: "planner",
-  executor: "executor",
-  fallback: "fallback",
-  judge: "judge",
-  websearch: "webSearch",
-  websearchFallback: "webSearchFallback",
-};
-
-/** Resolve model library + agent config into typed SDK session options. */
-export function buildSessionOptions(
-  settings: CodingAgentSettings,
-  models: ModelEntry[],
-): AgentSessionOptions | Record<string, never> {
-  const lookup = new Map(models.map((m) => [m.id, m]));
-  const baseEntry = lookup.get(settings.baseModelId);
-  if (!baseEntry || isApiKeyError(baseEntry.apiKey)) return {};
-
-  const base = { modelId: baseEntry.modelId, apiKey: baseEntry.apiKey };
-  const modelConfig: Record<string, { modelId: string; apiKey: string }> = { base };
-
-  for (const [fn, routerKey] of Object.entries(ROUTER_KEY_MAP)) {
-    const overrideId = settings.functionOverrides[fn as AgentFunction];
-    const entry = overrideId ? lookup.get(overrideId) : undefined;
-    if (entry && !isApiKeyError(entry.apiKey)) {
-      modelConfig[routerKey] = { modelId: entry.modelId, apiKey: entry.apiKey };
-    }
-  }
-
-  const result: AgentSessionOptions = { models: modelConfig };
-  if (settings.defaultMode) result.mode = settings.defaultMode;
-  if (settings.defaultProfile) result.profile = settings.defaultProfile;
-  return result;
-}
 
 /** Resolved layout config for use by createDefaultLayout. */
 export interface EffectiveLayoutConfig {

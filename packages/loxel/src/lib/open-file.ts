@@ -1,3 +1,5 @@
+import type { PanelOpenOptions } from "@/api/panel-placement-model";
+
 import { dispatchLoxelEvent } from "./loxel-events";
 import { isMediaFile } from "./media-extensions";
 
@@ -30,8 +32,21 @@ export function filePanelType(filePath: string): FilePanelType {
   return "codeEditor";
 }
 
+/** Open a language server's read-only document (see `virtual-documents.ts`) in its own tab. */
+export function dispatchOpenVirtualDocument(uri: string, location?: FileLocation): void {
+  dispatchLoxelEvent("loxel-open-virtual-document", {
+    uri,
+    line: location?.line,
+    column: location?.column,
+  });
+}
+
 /** Dispatch the appropriate panel-open event based on file type. */
-export function dispatchOpenFile(filePath: string, location?: FileLocation): void {
+export function dispatchOpenFile(
+  filePath: string,
+  location?: FileLocation,
+  { placement, focus }: PanelOpenOptions = {},
+): void {
   const type = filePanelType(filePath);
   switch (type) {
     case "editor":
@@ -39,19 +54,23 @@ export function dispatchOpenFile(filePath: string, location?: FileLocation): voi
         filePath,
         line: location?.line,
         column: location?.column,
+        placement,
+        focus,
       });
       break;
     case "excalidraw":
-      dispatchLoxelEvent("loxel-open-drawing-editor", { filePath });
+      dispatchLoxelEvent("loxel-open-drawing-editor", { filePath, placement, focus });
       break;
     case "media":
-      dispatchLoxelEvent("loxel-open-media-viewer", { filePath });
+      dispatchLoxelEvent("loxel-open-media-viewer", { filePath, placement, focus });
       break;
     case "codeEditor":
       dispatchLoxelEvent("loxel-open-code-editor", {
         filePath,
         line: location?.line,
         column: location?.column,
+        placement,
+        focus,
       });
       break;
     default: {

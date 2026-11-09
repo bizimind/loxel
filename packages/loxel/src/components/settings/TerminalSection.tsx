@@ -8,6 +8,7 @@ import { DEFAULT_TERMINAL_SCROLLBACK, useSettingsStore } from "@/store/settings-
 export function TerminalSection() {
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const notificationSequences = useSettingsStore((s) => s.terminal.notificationSequences);
+  const activatePythonEnv = useSettingsStore((s) => s.terminal.activatePythonEnv);
   const updateTerminal = useSettingsStore((s) => s.updateTerminal);
 
   // Local string state allows free typing; commit to store on blur.
@@ -89,6 +90,21 @@ export function TerminalSection() {
             description="Kitty style"
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="text-muted-foreground text-xs">Activate Python Environment</label>
+          <Switch
+            checked={activatePythonEnv}
+            onCheckedChange={(checked) => updateTerminal({ activatePythonEnv: checked })}
+            className="ml-auto"
+          />
+        </div>
+        <p className="text-muted-foreground text-[10px]">
+          Start new terminals with the worktree&apos;s Python virtual environment active, the one
+          the Python language server uses. Open terminals keep their environment.
+        </p>
       </div>
     </div>
   );

@@ -1,6 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { DockviewComponent, type DockviewApi, type IDockviewPanel } from "dockview-react";
+import {
+  DockviewComponent,
+  Orientation,
+  type DockviewApi,
+  type IDockviewPanel,
+} from "dockview-react";
 
 import { activatePanel, reattachActiveContent } from "./layout-actions";
 
@@ -81,7 +86,7 @@ describe("reattachActiveContent", () => {
         },
         width: 800,
         height: 600,
-        orientation: "HORIZONTAL",
+        orientation: Orientation.HORIZONTAL,
       },
       panels: {
         editor: { id: "editor", contentComponent: "c" },

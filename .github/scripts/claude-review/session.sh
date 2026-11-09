@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Keep one Claude Code Review session per PR across workflow runs.
+#
+#   session.sh prepare   restore the PR's session and decide how this run reviews (step outputs)
+#   session.sh save      store the session and review state, and summarize this run's cost
+#
+# Sessions live in private storage ($STORE, an s3:// prefix on R2). Without it every run starts a
+# new session and nothing is stored. state.json holds the session id, the last commit the session
+# worked on, and the cost the last run reported. Whether a head was reviewed is read from the PR's
+# summary comments, not from this state.
+#
+# Env: PR, HEAD_SHA, GITHUB_REPOSITORY, GITHUB_WORKSPACE, RUNNER_TEMP, GITHUB_OUTPUT,
+# GITHUB_STEP_SUMMARY, GH_TOKEN, STORE (optional); for save also MODE, SESSION_ID, OUTCOME.
+set -euo pipefail
+
+# Claude Code keeps transcripts under a directory named after the resolved working directory.
+workspace="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+projects="$HOME/.claude/projects/${workspace//[^a-zA-Z0-9]/-}"
+state_file="$RUNNER_TEMP/review-state.json"
+# Claude's stream-json output, written by the workflow's review step.
+output="$RUNNER_TEMP/claude-output.jsonl"
+# The review's comments: claude[bot] posted them before the workflow ran the CLI itself. Any workflow
+# with this repo's token can post as github-actions[bot]; that is trusted like the rest of a
+# same-repo PR, which the workflow is limited to.
+reviewer='.user.login == "claude[bot]" or .user.login == "github-actions[bot]"'
+
+fetch() { [[ -n "${STORE:-}" ]] && aws s3 cp --quiet "$STORE/$1" "$2"; }
+store() { [[ -z "${STORE:-}" ]] || aws s3 cp --quiet "$1" "$STORE/$2"; }
+
+prepare() {
+  : "${HEAD_SHA:?}" "${PR:?}"
+  fetch state.json "$state_file" || echo '{}' >"$state_file"
+  local session last mode prompt
+  session="$(jq -r '.sessionId // ""' "$state_file")"
+  last="$(jq -r '.lastSha // ""' "$state_file")"
+
+  # The PR's summary comments are the record of finished reviews: a run can succeed without posting
+  # anything, so the stored state alone proves nothing.
+  local summaries
+  summaries="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+    --jq ".[] | select($reviewer) | .body" | grep -o 'Reviewed commit: [0-9a-f]*' || true)"
+
+  if grep -qx "Reviewed commit: $HEAD_SHA" <<<"$summaries"; then
+    mode=skip
+  # Resume only a session whose last run posted its summary. A run that ended early (e.g. stopped
+  # while background work was pending) leaves a transcript whose resume ends at once with a 0-turn
+  # result, before the review posts anything.
+  elif [[ -n "$session" && -n "$last" ]] && grep -qx "Reviewed commit: $last" <<<"$summaries" \
+    && fetch session.tgz "$RUNNER_TEMP/session.tgz" \
+    && mkdir -p "$projects" && tar -xzf "$RUNNER_TEMP/session.tgz" -C "$projects" \
+    && [[ -f "$projects/$session.jsonl" ]]; then
+    # Restored files keep old mtimes; keep Claude Code's cleanup from treating them as stale.
+    find "$projects" -exec touch {} +
+    mode=resume
+  else
+    # No usable transcript (none stored, corrupt, or from a run that did not finish): start over.
+    mode=new
+    session="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr "[:upper:]" "[:lower:]")"
+  fi
+
+  local review="/ci-code-review Code review $GITHUB_REPOSITORY/pull/$PR at commit $HEAD_SHA"
+  if [[ "$mode" == resume ]]; then
+    # With a shallow clone the earlier commit has to be fetched before it can be diffed.
+    if [[ -n "$last" ]] && git fetch --quiet --depth=1 origin "$last" 2>/dev/null; then
+      prompt="$review. You reviewed this PR before: its head moved from $last to $HEAD_SHA since you last worked on it, and the working tree is now at $HEAD_SHA. Review the whole PR as one unit again: reuse your earlier research and findings, re-check each earlier finding against $HEAD_SHA, give fresh attention to what changed (git diff $last $HEAD_SHA), and do not repeat comments already posted on the PR."
+    else
+      prompt="$review. You reviewed this PR before, but it changed since (the earlier commit is no longer reachable, e.g. after a force-push), and the working tree is now at $HEAD_SHA. Review the whole PR as one unit again: reuse what still applies from your earlier research and findings, and do not repeat comments already posted on the PR."
+    fi
+  else
+    prompt="$review"
+  fi
+
+  local args="--session-id $session"
+  [[ "$mode" == resume ]] && args="--resume $session"
+  {
+    echo "mode=$mode"
+    echo "session_id=$session"
+    echo "claude_args=$args"
+    echo "prompt<<PROMPT_EOF"
+    echo "$prompt"
+    echo "PROMPT_EOF"
+  } >>"$GITHUB_OUTPUT"
+}
+
+save() {
+  : "${MODE:?}" "${SESSION_ID:?}" "${OUTCOME:?}"
+  local target stats prev
+  # The reviewer checks out each new head it takes in, so the checkout is the commit it reviewed.
+  target="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+  [[ -f "$state_file" ]] || echo '{}' >"$state_file"
+  # What the previous run of this session reported, shown next to this run's figure so the job
+  # summaries tell whether a resumed session reports its cost cumulatively.
+  prev=""
+  [[ "$MODE" == resume ]] && prev="$(jq -r '.reportedCostUsd // empty' "$state_file")"
+  # A run emits several results (one per turn, including turns that react to background agents);
+  # the cost is cumulative, so the largest is the run's total.
+  stats="null"
+  if [[ -s "$output" ]]; then
+    # A cancelled run can leave a truncated last line; keep whatever parses.
+    stats="$(jq -cR 'fromjson?' "$output" | jq -sc '[.[] | select(.type == "result")] as $r
+      | [.[] | select(.type == "rate_limit_event") | .rate_limit_info.unifiedWindows] as $w
+      # Window usage in percent (0.1 resolution) at the first and last snapshot; null if it reset mid-run.
+      | def snap(k): try (if ($w | length) > 1 and $w[0][k].resetsAt == $w[-1][k].resetsAt
+          then {start: ($w[0][k].utilization * 1000 | round / 10), end: ($w[-1][k].utilization * 1000 | round / 10),
+                reset: $w[-1][k].resetsAt} else null end) catch null;
+      if ($r | length) == 0 then null else {
+          costUsd: ($r | map(.total_cost_usd // 0) | max), turns: ($r | map(.num_turns // 0) | add),
+          minutes: ($r | map(.duration_ms // 0) | add / 60000 | round),
+          d7: snap("seven_day")
+        } end')" || stats="null"
+  fi
+  jq -n --arg session "$SESSION_ID" --arg last "$target" --argjson stats "$stats" \
+    '{sessionId: $session, lastSha: $last, reportedCostUsd: $stats.costUsd}' >"$state_file"
+
+  if [[ -f "$projects/$SESSION_ID.jsonl" ]]; then
+    local members=("$SESSION_ID.jsonl")
+    [[ -d "$projects/$SESSION_ID" ]] && members+=("$SESSION_ID")
+    tar -czf "$RUNNER_TEMP/session.tgz" -C "$projects" "${members[@]}"
+    store "$RUNNER_TEMP/session.tgz" session.tgz
+  fi
+  store "$state_file" state.json
+
+  # Numbers only, for review-cost.sh: the transcript itself never reaches the log.
+  [[ "$stats" != null ]] && echo "review-metrics $stats"
+  # A failed run's errors (auth, usage limit, crash) are on stderr or in error results; neither holds
+  # the transcript.
+  if [[ "$OUTCOME" != success ]]; then
+    [[ -s "$RUNNER_TEMP/claude-stderr.log" ]] && tail -20 "$RUNNER_TEMP/claude-stderr.log"
+    [[ -s "$output" ]] && jq -rR 'fromjson? | select(.type == "result" and .is_error == true)
+      | "error result: \(.subtype) \(.result // "" | tostring | .[0:300])"' "$output"
+  fi
+
+  {
+    echo "### Claude Code Review"
+    echo "- Session: $MODE (\`$SESSION_ID\`), outcome: $OUTCOME"
+    echo "- Commit: \`${target:0:7}\`"
+    if [[ "$stats" != null ]]; then
+      jq -rn --argjson s "$stats" --arg prev "$prev" '"- Reported cost: $\($s.costUsd * 100 | round / 100)"
+        + (if $prev != "" then " (previous run of this session reported $\($prev | tonumber * 100 | round / 100))" else "" end)
+        + ", \($s.turns) turns, \($s.minutes) min"'
+    else
+      echo "- Claude did not finish a review in this run; see the review step's log."
+    fi
+    [[ -n "${STORE:-}" ]] || echo "- Session storage is not configured: the next run starts a new session."
+  } >>"$GITHUB_STEP_SUMMARY"
+
+  # Claude finished but posted no summary for its commit: the review did not happen. Fail the step
+  # so the check is red and the review gets rerun.
+  if [[ "$OUTCOME" == success ]]; then
+    local summaries
+    if ! summaries="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+      --jq ".[] | select($reviewer) | .body")"; then
+      echo "- Could not read the PR's comments to confirm the review summary was posted." >>"$GITHUB_STEP_SUMMARY"
+      return 0
+    fi
+    if ! grep -q "Reviewed commit: $target" <<<"$summaries"; then
+      echo "- No review summary was posted for \`${target:0:7}\`: the review ended without reviewing." >>"$GITHUB_STEP_SUMMARY"
+      echo "::error::Claude finished without posting the review summary for $target; rerun the review."
+      return 1
+    fi
+  fi
+}
+
+case "${1:-}" in
+  prepare) prepare ;;
+  save) save ;;
+  *) echo "usage: session.sh prepare|save" >&2; exit 2 ;;
+esac

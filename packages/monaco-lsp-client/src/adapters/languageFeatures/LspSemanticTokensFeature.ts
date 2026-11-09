@@ -4,13 +4,30 @@ import type { SemanticTokensRegistrationOptions } from "../../types";
 import { capabilities, TokenFormat, api } from "../../types";
 import type { IDisposable } from "../../utils";
 import { Disposable } from "../../utils";
+import { CancellationError } from "../LspCancellableRequests";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";
+
+/**
+ * What the app's theme has rules for. Monaco paints a token type with no rule in the default
+ * foreground, hiding its TextMate color, and matches modifiers against rules as a dotted path in
+ * legend order, so a modifier no rule names (`variable.declaration.readonly`) stops the match.
+ * Without this, a server's legend reaches Monaco as is.
+ */
+export interface SemanticTokenStyling {
+  /** Token types with a rule of their own. Tokens of any other type keep their TextMate color. */
+  types: ReadonlySet<string>;
+  /** Modifiers that rules name. Any other modifier is dropped from tokens before they are matched. */
+  modifiers: ReadonlySet<string>;
+}
 
 export class LspSemanticTokensFeature extends Disposable {
   private readonly _providers = new Set<LspSemanticTokensProvider>();
 
-  constructor(private readonly _connection: LspConnection) {
+  constructor(
+    private readonly _connection: LspConnection,
+    private readonly _styling?: SemanticTokenStyling,
+  ) {
     super();
 
     this._register(
@@ -18,12 +35,7 @@ export class LspSemanticTokensFeature extends Disposable {
         textDocument: {
           semanticTokens: {
             dynamicRegistration: true,
-            // Disable delta tokens. The server augments FULL responses with
-            // custom JSX tokens (see ts-lsp-manager.augmentSemanticTokens);
-            // delta responses would be computed by TypeScript against its
-            // NON-augmented token sequence, so applying them on the client
-            // (which holds the augmented sequence) drifts positions and
-            // produces the offset highlighting seen during live editing.
+            // Delta requests are not made: `provideDocumentSemanticTokensEdits` asks for all tokens.
             requests: { range: true, full: { delta: false } },
             tokenTypes: [
               "namespace",
@@ -139,6 +151,7 @@ export class LspSemanticTokensFeature extends Disposable {
             onDidChangeEmitter.event,
             clearOnNextCall,
             () => onDidChangeEmitter.fire(),
+            this._styling,
           );
           this._providers.add(provider);
           const registration = monaco.languages.registerDocumentSemanticTokensProvider(
@@ -160,24 +173,42 @@ export class LspSemanticTokensFeature extends Disposable {
   }
 }
 
-class LspSemanticTokensProvider implements monaco.languages.DocumentSemanticTokensProvider {
+export class LspSemanticTokensProvider implements monaco.languages.DocumentSemanticTokensProvider {
+  private readonly _legend: monaco.languages.SemanticTokensLegend;
+  /** Bits of the modifiers `SemanticTokenStyling` keeps, undefined to keep them all. */
+  private readonly _modifierMask: number | undefined;
+
   constructor(
     private readonly _client: LspConnection,
     private readonly _capabilities: SemanticTokensRegistrationOptions,
     public readonly onDidChange: monaco.IEvent<void>,
     private readonly _clearOnNextCall: Set<string>,
     private readonly _refire: () => void,
-  ) {}
+    styling?: SemanticTokenStyling,
+  ) {
+    const { tokenTypes, tokenModifiers } = this._capabilities.legend;
+    // Monaco leaves a token whose type is blank in the legend unstyled. Indexes stay stable, so
+    // token data needs no rewriting for it.
+    this._legend = {
+      tokenTypes: styling
+        ? tokenTypes.map((type) => (styling.types.has(type) ? type : ""))
+        : tokenTypes,
+      tokenModifiers,
+    };
+    this._modifierMask =
+      styling &&
+      tokenModifiers.reduce(
+        (mask, modifier, index) => (styling.modifiers.has(modifier) ? mask | (1 << index) : mask),
+        0,
+      );
+  }
 
   public refresh(): void {
     this._refire();
   }
 
   getLegend(): monaco.languages.SemanticTokensLegend {
-    return {
-      tokenTypes: this._capabilities.legend.tokenTypes,
-      tokenModifiers: this._capabilities.legend.tokenModifiers,
-    };
+    return this._legend;
   }
 
   releaseDocumentSemanticTokens(_resultId: string | undefined): void {
@@ -190,6 +221,7 @@ class LspSemanticTokensProvider implements monaco.languages.DocumentSemanticToke
     lastResultId: string | null,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.SemanticTokens | monaco.languages.SemanticTokensEdits | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, model.getPositionAt(0));
 
     // Two-phase invalidation after format/large edits: first call clears
@@ -201,38 +233,29 @@ class LspSemanticTokensProvider implements monaco.languages.DocumentSemanticToke
       return { resultId: undefined, data: new Uint32Array(0) };
     }
 
-    // Loop inline on version-staleness: the model can move under us between
-    // the request leaving and the response arriving, but Monaco's `null`
-    // return means "no change" — leaving the previous (naively edit-shifted)
-    // tokens painted — and firing the emitter to trigger a re-entry causes a
-    // visible Monarch flash on every rapid keystroke. Instead, keep fetching
-    // inline until we get a response that matches the current model version
-    // (or Monaco cancels the whole thing, which is its own signal that a new
-    // request is already queued).
-    while (true) {
-      const requestedVersion = model.getVersionId();
+    // An answer may only be painted for the content it was made for. Monaco shifts an answer
+    // across the edits made while the request was out, which suits a server answering for the
+    // request's content, but rust-analyzer can answer for newer content, and such an answer
+    // would be shifted across edits it already holds, landing tokens off their text and past
+    // line ends ("Invalid Semantic Tokens Data"). Which content an answer is for is not known, so
+    // an answer the model moved past is dropped as cancelled: Monaco keeps its shifted tokens and
+    // asks again. Re-requesting here instead would hand Monaco newer tokens to shift twice.
+    const version = model.getVersionId();
+    const result = await this._client.server.textDocumentSemanticTokensFull({
+      textDocument: translated.textDocument,
+    });
 
-      // We intentionally do NOT use delta requests. Our proxy augments FULL
-      // token responses with custom JSX tokens; delta responses would drift.
-      const result = await this._client.server.textDocumentSemanticTokensFull({
-        textDocument: translated.textDocument,
-      });
+    if (!result || token.isCancellationRequested || model.isDisposed()) return null;
+    if (model.getVersionId() !== version) throw new CancellationError();
 
-      if (!result || token.isCancellationRequested || model.isDisposed()) {
-        // Monaco will schedule its own refetch; returning null keeps the
-        // currently painted tokens in place (no Monarch flash).
-        return null;
-      }
-
-      if (model.getVersionId() !== requestedVersion) {
-        // Retry inline with the current version. No onDidChange refire —
-        // firing the emitter here caused Monaco to drop tokens mid-fetch
-        // and produced a visible Monarch flash during rapid typing.
-        continue;
-      }
-
-      return { resultId: result.resultId, data: new Uint32Array(result.data) };
-    }
+    const mask = this._modifierMask;
+    // Each token is five integers, the last of them its modifier bits.
+    const data = new Uint32Array(
+      mask === undefined
+        ? result.data
+        : result.data.map((value, index) => (index % 5 === 4 ? value & mask : value)),
+    );
+    return { resultId: result.resultId, data };
   }
 
   async provideDocumentSemanticTokensEdits?(

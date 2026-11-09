@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { TerminalState } from "@/api/ws-protocol";
 import type { OscPayload } from "@/lib/osc-notification-parser";
+import { until } from "@/test/until";
 
 import type { TerminalSessionOptions, TerminalSink } from "./terminal-session";
 import { OutputRing, TerminalSession } from "./terminal-session";
@@ -21,14 +22,6 @@ function createRecordingSink() {
   const outputText = () => output.map((o) => textDecoder.decode(o.data)).join("");
   const outputBytes = () => output.reduce((n, o) => n + o.data.byteLength, 0);
   return { sink, states, output, exits, outputText, outputBytes };
-}
-
-async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error("Timed out waiting for condition");
-    await Bun.sleep(10);
-  }
 }
 
 const sessions: TerminalSession[] = [];

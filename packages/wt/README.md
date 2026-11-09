@@ -7,6 +7,8 @@ A CLI for managing git worktrees. Built for parallel development workflows where
 - [Why wt?](#why-wt)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Checking the Setup](#checking-the-setup)
+- [Per-Worktree Metadata](#per-worktree-metadata)
 - [Where Worktrees Live](#where-worktrees-live)
 - [Hooks](#hooks)
 - [Renaming](#renaming)
@@ -38,7 +40,7 @@ But raw `git worktree` commands are verbose and don't handle the real challenges
 - **Renames**: Moving a worktree should move its branch, and fix up anything named after it
 - **Cleanup**: Stopping containers and removing resources when done
 
-`wt` solves this with three plain shell hooks and nothing else to configure. Git is the only source of truth, so there is nothing to initialize and nothing to keep in sync.
+`wt` solves this with three plain shell hooks and nothing else to configure. Git is the only source of truth, so there is nothing to keep in sync; `wt init` only checks and fixes git's own setup, and never writes a file of its own.
 
 ---
 
@@ -74,16 +76,25 @@ wt version
 
 ### 1. Set up a bare repository
 
-`wt` is most commonly used with a **bare repo**: every checkout, including `main`, is a worktree under `.worktrees/`, so the root stays a stable home for git internals, local-only files and the hooks. A plain `git clone --bare` records no fetch refspec, so add one to get `origin/*` tracking branches:
+`wt` is most commonly used with a **bare repo**: every checkout, including `main`, is a worktree under `.worktrees/`, so the root stays a stable home for git internals, local-only files and the hooks. `wt init <url>` creates one:
+
+```bash
+wt init git@github.com:myorg/myproject.git    # bare clone into ./myproject, set up for wt
+cd myproject
+```
+
+That is `git clone --bare` plus what a plain bare clone leaves out: the fetch refspec (without it there are no `origin/*` branches), a fetch, `origin/HEAD`, and the default branch checked out as `.worktrees/main`. The equivalent by hand:
 
 ```bash
 git clone --bare git@github.com:myorg/myproject.git myproject
 cd myproject
 git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
 git fetch origin
-
+git remote set-head origin --auto
 wt add main -b main        # check out the default branch as the first worktree
 ```
+
+For a repository you already have, `wt doctor` reports how its setup looks and `wt init` offers to fix it; see [Checking the Setup](#checking-the-setup).
 
 `wt` also works in a regular (non-bare) repo: there the repo root is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code. wt adds that directory to `.git/info/exclude` on first use so the main checkout's status stays clean without a committed `.gitignore` entry.
 
@@ -121,6 +132,66 @@ docker run -d --name "myapp-$WT_NAME" -p 0:5432 postgres:15
 ```
 
 A matching `clean.wt.sh` would remove that container before `wt remove` deletes the checkout. See [Hooks](#hooks) for the full set of hooks and the variables they receive, and [Real-World Examples](#real-world-examples) for complete hook sets.
+
+---
+
+## Checking the Setup
+
+`wt doctor` checks the repository's git setup and changes nothing; it exits 1 when a check fails. `wt init` runs the same checks and walks through each one that is not ok: what it affects, the recommended fix, the exact commands it would run (a step wt does itself, such as giving worktrees a `wt-id`, shows as a `#` comment), and then apply, skip or explain. Every fix is idempotent and prints each command before running it. Neither writes a wt config file: all they touch is git's own setup.
+
+| Check                   | Looks at                                                                                                     | Fix offered by `wt init`            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| Git version             | git 2.31+, which wt needs                                                                                    |                                     |
+| Layout                  | bare (recommended) or regular                                                                                |                                     |
+| Worktrees directory     | `WT_DIR` is set                                                                                              |                                     |
+| Legacy `wt.yaml`        | a leftover config from the old CLI, which is ignored                                                         |                                     |
+| Fetch refspec           | `origin` has a `remote.origin.fetch`; without one there is no `origin/main`, and `wt add` starts from `HEAD` | add it, fetch, record `origin/HEAD` |
+| `origin/HEAD`           | origin's default branch is recorded, so `wt add` starts from the right branch                                | `git remote set-head origin --auto` |
+| Default branch worktree | a bare repo has its default branch checked out in a worktree                                                 | `wt add main -b main`               |
+| Worktree metadata       | per-worktree config is on, and set up so linked worktrees work (see below)                                   | turn it on or off                   |
+| Worktree ids            | while metadata is on, every worktree has a [`wt-id`](#per-worktree-metadata)                                 | give the ones without one an id     |
+| Moved worktrees         | worktrees git lost track of because the repository directory moved; their checkouts are intact               | `git worktree repair`               |
+| Stale worktrees         | registered worktrees whose directory is gone (moved ones are repaired first, never pruned)                   | `git worktree prune`                |
+| Locked worktrees        | worktrees `wt remove` and `wt mv` refuse until unlocked                                                      |                                     |
+| Hooks                   | which hook scripts exist                                                                                     |                                     |
+
+Unattended (an agent, a script, no terminal), every decision is a flag: `--fetch-refspec`, `--set-origin-head`, `--main-worktree`, `--repair`, `--prune`, `--worktree-metadata on|off`, each with a `--no-` form for the yes/no ones. `--yes` applies every recommended fix, and a flag overrides it for its own check. With no terminal and no flags, `wt init` changes nothing and lists the pending decisions with the flag for each.
+
+```bash
+wt doctor                        # report only
+wt init                          # interactive walkthrough
+wt init --yes --no-main-worktree # every recommendation except the default branch worktree
+wt init -j | jq '.pending'       # what is undecided, and the flags that decide it
+```
+
+### Worktree metadata
+
+Git can give each worktree its own config file (`git config --worktree`), which survives detached HEADs, rebases, branch renames and `git worktree move`, and is deleted with the worktree. It is off by default (`extensions.worktreeConfig`), and features that store metadata per worktree ([`wt meta`](#per-worktree-metadata), and through it nesting worktrees in Loxel) need it on. wt never turns it on or off by itself: only `wt init --worktree-metadata on`, or choosing it in the interactive walkthrough, does. Turning it on also gives every existing worktree a [`wt-id`](#per-worktree-metadata), and while it is on, `wt doctor` reports worktrees without one (created by plain `git worktree add`, say); `wt init --worktree-metadata on`, `--yes` or the walkthrough gives them one.
+
+Turning it on is more than one setting. `core.bare = true` (and `core.worktree`, if set) describe the bare dir only, and with per-worktree config on git requires them in the bare dir's own `config.worktree`: left in the shared config, every linked worktree inherits them and fails with "fatal: this operation must be run in a work tree". `wt init` moves them before switching it on, and `wt doctor` fails a repository where they were left behind; either `--worktree-metadata on` or `off` repairs it. The tradeoff: tools that don't support `extensions.worktreeConfig` (some libgit2- and JGit-based apps) read only the shared config, so they may no longer see the repository as bare. `--worktree-metadata off` moves the settings back; values written with `git config --worktree` stay in their files but stop applying until it is turned on again.
+
+---
+
+## Per-Worktree Metadata
+
+With [worktree metadata](#worktree-metadata) on, wt stores `key=value` pairs on each worktree for other tools to read, such as Loxel's worktree nesting. They live in the worktree's own git config, under `wt-meta.<key>`, so they survive renames (`wt mv`), detached HEADs and rebases, and are deleted by `wt remove`. Each worktree sees only its own, and concurrent writes, to one worktree or to several, all land.
+
+```bash
+wt add feat/x --meta loxel-parent-wt=<id>  # set keys when creating the worktree (repeatable)
+wt meta set feat/x note="needs review"     # set keys on an existing worktree
+wt meta get feat/x                         # all of its keys
+wt meta get feat/x note                    # one value
+wt meta unset feat/x note
+wt meta get                                # the worktree you are in
+```
+
+- Keys follow git config rules: letters, digits and `-`, starting with a letter. They are case-insensitive and stored lowercase. Values are any string.
+- `wt-*` keys are reserved for wt and cannot be set or unset; `loxel-*` keys belong to Loxel. wt gives no meaning to any other key.
+- `wt-id` is a stable id (a UUID) that every worktree has while metadata is on: wt gives one to each worktree it creates, `wt init` to the existing ones when it turns metadata on, and `wt init` again to any created outside wt later (see [Worktree metadata](#worktree-metadata)). A worktree that still has none gets one the first time its metadata is written. Refer to other worktrees by id, never by name, so a rename cannot break the reference.
+- `wt add` never sets metadata on its own: a new worktree gets its `wt-id` and only the keys passed with `--meta`, never those of the worktree it was run from. A plain `git worktree add` copies the config of the worktree it runs in, metadata included; wt ignores such a copy and replaces it on the first write, so two worktrees never share an id. The metadata is written before `init.wt.sh` runs, so the hook can read it with `git config --worktree --get wt-meta.<key>`.
+- The worktree name is optional: without it, `meta` acts on the worktree you are in, and outside every worktree picks from a list like `wt view`. For `get` and `unset`, a lone argument is the worktree when a worktree has that name and a key otherwise, so scripts should always pass the name.
+- With metadata off, `--meta`, `meta set` and `meta unset` fail with a pointer to `wt init --worktree-metadata on`, and reads return no metadata.
+- `wt list -j` and `wt view -j` report each worktree's `meta`, and `wt view` lists it; the `wt list` table does not.
 
 ---
 
@@ -222,6 +293,7 @@ Run interactively and wt prompts for the common decisions: the worktree name, wh
 | `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr                   |
 | `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one                         |
 | `--base <ref>`          | `add`    | Start the new branch from `<ref>` instead of the remote default              |
+| `--meta <key=value>`    | `add`    | Store metadata on the new worktree (repeatable)                              |
 | `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name                           |
 | `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone                          |
 | `-f`, `--force`         | `mv`     | Move a locked worktree                                                       |
@@ -229,6 +301,8 @@ Run interactively and wt prompts for the common decisions: the worktree name, wh
 | `-d`, `--delete-branch` | `remove` | Also delete the branch; kept unless merged into `HEAD` or the remote default |
 | `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                            |
 | `--keep-branch`         | `remove` | Keep the branch (no prompt)                                                  |
+| `-y`, `--yes`           | `init`   | Apply every recommended fix without asking                                   |
+| `--fetch-refspec` etc.  | `init`   | Decide one fix; see [Checking the Setup](#checking-the-setup)                |
 
 ### `wt list` (alias: `ls`)
 
@@ -253,11 +327,12 @@ Create a worktree at `<worktreesDir>/<name>`, then run `init.wt.sh`. Prompts for
 wt add feature-auth                    # new branch feature-auth from origin/main (as last fetched)
 wt add feature-auth --base HEAD        # ... from the current HEAD instead
 wt add feature-auth -b existing-branch # check out an existing branch instead
+wt add feature-auth --meta note=wip    # store metadata on it (needs worktree metadata on)
 ```
 
 ### `wt view [name]`
 
-Show one worktree's branch, head, path, lock state, number of `git status` entries and upstream divergence. Picks from a list when the name is omitted.
+Show one worktree's branch, head, path, lock state, number of `git status` entries, upstream divergence and metadata. Picks from a list when the name is omitted.
 
 ### `wt mv [old] <new>` (aliases: `rename`, `move`)
 
@@ -269,7 +344,7 @@ Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to de
 
 A worktree is dirty, and needs `--force`, when `git status` reports anything in it, checked both before and after `clean.wt.sh` runs. Only what `git status` shows counts: submodule content it hides (through `ignore` settings) and submodule commits that exist on no remote are deleted without asking for `--force`.
 
-The command returns as soon as git has unregistered the worktree; its files are deleted in the background from `.wt-trash/` inside the worktrees directory. If that deletion is interrupted (a reboot, say), the leftover stays in `.wt-trash/` until you delete it. A worktree whose directory was already deleted outside wt can still be listed and removed.
+The command returns as soon as git has unregistered the worktree and its branch is handled; its files are deleted in the background from `.wt-trash/` inside the worktrees directory. Once it has started, closing the terminal does not stop `wt` itself, though a git command running at that moment can fail: the rest of the removal still happens, and the branch may be left behind. If that deletion is interrupted (a reboot, say), the leftover stays in `.wt-trash/` until you delete it. A worktree whose directory was already deleted outside wt can still be listed and removed.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
@@ -277,6 +352,25 @@ wt remove feature-auth -d              # also delete the branch, if merged
 wt remove feature-auth -D              # delete the branch even if unmerged
 wt remove feature-auth --force         # remove despite uncommitted changes
 ```
+
+### `wt meta get|set|unset`
+
+Read and write a worktree's metadata: `wt meta get [name] [key]`, `wt meta set [name] key=value...`, `wt meta unset [name] key...`. Without a name, acts on the worktree you are in. See [Per-Worktree Metadata](#per-worktree-metadata).
+
+### `wt init [url] [dir]`
+
+Without a URL, check the repository's git setup and fix what you choose (see [Checking the Setup](#checking-the-setup)); run from anywhere inside it. With a URL, create a bare clone in `dir` (default: the repository name) with the fetch refspec, `origin/*` fetched, `origin/HEAD` recorded and the default branch checked out as a worktree, then offer the remaining fixes for it. `--no-fetch-refspec` and `--no-main-worktree` leave those steps out.
+
+```bash
+wt init                                # walk through what is not ok
+wt init --fetch-refspec --set-origin-head
+wt init --worktree-metadata on         # opt in to per-worktree config
+wt init git@github.com:org/proj.git    # bare clone into ./proj, set up for wt
+```
+
+### `wt doctor`
+
+Run the same checks as `wt init` and report them, changing nothing. Exits 1 when a check fails.
 
 ### `wt version`, `wt update`
 
@@ -290,16 +384,26 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 
 ```jsonc
 // list
-{"worktrees":[{"name","path","branch","head","main","locked"}, ...]}
-// add
-{"name","path","branch","created":true,"base":"origin/main","hookRan":false}
+{"worktrees":[{"name","path","branch","head","main","locked","meta":{"wt-id","<key>":"<value>"}}, ...]}
+// add — `meta` is {} while worktree metadata is off
+{"name","path","branch","created":true,"base":"origin/main","hookRan":false,"meta":{...}}
 // mv
 {"name","path","branch","oldName","oldPath","oldBranch","moved":true,"branchRenamed":true}
 // view — `head` is abbreviated to 12 chars here, full in `list`; `dirty` is null when the status
 // cannot be read, `ahead`/`behind` are null without an upstream
-{"name","path","branch","head","main","locked","dirty","ahead","behind"}
+{"name","path","branch","head","main","locked","dirty","ahead","behind","meta":{...}}
+// meta get, meta set, meta unset — the worktree's metadata after the change
+{"name","path","meta":{"wt-id","<key>":"<value>"}}
+// meta get <name> <key> — `value` is null when the key is not set
+{"name","path","key","value"}
 // remove
 {"name","path","removed":true,"branchDeleted":false,"hookRan":true}
+// doctor — exit code 1 when `ok` is false; each check's status is ok | info | warn | fail
+{"root","bare","ok":true,"checks":[{"id","status","title","summary","affects":[...],"fixable"}, ...]}
+// init — `outcomes[].status` is applied | not-needed | failed (exit code 1 if one failed, or if any check still fails afterwards, as with `doctor`);
+// `pending` lists the undecided fixes with the flag that applies each
+{"root","bare","cloned":false,"outcomes":[{"id","status","commands":[...],"error"}],
+ "pending":[{"check":{...},"actions":[{"id","title","recommended","commands","flag"}]}],"checks":[...]}
 // cancelled at a prompt, via Cancel or Ctrl+C (exit code 0)
 {"aborted":true,"reason":"User cancelled"}
 ```
@@ -476,13 +580,38 @@ if (!forceReason("feat/bar", removal.dirty)) {
 }
 ```
 
-Each `execute*` also accepts `hookEnv`, the base environment for the hook (for example a resolved shell `PATH` when calling from a GUI app). The full export list, including worktree listing, repo helpers and the hook filename constants, is in [`src/lib/index.ts`](src/lib/index.ts).
+Repository setup follows the same split. `planInit` returns the checks and every fix available, each with a recommendation, its tradeoffs and the exact commands; `executeInit` applies only the fixes it is given, re-checking before each one. `diagnose` is the read-only report `wt doctor` prints, and `cloneBareRepo` is `wt init <url>`.
+
+```ts
+import { executeInit, planInit } from "@bizimind/wt/lib";
+
+const setup = await planInit(repoPath);
+// setup.checks[].status: "ok" | "info" | "warn" | "fail"
+// setup.actions[]: { id, check, title, recommended, recommendation, tradeoffs, commands }
+const chosen = setup.actions.filter((action) => action.recommended).map((action) => action.id);
+const done = await executeInit(repoPath, { apply: chosen });
+// done.outcomes[].status: "applied" | "not-needed" | "failed"; done.checks is the state after
+```
+
+Worktree metadata has its own functions. `listManagedWorktrees` and `currentManagedWorktree` include each worktree's `meta`, and `executeAdd` takes `meta` like `--meta`.
+
+```ts
+import { ensureWorktreeId, findWorktreeById, setWorktreeMeta } from "@bizimind/wt/lib";
+
+const parentId = await ensureWorktreeId({ name: "feat/foo", repoPath }); // assigns one if missing
+await setWorktreeMeta({ name: "feat/bar", repoPath, values: { "loxel-parent-wt": parentId } });
+const parent = await findWorktreeById(parentId, repoPath); // ManagedWorktree | null, after any rename
+```
+
+`getWorktreeMeta`, `unsetWorktreeMeta`, `isWorktreeMetadataEnabled` and `parseMetaAssignments` cover the rest; writes throw `METADATA_OFF_MESSAGE` while metadata is off.
+
+Each `execute*` also accepts `hookEnv`, the base environment for the hook (for example a resolved shell `PATH` when calling from a GUI app). `executeAdd` and `executeRemove` accept `allowHook(worktreePath)`, asked before an existing hook runs, for an app that runs a repository's hooks only when its user allows it: false skips the hook, and the result says `hookSkipped` when there was one. `planRemove` reports `hasHook`, and `runInitHook` runs `init.wt.sh` later in an existing worktree. The CLI always runs the hooks. The full export list, including worktree listing, repo helpers and the hook filename constants, is in [`src/lib/index.ts`](src/lib/index.ts).
 
 ---
 
 ## Upgrading from the Config-Based CLI
 
-`wt.yaml`, generated state files, `wt init`, `wt open`, `wt completions`, the global `--repo` selector, automatic port offsets, and generated unique names are no longer supported. Existing `wt.yaml` files are ignored, so migrate their behavior before relying on this version:
+`wt.yaml`, generated state files, the old `wt init` (editor choice, GitHub remote creation, `wt.yaml` generation), `wt open`, `wt completions`, the global `--repo` selector, automatic port offsets, and generated unique names are no longer supported. Existing `wt.yaml` files are ignored, so migrate their behavior before relying on this version:
 
 - Replace `worktrees_dir` with the `WT_DIR` environment variable when the default `.worktrees` directory is not suitable.
 - Move `hooks.add.run` into repo-root `init.wt.sh`, and `hooks.clean.run` into `clean.wt.sh`.
@@ -491,7 +620,7 @@ Each `execute*` also accepts `hookEnv`, the base environment for the hook (for e
 - Replace `automatic_updates: true` with `WT_AUTO_UPDATE=1`.
 - Use the shell helpers instead of `wt open` when you want the calling shell to change directory.
 
-Remove the obsolete `wt.yaml` after migrating. Existing git worktrees remain registered in git and are not modified by the upgrade.
+Remove the obsolete `wt.yaml` after migrating; `wt doctor` warns while it is still there. Existing git worktrees remain registered in git and are not modified by the upgrade.
 
 ---
 

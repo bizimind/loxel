@@ -23,6 +23,10 @@ export const queryKeys = {
   /** Prefix key for invalidating all fileContent queries for a given file, regardless of ref/worktree. */
   fileContentPrefix: (projectPath: string | null, path: string) =>
     ["fileContent", projectPath, path] as const,
+  /** `.editorconfig` properties of an open file; invalidated when an `.editorconfig` changes. */
+  editorConfig: (path: string, worktree?: string) => ["editorConfig", path, worktree] as const,
+  /** Prefix key matching a file's `editorConfig` queries for every worktree. */
+  editorConfigPrefix: (path: string) => ["editorConfig", path] as const,
   diagnostics: (
     projectPath: string | null,
     ref: string | undefined,
@@ -34,6 +38,16 @@ export const queryKeys = {
     ["detachedFiles", projectPath, wtPath] as const,
   externalFiles: (projectPath: string | null, wtPath: string | null) =>
     ["externalFiles", projectPath, wtPath] as const,
+  toolchainStatus: (toolchainId: string, projectPath: string | null, wtPath: string | null) =>
+    ["toolchainStatus", projectPath, wtPath, toolchainId] as const,
+  /** Prefix key for every worktree's status of every language toolchain. */
+  toolchainStatusAll: () => ["toolchainStatus"] as const,
+  repoTrust: (projectPath: string | null, wtPath: string | null) =>
+    ["repoTrust", projectPath, wtPath] as const,
+  /** Every repository's answer, for Settings > Security; under {@link repoTrustAll}. */
+  repoTrustList: () => ["repoTrust", "list"] as const,
+  /** Prefix key for every worktree's repository trust, and the list of every repository's. */
+  repoTrustAll: () => ["repoTrust"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

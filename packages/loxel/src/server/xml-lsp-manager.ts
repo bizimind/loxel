@@ -1,25 +1,42 @@
 import path from "node:path";
 
-import type { ServerWebSocket, Subprocess } from "bun";
+import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
 
-import {
-  type SpawnOptions,
-  StdioLspManager,
-  type WtLspContext,
-  type WtLspSession,
-} from "./stdio-lsp-manager";
+/**
+ * LemMinX's download setting covers what it reads through its cache. Everything else it would open
+ * goes through the JVM's URL handlers, so those get a proxy that leads nowhere, for every host.
+ */
+const NO_OUTBOUND_ARGS = [
+  ...["http", "https", "ftp"].flatMap((protocol) => [
+    `-D${protocol}.proxyHost=127.0.0.1`,
+    `-D${protocol}.proxyPort=9`,
+    `-D${protocol}.nonProxyHosts=`,
+  ]),
+  "-DsocksProxyHost=127.0.0.1",
+  "-DsocksProxyPort=9",
+];
 
-export class XmlLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
-  constructor() {
+export class XmlLspManager extends WorktreeLspManager {
+  constructor(private readonly workDir: string) {
     super("xml-lsp");
   }
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+  protected override spawnArgs(): readonly string[] {
+    return [...NO_OUTBOUND_ARGS, "--stdio"];
   }
 
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
+  // LemMinX offers to download a schema anyway, which only `SchemaConsent` may decide.
+  protected override handleServerFrame(session: WtLspSession, body: string): void {
+    super.handleServerFrame(session, withoutForceDownload(body));
+  }
+
+  // With downloads off, LemMinX reads schemas only from its cache, which `SchemaDownloads` fills.
+  protected override getInitializationOptions(): Record<string, unknown> {
+    return {
+      settings: {
+        xml: { downloadExternalResources: { enabled: false }, server: { workDir: this.workDir } },
+      },
+    };
   }
 
   protected resolveBinary(): string | null {
@@ -28,30 +45,16 @@ export class XmlLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
       path.resolve(import.meta.dir, "../../build/lemminx/lemminx"),
     );
   }
+}
 
-  protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: WtLspContext,
-  ): WtLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-    };
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string | null {
-    return session.wtPath;
-  }
+/** The frame without the "Force download" quick fixes in a code action response. */
+export function withoutForceDownload(body: string): string {
+  if (!body.includes("Force download")) return body;
+  const message = JSON.parse(body) as { result?: unknown };
+  if (!Array.isArray(message.result)) return body;
+  const result = message.result.filter(
+    (action: { title?: unknown }) =>
+      typeof action.title !== "string" || !action.title.startsWith("Force download"),
+  );
+  return JSON.stringify({ ...message, result });
 }

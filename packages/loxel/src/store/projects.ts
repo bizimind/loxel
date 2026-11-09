@@ -78,6 +78,8 @@ export function clampSidebarWidth(width: number): number {
 
 interface ProjectState {
   projects: EnrichedProject[];
+  /** The server user's home directory (null until projects are first fetched). */
+  homeDir: string | null;
   sidebarExpanded: boolean;
   /** Width of the sidebar when expanded (the collapsed width is fixed). */
   sidebarWidth: number;
@@ -106,6 +108,7 @@ export const useProjectStore = create<ProjectState>()(
   persist(
     (set, get) => ({
       projects: [],
+      homeDir: null,
       sidebarExpanded: false,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
@@ -114,7 +117,7 @@ export const useProjectStore = create<ProjectState>()(
       fetchProjects: async () => {
         try {
           const data = await api.getProjects();
-          set({ projects: data.projects });
+          set({ projects: data.projects, homeDir: data.homeDir });
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
           useWorktreeStore.getState().applyEnrichedProjects(data.projects);

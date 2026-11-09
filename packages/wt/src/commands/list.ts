@@ -6,7 +6,9 @@ import {
   getWorktreeName,
   listWorktrees,
   resolveRepoRoot,
+  type WorktreeMeta,
 } from "../git/index.ts";
+import { readWorktreesMeta } from "../lib/index.ts";
 
 interface ListOptions {
   json?: boolean;
@@ -22,6 +24,8 @@ interface ListedWorktree {
   main: boolean;
   /** Whether the worktree is locked */
   locked: boolean;
+  /** Worktree metadata, `wt-id` included; empty while metadata is off */
+  meta: WorktreeMeta;
 }
 
 export interface ListResult {
@@ -30,10 +34,14 @@ export interface ListResult {
 
 /** List every worktree git knows about. */
 export async function listCommand(options: ListOptions = {}): Promise<void> {
-  await runAction<ListResult>(options, async () => {
+  await runAction<ListResult>(options, async (ctx) => {
     const root = await resolveRepoRoot(process.cwd());
     const dir = await canonicalWorktreesDir(root);
     const worktrees = await listWorktrees(root);
+    // Only JSON reports metadata; the table would read every worktree's config for nothing.
+    const meta = options.json
+      ? await readWorktreesMeta(root, worktrees, ctx.warn)
+      : new Map<string, WorktreeMeta>();
 
     const result: ListResult = {
       worktrees: worktrees
@@ -45,6 +53,7 @@ export async function listCommand(options: ListOptions = {}): Promise<void> {
           head: wt.head,
           main: wt.path === root,
           locked: wt.locked,
+          meta: meta.get(wt.path) ?? {},
         })),
     };
 

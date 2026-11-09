@@ -1,4 +1,5 @@
 import {
+  ArrowLeftRightIcon,
   ClipboardPasteIcon,
   CopyIcon,
   FilePlusIcon,
@@ -46,6 +47,9 @@ interface ProjectFileMenuProps {
   onGitRestore?: () => void;
   /** Close a folder in the Others section (the folder stays on disk). */
   onRemoveFromOthers?: () => void;
+  /** Compare the focused file (`compareWith`, a path) with this one. */
+  onCompare?: () => void;
+  compareWith?: string;
 }
 
 export function ProjectFileMenu({
@@ -65,6 +69,8 @@ export function ProjectFileMenu({
   onPaste,
   onGitRestore,
   onRemoveFromOthers,
+  onCompare,
+  compareWith,
 }: ProjectFileMenuProps) {
   const fileName = pathName(filePath);
 
@@ -163,6 +169,26 @@ export function ProjectFileMenu({
       )}
 
       {(hasNewSection || hasRename || hasClipboard) && <ContextMenuSeparator />}
+
+      {onCompare && (
+        <>
+          <ContextMenuItem
+            onClick={() => {
+              onClose();
+              onCompare();
+            }}
+          >
+            <ArrowLeftRightIcon />
+            Compare Files
+            {compareWith && (
+              <span className="text-muted-foreground ml-auto max-w-40 truncate pl-4 text-xs">
+                with {pathName(compareWith)}
+              </span>
+            )}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
 
       <ContextMenuItem
         onClick={() => {

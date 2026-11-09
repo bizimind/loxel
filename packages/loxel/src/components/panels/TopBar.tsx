@@ -1,13 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
 
-import * as api from "@/api/client";
-import type { UpdateState } from "@/api/update-model";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
+import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
+import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
 import { cn } from "@/lib/utils";
-import { queryKeys } from "@/queries/query-keys";
+import { useUpdateStatus } from "@/queries/use-update-status";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -48,7 +47,11 @@ const LOGO_SIZE_PX = 16;
 export function TopBar() {
   const isScreenshot = import.meta.env.VITE_SCREENSHOT === "1";
   const windowFocused = useWindowFocused();
+  const fullScreen = useWindowFullScreen();
   const zoom = useZoomFactor();
+  // macOS hides the traffic lights in native fullscreen (they only appear in the slide-down
+  // title bar), so the inset would be an empty gap. Screenshot mode always draws them.
+  const trafficLightsInset = isScreenshot || (isElectron && !fullScreen);
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
   const activeWorktree = useWorktreeStore((s) => {
@@ -70,7 +73,7 @@ export function TopBar() {
       style={{
         // Grows with zoom-in so the text fits, but never shrinks below the traffic lights.
         height: `max(2rem, ${BAR_MIN_HEIGHT_PX / zoom}px)`,
-        ...((isElectron || isScreenshot) && { paddingLeft: TRAFFIC_LIGHTS_INSET_PX / zoom }),
+        ...(trafficLightsInset && { paddingLeft: TRAFFIC_LIGHTS_INSET_PX / zoom }),
         ...(isElectron && { WebkitAppRegion: "drag" }),
       }}
     >
@@ -81,6 +84,9 @@ export function TopBar() {
           <div className="size-3 rounded-full bg-[#5FC038]" />
         </div>
       )}
+      {/* Worktree sidebar toggle: first in the bar, so it stays put whichever way it goes */}
+      <SidebarToggle />
+
       {/* Logo + brand */}
       <LoxelLogo
         className="text-foreground shrink-0"
@@ -116,27 +122,43 @@ export function TopBar() {
       )}
 
       {/* Right side — notifications + settings */}
-      <div className="ml-auto flex items-center">
+      <div className="ml-auto flex items-center gap-1.5">
         <UpdateIndicator />
         <NotificationBell />
         <button
+          aria-label="Settings"
           className="text-muted-foreground hover:text-foreground rounded p-1"
           onClick={() => useSettingsStore.getState().openSettings()}
           style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
         >
-          <SettingsIcon className="size-3.5" />
+          <SettingsIcon className="size-4" />
         </button>
       </div>
     </div>
   );
 }
 
+function SidebarToggle() {
+  const expanded = useProjectStore((s) => s.sidebarExpanded);
+  return (
+    <button
+      className="text-muted-foreground hover:text-foreground hover:bg-muted ml-1.5 shrink-0 rounded p-1 transition-colors"
+      onClick={toggleWorktreeSidebar}
+      title={expanded ? "Collapse sidebar" : "Expand sidebar"}
+      aria-expanded={expanded}
+      style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
+    >
+      {expanded ? (
+        <PanelLeftCloseIcon className="size-4.5" />
+      ) : (
+        <PanelLeftOpenIcon className="size-4.5" />
+      )}
+    </button>
+  );
+}
+
 function UpdateIndicator() {
-  const { data: status } = useQuery<UpdateState>({
-    queryKey: queryKeys.updateStatus(),
-    queryFn: api.getUpdateStatus,
-    enabled: false, // Only populated by WS bridge, no initial fetch needed
-  });
+  const status = useUpdateStatus();
 
   const hasUpdate =
     status?.state === "available" || status?.state === "ready" || status?.state === "downloading";

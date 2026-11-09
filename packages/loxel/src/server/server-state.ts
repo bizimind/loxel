@@ -1,6 +1,7 @@
 import type { LocalDb } from "@bizimind/localdb-sdk";
 import type { ServerWebSocket } from "bun";
 
+import type { LspName } from "@/api/log-entry-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { isWithin } from "@/lib/project-file-helpers";
 
@@ -9,7 +10,9 @@ import type { ExternalFilesService } from "./external-files-service";
 import type { ExternalFoldersService, FileTree } from "./external-folders-service";
 import type { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import type { FileWatcher } from "./file-watcher";
+import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
+import type { RegisteredWorktrees } from "./registered-worktrees";
 import type { ReviewDb } from "./review-db";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
@@ -25,6 +28,8 @@ export interface ProjectState {
   worktreesDir: string;
   /** Cached dirty status of every worktree, pushed as `worktree_status_changed`. */
   worktreeStatuses: WorktreeStatusTracker;
+  /** The worktrees seen registered, to tell a removal from a move on a `worktrees` event. */
+  registeredWorktrees: RegisteredWorktrees;
 }
 
 /**
@@ -80,6 +85,8 @@ export interface WorktreeResources {
   /** Watches a linked worktree's git dir for status events. Null for a regular repo's root. */
   worktreeWatcher: FileWatcher | null;
   filesService: ProjectFilesService;
+  /** Reports dependency installs, which `filesService` ignores, to the language servers. */
+  nodeModulesChanges: NodeModulesChanges;
   fileOpsService: FileOperationsService;
   detachedFilesService: DetachedFilesService;
   externalFilesService: ExternalFilesService;
@@ -89,6 +96,8 @@ export interface WorktreeResources {
   fileOpsHistory: FileOperationsHistory;
   /** Connected clients subscribing to this worktree's events. */
   subscribers: Set<ServerWebSocket<WsData>>;
+  /** Keep the worktree's language toolchains resolved and watched (see `toolchain-statuses.ts`). */
+  unsubscribeToolchainStatuses: Array<() => void>;
 }
 
 /** A worktree's Others section: its open folders, then its open external files. */
@@ -128,18 +137,35 @@ export interface ClientState {
   subscribedWorktrees: Set<string>;
   /** The window this socket belongs to (its terminals carry it as `LOXEL_WINDOW_ID`). */
   windowId?: string;
+  /**
+   * The worktree the window shows: the one it subscribed to last, set when the request arrives
+   * (the subscription itself completes later) and cleared when it unsubscribes from it.
+   */
+  shownWorktree?: string;
+}
+
+/** A language-server manager rooted at a worktree, as `server.ts` drives it. */
+export interface WorktreeLspServer {
+  readonly name: LspName;
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void;
+  destroySession(ws: ServerWebSocket<unknown>): void;
+  handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
+  notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
+  notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
+  /**
+   * The worktree at `wtPath` is gone: delete what the server keeps for it outside the worktree. It
+   * may run more than once for a path, and for one the server never served.
+   */
+  forgetWorktree?(wtPath: string): void;
+  /** May settle once its processes have exited; server shutdown waits for that. */
+  destroy(): void | Promise<void>;
+}
+
+export interface WorktreeLspData {
+  type: LspName;
+  wtPath: string;
+  manager: WorktreeLspServer;
 }
 
 /** WS data tag for routing app vs language-server connections. */
-export type WsData =
-  | { type: "app" }
-  | { type: "yaml-lsp" }
-  | WorktreeLspData<"ts-lsp">
-  | WorktreeLspData<"docker-lsp">
-  | WorktreeLspData<"terraform-lsp">
-  | WorktreeLspData<"python-lsp">
-  | WorktreeLspData<"astro-lsp">
-  | WorktreeLspData<"xml-lsp">;
-
-export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
-export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];
+export type WsData = { type: "app" } | { type: "yaml-lsp" } | WorktreeLspData;

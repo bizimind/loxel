@@ -1,8 +1,8 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectPythonLsp, disconnect: disconnectPythonLsp } = createWorktreeLspClient(
-  "ws/python-lsp",
-  "python",
-);
-
-export { connectPythonLsp, disconnectPythonLsp };
+// basedpyright: only worktrees with .py/.pyi files pay the cost.
+export default createLspClient({
+  route: "ws/python-lsp",
+  name: "basedpyright",
+  languageId: "python",
+});

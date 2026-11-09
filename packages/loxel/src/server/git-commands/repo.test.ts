@@ -79,10 +79,46 @@ describe("resolveDefaultBranchRef", () => {
       await commit(worktree, "A", { "a.txt": "a" });
       await $`git -C ${worktree} checkout -q -b topic`.quiet();
 
-      // From the worktree, --is-bare-repository is false; core.bare still says true.
+      // From the worktree, --is-bare-repository is false; the common dir knows it is bare.
       expect(await resolveDefaultBranchRef(worktree)).toBe("develop");
     } finally {
       await $`git -C ${repo.path} worktree remove --force ${worktree}`.quiet().nothrow();
+      await repo.cleanup();
+    }
+  });
+
+  test("resolves a bare repository's HEAD when per-worktree config holds core.bare", async () => {
+    const repo = await createBareRepo();
+    const worktree = `${repo.path}-wt`;
+    try {
+      await $`git -C ${repo.path} symbolic-ref HEAD refs/heads/develop`.quiet();
+      await $`git -C ${repo.path} worktree add --orphan -b develop ${worktree}`.quiet();
+      await $`git -C ${worktree} config user.email "test@loxel.dev"`.quiet();
+      await $`git -C ${worktree} config user.name "Test"`.quiet();
+      await commit(worktree, "A", { "a.txt": "a" });
+      await $`git -C ${worktree} checkout -q -b topic`.quiet();
+      // What `wt init --worktree-metadata on` does: core.bare moves to the bare dir's own file.
+      await $`git config --file ${repo.path}/config.worktree core.bare true`.quiet();
+      await $`git config --file ${repo.path}/config --unset-all core.bare`.quiet();
+      await $`git config --file ${repo.path}/config extensions.worktreeConfig true`.quiet();
+
+      // From the worktree, core.bare is no longer visible at all.
+      expect(await resolveDefaultBranchRef(worktree)).toBe("develop");
+    } finally {
+      await $`git -C ${repo.path} worktree remove --force ${worktree}`.quiet().nothrow();
+      await repo.cleanup();
+    }
+  });
+
+  test("does not treat a regular repo without core.bare as bare", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await $`git -C ${repo.path} checkout -q -b topic`.quiet();
+      await $`git -C ${repo.path} config --unset core.bare`.quiet();
+
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("main");
+    } finally {
       await repo.cleanup();
     }
   });

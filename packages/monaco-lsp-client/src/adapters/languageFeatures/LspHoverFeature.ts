@@ -50,6 +50,7 @@ class LspHoverProvider implements monaco.languages.HoverProvider {
     position: monaco.Position,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.Hover | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentHover({

@@ -28,6 +28,7 @@ export {
   addWorktree,
   canonicalWorktreesDir,
   DETACHED,
+  deleteInBackground,
   detachWorktree,
   findWorktree,
   getManagedWorktrees,
@@ -49,3 +50,30 @@ export {
   worktreesDir,
   type Worktree,
 } from "./worktree.ts";
+export {
+  disableWorktreeConfigCommands,
+  enableWorktreeConfigCommands,
+  gitCommonDir,
+  isWorktreeConfigEnabled,
+  isWorktreeConfigBroken,
+  isWorktreeConfigStranded,
+  readWorktreeConfigState,
+  strandedWorktreeConfigKeys,
+  type WorktreeConfigState,
+} from "./worktree-config.ts";
+export {
+  claimMeta,
+  isReservedMetaKey,
+  META_SECTION,
+  metaKeyError,
+  normalizeMetaKey,
+  readMeta,
+  RESERVED_META_PREFIX,
+  resetMeta,
+  unsetMeta,
+  worktreeConfigFiles,
+  withMetaLock,
+  WORKTREE_ID_KEY,
+  writeMeta,
+  type WorktreeMeta,
+} from "./worktree-meta.ts";

@@ -1,10 +1,26 @@
 import * as monaco from "monaco-editor";
 
-import type { RenameRegistrationOptions, WorkspaceEdit } from "../../types";
+import type { RenameRegistrationOptions } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
+import type { WorkspaceEditSummary } from "../WorkspaceEditApplier";
 import { toMonacoLanguageSelector } from "./common";
+
+/** What each empty edit a rename provider handed Monaco stands for: see `appliedRenameSummary`. */
+const appliedRenames = new WeakMap<monaco.languages.WorkspaceEdit, WorkspaceEditSummary | null>();
+
+/**
+ * For the empty edit a rename provider hands Monaco after applying the rename itself: what the
+ * rename changed, or null when it failed (the client already reported why). Undefined for any other
+ * edit. Monaco announces the rename with a summary of the edit it is handed ("Made 0 edits in 0
+ * files"); an app that wraps Monaco's bulk-edit service can announce this one instead.
+ */
+export function appliedRenameSummary(
+  edit: monaco.languages.WorkspaceEdit,
+): WorkspaceEditSummary | null | undefined {
+  return appliedRenames.get(edit);
+}
 
 export class LspRenameFeature extends Disposable {
   constructor(private readonly _connection: LspConnection) {
@@ -40,12 +56,20 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
     private readonly _capabilities: RenameRegistrationOptions,
   ) {}
 
+  /**
+   * Applies the rename itself and hands Monaco an empty edit: Monaco's standalone bulk-edit
+   * service can only edit open models, and a rename usually touches files that are not open.
+   * A failed edit is handed over empty too, not as a reject reason: the applier already reported
+   * it (`onWorkspaceEditFailure`), and Monaco would ask the next rename provider on a rejection.
+   * `appliedRenameSummary` tells what the empty edit stands for.
+   */
   async provideRenameEdits(
     model: monaco.editor.ITextModel,
     position: monaco.Position,
     newName: string,
-    _token: monaco.CancellationToken,
+    token: monaco.CancellationToken,
   ): Promise<monaco.languages.WorkspaceEdit | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentRename({
@@ -54,11 +78,15 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
       newName,
     });
 
-    if (!result) {
+    // Monaco cancels when the user moves on (types, moves the caret) before the edit arrives.
+    if (!result || token.isCancellationRequested) {
       return null;
     }
 
-    return toMonacoWorkspaceEdit(result, this._client);
+    const outcome = await this._client.edits.apply(result);
+    const handed: monaco.languages.WorkspaceEdit = { edits: [] };
+    appliedRenames.set(handed, outcome.summary ?? null);
+    return handed;
   }
 
   async resolveRenameLocation(
@@ -66,6 +94,7 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
     position: monaco.Position,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.RenameLocation | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     if (!this._capabilities.prepareProvider) {
       return null;
     }
@@ -95,46 +124,4 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
 
     return null;
   }
-}
-
-function toMonacoWorkspaceEdit(
-  edit: WorkspaceEdit,
-  client: LspConnection,
-): monaco.languages.WorkspaceEdit {
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
-
-  if (edit.changes) {
-    for (const uri in edit.changes) {
-      const textEdits = edit.changes[uri];
-      if (!textEdits) continue;
-      for (const textEdit of textEdits) {
-        const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-        edits.push({
-          resource: translated.textModel.uri,
-          versionId: undefined,
-          textEdit: { range: translated.range, text: textEdit.newText },
-        });
-      }
-    }
-  }
-
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      if ("textDocument" in change) {
-        // TextDocumentEdit
-        const uri = change.textDocument.uri;
-        for (const textEdit of change.edits) {
-          const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-          edits.push({
-            resource: translated.textModel.uri,
-            versionId: change.textDocument.version ?? undefined,
-            textEdit: { range: translated.range, text: textEdit.newText },
-          });
-        }
-      }
-      // TODO: Handle CreateFile, RenameFile, DeleteFile
-    }
-  }
-
-  return { edits };
 }

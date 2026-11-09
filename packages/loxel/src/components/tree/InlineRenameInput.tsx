@@ -8,6 +8,7 @@ export function InlineRenameInput({
   className,
   onFinish,
   onCancel,
+  onKeyboardExit,
 }: {
   currentName: string;
   /** Initially select only the name before its extension (file names), instead of all of it. */
@@ -15,6 +16,11 @@ export function InlineRenameInput({
   className?: string;
   onFinish: (newName: string) => void;
   onCancel: () => void;
+  /**
+   * Called after Enter or Escape ends the rename (not on blur), e.g. to return focus to where the
+   * user was working.
+   */
+  onKeyboardExit?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelledRef = useRef(false);
@@ -32,6 +38,12 @@ export function InlineRenameInput({
     }
     const timeout = window.setTimeout(() => {
       input.focus();
+      // Behind a modal dialog the input can't take focus, so no blur would ever end the rename.
+      if (document.activeElement !== input) {
+        cancelledRef.current = true;
+        onCancel();
+        return;
+      }
       blurReadyRef.current = true;
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -59,10 +71,12 @@ export function InlineRenameInput({
         if (e.key === "Enter") {
           e.preventDefault();
           handleSubmit();
+          onKeyboardExit?.();
         } else if (e.key === "Escape") {
           e.preventDefault();
           cancelledRef.current = true;
           onCancel();
+          onKeyboardExit?.();
         }
       }}
       onBlur={() => {

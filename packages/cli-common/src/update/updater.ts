@@ -11,7 +11,7 @@ import { getCurrentPlatform } from "./platform.ts";
  */
 export function isRunningCompiled(): boolean {
   const execName = path.basename(process.execPath);
-  // When running compiled, execPath points to the binary itself (e.g., "ccm")
+  // When running compiled, execPath points to the binary itself (e.g., "wt")
   // When running via interpreter, it points to "bun" or "node" (with optional version suffix)
   return !/^(bun|node)(\d.*)?$/.test(execName);
 }
@@ -37,7 +37,7 @@ export async function downloadAndVerify(binaryInfo: BinaryInfo): Promise<Buffer>
 }
 
 export interface PerformUpdateOptions {
-  /** The package name (used for safety check, e.g., "ccm", "wt", "remote-claude") */
+  /** The package name (used for safety check, e.g., "wt", "code-analysis") */
   packageName: string;
   /** Custom message for development mode error */
   devModeMessage?: string;

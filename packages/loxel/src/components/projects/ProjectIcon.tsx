@@ -6,14 +6,14 @@ import { cn } from "@/lib/utils";
 interface ProjectIconProps {
   id: string;
   name: string;
-  size: "xs" | "sm" | "md";
+  size: "xs" | "sm";
   active?: boolean;
 }
 
 const sizeClasses = {
   xs: "size-5 text-[9px] leading-none",
-  sm: "size-7 text-xs",
-  md: "size-8 text-sm",
+  /** The size of a worktree icon, so the project sits in the sidebar's worktree column. */
+  sm: "size-6 text-[11px] leading-none",
 };
 
 export function ProjectIcon({ id, name, size, active }: ProjectIconProps) {
@@ -23,11 +23,16 @@ export function ProjectIcon({ id, name, size, active }: ProjectIconProps) {
   return (
     <div
       className={cn(
-        "corner-superellipse flex shrink-0 items-center justify-center rounded-2xl font-semibold select-none",
+        "corner-superellipse flex shrink-0 items-center justify-center rounded-2xl border-[1.5px] font-semibold select-none",
         sizeClasses[size],
         active && "shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
       )}
-      style={{ backgroundColor: color.bg, color: color.text }}
+      // An outline in the project color, so a project reads differently from the solid worktree
+      // icons in the same column. Unmixed, the line keeps 3:1 contrast on the card in both themes.
+      style={{
+        borderColor: color.bg,
+        color: `color-mix(in oklch, ${color.bg}, var(--foreground) 40%)`,
+      }}
     >
       {letter}
     </div>

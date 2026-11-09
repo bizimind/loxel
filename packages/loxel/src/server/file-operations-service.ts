@@ -19,6 +19,7 @@ import { $ } from "bun";
 
 import type { FileOperationResult } from "@/api/file-operations-model";
 
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -116,6 +117,11 @@ export interface FileOperationsServiceOptions {
   git?: boolean;
   /** The owning worktree's history, which orders undo/redo across all its services. */
   history?: FileOperationsHistory;
+  /**
+   * Called as each operation starts; the returned function is called when it ends. Lets the
+   * tree's watcher attribute the moves it sees meanwhile to Loxel.
+   */
+  onOperation?: () => () => void;
 }
 
 /**
@@ -178,7 +184,15 @@ export class FileOperationsService {
   // --- Serialization ---
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
+    const run = async (): Promise<T> => {
+      const end = this.options.onOperation?.();
+      try {
+        return await fn();
+      } finally {
+        end?.();
+      }
+    };
+    const next = this.queue.then(run, run);
     this.queue = next.catch(() => {});
     return next;
   }
@@ -619,7 +633,9 @@ export class FileOperationsService {
   private async isGitTracked(relPath: string): Promise<boolean> {
     if (this.options.git === false) return false;
     try {
-      const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`.text();
+      const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`
+        .env(readOnlyGitEnv(this.worktreeCwd))
+        .text();
       return out.trim().length > 0;
     } catch {
       return false;

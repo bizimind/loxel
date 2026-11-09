@@ -13,9 +13,14 @@ updates:
       - dependency-name: "@types/node"
         versions: [">= 25"]
     groups:
+      # New lint rules usually need a code commit before oxlint merges, so it gets its own PR instead
+      # of holding back every other bump. oxfmt stays ungrouped: a formatter bump is reviewed alone.
+      oxlint:
+        patterns: ["oxlint*"]
+        update-types: ["minor", "patch"]
       all-non-major:
         patterns: ["*"]
-        exclude-patterns: ["oxfmt"]
+        exclude-patterns: ["oxlint*", "oxfmt"]
         update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions

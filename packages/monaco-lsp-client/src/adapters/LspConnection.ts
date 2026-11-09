@@ -2,7 +2,10 @@ import { TypedChannel } from "@hediet/json-rpc";
 
 import { api } from "../types";
 import type { ITextModelBridge } from "./ITextModelBridge";
+import type { LspCancellableRequests } from "./LspCancellableRequests";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
+import type { LspServerCommands } from "./LspServerCommands";
+import type { WorkspaceEditApplier } from "./WorkspaceEditApplier";
 
 /**
  * Cross-feature coordination hook. Populated by `LspSemanticTokensFeature`
@@ -23,6 +26,9 @@ export class LspConnection {
     public readonly bridge: ITextModelBridge,
     public readonly capabilities: LspCapabilitiesRegistry,
     public readonly connection: TypedChannel,
+    public readonly commands: LspServerCommands,
+    public readonly cancellableRequests: LspCancellableRequests,
+    public readonly edits: WorkspaceEditApplier,
     public readonly defaultLanguageIds?: readonly string[],
   ) {}
 }

@@ -3,17 +3,18 @@
  *
  * The outer dockview manages sidebar zones (left/bottom/right) and the center host.
  * This component renders a second PersistedLayoutComponent for center panels
- * (editors, terminals, agents, etc.) with their own persistence and tab management.
+ * (editors, terminals, etc.) with their own persistence and tab management.
  */
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
-import { dispatchOpenFile } from "@/lib/open-file";
-import { useAgentDevToolsStore } from "@/store/agent-devtools";
+import { dispatchPendingOpen } from "@/lib/open-path";
+import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -23,6 +24,7 @@ import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { syncTerminalsFromLayout } from "./default-layout";
+import { MaximizedGroupActions } from "./maximized-group-actions";
 import { CenterWatermark, centerComponents, centerTabComponents } from "./panels";
 import { PersistedLayoutComponent, isOuterSwapping } from "./PersistedLayout";
 
@@ -48,12 +50,22 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
 
+    restoreLayoutWhenAnotherGroupActivates(api);
+
     // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
     // move. The move event fires once the move has settled; add events are suppressed during moves
     // and fire before the active panel switches, so they can't be used here.
     api.onDidMovePanel(({ from, to }) => {
       reattachActiveContent(from);
       reattachActiveContent(to);
+    });
+
+    // A swap's groups come back with their ids when the layout is restored; these are gone for good.
+    api.onDidRemoveGroup((group) => {
+      const worktreePath = worktreePathRef.current;
+      if (worktreePath && !swappingRef.current && !isOuterSwapping()) {
+        forgetClosedTabGroup(worktreePath, group.id);
+      }
     });
 
     api.onDidRemovePanel((event) => {
@@ -75,55 +87,30 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
       }
 
-      if (removedDef?.type === "agentDevTools") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          useAgentDevToolsStore.getState().removeSession(sessionId);
-        }
-      }
-
-      if (removedDef?.type === "agent") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          wsClient.send({ type: "agent_detach", id: sessionId });
-        }
-      }
-
-      // Notify server when an external file panel is closed so watchers can be cleaned up.
-      // Only send for files outside the worktree to avoid unnecessary messages.
-      const rawParams: unknown = event.params;
-      const filePath =
-        rawParams !== undefined &&
-        rawParams !== null &&
-        typeof rawParams === "object" &&
-        "filePath" in rawParams &&
-        typeof (rawParams as { filePath?: unknown }).filePath === "string"
-          ? (rawParams as { filePath: string }).filePath
-          : undefined;
+      // Notify server when the last panel showing an external file closes, so its watcher can
+      // be cleaned up. Only files outside the worktree are sent; a file still shown by another
+      // panel (an editor tab and a compare panel can show the same one) stays watched.
       const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-      if (filePath && worktreePath && !filePath.startsWith(worktreePath + "/")) {
-        wsClient.send({ type: "close_external_file", worktreePath, filePath });
+      if (worktreePath) {
+        const others = api.panels.filter((p) => p.id !== event.id);
+        const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));
+        for (const filePath of panelFilePaths(event.params)) {
+          if (filePath.startsWith(worktreePath + "/") || stillShown.has(filePath)) continue;
+          wsClient.send({ type: "close_external_file", worktreePath, filePath });
+        }
       }
     });
 
-    // Open files queued for this worktree while its editor area was being swapped in or had not
-    // mounted yet (see openFile). Deferred so only the instance that stays mounted takes them —
-    // React StrictMode mounts the layout twice in dev — and left queued if the worktree was
-    // switched away again meanwhile, for the next center mounted for it.
+    // Open panels queued for this worktree while its editor area was being swapped in or had not
+    // mounted yet (see openFile and openTerminal). Deferred so only the instance that stays
+    // mounted takes them — React StrictMode mounts the layout twice in dev — and left queued if
+    // the worktree was switched away again meanwhile, for the next center mounted for it.
     queueMicrotask(() => {
       const worktreePath = worktreePathRef.current;
       if (getCenterApi() !== api || !worktreePath) return;
       if (useWorktreeStore.getState().activeWorktreePath !== worktreePath) return;
-      for (const filePath of getWorktreeUI(worktreePath).getState().takePendingOpenFiles()) {
-        dispatchOpenFile(filePath);
+      for (const open of getWorktreeUI(worktreePath).getState().takePendingOpens()) {
+        dispatchPendingOpen(open);
       }
     });
   }, []);
@@ -151,10 +138,18 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         components={centerComponents}
         tabComponents={centerTabComponents}
         watermarkComponent={CenterWatermark}
+        rightHeaderActionsComponent={MaximizedGroupActions}
         scrollbars="native"
         apiRef={centerApiRef}
         swappingRef={swappingRef}
       />
     </div>
   );
+}
+
+/** Files a center panel shows, from its params: `filePath` for editors, both sides for a comparison. */
+function panelFilePaths(params: unknown): string[] {
+  if (typeof params !== "object" || params === null) return [];
+  const { filePath, oldPath, newPath } = params as Record<string, unknown>;
+  return [filePath, oldPath, newPath].filter((p): p is string => typeof p === "string");
 }

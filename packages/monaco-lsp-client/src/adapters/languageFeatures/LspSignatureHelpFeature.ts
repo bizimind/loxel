@@ -63,6 +63,7 @@ class LspSignatureHelpProvider implements monaco.languages.SignatureHelpProvider
     token: monaco.CancellationToken,
     context: monaco.languages.SignatureHelpContext,
   ): Promise<monaco.languages.SignatureHelpResult | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     if (token.isCancellationRequested) {
       return null;
     }

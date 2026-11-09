@@ -1,0 +1,40 @@
+---
+import { shortcutKeys } from "../lib/satteri-kbd";
+
+interface Props {
+  /** A shortcut as the docs write it, such as `Ctrl+Alt+[`. */
+  combo: string;
+}
+
+// The same badge the docs render for shortcuts in backticks, for pages written in Astro.
+const { spokenLabel, keys } = shortcutKeys(Astro.props.combo);
+---
+
+<kbd class="kbd-combo">
+  <span class="sr-only">{spokenLabel}</span>
+  {
+    keys.map(({ label, iconPaths }) => (
+      <kbd class="kbd-key" aria-hidden="true">
+        {iconPaths ? (
+          <svg
+            width="1em"
+            height="1em"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            {iconPaths.map((d) => (
+              <path d={d} />
+            ))}
+          </svg>
+        ) : (
+          label
+        )}
+      </kbd>
+    ))
+  }
+</kbd>

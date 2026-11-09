@@ -7,14 +7,15 @@
 
 import { useEffect } from "react";
 
-import { onFindTargetsChange } from "@/lib/find-targets";
+import { onFocusTargetsChange } from "@/lib/focus-target-registry";
 import type { KeyCombo } from "@/store/keybindings/key-combo";
 import { eventToKeyCombo, getBindingSteps, isModifierKey } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
+import { isMacWindowTilingKeystroke } from "@/store/keybindings/mac-window-tiling";
 import {
   cancelPendingChord,
+  enabledActionOf,
   hasPendingChord,
-  isActionEnabledHere,
   resolveKeystroke,
   usePendingChordStore,
 } from "@/store/keybindings/pending-chord";
@@ -36,8 +37,8 @@ function isTextInput(target: EventTarget | null): boolean {
  */
 function firstKeystrokes(): string[] {
   const firstSteps = new Set<string>();
-  for (const [binding, actionId] of useKeybindingStore.getState().lookup) {
-    if (actionId.startsWith("tree.") || !isActionEnabledHere(actionId)) continue;
+  for (const [binding, actions] of useKeybindingStore.getState().lookup) {
+    if (!enabledActionOf(actions)) continue;
     firstSteps.add(getBindingSteps(binding)[0]!);
   }
   return [...firstSteps];
@@ -85,7 +86,15 @@ export function useKeybindings(): void {
       // complete a chord in progress.
       if (!hasPendingChord() && isTextInput(e.target) && !e.metaKey && !e.ctrlKey) return;
 
-      if (!handleKeystroke(eventToKeyCombo(e), e.repeat)) return;
+      const combo = eventToKeyCombo(e);
+      if (!handleKeystroke(combo, e.repeat)) {
+        // Keep macOS window tiling keys from widgets that would consume them (the editor, the
+        // terminal), without preventDefault, so the unhandled key reaches the Window menu.
+        if (isMacWindowTilingKeystroke(combo, window.electronAPI?.macOSVersion)) {
+          e.stopPropagation();
+        }
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
     }
@@ -95,7 +104,7 @@ export function useKeybindings(): void {
       handleKeystroke(combo as KeyCombo, isRepeat === true);
     }
 
-    const offWebviewKeystroke = window.electronAPI?.onWebviewKeystroke?.(handleWebviewKeystroke);
+    const offWebviewKeystroke = window.electronAPI?.onWebviewKeystroke(handleWebviewKeystroke);
     const offLookup = useKeybindingStore.subscribe((state, prev) => {
       if (state.lookup !== prev.lookup) syncWebviewInterception();
     });
@@ -105,9 +114,9 @@ export function useKeybindings(): void {
     // Focus moving into a <webview> fires no focusin here. The main process reports it (the
     // guest's webContents focus event); as a fallback, re-sync one tick after a focusout or window
     // blur, by when activeElement is the webview.
-    const offWebviewFocused = window.electronAPI?.onWebviewFocused?.(syncWebviewInterception);
+    const offWebviewFocused = window.electronAPI?.onWebviewFocused(syncWebviewInterception);
     const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
-    const offFindTargets = onFindTargetsChange(syncWebviewInterception);
+    const offFocusTargets = onFocusTargetsChange(syncWebviewInterception);
     syncWebviewInterception();
 
     // Capture phase ensures this fires before component-level handlers
@@ -125,7 +134,7 @@ export function useKeybindings(): void {
       window.removeEventListener("blur", syncAfterFocusLeaves);
       offWebviewKeystroke?.();
       offWebviewFocused?.();
-      offFindTargets();
+      offFocusTargets();
       offLookup();
       offChord();
     };

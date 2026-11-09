@@ -223,10 +223,11 @@ export class DetachedFilesService {
       this.onListChanged(this.cachedEntries);
     }
 
-    // Fire content-changed for files that existed before and still exist (i.e., modified)
+    // Fire content-changed for every known draft that changed: modified, deleted (an open
+    // editor marks itself deleted when its refetch 404s) or re-created after a deletion.
     if (this.onFileChanged) {
       for (const { key, nonces } of changes) {
-        if (oldNames.has(key) && newNames.has(key)) {
+        if (oldNames.has(key) || newNames.has(key)) {
           this.onFileChanged(join(this.dir, key), nonces);
         }
       }

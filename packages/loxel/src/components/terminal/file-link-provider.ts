@@ -127,7 +127,7 @@ function createLink(
   endCol: number,
   bufferLineNumber: number,
   text: string,
-  getCwd: () => string | null,
+  getPaths: () => TerminalPaths | null,
   resolvedRelative?: string,
 ): ILink {
   return {
@@ -135,23 +135,30 @@ function createLink(
     text,
     activate(event: MouseEvent, linkText: string) {
       if (!event.metaKey) return;
-      const cwd = getCwd();
-      if (!cwd) return;
+      const paths = getPaths();
+      if (!paths) return;
 
       const { path: filePath, location } = parseLocationSuffix(linkText);
-      // For bare filenames resolved via the index, use the worktree root + relative path
+      // Bare filenames resolved via the index are worktree-root relative; explicit paths are
+      // relative to where the shell started.
       const resolved = resolvedRelative
-        ? resolvePath(resolvedRelative, cwd)
-        : resolvePath(filePath, cwd);
+        ? resolvePath(resolvedRelative, paths.worktreePath)
+        : resolvePath(filePath, paths.cwd);
       // Folders open in the files panel; everything else in its editor.
       void openPath(resolved, location);
     },
   };
 }
 
+/** Where a terminal's shell started and which worktree the panel belongs to. */
+export interface TerminalPaths {
+  cwd: string;
+  worktreePath: string;
+}
+
 export function createFilePathLinkProvider(
   terminal: Terminal,
-  getCwd: () => string | null,
+  getPaths: () => TerminalPaths | null,
   getFileIndex: () => FileIndex | null,
 ): ILinkProvider {
   return {
@@ -188,7 +195,7 @@ export function createFilePathLinkProvider(
         for (let i = match.index!; i < match.index! + matchText.length; i++) matched.add(i);
         const startCol = strippedToRawIndex(rawText, match.index!) + 1;
         const endCol = strippedToRawIndex(rawText, match.index! + matchText.length - 1) + 1;
-        links.push(createLink(startCol, endCol, bufferLineNumber, matchText, getCwd));
+        links.push(createLink(startCol, endCol, bufferLineNumber, matchText, getPaths));
       }
 
       // Pass 2: bare filenames (only if file index is available)
@@ -206,7 +213,7 @@ export function createFilePathLinkProvider(
           const startCol = strippedToRawIndex(rawText, match.index!) + 1;
           const endCol = strippedToRawIndex(rawText, match.index! + matchText.length - 1) + 1;
           links.push(
-            createLink(startCol, endCol, bufferLineNumber, matchText, getCwd, relativePath),
+            createLink(startCol, endCol, bufferLineNumber, matchText, getPaths, relativePath),
           );
         }
       }
