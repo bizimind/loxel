@@ -35,6 +35,24 @@ mock.module("@/api/client", () => ({
   writeFileContent,
 }));
 
+// The mount effect constructs the editor and its cleanup destroys it, both synchronously inside
+// the effect, so right after `act()` these counts say whether a remount happened, with no waiting.
+const crepeCounts = { constructed: 0, destroyed: 0 };
+const originalCrepe = await import("@milkdown/crepe");
+class CountingCrepe extends originalCrepe.Crepe {
+  constructor(...args: ConstructorParameters<typeof originalCrepe.Crepe>) {
+    super(...args);
+    crepeCounts.constructed += 1;
+    // `destroy` is an instance field, so wrap it on the instance.
+    const destroy = this.destroy;
+    this.destroy = () => {
+      crepeCounts.destroyed += 1;
+      return destroy();
+    };
+  }
+}
+mock.module("@milkdown/crepe", () => ({ ...originalCrepe, Crepe: CountingCrepe }));
+
 const { MarkdownEditor, editorContentCache } = await import("./MarkdownEditor");
 
 /** The parts of the dockview panel API the editor subscribes to. */
@@ -78,6 +96,8 @@ beforeEach(() => {
   }));
   editorContentCache.clear();
   writeFileContent.mockClear();
+  crepeCounts.constructed = 0;
+  crepeCounts.destroyed = 0;
 });
 
 afterEach(() => {
@@ -93,10 +113,12 @@ describe("MarkdownEditor markdown output settings", () => {
       await waitFor(() => expect(editorContent()).toBe(SOURCE));
       const before = container.querySelector(".milkdown");
       expect(before).not.toBeNull();
+      expect(crepeCounts).toEqual({ constructed: 1, destroyed: 0 });
 
       act(() => {
         useSettingsStore.getState().updateMarkdownOutput({ bullet: "+" });
       });
+      expect(crepeCounts).toEqual({ constructed: 2, destroyed: 1 });
       await waitFor(() => {
         const after = container.querySelector(".milkdown");
         expect(after).not.toBeNull();
@@ -120,19 +142,16 @@ describe("MarkdownEditor markdown output settings", () => {
   test(
     "re-hydrating identical settings does not remount the editor",
     async () => {
-      const { container } = renderEditor();
+      renderEditor();
       await waitFor(() => expect(editorContent()).toBe(SOURCE));
-      const before = container.querySelector(".milkdown");
+      expect(crepeCounts).toEqual({ constructed: 1, destroyed: 0 });
 
       act(() => {
         useSettingsStore
           .getState()
           .updateMarkdownOutput({ ...DEFAULT_FORMATTING_SETTINGS.markdownOutput });
       });
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-      expect(container.querySelector(".milkdown")).toBe(before);
+      expect(crepeCounts).toEqual({ constructed: 1, destroyed: 0 });
     },
     EDITOR_TEST_TIMEOUT_MS,
   );
