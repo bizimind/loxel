@@ -9,7 +9,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { DELETED_TAB_TITLE_CLASS, DivergedDot, Tab } from "./tab";
+import { DELETED_TAB_TITLE_CLASS, DivergedDot, Tab, usePanelTitle } from "./tab";
 
 /**
  * Tab of the diff viewer. While the shown file's working-tree side is edited in place, it has the
@@ -51,7 +51,7 @@ export function PatchDiffTab(props: IDockviewPanelHeaderProps<PatchDiffParams>) 
     <Tab
       api={props.api}
       icon={<DiffIcon className="size-3.5 shrink-0" />}
-      title={props.api.title ?? "Patch"}
+      title={usePanelTitle(props.api) ?? "Patch"}
       titleTooltip={`Patch from ${props.params.sourcePath}`}
     />
   );
