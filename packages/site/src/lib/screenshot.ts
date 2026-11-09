@@ -6,7 +6,8 @@ type PictureProps = ComponentProps<typeof Picture>;
 
 // Candidate widths, up to 3200: the full 4064px capture (its shadow margin included) would only
 // serve the hero above a 2560px screen at 2x, and is by far the slowest to encode.
-const WIDTHS = [640, 960, 1280, 1600, 1920, 2400, 3200];
+const MAX_WIDTH = 3200;
+const WIDTHS = [640, 960, 1280, 1600, 1920, 2400, MAX_WIDTH];
 
 interface ScreenshotOptions {
   alt: string;
@@ -38,6 +39,10 @@ export async function screenshotPicture(
       alt,
       priority,
       widths: WIDTHS,
+      // The fallback `src` (and the `width`/`height` attributes, which keep the aspect ratio) default
+      // to the capture's own 4064px: a file no browser picks from the srcset. The largest candidate
+      // makes `src` one of the srcset's own files instead.
+      width: MAX_WIDTH,
       sizes,
     },
   };

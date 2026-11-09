@@ -20,13 +20,35 @@ interface Props {
   shots: [Shot] | [Shot, Shot];
   /** From `lg`, puts the screenshot on the left, bleeding off the left edge, and the text on the right. */
   reverse?: boolean;
+  /**
+   * Below `lg`, where the screenshot sits under the text and only about 70% of the window is on
+   * screen: which side of it shows. `start` anchors the window at the left edge and bleeds it off the
+   * right, coming in from the right; `end` the opposite. Chosen per shot, for the part that makes
+   * its point.
+   */
+  narrowCrop?: "start" | "end";
   /** One or two chips floating over the screenshot, each pointing at something in it. */
   callouts?: ComponentProps<typeof ShotCallout>[];
   /** Task tiles or agent marks peeking from behind the screenshot, positioned like the callouts. */
   tiles?: ComponentProps<typeof TaskOrbit>["tiles"];
+  /**
+   * The tiles below `lg`, where only part of the screenshot is on screen: about 0–65% of the box,
+   * or 35–100% for a `narrowCrop` of `end`. Kept off its top edge, so they never reach the copy.
+   */
+  narrowTiles?: ComponentProps<typeof TaskOrbit>["tiles"];
 }
 
-const { kicker, title, body, shots, reverse = false, callouts = [], tiles = [] } = Astro.props;
+const {
+  kicker,
+  title,
+  body,
+  shots,
+  reverse = false,
+  narrowCrop = "start",
+  callouts = [],
+  tiles = [],
+  narrowTiles = [],
+} = Astro.props;
 
 // The screenshot is wider than its column and bleeds off that side of the page: 140vw below the
 // `lg` breakpoint. From it, a section's screenshot takes 64vw, and a reversed one its 7fr column
@@ -51,6 +73,12 @@ const sizes = widths
     [query, shots.length === 1 ? width : `calc(${width} * 0.84)`].filter(Boolean).join(" "),
   )
   .join(", ");
+// The side a screenshot comes in from (global.css): its side of the page from `lg`, and below it the
+// side its window bleeds off.
+const entrance = {
+  "data-from": reverse ? "left" : "right",
+  "data-from-narrow": narrowCrop === "end" ? "left" : "right",
+};
 const [back, front] = await Promise.all(
   shots.map(async ({ src, alt }) => (await screenshotPicture(src, { alt, sizes })).props),
 );
@@ -84,17 +112,23 @@ this one's edge. -->
       }
     </div>
 
-    <!-- On phones every screenshot shows its left part, window controls and sidebar included. From
-    `lg`, a reversed section's screenshot grows left from its column only to 2.5rem short of the
-    page edge (80rem is the container's max width, 1.5rem its padding): its left side holds the
-    window controls and the colorful task sidebar, the part that must never be cut off. -->
-    <div class:list={["relative flex min-w-0 justify-start", { "lg:justify-end": reverse }]}>
+    <!-- Below `lg` a screenshot shows the side its `narrowCrop` names. From `lg`, a reversed
+    section's screenshot grows left from its column only to 2.5rem short of the page edge (80rem is
+    the container's max width, 1.5rem its padding): its left side holds the window controls and the
+    colorful task sidebar, the part that must never be cut off. -->
+    <div
+      class:list={[
+        "relative flex min-w-0",
+        narrowCrop === "end" ? "justify-end" : "justify-start",
+        reverse ? "lg:justify-end" : "lg:justify-start",
+      ]}
+    >
       <div
         class:list={[
           "shot-glow pointer-events-none absolute -inset-y-[30%]",
           reverse ? "-right-[10%] -left-[30%]" : "-right-[30%] -left-[10%]",
         ]}
-        data-from={reverse ? "left" : "right"}
+        {...entrance}
         aria-hidden="true"
       >
       </div>
@@ -105,10 +139,11 @@ this one's edge. -->
             ? "lg:w-[min(calc(100%+max(0px,(100vw-80rem)/2)+1.5rem-2.5rem),82.5rem)]"
             : "lg:w-[min(64vw,82.5rem)]",
         ]}
-        data-from={reverse ? "left" : "right"}
+        {...entrance}
       >
         {tiles.length > 0 && <TaskOrbit motion="shot" tiles={tiles} />}
-        <div class="feature-shot relative" data-from={reverse ? "left" : "right"}>
+        {narrowTiles.length > 0 && <TaskOrbit motion="shot" screens="narrow" tiles={narrowTiles} />}
+        <div class="feature-shot relative" {...entrance}>
           {
             front ? (
               <div class="grid">

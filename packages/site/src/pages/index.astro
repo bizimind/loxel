@@ -24,14 +24,14 @@ import { softwareNodes } from "../lib/structured-data";
 const manifest = await fetchManifest();
 const { version, downloads: binaries } = manifest;
 
-// The widths follow the hero markup: 180vw on phones, cropped to the sidebar and the first agent,
+// The widths follow the hero markup: 200vw on phones, where two crops of the window show its halves,
 // then 100vw minus the section padding (sm:px-6) and the image's margins (sm:mx-8, lg:mx-16,
 // xl:mx-24), up to 110rem (1760px) from a 2000px viewport, where the window shows whole.
 const hero = await screenshotPicture(worktreesAgentsShot, {
   alt: "Loxel with a task's nested subtasks in the sidebar, Claude Code and Codex in terminals beside the code, and the task's tests below",
   priority: true,
   sizes:
-    "(min-width: 2000px) 1760px, (min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 180vw",
+    "(min-width: 2000px) 1760px, (min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 200vw",
 });
 const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site).href);
 ---
@@ -50,7 +50,7 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
     <div class="relative mx-auto max-w-4xl">
       <TaskOrbit
         motion="load"
-        from="xl"
+        screens="xl"
         tiles={[
           { color: "green", glyph: "tee", x: -13, y: 14, size: 46, tilt: -7 },
           { color: "pink", glyph: "smile", x: -4, y: 64, size: 26, tilt: 6, depth: "far" },
@@ -59,31 +59,44 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
           { color: "teal", glyph: "dice", x: 104, y: 94, size: 32, tilt: -9, depth: "mid" },
         ]}
       />
-      <h1 class="mb-6 text-5xl leading-tight font-bold tracking-tight text-balance sm:text-6xl lg:text-7xl">
-        <span class="text-gradient-light">Built for agentic coding.</span><br />
-        <span class="text-gradient-accent">Made for developers.</span>
+      <!-- One line each. Below `sm` the size follows the screen so the longer line fits: "Made for
+      developers." is about 9.21 times the font size wide, and the text has 2rem of padding. -->
+      <h1
+        class="mb-6 text-[clamp(1.75rem,calc((100vw-2rem)/9.3),3rem)] leading-tight font-bold tracking-tight text-balance sm:text-6xl lg:text-7xl"
+      >
+        <span class="text-gradient-light whitespace-nowrap">Agentic coding.</span><br />
+        <span class="text-gradient-accent whitespace-nowrap">Made for developers.</span>
       </h1>
 
       <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-balance text-muted-foreground">
         {SITE_DESCRIPTION}
       </p>
 
-      <!-- Desktop: download buttons -->
-      <div class="hidden flex-row items-start justify-center gap-4 sm:flex">
-        <DownloadButton version={version} binaries={binaries} location="hero" />
-        <GitHubButton location="hero" />
-      </div>
+      <div class="relative lg:static">
+        <!-- Below `lg`, beside the buttons, clear of the widest ones. Static from `lg`, so the buttons
+        paint there exactly as before. -->
+        <TaskOrbit
+          motion="load"
+          screens="narrow"
+          tiles={[{ color: "pink", glyph: "smile", x: 93, y: 105, size: 26, tilt: 8, depth: "mid" }]}
+        />
+        <!-- Desktop: download buttons -->
+        <div class="hidden flex-row items-start justify-center gap-4 sm:flex">
+          <DownloadButton version={version} binaries={binaries} location="hero" />
+          <GitHubButton location="hero" />
+        </div>
 
-      <!-- Mobile: GitHub link only -->
-      <div class="flex justify-center sm:hidden">
-        <GitHubButton location="hero_mobile" />
+        <!-- Mobile: GitHub link only -->
+        <div class="flex justify-center sm:hidden">
+          <GitHubButton location="hero_mobile" />
+        </div>
       </div>
     </div>
 
-    <!-- Hero screenshot: the whole window from `sm`, the sidebar and the first agent on phones -->
-    <div
-      class="relative mt-14 sm:mx-8 sm:mt-16 lg:mx-16 xl:mx-24"
-    >
+    <!-- Hero screenshot: the whole window from `sm`. On phones, two crops of it at twice the screen's
+    width, so its text stays readable: the window's left part, then its right part below, overlapping
+    it. They share one file. -->
+    <div class="relative -mx-4 mt-14 sm:mx-8 sm:mt-16 lg:mx-16 xl:mx-24">
       <div class="hero-glow pointer-events-none absolute -inset-x-[8%] -top-[18%] h-[90%]" aria-hidden="true">
       </div>
       <TaskOrbit
@@ -94,8 +107,29 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
         ]}
       />
       <div class="hero-shot relative mx-auto max-w-[110rem]">
-        <Picture {...hero.props} class="block h-auto w-[180vw] max-w-none sm:w-full" />
+        <Picture
+          {...hero.props}
+          class="hero-crop block h-auto w-[200vw] max-w-none sm:w-full"
+          data-crop="left"
+        />
+        <Picture
+          {...hero.props}
+          alt=""
+          aria-hidden="true"
+          class="hero-crop -mt-[50vw] -ml-[100vw] block h-auto w-[200vw] max-w-none sm:hidden"
+          data-crop="right"
+        />
       </div>
+      <!-- Below `lg`, over the window's edges: its top-left corner, and where the second crop's top
+      edge meets the screen's. -->
+      <TaskOrbit
+        motion="load"
+        screens="narrow"
+        tiles={[
+          { color: "green", glyph: "tee", x: 6, y: 1, size: 34, tilt: -7 },
+          { color: "teal", glyph: "dice", x: 94, y: 40, size: 30, tilt: 6 },
+        ]}
+      />
     </div>
   </section>
 
@@ -108,6 +142,7 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
       { icon: "nest", text: "2 subtasks", x: 5.5, y: 47, delay: 6 },
     ]}
     tiles={[{ color: "purple", glyph: "gate", x: 40, y: 1, size: 38, tilt: -8 }]}
+    narrowTiles={[{ color: "blue", glyph: "gate", x: 5, y: 96, size: 30, tilt: -8 }]}
     shots={[
       {
         src: worktreesAgentsShot,
@@ -135,6 +170,7 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
       { agent: "openai", x: 72, y: -2, size: 48, tilt: 7 },
       { agent: "antigravity", x: 80, y: 102.5, size: 50, tilt: -4 },
     ]}
+    narrowTiles={[{ agent: "claude", x: 50, y: 98, size: 38, tilt: -6 }]}
     reverse
     shots={[
       {
@@ -155,6 +191,7 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
     title="The PR and the app, right in the task"
     body="Browser tabs live in the task they belong to: the pull request under review, the app on localhost, the docs you were reading. DevTools included, logins kept."
     callouts={[{ icon: "pullRequest", text: "PR #11006 · open", x: 50, y: 20 }]}
+    narrowCrop="end"
     tiles={[{ color: "orange", glyph: "frame", x: 3.5, y: 93, size: 40, tilt: 6 }]}
     shots={[
       {
@@ -186,6 +223,8 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
     title="A glance at the code beats asking"
     body="Jump to a definition, find references, open the file the agent just touched. Language servers for TypeScript, Python, Go, Rust, Java, and more, with their own set for each worktree."
     callouts={[{ icon: "definition", text: "Go to definition", x: 67.5, y: 29.5 }]}
+    narrowCrop="end"
+    narrowTiles={[{ color: "emerald", glyph: "cross", x: 82, y: 97, size: 30, tilt: 6 }]}
     shots={[
       {
         src: editorShot,
@@ -230,6 +269,17 @@ const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site)
             { color: "pink", glyph: "smile", x: 91, y: 18, size: 46, tilt: 9 },
             { color: "teal", glyph: "dice", x: 85, y: 58, size: 58, tilt: -6 },
             { color: "green", glyph: "tee", x: 94, y: 84, size: 36, tilt: 6 },
+          ]}
+        />
+        <!-- Below `lg`, in the panel's corners, above the heading and below the buttons. -->
+        <TaskOrbit
+          motion="cta"
+          screens="narrow"
+          tiles={[
+            { color: "purple", glyph: "arch", x: 9, y: 4.5, size: 28, tilt: -7 },
+            { color: "pink", glyph: "smile", x: 88, y: 4, size: 22, tilt: 9, depth: "mid" },
+            { color: "orange", glyph: "frame", x: 11, y: 96, size: 22, tilt: 5, depth: "mid" },
+            { color: "teal", glyph: "dice", x: 90, y: 95.5, size: 28, tilt: -6 },
           ]}
         />
         <div class="stagger-rise relative mx-auto max-w-3xl">

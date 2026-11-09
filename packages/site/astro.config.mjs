@@ -37,7 +37,7 @@ export default defineConfig({
   integrations: [mdx(), sitemap(), siteScript],
   // The homepage's screenshots are encoded at 7 widths in two formats; sharp's default effort makes
   // that minutes of CPU on a CI runner. Lower effort costs about a tenth more bytes and encodes
-  // several times faster. CI also caches the results (release-site.yml).
+  // several times faster.
   image: {
     service: {
       entrypoint: "astro/assets/services/sharp",

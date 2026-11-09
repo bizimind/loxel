@@ -259,13 +259,34 @@ kbd.kbd-key svg {
    and check that no `animation:` in the built CSS contains `view()` or a `--` timeline. */
 @supports (animation-timeline: view()) {
   @media (prefers-reduced-motion: no-preference) {
-    .hero-shot {
-      transform-origin: 50% 100%;
-      animation-name: hero-shot;
-      animation-timing-function: linear;
-      animation-fill-mode: both;
-      animation-timeline: view();
-      animation-range: cover 0% cover 100%;
+    /* The hero window tips up flat as the page opens, from `sm` where it shows whole. */
+    @media (width >= 40rem) {
+      .hero-shot {
+        transform-origin: 50% 100%;
+        animation-name: hero-shot;
+        animation-timing-function: linear;
+        animation-fill-mode: both;
+        animation-timeline: view();
+        animation-range: cover 0% cover 100%;
+      }
+    }
+
+    /* On phones the window's two crops stand twice as tall, too tall to tip, so they pan a little
+       against each other as the page scrolls instead: its left part to the right, its right part to
+       the left. */
+    @media (width < 40rem) {
+      .hero-crop {
+        --crop-drift: 1;
+        animation-name: hero-crop-drift;
+        animation-timing-function: linear;
+        animation-fill-mode: both;
+        animation-timeline: view();
+        animation-range: cover 0% cover 100%;
+      }
+
+      .hero-crop[data-crop="right"] {
+        --crop-drift: -1;
+      }
     }
 
     .hero-glow {
@@ -277,7 +298,8 @@ kbd.kbd-key svg {
     }
 
     /* `--from` is the side a screenshot comes in from: 1 for the right, -1 for the left. Below `lg`
-       every screenshot sits on the right. */
+       that is the side the window bleeds off (`data-from-narrow`), from it its side of the page
+       (`data-from`). Either way it swings in hinged on its edge that stays on screen. */
     [data-from] {
       --from: 1;
     }
@@ -289,6 +311,16 @@ kbd.kbd-key svg {
       animation-fill-mode: both;
       animation-timeline: view();
       animation-range: entry 20% cover 50%;
+    }
+
+    @media (width < 64rem) {
+      [data-from-narrow="left"] {
+        --from: -1;
+      }
+
+      .feature-shot[data-from-narrow="left"] {
+        transform-origin: 100% 50%;
+      }
     }
 
     @media (width >= 64rem) {
@@ -446,6 +478,15 @@ kbd.kbd-key svg {
   }
   100% {
     transform: translateY(6%);
+  }
+}
+
+@keyframes hero-crop-drift {
+  from {
+    translate: calc(var(--crop-drift) * -3vw) 0;
+  }
+  to {
+    translate: calc(var(--crop-drift) * 3vw) 0;
   }
 }
 
