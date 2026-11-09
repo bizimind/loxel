@@ -1,0 +1,37 @@
+---
+// One coding agent's mark on a neutral dark tile, the counterpart of TaskTile. The mark keeps its
+// own colors and proportions; monochrome marks are drawn white. Decorative: always used inside an
+// `aria-hidden` layer.
+import { AGENT_LOGOS, type AgentLogo } from "../lib/agent-logos";
+
+interface Props {
+  agent: AgentLogo;
+  /** Width and height, in px. */
+  size: number;
+  /** Resting tilt, in degrees. */
+  tilt?: number;
+}
+
+const { agent, size, tilt = 0 } = Astro.props;
+const { monochrome, markup } = AGENT_LOGOS[agent];
+const mark = Math.round(size * 0.54);
+// Ships the upstream credit and license with each mark (the full notice is in agent-logos.ts). An
+// HTML comment, since Astro drops `{/* */}` from the build.
+const notice =
+  "<!-- Mark: Lobe Icons (https://github.com/lobehub/lobe-icons), MIT License, Copyright (c) 2023 LobeHub. The mark is a trademark of its owner. -->";
+---
+
+<div
+  class="grid place-items-center rounded-[28%] border border-white/10 bg-linear-to-b from-[#2a2c33] to-[#16171b] shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]"
+  style={`width: ${size}px; height: ${size}px; rotate: ${tilt}deg; filter: drop-shadow(0 ${size / 6}px ${size / 3}px rgb(0 0 0 / 0.55));`}
+>
+  <svg
+    width={mark}
+    height={mark}
+    viewBox="0 0 24 24"
+    class="block"
+    fill={monochrome ? "#fff" : undefined}
+    fill-rule={monochrome ? "evenodd" : undefined}
+    set:html={notice + markup}
+  />
+</div>

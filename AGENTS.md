@@ -4,7 +4,7 @@ This file provides guidance to coding agents working in this repository (`CLAUDE
 
 ## Project Overview
 
-loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), Claude Code hooks and wrappers that make standard tools non-blocking for agents while preserving normal UX for humans, and shared libraries for logging, CLI output, and WebSocket channels.
+loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for logging, CLI output, and WebSocket channels.
 
 ## Environment Setup
 
@@ -24,7 +24,7 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 pnpm install                                   # Install all dependencies
 
 # Build a package (root `build` is intentionally disabled; packages with a build script:
-# cc-git-editor, cc-tool-guard, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
+# cc-git-editor, code-analysis, excalidraw, loxel, site, whisper-cpp, wt)
 pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
@@ -50,6 +50,8 @@ bun test --cwd packages/wt src/git/name.test.ts
 bun test --cwd packages/wt --test-name-pattern "validates"
 ```
 
+Tests must not depend on timing: wait for the event, callback or condition the code signals (or use fake timers) instead of sleeps, fixed timeouts or wall-clock assertions. A test that only passes on a fast, idle machine is a flaky test.
+
 ## Architecture
 
 ### Packages
@@ -68,19 +70,15 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **cc-git-editor**: Intercepts `git rebase -i` and `git add -p` to provide non-blocking execution for agents. Detects agent mode via `CLAUDECODE=1`. See `packages/cc-git-editor/README.md`.
 
-- **cc-tool-guard**: PermissionRequest hook that auto-approves safe Bash/Read operations and defers everything else to the user (never denies), using pattern matching with a Haiku fallback. See `packages/cc-tool-guard/README.md`.
-
 - **excalidraw**: CLI for agents to create, edit, query, and render Excalidraw diagrams, with JSON-over-stdin batch operations. See `packages/excalidraw/README.md` and the `excalidraw` skill.
 
 - **code-analysis**: Code analysis CLI with built-in plugins (loc, languages, git-churn, lint/type issues, import graph) that prints results or serves a live treemap or graph visualization. See `packages/code-analysis/README.md`.
-
-- **coding-agent**: Programmatic coding agent runtime used by loxel's agent panel (in-process `Session` SDK, or a stdio JSON protocol CLI). See `packages/coding-agent/README.md`.
 
 #### Libraries
 
 - **channel**: WebSocket client library for peer-to-peer messaging through the channel-worker relay; owns the shared wire protocol. See `packages/channel/README.md`.
 
-- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, coding-agent, and code-analysis. See `packages/cli-common/README.md`.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
 
 - **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
 
@@ -96,13 +94,17 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **channel-worker**: Cloudflare Worker (Durable Objects) that relays channel WebSocket traffic, with WorkOS JWT auth and same-user channels. See `packages/channel-worker/README.md`.
 
+### Skills
+
+`.agents/skills/` holds the skills for agents working on this repo (`.claude/skills` symlinks to it). `skills/` holds user-facing skills that Loxel users install in their own agents (see `skills/README.md`). Write those self-contained, with no references to this repo's layout, and update them when the behavior they describe changes.
+
 ### Key Patterns
 
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.
 
-**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
+**Privacy and Licensing**: Loxel never collects data about users without consent and does not require an account today. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
 
-**Hook Protocol**: Tools integrate with Claude Code via JSON-over-stdin/stdout. See `cc-tool-guard/src/tool-guard.ts` for the pattern.
+**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
 ## Bun Guidelines
 
@@ -204,18 +206,18 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - Docs use progressive disclosure: this file is an index pointing to package READMEs, and a large package's README (e.g. `packages/loxel`) is in turn an index pointing to its nested docs and specs.
 
-- In every PR, check that the docs covering the code you changed are not stale, and fix them in the same PR if they are.
+- In every PR, search the package's `docs/`, its README, the indexes that link them, and the site pages for every identifier, file, message type, and behavior you changed or moved, and fix every stale hit in the same PR, not only the section you set out to edit. If a doc's scope changes, update its one-line description in each index that links it. `scripts/docs-sweep.sh` lists the doc lines that mention what your branch changed; run it before the first push and review every hit.
 
 - There are two kinds of docs, and they differ in audience, content, and style. Keep them separate:
   - **Public docs** (the site pages under `packages/site/src/content/docs/`, and the user-facing parts of package READMEs) are feature- and usage-centric: what the product or tool can do, how to use it, and the configuration, commands, paths, and shortcuts a user needs. They never name source files, modules, internal data structures, or implementation mechanics, and they are written for someone who has not read the code.
-  - **Internal docs** (`packages/<pkg>/docs/*.md`, linked from the package README) are for contributors: architecture, data flow, module boundaries, internal APIs and protocols, invariants, conventions, and design choices with their rationale. They name the modules they describe and link to them, and they do not narrate features for end users or repeat what the public docs say.
+  - **Internal docs** (`packages/<pkg>/docs/*.md`, linked from the package README) are for contributors: architecture, data flow, module boundaries, internal APIs and protocols, invariants, conventions, and design choices with their rationale. They name the modules they describe and link to them, and they do not narrate features for end users or repeat what the public docs say. A package's docs describe that package's own behavior; how another package uses it belongs in the consumer's docs.
   - When user-visible behavior changes, update the public doc that owns the feature. When architecture, internal APIs, or conventions change, update the internal doc. A change rarely needs both.
 
 - READMEs stay high-level: what the package does, setup, commands, configuration, public APIs, and an index of the package's internal docs.
 
 - Add or expand docs only for significant changes. Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
 
-- Explain small fixes and local implementation details in code comments next to the code, not in docs.
+- Explain small fixes and local implementation details in code comments next to the code, not in docs. This does not exempt a small fix from updating existing docs that name what it moved, renamed, or changed.
 
 - Markdown prose is soft-wrapped: one paragraph (or list item) per line, never hard-wrapped at a column. Readers view docs at many widths and the viewer should do the wrapping. Tables, code blocks, and diagrams are the only multi-line constructs.
 
@@ -239,7 +241,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`). Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
 
 ## Type Checking
 
@@ -247,7 +249,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 
 ## CI & Releases
 
-**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json` → everything. Lint/format runs only when code or lint config changed. Automated code review via Claude runs on PRs (`claude-code-review.yml`); PRs from forks are not auto-reviewed because secret-bearing workflows are skipped for fork pull requests.
+**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Automated code review runs Claude Code's CLI (`claude -p`, version pinned in `claude-code-review.yml`) with the `ci-code-review` skill, only on PRs whose branch is in this repo (never forks or Dependabot), using the PR's own `CLAUDE.md`, `.claude` and skills, and posts as `github-actions[bot]`. One review runs per PR at a time: pushes during a review are taken in by the running review or queue the next run, which resumes the same review session (kept in a private R2 bucket) when the previous run posted its summary. A run that finishes without posting its summary fails so it gets rerun, and Claude's output goes to a file on the runner, never to the public log.
 
 **Auto-releases**: `wt`, `code-analysis`, and `loxel` release automatically when changes under their package directory are merged to main (`release-<pkg>.yml`; `loxel` also supports `workflow_dispatch` for releases driven by root-level changes):
 
@@ -257,13 +259,13 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`)
 5. Creates a GitHub release with R2 download links (no binary attachments)
 
-**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
+**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
 
 **Version checking**: When debugging CLI issues, verify the user has the latest version. Check the manifest at `https://loxel.bizimind.io/<pkg>/manifest.json` for current version and compare with local binary. Don't manually bump versions - releases are automated.
 
 ## Workflow
 
-When asked to implement a feature, fix a bug, or execute a plan, the expected deliverable is a PR. After completing implementation:
+When asked to implement a feature, fix a bug, or execute a plan, the expected deliverable is a PR. Any GitHub issue you file gets labels at creation per [Issue Labels](CONTRIBUTING.md#issue-labels). After completing implementation:
 
 1. Run `pnpm run lint:fix` and `pnpm run fmt`
 
@@ -274,7 +276,7 @@ When asked to implement a feature, fix a bug, or execute a plan, the expected de
 4. Task two sub agents in parallel:
    - **Code review**: review your changes for correctness, quality, and security (provide full context: the task, files changed, and relevant architecture)
 
-   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones
+   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for at most the two most worthwhile ones, after searching open and closed issues for duplicates, and mention the rest in the PR body
 
 5. Fix review findings directly in the PR. Only create GitHub issues for items that are clearly out of scope and low urgency (e.g., a broader refactor or a pattern change affecting many files).
 

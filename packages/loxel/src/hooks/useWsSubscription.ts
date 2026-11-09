@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
-import { useEditorStateStore } from "@/store/editor-state";
+import { queryKeys } from "@/queries/query-keys";
+import { queryClient } from "@/query-client";
+import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -17,7 +19,12 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     const prev = prevWtRef.current;
     prevWtRef.current = activeWorktreePath;
     if (prev === activeWorktreePath) return;
-    if (activeWorktreePath) wsClient.subscribeWorktree(activeWorktreePath);
+    if (activeWorktreePath) {
+      wsClient.subscribeWorktree(activeWorktreePath);
+      // A toolchain's changed message reaches only subscribers, so a cached status may have gone
+      // stale while this window was on another worktree.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
+    }
     if (prev) {
       onWorktreeSavesDrained(prev, () => wsClient.unsubscribeWorktree(prev));
     }
@@ -25,10 +32,12 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
 
   useEffect(() => {
     return wsClient.onReconnect(() => {
+      // A restarted server has forgotten what ran restricted, and trust may have changed meanwhile.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (wt) {
         wsClient.subscribeWorktree(wt);
-        const externalPaths = [...useEditorStateStore.getState().files.keys()].filter(
+        const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
           (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
         );
         if (externalPaths.length > 0) {

@@ -1,6 +1,7 @@
 import { basename, resolve } from "node:path";
 
 import type { DirEntry } from "@/api/project-files-model";
+import type { FileMoveSource } from "@/api/ws-protocol";
 import { isDirectory } from "@/fs-utils";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 
@@ -35,6 +36,12 @@ export interface ExternalFolderStorage {
 interface ExternalFolderEvents {
   onDirChanged: (worktrees: readonly string[], dir: string, entries: DirEntry[]) => void;
   onFileChanged: (worktrees: readonly string[], filePath: string, nonces: string[]) => void;
+  onFileMoved: (
+    worktrees: readonly string[],
+    oldPath: string,
+    newPath: string,
+    source: FileMoveSource,
+  ) => void;
 }
 
 interface SharedFolder {
@@ -73,7 +80,11 @@ export class ExternalFolderRegistry {
         (dir, entries) => this.events.onDirChanged([...users], dir, entries),
         (filePath, nonces) => this.events.onFileChanged([...users], filePath, nonces),
         undefined,
-        { gitStatus: false },
+        {
+          gitStatus: false,
+          onFileMoved: (oldPath, newPath, source) =>
+            this.events.onFileMoved([...users], oldPath, newPath, source),
+        },
       );
       shared = { filesService, worktrees: users, started: filesService.start() };
       // Registered before starting so a concurrent acquire of the same root shares it.
@@ -217,7 +228,11 @@ export class ExternalFoldersService {
   private async open(root: string): Promise<void> {
     const { registry, wtPath, history } = this.options;
     const { filesService, ready } = registry.acquire(root, wtPath);
-    const fileOpsService = new FileOperationsService(root, { git: false, history });
+    const fileOpsService = new FileOperationsService(root, {
+      git: false,
+      history,
+      onOperation: () => filesService.beginOperation(),
+    });
     // Listed before the watcher is up, so a concurrent add of the same root finds it and a stop
     // meanwhile releases it.
     this.folders.set(root, { root, filesService, fileOpsService });

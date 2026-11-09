@@ -46,6 +46,7 @@ class LspDeclarationProvider implements monaco.languages.DeclarationProvider {
     position: monaco.Position,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.Definition | monaco.languages.LocationLink[] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentDeclaration({

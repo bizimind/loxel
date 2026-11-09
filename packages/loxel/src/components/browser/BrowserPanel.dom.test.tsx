@@ -1,0 +1,460 @@
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { DockviewPanelApi } from "dockview-react";
+
+import type {
+  JavaScriptDialogClosed,
+  JavaScriptDialogRequest,
+} from "@/electron/javascript-dialog-protocol";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { focusRegisteredPanel } from "@/lib/panel-focus";
+import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
+import { stubElectronAPI } from "@/test/electron-api-stub";
+
+// BrowserPanel renders its webview only in Electron (read once, at import).
+Object.defineProperty(navigator, "userAgent", {
+  value: "Mozilla/5.0 Electron/44",
+  configurable: true,
+});
+
+let openDialog: (request: unknown) => void = () => {};
+let closeDialog: (closed: unknown) => void = () => {};
+const respondToJavaScriptDialog = mock();
+window.electronAPI = stubElectronAPI({
+  onJavaScriptDialog: (onOpen, onClosed) => {
+    openDialog = onOpen;
+    closeDialog = onClosed;
+    return () => {};
+  },
+  respondToJavaScriptDialog,
+});
+
+const { BrowserPanel } = await import("./BrowserPanel");
+
+const WEB_CONTENTS_ID = 42;
+let nextId = 1;
+
+const disposable = { dispose: () => {} };
+const panelApi = {
+  id: "browser-test",
+  renderer: "always",
+  isActive: false,
+  isGroupActive: false,
+  onDidActiveChange: () => disposable,
+  onDidActiveGroupChange: () => disposable,
+  onDidGroupChange: () => disposable,
+  updateParameters: () => {},
+  setTitle: () => {},
+} as unknown as DockviewPanelApi;
+
+function request(fields: Partial<JavaScriptDialogRequest>): JavaScriptDialogRequest {
+  return {
+    id: nextId++,
+    webContentsId: WEB_CONTENTS_ID,
+    type: "alert",
+    title: "localhost:5173 says",
+    message: "",
+    defaultValue: "",
+    canSuppress: false,
+    ...fields,
+  };
+}
+
+function show(fields: Partial<JavaScriptDialogRequest>): JavaScriptDialogRequest {
+  const dialog = request(fields);
+  act(() => openDialog(dialog));
+  return dialog;
+}
+
+/** Render the panel, focus its page, and fire the webview's first dom-ready. */
+function renderPanel({ ready = true, url = "about:blank" } = {}) {
+  render(
+    <>
+      <button type="button">Elsewhere</button>
+      <BrowserPanel url={url} panelApi={panelApi} />
+    </>,
+  );
+  const webview = document.querySelector<HTMLElement>("webview")!;
+  const guest = { id: WEB_CONTENTS_ID };
+  // How many dialog answers had been sent when the page was reloaded.
+  const reload = mock(() => respondToJavaScriptDialog.mock.calls.length);
+  const reloadIgnoringCache = mock(() => respondToJavaScriptDialog.mock.calls.length);
+  Object.assign(webview, {
+    getWebContentsId: () => guest.id,
+    loadURL: async () => {},
+    reload,
+    reloadIgnoringCache,
+    canGoBack: () => false,
+    canGoForward: () => false,
+  });
+  webview.tabIndex = 0;
+  webview.focus();
+  const fireReady = () => act(() => void webview.dispatchEvent(new Event("dom-ready")));
+  if (ready) fireReady();
+  return { webview, guest, reload, reloadIgnoringCache, fireReady };
+}
+
+const lastResponse = () => respondToJavaScriptDialog.mock.calls.at(-1)?.[0];
+
+beforeEach(() => respondToJavaScriptDialog.mockClear());
+afterEach(cleanup);
+
+describe("page dialogs in a browser panel", () => {
+  test("a prompt shows the page's message and default, and answers with the entered text", () => {
+    const { webview } = renderPanel();
+    const dialog = show({ type: "prompt", message: "Your name?", defaultValue: "Ada" });
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText("localhost:5173 says")).toBeInTheDocument();
+    const input = screen.getByLabelText("Your name?") as HTMLInputElement;
+    expect(input.value).toBe("Ada");
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.change(input, { target: { value: "Grace" } });
+    fireEvent.submit(input);
+    expect(lastResponse()).toEqual({
+      id: dialog.id,
+      accepted: true,
+      value: "Grace",
+      suppress: false,
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    // Focus goes back to the page.
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("a confirm is cancelled with Cancel or Escape", () => {
+    renderPanel();
+    const first = show({ type: "confirm", message: "Delete?" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(lastResponse()).toMatchObject({ id: first.id, accepted: false });
+
+    const second = show({ type: "confirm" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "OK" }), { key: "Escape" });
+    expect(lastResponse()).toMatchObject({ id: second.id, accepted: false });
+  });
+
+  test("an alert has only OK", () => {
+    renderPanel();
+    const dialog = show({ type: "alert", message: "Saved" });
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(within(screen.getByRole("alertdialog")).queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(lastResponse()).toMatchObject({ id: dialog.id, accepted: true });
+  });
+
+  test("offers to block the page's further dialogs when main allows it", () => {
+    renderPanel();
+    show({ type: "alert" });
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+
+    const dialog = show({ type: "alert", canSuppress: true });
+    fireEvent.click(screen.getByRole("checkbox", { name: /more dialogs/ }));
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(lastResponse()).toMatchObject({ id: dialog.id, suppress: true });
+  });
+
+  test("shows queued dialogs one at a time, and drops withdrawn ones", () => {
+    renderPanel();
+    const first = show({ message: "first" });
+    const second = show({ message: "second" });
+    show({ message: "third" });
+    expect(screen.getByText("first")).toBeInTheDocument();
+    expect(screen.queryByText("second")).toBeNull();
+
+    const closed: JavaScriptDialogClosed = { id: second.id, webContentsId: WEB_CONTENTS_ID };
+    act(() => closeDialog(closed));
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(lastResponse()).toMatchObject({ id: first.id });
+    expect(screen.getByText("third")).toBeInTheDocument();
+  });
+
+  test("a dialog opened before the panel is ready waits for it", () => {
+    const { fireReady } = renderPanel({ ready: false });
+    show({ message: "early" });
+    expect(screen.queryByText("early")).toBeNull();
+    fireReady();
+    expect(screen.getByText("early")).toBeInTheDocument();
+  });
+
+  test("does not take focus from outside the panel", () => {
+    renderPanel();
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+    show({ type: "prompt", message: "Name?" });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  test("reloading from the toolbar first dismisses the page's dialogs", () => {
+    const { reload } = renderPanel();
+    const first = show({ type: "confirm" });
+    const second = show({ type: "prompt" });
+    fireEvent.click(screen.getByTitle("Reload"));
+    expect(respondToJavaScriptDialog.mock.calls.map(([response]) => response)).toEqual([
+      { id: first.id, accepted: false, value: "", suppress: false },
+      { id: second.id, accepted: false, value: "", suppress: false },
+    ]);
+    // The page can't navigate until its dialogs are answered, so the answers go first.
+    expect(reload.mock.results).toEqual([{ type: "return", value: 2 }]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  test("returns focus to the page when a focused dialog is withdrawn", () => {
+    const { webview } = renderPanel();
+    const dialog = show({ type: "confirm" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "OK" }));
+    act(() => closeDialog({ id: dialog.id, webContentsId: WEB_CONTENTS_ID }));
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("Escape while composing text (IME) does not cancel a prompt", () => {
+    renderPanel();
+    show({ type: "prompt", message: "Name?" });
+    fireEvent.keyDown(screen.getByLabelText("Name?"), { key: "Escape", isComposing: true });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(respondToJavaScriptDialog).not.toHaveBeenCalled();
+  });
+
+  test("a re-created guest drops the old guest's dialogs", () => {
+    const { guest, fireReady } = renderPanel();
+    show({ message: "old page" });
+    guest.id = WEB_CONTENTS_ID + 100;
+    fireReady();
+    expect(screen.queryByText("old page")).toBeNull();
+    show({ webContentsId: guest.id, message: "new page" });
+    expect(screen.getByText("new page")).toBeInTheDocument();
+  });
+
+  test("ignores dialogs of other webviews", () => {
+    renderPanel();
+    show({ webContentsId: WEB_CONTENTS_ID + 1, message: "not mine" });
+    expect(screen.queryByText("not mine")).toBeNull();
+  });
+});
+
+describe("hard refresh", () => {
+  test("bypasses the cache for the panel that holds focus, in its page or its toolbar", () => {
+    const { webview, reload, reloadIgnoringCache } = renderPanel();
+    getFocusedBrowserPanel()?.hardRefresh();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
+
+    screen.getByRole("textbox").focus();
+    getFocusedBrowserPanel()?.hardRefresh();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(2);
+    expect(reload).not.toHaveBeenCalled();
+
+    screen.getByText("Elsewhere").focus();
+    expect(document.activeElement).not.toBe(webview);
+    expect(getFocusedBrowserPanel()).toBeUndefined();
+  });
+
+  test("first dismisses the page's dialogs, which would block the navigation", () => {
+    const { reloadIgnoringCache } = renderPanel();
+    show({ type: "confirm" });
+    act(() => getFocusedBrowserPanel()?.hardRefresh());
+    expect(reloadIgnoringCache.mock.results).toEqual([{ type: "return", value: 1 }]);
+  });
+
+  test("does nothing until the webview is ready, and stops applying once unmounted", () => {
+    const { reloadIgnoringCache, fireReady } = renderPanel({ ready: false });
+    getFocusedBrowserPanel()?.hardRefresh();
+    expect(reloadIgnoringCache).not.toHaveBeenCalled();
+    fireReady();
+    getFocusedBrowserPanel()?.hardRefresh();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    expect(getFocusedBrowserPanel()).toBeUndefined();
+  });
+});
+
+describe("focus when a browser panel is activated", () => {
+  /** Activate the panel while focus is outside it, as when it opens or is switched to. */
+  function activate() {
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    act(() => void focusRegisteredPanel(panelApi.id));
+  }
+
+  test("a blank panel focuses its address bar, ready for a URL", () => {
+    renderPanel();
+    activate();
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  });
+
+  test("a panel opened on a URL focuses the page", () => {
+    const { webview } = renderPanel({ url: "https://example.com" });
+    activate();
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("a blank panel focuses the page once it navigates", () => {
+    const { webview } = renderPanel();
+    const address = screen.getByRole("textbox");
+    fireEvent.change(address, { target: { value: "example.com" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    activate();
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("a blank tab switched to focuses its address bar once it is shown", async () => {
+    renderPanel();
+    const address = screen.getByRole("textbox") as HTMLInputElement;
+    // Still hidden by dockview, which shows the tab a frame later.
+    address.disabled = true;
+    Object.assign(panelApi, { isActive: true, isGroupActive: true });
+    try {
+      activate();
+      expect(document.activeElement).not.toBe(address);
+      address.disabled = false;
+      await act(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => resolve());
+          }),
+      );
+      expect(document.activeElement).toBe(address);
+    } finally {
+      Object.assign(panelApi, { isActive: false, isGroupActive: false });
+    }
+  });
+
+  test("a panel opened on a URL focuses the page while that page loads", () => {
+    const { webview, fireReady } = renderPanel({ ready: false, url: "https://example.com" });
+    // The webview's placeholder page commits before its first dom-ready.
+    Object.assign(webview, { getURL: () => "about:blank" });
+    act(() => void webview.dispatchEvent(new Event("did-navigate")));
+    fireReady();
+    activate();
+    expect(document.activeElement).toBe(webview);
+    expect(screen.getByRole("textbox")).toHaveValue("https://example.com");
+  });
+
+  test("a pending page dialog takes focus before the address bar", () => {
+    renderPanel();
+    show({ type: "confirm" });
+    activate();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "OK" }));
+  });
+
+  test("keeps focus inside the panel where it is", () => {
+    const { webview } = renderPanel();
+    act(() => void focusRegisteredPanel(panelApi.id));
+    expect(document.activeElement).toBe(webview);
+  });
+});
+
+describe("bookmarks", () => {
+  beforeEach(() => useBrowserBookmarksStore.setState({ bookmarks: [] }));
+
+  const star = () => screen.getByRole("button", { name: /bookmark/i, pressed: false });
+
+  function loadPage(webview: HTMLElement, url: string, title?: string, favicon?: string) {
+    Object.assign(webview, { getURL: () => url });
+    act(() => {
+      webview.dispatchEvent(new Event("did-navigate"));
+      if (title) webview.dispatchEvent(Object.assign(new Event("page-title-updated"), { title }));
+      if (favicon) {
+        webview.dispatchEvent(
+          Object.assign(new Event("page-favicon-updated"), { favicons: [favicon] }),
+        );
+      }
+    });
+  }
+
+  test("the star bookmarks the page with its title and favicon, and removes it again", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+
+    fireEvent.click(star());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([
+      {
+        url: "https://example.com/",
+        title: "Example",
+        faviconUrl: "https://example.com/favicon.ico",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bookmark", pressed: true }));
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("the bookmark action toggles the focused panel's page", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(screen.getByRole("button", { name: "Remove Bookmark", pressed: true })).toBeVisible();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("bookmarks the page shown, not the next one still loading or the last one's title", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+    const address = screen.getByRole("textbox");
+    fireEvent.change(address, { target: { value: "other.example" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks.map((b) => b.url)).toEqual([
+      "https://example.com/",
+    ]);
+
+    // Committed, but its title and favicon have not arrived yet.
+    loadPage(webview, "https://other.example/");
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks.at(-1)).toEqual({
+      url: "https://other.example/",
+      title: "https://other.example/",
+    });
+  });
+
+  function failLoad(webview: HTMLElement, isMainFrame: boolean) {
+    act(() => {
+      webview.dispatchEvent(
+        Object.assign(new Event("did-fail-load"), {
+          errorCode: -105,
+          errorDescription: "ERR_NAME_NOT_RESOLVED",
+          validatedURL: "https://nope.example/",
+          isMainFrame,
+        }),
+      );
+    });
+  }
+
+  test("a page whose embed failed to load can still be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, false);
+    expect(star()).toBeEnabled();
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
+  });
+
+  test("a page that failed to load can't be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, true);
+    expect(star()).toBeDisabled();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("a blank page can't be bookmarked, and lists the bookmarks to open one", () => {
+    useBrowserBookmarksStore.setState({
+      bookmarks: [{ url: "https://example.com/docs", title: "Docs" }],
+    });
+    const { webview } = renderPanel();
+    const loadURL = mock(async () => {});
+    Object.assign(webview, { loadURL });
+    expect(star()).toBeDisabled();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Docs/ }));
+    expect(loadURL).toHaveBeenCalledWith("https://example.com/docs");
+    expect(screen.getByRole("textbox")).toHaveValue("https://example.com/docs");
+    // The start page goes once the panel shows a page.
+    expect(screen.queryByRole("heading", { name: "Bookmarks" })).toBeNull();
+  });
+});

@@ -13,24 +13,14 @@ files:
 extraResources:
   - from: build/loxel-server
     to: loxel-server
-  - from: build/yaml-language-server
-    to: yaml-language-server
-  - from: build/docker-language-server
-    to: docker-language-server
-  - from: build/terraform-ls
-    to: terraform-ls
-  - from: build/pyright-langserver
-    to: pyright-langserver
-  - from: build/astro-ls
-    to: astro-ls
-  - from: build/lemminx/lemminx
-    to: lemminx
-  - from: build/typeshed-fallback
-    to: typeshed-fallback
-  - from: build/typescript-lib
-    to: typescript-lib
+  # Every language server's files, staged from scripts/language-servers/*.json
+  - from: build/language-servers
+    to: .
   - from: dist-electron/renderer
     to: renderer
+  # electron-updater's cache folder; without it no update can download
+  - from: assets/app-update.yml
+    to: app-update.yml
 
 asar: true
 
@@ -100,15 +90,13 @@ mac:
         CFBundleTypeRole: Viewer
         LSHandlerRank: Alternate
         LSItemContentTypes: [public.folder]
+  # No arch lists: they would override --x64 or --arm64 and package the other architecture with
+  # this machine's binaries.
+  # The dmg is the download; the zip, with its block map, is what installed apps update from
+  # (src/electron/app-updater.ts).
   target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
-    - target: zip
-      arch:
-        - arm64
-        - x64
+    - dmg
+    - zip
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 dmg:

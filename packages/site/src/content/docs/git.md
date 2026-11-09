@@ -1,7 +1,8 @@
 ---
 title: Git
 description: Commit graph, Changes panel, branch operations, cherry-pick, revert, and reset.
-order: 6
+section: "Review & Git"
+order: 2
 ---
 
 Loxel's git tooling is split across two panels that work together: the **Git panel**, with the interactive **commit graph** and the **branch list** (branch operations), and the **Changes panel** (working tree and commit diffs). Together they cover everything from discarding a file's changes to cherry-picking a range of commits.

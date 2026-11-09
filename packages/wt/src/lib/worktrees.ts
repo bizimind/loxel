@@ -5,8 +5,11 @@ import {
   listWorktrees,
   resolveRepoRoot,
   worktreeContaining,
+  WORKTREE_ID_KEY,
   type Worktree,
+  type WorktreeMeta,
 } from "../git/index.ts";
+import { readWorktreesMeta } from "./meta.ts";
 
 /** A worktree managed by wt (living under the worktrees directory). */
 export interface ManagedWorktree {
@@ -18,6 +21,8 @@ export interface ManagedWorktree {
   branch: string | null;
   /** HEAD commit hash */
   head: string;
+  /** Worktree metadata, `wt-id` included; empty while metadata is off */
+  meta: WorktreeMeta;
 }
 
 /**
@@ -38,14 +43,43 @@ export async function resolveWorktreesDir(repoPath: string): Promise<string> {
 export async function listManagedWorktrees(repoPath: string): Promise<ManagedWorktree[]> {
   const root = await resolveRepoRoot(repoPath);
   const dir = await canonicalWorktreesDir(root);
-  const managed = getManagedWorktrees(await listWorktrees(root), dir);
+  const worktrees = await listWorktrees(root);
+  const meta = await readWorktreesMeta(root, worktrees);
 
-  return managed.map((wt) => ({
+  return getManagedWorktrees(worktrees, dir).map((wt) => ({
     name: getWorktreeName(wt.path, dir),
     path: wt.path,
     branch: wt.branch,
     head: wt.head,
+    meta: meta.get(wt.path) ?? {},
   }));
+}
+
+/**
+ * The worktree whose `wt-id` is `id`, or null: a managed one, or the main
+ * worktree of a non-bare repo. Ids survive renames, so references between
+ * worktrees use them rather than names.
+ *
+ * @param repoPath - Any path inside the repository (bare or non-bare)
+ */
+export async function findWorktreeById(
+  id: string,
+  repoPath: string,
+): Promise<ManagedWorktree | null> {
+  const root = await resolveRepoRoot(repoPath);
+  const dir = await canonicalWorktreesDir(root);
+  const worktrees = await listWorktrees(root);
+  const meta = await readWorktreesMeta(root, worktrees);
+
+  const found = worktrees.find((wt) => !wt.bare && meta.get(wt.path)?.[WORKTREE_ID_KEY] === id);
+  if (!found) return null;
+  return {
+    name: getWorktreeName(found.path, dir),
+    path: found.path,
+    branch: found.branch,
+    head: found.head,
+    meta: meta.get(found.path) ?? {},
+  };
 }
 
 /** A worktree resolved by name, with the repository paths it was found through. */
@@ -98,15 +132,17 @@ export async function currentManagedWorktree(
 ): Promise<ManagedWorktree | null> {
   const root = await resolveRepoRoot(repoPath);
   const dir = await canonicalWorktreesDir(root);
-  const managed = getManagedWorktrees(await listWorktrees(root), dir);
+  const worktrees = await listWorktrees(root);
 
-  const current = worktreeContaining(managed, dirPath);
+  const current = worktreeContaining(getManagedWorktrees(worktrees, dir), dirPath);
   if (!current) return null;
 
+  const meta = await readWorktreesMeta(root, worktrees);
   return {
     name: getWorktreeName(current.path, dir),
     path: current.path,
     branch: current.branch,
     head: current.head,
+    meta: meta.get(current.path) ?? {},
   };
 }

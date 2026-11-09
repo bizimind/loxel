@@ -45,11 +45,9 @@ export function KeyRecorder({ actionId, onConfirm, onCancel }: KeyRecorderProps)
 
   const binding = steps.length > 0 ? toKeyBinding(steps) : null;
   const problem = bindingProblem(actionId, steps);
-  const conflict = useMemo(
-    () =>
-      binding
-        ? (findOverlappingActions(useKeybindingStore.getState(), actionId, binding)[0] ?? null)
-        : null,
+  // Every action Reassign takes the key from; actions sharing a key lose it together.
+  const conflicts = useMemo(
+    () => (binding ? findOverlappingActions(useKeybindingStore.getState(), actionId, binding) : []),
     [actionId, binding],
   );
 
@@ -92,9 +90,9 @@ export function KeyRecorder({ actionId, onConfirm, onCancel }: KeyRecorderProps)
       </div>
 
       {problem && <span className="text-destructive text-xs">{problem}</span>}
-      {!problem && conflict && (
+      {!problem && conflicts.length > 0 && (
         <span className="text-xs text-amber-500">
-          Conflicts with "{getActionDef(conflict)?.label ?? conflict}"
+          Conflicts with {conflicts.map((id) => `"${getActionDef(id)?.label ?? id}"`).join(", ")}
         </span>
       )}
 
@@ -114,7 +112,7 @@ export function KeyRecorder({ actionId, onConfirm, onCancel }: KeyRecorderProps)
         </Button>
       )}
       <Button size="xs" disabled={!binding || problem !== null} onClick={handleConfirm}>
-        {conflict ? "Reassign" : "Save"}
+        {conflicts.length > 0 ? "Reassign" : "Save"}
       </Button>
     </div>
   );

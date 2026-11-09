@@ -5,8 +5,8 @@ import * as api from "@/api/client";
 import type { DirEntry } from "@/api/project-files-model";
 import { showToast } from "@/components/ui/toast";
 import { toAbsoluteDir } from "@/lib/detached-path";
+import { moveFile } from "@/lib/file-operations";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
-import { invalidateDirQueries } from "@/queries/query-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
@@ -65,17 +65,7 @@ export function useFileClipboard(
             getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
           }
         } else if (clipboard.mode === "cut") {
-          const { newPath } = await api.moveProjectFile(wt, {
-            srcPath: clipboard.path,
-            destDir: targetDir,
-          });
-          getCurrentWorktreeUI().getState().renameProjectPaths(clipboard.path, newPath);
-          window.dispatchEvent(
-            new CustomEvent("loxel-file-moved", { detail: { oldPath: clipboard.path, newPath } }),
-          );
-          const srcParentDir = fileParentDir(clipboard.path, wt);
-          const destDirAbs = targetDir || wt;
-          invalidateDirQueries(srcParentDir, destDirAbs);
+          await moveFile({ wt, srcPath: clipboard.path, destDir: targetDir });
         } else {
           const { newPath } = await api.copyProjectFile(wt, {
             srcPath: clipboard.path,

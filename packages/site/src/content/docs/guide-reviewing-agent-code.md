@@ -1,7 +1,8 @@
 ---
 title: "Guide: Reviewing Agent Code"
 description: A walkthrough of reviewing AI-generated code with anchored comments that survive rewrites.
-order: 17
+section: "Review & Git"
+order: 3
 ---
 
 Agent-generated code differs from human PRs: a single task may go through several complete rewrites, and the final diff can be large with no clear narrative. Loxel's review system is built for this — comments survive rewrites, and the full iteration history is there when you need it.

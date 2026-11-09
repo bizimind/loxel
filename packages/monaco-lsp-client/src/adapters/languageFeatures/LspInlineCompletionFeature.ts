@@ -8,7 +8,7 @@ import type {
 import { capabilities, InlineCompletionTriggerKind } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoCommand, toMonacoLanguageSelector } from "./common";
+import { toMonacoLanguageSelector } from "./common";
 
 export class LspInlineCompletionFeature extends Disposable {
   constructor(private readonly _connection: LspConnection) {
@@ -49,6 +49,7 @@ class LspInlineCompletionProvider implements monaco.languages.InlineCompletionsP
     context: monaco.languages.InlineCompletionContext,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.InlineCompletions | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentInlineCompletion({
@@ -99,6 +100,6 @@ function toMonacoInlineCompletion(
     range: item.range
       ? client.bridge.translateBackRange(translated.textDocument, item.range).range
       : undefined,
-    command: toMonacoCommand(item.command),
+    command: client.commands.toMonacoCommand(item.command),
   };
 }

@@ -20,7 +20,8 @@ export type MoveDirection = "right" | "left" | "up" | "down";
 
 /**
  * Find the nearest group adjacent to `sourceGroup` in the given direction.
- * Returns null if no group exists in that direction.
+ * Returns null if no group exists in that direction, or is on screen: a maximized group hides the
+ * others.
  *
  * In the nested architecture, this is called on the center API where all groups
  * are center groups — no filtering needed.
@@ -30,6 +31,8 @@ export function findAdjacentCenterGroup(
   sourceGroup: DockviewGroupPanel,
   direction: MoveDirection,
 ): DockviewGroupPanel | null {
+  if (api.hasMaximizedGroup()) return null;
+
   const sourceRect = sourceGroup.element.getBoundingClientRect();
   const sourceCx = sourceRect.left + sourceRect.width / 2;
   const sourceCy = sourceRect.top + sourceRect.height / 2;

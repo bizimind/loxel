@@ -1,65 +1,28 @@
-import { join } from "node:path";
+import { extname, join } from "node:path";
 
 import type { AnalysisPlugin, AnalysisRecord, TreemapConfig } from "../plugin.ts";
+import { listProjectFiles, SOURCE_EXTENSIONS, SOURCE_GLOBS } from "../project.ts";
 
 const plugin: AnalysisPlugin = {
   meta: {
     id: "loc",
     description: "Lines of code per source file",
     vizType: "treemap",
-    watchGlobs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
+    watchGlobs: [...SOURCE_GLOBS, "**/.gitignore"],
   },
 
   async generate(workDir, _args): Promise<AnalysisRecord[]> {
-    const proc = Bun.spawn(
-      [
-        "find",
-        ".",
-        "-type",
-        "f",
-        "(",
-        "-name",
-        "*.ts",
-        "-o",
-        "-name",
-        "*.tsx",
-        "-o",
-        "-name",
-        "*.js",
-        "-o",
-        "-name",
-        "*.jsx",
-        "-o",
-        "-name",
-        "*.mjs",
-        "-o",
-        "-name",
-        "*.cjs",
-        ")",
-        "-not",
-        "-path",
-        "*/node_modules/*",
-        "-not",
-        "-path",
-        "*/.git/*",
-        "-not",
-        "-path",
-        "*/dist/*",
-      ],
-      { cwd: workDir, stdout: "pipe", stderr: "ignore" },
-    );
-    const text = await new Response(proc.stdout).text();
-    const files = text.trim().split("\n").filter(Boolean);
+    const files = await listProjectFiles(workDir);
+    const sources = files.filter(({ path }) => SOURCE_EXTENSIONS.includes(extname(path).slice(1)));
 
     const records: AnalysisRecord[] = [];
     await Promise.all(
-      files.map(async (rel) => {
-        const abs = join(workDir, rel.replace(/^\.\//, ""));
-        const content = await Bun.file(abs)
+      sources.map(async ({ path }) => {
+        const content = await Bun.file(join(workDir, path))
           .text()
-          .catch(() => "");
-        const lines = content.split("\n").length;
-        records.push({ path: rel.replace(/^\.\//, ""), lines });
+          .catch(() => null);
+        if (content === null) return;
+        records.push({ path, lines: content.split("\n").length });
       }),
     );
     return records;

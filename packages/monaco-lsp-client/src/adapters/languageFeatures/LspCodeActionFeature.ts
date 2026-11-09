@@ -1,26 +1,50 @@
 import * as monaco from "monaco-editor";
 
 import type {
+  CodeAction,
+  CodeActionKind,
   CodeActionRegistrationOptions,
   Command,
   WorkspaceEdit,
-  CodeAction,
 } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoLanguageSelector } from "./common";
+import { isLspCommand } from "../LspServerCommands";
 import {
+  codeActionKindsIntersect,
   lspCodeActionKindToMonacoCodeActionKind,
+  matchesDocumentSelector,
   toMonacoCodeActionKind,
-  toLspDiagnosticSeverity,
   toLspCodeActionTriggerKind,
-  toMonacoCommand,
+  toMonacoLanguageSelector,
 } from "./common";
+import type { LspDiagnosticsFeature } from "./LspDiagnosticsFeature";
+
+let nextApplyCommandId = 0;
 
 export class LspCodeActionFeature extends Disposable {
-  constructor(private readonly _connection: LspConnection) {
+  /**
+   * Monaco applies a code action's `edit` with its standalone bulk-edit service, which can only
+   * edit open models, so actions carry their edit to this command instead: it applies the edit
+   * through the client's workspace-edit path, then runs the action's own command.
+   */
+  private readonly _applyCommandId = `monaco-lsp-client.applyCodeAction.${nextApplyCommandId++}`;
+  /** The server's live code action registrations (static or dynamic). */
+  private readonly _registrations = new Set<CodeActionRegistrationOptions>();
+
+  constructor(
+    private readonly _connection: LspConnection,
+    private readonly _diagnostics: Pick<LspDiagnosticsFeature, "diagnosticsForMarkers">,
+  ) {
     super();
+
+    this._register(
+      monaco.editor.registerCommand(
+        this._applyCommandId,
+        (_accessor, edit: unknown, command: unknown) => this._apply(edit, command),
+      ),
+    );
 
     this._register(
       this._connection.capabilities.addStaticClientCapabilities({
@@ -46,21 +70,89 @@ export class LspCodeActionFeature extends Disposable {
         capabilities.textDocumentCodeAction,
         true,
         (capability) => {
-          return monaco.languages.registerCodeActionProvider(
+          this._registrations.add(capability);
+          const provider = monaco.languages.registerCodeActionProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
               this._connection.defaultLanguageIds,
             ),
-            new LspCodeActionProvider(this._connection, capability),
+            new LspCodeActionProvider(
+              this._connection,
+              capability,
+              (edit, command) => this._toMonacoCommand(edit, command),
+              this._diagnostics,
+            ),
+            // Monaco enables kind-specific commands (Organize Imports, Fix All) only for providers
+            // that declare the kind; LSP kinds are Monaco kinds (`source.organizeImports.ruff`
+            // counts as `source.organizeImports`).
+            { providedCodeActionKinds: capability.codeActionKinds },
           );
+          return {
+            dispose: () => {
+              this._registrations.delete(capability);
+              provider.dispose();
+            },
+          };
         },
       ),
     );
+  }
+
+  /**
+   * Whether the server may offer code actions of `kind` for `model`: a registration covers the
+   * model and declares a kind inside or containing `kind`, or declares no kinds. With `declared`,
+   * only a declared kind equal to or inside `kind` counts, the test Monaco applies before running
+   * Fix All and Organize Imports (they do nothing for a server that declares no kinds).
+   */
+  supportsKind(
+    model: monaco.editor.ITextModel,
+    kind: string,
+    { declared = false }: { declared?: boolean } = {},
+  ): boolean {
+    if (!this._connection.bridge.isSyncedModel(model)) return false;
+    return [...this._registrations].some((registration) => {
+      const covers = matchesDocumentSelector(
+        model,
+        registration.documentSelector,
+        this._connection.defaultLanguageIds,
+      );
+      if (!covers) return false;
+      // LSP kinds are open-ended strings; the enum lists only the predefined ones.
+      const provided: readonly string[] | undefined = registration.codeActionKinds;
+      if (declared) return provided?.some((p) => p === kind || p.startsWith(`${kind}.`)) ?? false;
+      return !provided || provided.some((p) => codeActionKindsIntersect(p, kind));
+    });
+  }
+
+  private _toMonacoCommand(
+    edit: WorkspaceEdit | undefined,
+    command: Command | undefined,
+  ): monaco.languages.Command | undefined {
+    if (!edit) return this._connection.commands.toMonacoCommand(command);
+    return { id: this._applyCommandId, title: command?.title ?? "", arguments: [edit, command] };
+  }
+
+  private async _apply(edit: unknown, command: unknown): Promise<void> {
+    if (!isWorkspaceEdit(edit)) {
+      throw new Error(`${this._applyCommandId} expects an LSP WorkspaceEdit argument`);
+    }
+    const result = await this._connection.edits.apply(edit);
+    if (!result.applied || !isLspCommand(command)) return;
+    if (await this._connection.commands.executeServerCommand(command)) return;
+    // A client command (`editor.action.*`): run it on the editor the action was applied in, as
+    // Monaco would have. `trigger` passes one argument, which is what editor actions take.
+    const editor = monaco.editor.getEditors().find((e) => e.hasTextFocus() || e.hasWidgetFocus());
+    if (!editor || (command.arguments?.length ?? 0) > 1) {
+      console.warn(`[MonacoLspClient] code action command ${command.command} was not run`);
+      return;
+    }
+    editor.trigger("monaco-lsp-client", command.command, command.arguments?.[0]);
   }
 }
 
 interface ExtendedCodeAction extends monaco.languages.CodeAction {
   _lspAction?: CodeAction;
+  _resolved?: boolean;
 }
 
 class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
@@ -69,21 +161,26 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
   constructor(
     private readonly _client: LspConnection,
     private readonly _capabilities: CodeActionRegistrationOptions,
+    private readonly _toMonacoCommand: (
+      edit: WorkspaceEdit | undefined,
+      command: Command | undefined,
+    ) => monaco.languages.Command | undefined,
+    private readonly _diagnostics: Pick<LspDiagnosticsFeature, "diagnosticsForMarkers">,
   ) {
     if (_capabilities.resolveProvider) {
+      // Monaco resolves an action without an `edit` (all of ours) on hover and before applying it.
       this.resolveCodeAction = async (
         codeAction: ExtendedCodeAction,
         _token: monaco.CancellationToken,
       ): Promise<ExtendedCodeAction> => {
-        if (codeAction._lspAction) {
-          const resolved = await this._client.server.codeActionResolve(codeAction._lspAction);
-          if (resolved.edit) {
-            codeAction.edit = toMonacoWorkspaceEdit(resolved.edit, this._client);
-          }
-          if (resolved.command) {
-            codeAction.command = toMonacoCommand(resolved.command);
-          }
-        }
+        const action = codeAction._lspAction;
+        if (!action || action.edit || codeAction._resolved) return codeAction;
+        const resolved = await this._client.server.codeActionResolve(action);
+        codeAction._resolved = true;
+        codeAction.command = this._toMonacoCommand(
+          resolved.edit,
+          resolved.command ?? action.command,
+        );
         return codeAction;
       };
     }
@@ -95,17 +192,18 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
     context: monaco.languages.CodeActionContext,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.CodeActionList | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
     const result = await this._client.server.textDocumentCodeAction({
       textDocument: translated.textDocument,
       range: this._client.bridge.translateRange(model, range),
       context: {
-        diagnostics: context.markers.map((marker) => ({
-          range: this._client.bridge.translateRange(model, monaco.Range.lift(marker)),
-          message: marker.message,
-          severity: toLspDiagnosticSeverity(marker.severity),
-        })),
+        diagnostics: this._diagnostics.diagnosticsForMarkers(model, context.markers),
+        // Monaco's code action kinds are LSP's, an open set of strings the enum names only some of
+        // (a server's "source.fixAll.ruff" among the rest).
+        // oxlint-disable-next-line typescript/no-unsafe-enum-assignment
+        only: context.only === undefined ? undefined : [context.only as CodeActionKind],
         triggerKind: toLspCodeActionTriggerKind(context.trigger),
       },
     });
@@ -118,26 +216,23 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
 
     return {
       actions: actions.map((action) => {
-        if ("title" in action && !("kind" in action)) {
-          // Command
-          const cmd = action as Command;
+        if (isCommand(action)) {
           const monacoAction: ExtendedCodeAction = {
-            title: cmd.title,
-            command: toMonacoCommand(cmd),
+            title: action.title,
+            command: this._client.commands.toMonacoCommand(action),
           };
           return monacoAction;
         }
 
-        // CodeAction
-        const codeAction = action as CodeAction;
         const monacoAction: ExtendedCodeAction = {
-          title: codeAction.title,
-          kind: toMonacoCodeActionKind(codeAction.kind),
-          isPreferred: codeAction.isPreferred,
-          disabled: codeAction.disabled?.reason,
-          edit: codeAction.edit ? toMonacoWorkspaceEdit(codeAction.edit, this._client) : undefined,
-          command: toMonacoCommand(codeAction.command),
-          _lspAction: codeAction,
+          title: action.title,
+          kind: toMonacoCodeActionKind(action.kind),
+          isPreferred: action.isPreferred,
+          disabled:
+            action.disabled?.reason ??
+            (action.edit ? this._client.edits.unsupportedReason(action.edit) : undefined),
+          command: this._toMonacoCommand(action.edit, action.command),
+          _lspAction: action,
         };
         return monacoAction;
       }),
@@ -146,42 +241,16 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
   }
 }
 
-function toMonacoWorkspaceEdit(
-  edit: WorkspaceEdit,
-  client: LspConnection,
-): monaco.languages.WorkspaceEdit {
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
+// A bare `Command` names its command as a string; a `CodeAction` may carry a
+// `command` too, but as a nested `Command` object.
+function isCommand(action: Command | CodeAction): action is Command {
+  return typeof action.command === "string";
+}
 
-  if (edit.changes) {
-    for (const uri in edit.changes) {
-      const textEdits = edit.changes[uri];
-      if (!textEdits) continue;
-      for (const textEdit of textEdits) {
-        const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-        edits.push({
-          resource: translated.textModel.uri,
-          versionId: undefined,
-          textEdit: { range: translated.range, text: textEdit.newText },
-        });
-      }
-    }
-  }
-
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      if ("textDocument" in change) {
-        const uri = change.textDocument.uri;
-        for (const textEdit of change.edits) {
-          const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-          edits.push({
-            resource: translated.textModel.uri,
-            versionId: change.textDocument.version ?? undefined,
-            textEdit: { range: translated.range, text: textEdit.newText },
-          });
-        }
-      }
-    }
-  }
-
-  return { edits };
+function isWorkspaceEdit(value: unknown): value is WorkspaceEdit {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("changes" in value || "documentChanges" in value)
+  );
 }

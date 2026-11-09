@@ -56,7 +56,11 @@ export function makeRestAdapter(baseUrl: string, project?: string | null): DataA
   }
 
   async function del(path: string): Promise<void> {
-    const res = await fetch(url(path), { method: "DELETE" });
+    // The server requires a JSON content type on every mutation, including body-less deletes.
+    const res = await fetch(url(path), {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
     if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
   }
 

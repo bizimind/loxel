@@ -15,11 +15,32 @@ export const ProjectsDataSchema = z.object({ projects: z.array(ProjectSchema) })
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectsData = z.infer<typeof ProjectsDataSchema>;
 
+/** Response of POST /api/projects/clone and /init. */
+export interface ProjectSetupResult extends Project {
+  /** The first worktree, when it was created without running its repository's `init.wt.sh` */
+  initHookSkippedAt?: string;
+}
+
 /** Enriched project returned by GET /api/projects — includes inline worktrees + wt metadata. */
 export interface EnrichedProject extends Project {
   worktrees: WorktreeEntry[];
   /** Absolute path to the repo's worktrees directory (null when not yet initialized). */
   worktreesDir: string | null;
+  /** Worktree metadata (`wt init --worktree-metadata on`) is on, so worktrees can nest. */
+  worktreeMetadata: boolean;
+}
+
+/** Response of GET /api/projects/:id/worktrees. */
+export interface ProjectWorktreesResponse {
+  worktrees: WorktreeEntry[];
+  worktreeMetadata: boolean;
+}
+
+/** Response of GET /api/projects. */
+export interface ProjectsResponse {
+  projects: EnrichedProject[];
+  /** The server user's home directory, for shortening displayed paths to `~/…`. */
+  homeDir: string;
 }
 
 export interface BrowseEntry {

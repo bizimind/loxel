@@ -1,10 +1,12 @@
-import type { IMessageTransport } from "@hediet/json-rpc";
-import { TypedChannel } from "@hediet/json-rpc";
+import type { IMessageTransport, IRequestSender } from "@hediet/json-rpc";
+import { Channel, StreamBasedChannel, TypedChannel, unverifiedRequest } from "@hediet/json-rpc";
+import type * as monaco from "monaco-editor";
 
-import type { ClientCapabilities } from "../types";
+import type { ClientCapabilities, ShowMessageParams } from "../types";
 import { api } from "../types";
 import type { IDisposable } from "../utils";
 import { DisposableStore } from "../utils";
+import { LspApplyEditFeature } from "./languageFeatures/LspApplyEditFeature";
 import { LspCodeActionFeature } from "./languageFeatures/LspCodeActionFeature";
 import { LspCodeLensFeature } from "./languageFeatures/LspCodeLensFeature";
 import { LspCompletionFeature } from "./languageFeatures/LspCompletionFeature";
@@ -26,31 +28,86 @@ import { LspRangeFormattingFeature } from "./languageFeatures/LspRangeFormatting
 import { LspReferencesFeature } from "./languageFeatures/LspReferencesFeature";
 import { LspRenameFeature } from "./languageFeatures/LspRenameFeature";
 import { LspSelectionRangeFeature } from "./languageFeatures/LspSelectionRangeFeature";
+import type { SemanticTokenStyling } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSemanticTokensFeature } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeature";
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
+import type { WorkspaceSymbolItem } from "./languageFeatures/LspWorkspaceSymbolFeature";
+import { LspWorkspaceSymbolFeature } from "./languageFeatures/LspWorkspaceSymbolFeature";
+import { LspCancellableRequests, rejectingServerCancellations } from "./LspCancellableRequests";
 import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
+import { LspServerCommands } from "./LspServerCommands";
 import { TextDocumentSynchronizer } from "./TextDocumentSynchronizer";
+import type { WorkspaceFileSystem } from "./WorkspaceEditApplier";
+import { WorkspaceEditApplier } from "./WorkspaceEditApplier";
 
 export interface MonacoLspClientOptions {
   /** Restrict model sync and provider registration to these language(s). */
   languageId?: string | readonly string[];
+  /**
+   * Further restrict model sync to models this returns true for. Requests from
+   * Monaco providers for any other model are not sent: the server has never
+   * seen it. Use it to keep read-only views (diffs, history) away from the
+   * server.
+   */
+  modelFilter?: (textModel: monaco.editor.ITextModel) => boolean;
+  /**
+   * Open models workspace edits may not change, such as a read-only document of the server's own:
+   * an edit touching one is refused whole.
+   */
+  isReadOnlyModel?: (textModel: monaco.editor.ITextModel) => boolean;
+  /**
+   * Disk access for workspace edits (rename, code actions, `workspace/applyEdit`). With it they
+   * can edit files that have no model and create, rename or delete files; without it they are
+   * refused when they touch a file that is not open or hold a file operation.
+   */
+  workspaceFileSystem?: WorkspaceFileSystem;
+  /** Called with the reason when a workspace edit is refused or fails, to tell the user. */
+  onWorkspaceEditFailure?: (reason: string) => void;
+  /**
+   * Owner of the diagnostic markers this client sets. Live clients must not share one, so servers
+   * syncing the same model keep their own markers; a disposed client removes its owner's markers.
+   * Defaults to an owner unique to the client (`lsp-<n>`).
+   */
+  markerOwner?: string;
+  /** Called with each `window/showMessage` notification, for the app to show to the user. */
+  onShowMessage?: (params: ShowMessageParams) => void;
+  /** What the app's Monaco theme has rules for, so that the rest keeps its TextMate color. */
+  semanticTokenStyling?: SemanticTokenStyling;
 }
 
 export class MonacoLspClient {
   private _connection: LspConnection;
   private readonly _capabilitiesRegistry: LspCapabilitiesRegistry;
   private readonly _bridge: TextDocumentSynchronizer;
+  private readonly _commands: LspServerCommands;
+  private readonly _edits: WorkspaceEditApplier;
   private readonly _features: IDisposable;
+  private readonly _diagnostics: LspDiagnosticsFeature;
+  private readonly _codeActions: LspCodeActionFeature;
+  private readonly _workspaceSymbols: LspWorkspaceSymbolFeature;
+  private readonly _messages: IDisposable | undefined;
+  private readonly _semanticTokenStyling: SemanticTokenStyling | undefined;
 
   private _initPromise: Promise<void>;
 
   constructor(transport: IMessageTransport, options?: MonacoLspClientOptions) {
-    const c = TypedChannel.fromTransport(transport);
+    // `TypedChannel.fromTransport`, keeping the request sender it connects (in `startListen`)
+    // for requests that must know their JSON-RPC id to be cancelled. Requests the server cancels
+    // reject as cancelled, for every caller.
+    const streamChannel = StreamBasedChannel.createChannel(transport, undefined);
+    let requestSender: IRequestSender | undefined;
+    const c = new TypedChannel(
+      new Channel(
+        (listener) =>
+          (requestSender = rejectingServerCancellations(streamChannel.connect(listener))),
+      ),
+    );
     const s = api.getServer(c, {});
     c.startListen();
+    if (!requestSender) throw new Error("[MonacoLspClient] the channel did not connect on listen");
 
     const languageId = options?.languageId;
     const languageIds = languageId
@@ -58,16 +115,42 @@ export class MonacoLspClient {
       : undefined;
     const defaultLanguageIds = languageIds ? [...languageIds] : undefined;
     this._capabilitiesRegistry = new LspCapabilitiesRegistry(c);
-    this._bridge = new TextDocumentSynchronizer(s.server, this._capabilitiesRegistry, languageIds);
+    this._bridge = new TextDocumentSynchronizer(
+      s.server,
+      this._capabilitiesRegistry,
+      languageIds,
+      options?.modelFilter,
+    );
+    this._commands = new LspServerCommands(s.server, this._capabilitiesRegistry);
+    this._edits = new WorkspaceEditApplier(s.server, this._capabilitiesRegistry, {
+      fileSystem: options?.workspaceFileSystem,
+      onFailure: options?.onWorkspaceEditFailure,
+      isReadOnlyModel: options?.isReadOnlyModel,
+    });
 
     this._connection = new LspConnection(
       s.server,
       this._bridge,
       this._capabilitiesRegistry,
       c,
+      this._commands,
+      new LspCancellableRequests(requestSender, s.server),
+      this._edits,
       defaultLanguageIds,
     );
+    this._semanticTokenStyling = options?.semanticTokenStyling;
     this._features = this.createFeatures();
+    // Code actions send back the diagnostics behind the client's markers.
+    this._diagnostics = new LspDiagnosticsFeature(this._connection, options?.markerOwner);
+    this._codeActions = new LspCodeActionFeature(this._connection, this._diagnostics);
+    this._workspaceSymbols = new LspWorkspaceSymbolFeature(
+      this._connection,
+      () => this._initPromise,
+    );
+    const onShowMessage = options?.onShowMessage;
+    if (onShowMessage) {
+      this._messages = c.registerNotificationHandler(api.client.windowShowMessage, onShowMessage);
+    }
 
     this._initPromise = this._init().catch((err: unknown) => {
       console.error("[MonacoLspClient] initialization failed:", err);
@@ -75,7 +158,13 @@ export class MonacoLspClient {
   }
 
   dispose(): void {
+    this._messages?.dispose();
     this._features.dispose();
+    this._codeActions.dispose();
+    this._diagnostics.dispose();
+    this._workspaceSymbols.dispose();
+    this._commands.dispose();
+    this._edits.dispose();
     this._bridge.dispose();
     this._capabilitiesRegistry.dispose();
   }
@@ -101,6 +190,55 @@ export class MonacoLspClient {
   /** Declare additional client capabilities before the initialize handshake. */
   addStaticClientCapabilities(caps: ClientCapabilities): IDisposable {
     return this._capabilitiesRegistry.addStaticClientCapabilities(caps);
+  }
+
+  /**
+   * Symbols matching `query` across the server's workspace (`workspace/symbol`), empty when the
+   * server has no workspace symbol provider. Cancelling `token` sends `$/cancelRequest` and
+   * rejects with a `Canceled` error.
+   */
+  workspaceSymbols(query: string, token: monaco.CancellationToken): Promise<WorkspaceSymbolItem[]> {
+    return this._workspaceSymbols.provideWorkspaceSymbols(query, token);
+  }
+
+  /**
+   * Fills in the range of a symbol from `workspaceSymbols` that came without one, through
+   * `workspaceSymbol/resolve`; returns it unchanged when there is nothing to resolve.
+   */
+  resolveWorkspaceSymbol(
+    symbol: WorkspaceSymbolItem,
+    token: monaco.CancellationToken,
+  ): Promise<WorkspaceSymbolItem> {
+    return this._workspaceSymbols.resolveWorkspaceSymbol(symbol, token);
+  }
+
+  /**
+   * Whether the server may offer code actions of `kind` for `model` (`quickfix`, `source.fixAll`,
+   * `refactor`, …): it syncs the model and registered code actions for it that declare a kind
+   * containing or inside `kind`, or no kinds at all. With `declared`, only a declared kind equal to
+   * or inside `kind` counts, which is what Monaco's Fix All and Organize Imports require. False
+   * until the server has initialized.
+   */
+  supportsCodeActionKind(
+    model: monaco.editor.ITextModel,
+    kind: string,
+    options?: { declared?: boolean },
+  ): boolean {
+    return this._codeActions.supportsKind(model, kind, options);
+  }
+
+  /**
+   * Sends a request the typed `server` interface does not have (a server's own method, a newer LSP
+   * one) once the server has initialized, and resolves with its unverified result. Cancelling
+   * `token` sends `$/cancelRequest` and rejects with a `Canceled` error.
+   */
+  async request(method: string, params: object, token: monaco.CancellationToken): Promise<unknown> {
+    await this._initPromise;
+    return this._connection.cancellableRequests.request(
+      unverifiedRequest<object, unknown>({ method }),
+      params,
+      token,
+    );
   }
 
   /** Typed LSP server interface. Call any LSP method directly. */
@@ -133,7 +271,6 @@ export class MonacoLspClient {
     store.add(new LspDocumentHighlightFeature(this._connection));
     store.add(new LspDocumentSymbolFeature(this._connection));
     store.add(new LspRenameFeature(this._connection));
-    store.add(new LspCodeActionFeature(this._connection));
     store.add(new LspCodeLensFeature(this._connection));
     store.add(new LspDocumentLinkFeature(this._connection));
     store.add(new LspFormattingFeature(this._connection));
@@ -142,10 +279,10 @@ export class MonacoLspClient {
     store.add(new LspFoldingRangeFeature(this._connection));
     store.add(new LspSelectionRangeFeature(this._connection));
     store.add(new LspInlayHintsFeature(this._connection));
-    store.add(new LspSemanticTokensFeature(this._connection));
-    store.add(new LspDiagnosticsFeature(this._connection));
+    store.add(new LspSemanticTokensFeature(this._connection, this._semanticTokenStyling));
     store.add(new LspLinkedEditingRangeFeature(this._connection));
     store.add(new LspInlineCompletionFeature(this._connection));
+    store.add(new LspApplyEditFeature(this._connection));
 
     return store;
   }

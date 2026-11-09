@@ -1,0 +1,8 @@
+{
+  "script": "build-gopls.ts",
+  "resources": ["gopls"],
+  "license": "BSD-3-Clause",
+  "source": "https://github.com/golang/tools/tree/gopls/v0.24.0/gopls",
+  "licenseFile": "licenses/gopls.txt",
+  "note": "Statically links the Go runtime and standard library (BSD-3-Clause) and its Go module dependencies, listed in scripts/gopls-module/go.mod, under BSD-2-Clause, BSD-3-Clause, MIT, MIT-0 and Apache-2.0."
+}

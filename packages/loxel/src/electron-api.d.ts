@@ -1,26 +1,64 @@
 interface Window {
+  /**
+   * Native integrations, from Electron's window preload; undefined outside Electron. The preload
+   * and the renderer ship together in the app, so every member exists whenever this does.
+   */
   electronAPI?: {
     onOpenInBrowserTab: (callback: (url: string) => void) => () => void;
     setDockBadge: (count: number) => void;
     onWindowFocusChange: (callback: (focused: boolean) => void) => () => void;
     openFolderDialog: () => Promise<string | null>;
-    // The members below are optional: the preload ships in the .app bundle, while in-app updates
-    // replace only the renderer and server, so a newer renderer can run with an older preload.
-    // Guard every call (`?.()`) — an unguarded call throws on bundles that predate the member.
     /**
      * Keystrokes (KeyCombo strings) to withhold from this window's webviews and forward to it;
-     * `captureAll` forwards every keystroke (a chord is in progress). Since v0.1.198.
+     * `captureAll` forwards every keystroke (a chord is in progress).
      */
-    setKeystrokeInterception?: (interception: { combos: string[]; captureAll: boolean }) => void;
-    /** A forwarded keystroke (KeyCombo string) typed inside one of this window's webviews. Since v0.1.198. */
-    onWebviewKeystroke?: (callback: (combo: unknown, isRepeat: unknown) => void) => () => void;
+    setKeystrokeInterception: (interception: { combos: string[]; captureAll: boolean }) => void;
+    /** A forwarded keystroke (KeyCombo string) typed inside one of this window's webviews. */
+    onWebviewKeystroke: (callback: (combo: unknown, isRepeat: unknown) => void) => () => void;
+    /** One of this window's webviews gained keyboard focus (fires no focusin in the document). */
+    onWebviewFocused: (callback: () => void) => () => void;
     /**
-     * One of this window's webviews gained keyboard focus (fires no focusin in the document).
-     * Since v0.1.199.
+     * A page in one of this window's webviews (identified by its webContents id) asked to open
+     * `url` in a new tab or window; `background` for ⌘-click and middle-click.
      */
-    onWebviewFocused?: (callback: () => void) => () => void;
+    onOpenInNewBrowserTab: (
+      callback: (webContentsId: number, url: string, background: boolean) => void,
+    ) => () => void;
+    /** macOS version (e.g. "15.2.0"); undefined on other platforms. */
+    macOSVersion: string | undefined;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
-    getZoomFactor?: () => number;
+    getZoomFactor: () => number;
+    /** Whether this window is in macOS native fullscreen, read synchronously. */
+    isFullScreen: () => boolean;
+    /** The window entered or left macOS native fullscreen. */
+    onWindowFullScreenChange: (callback: (fullScreen: boolean) => void) => () => void;
+    /**
+     * Copy the image at window point (x, y) of one of this window's webviews to the clipboard;
+     * the point is in the coordinates of the webview's `context-menu` event.
+     */
+    copyWebviewImage: (webContentsId: number, x: number, y: number) => void;
+    /**
+     * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
+     * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).
+     */
+    onJavaScriptDialog: (
+      onOpen: (request: unknown) => void,
+      onClosed: (closed: unknown) => void,
+    ) => () => void;
+    /** Answer a dialog from `onJavaScriptDialog` (payload: `JavaScriptDialogResponse`). */
+    respondToJavaScriptDialog: (response: unknown) => void;
+    /** The app update's current state, kept by Electron main. */
+    getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
+    /** Check the release manifest for a newer version; the result arrives as a status change. */
+    checkForUpdates: () => Promise<void>;
+    /** Download the available update; progress and the result arrive as status changes. */
+    downloadUpdate: () => Promise<void>;
+    /** Quit, install the downloaded update and relaunch. */
+    installUpdate: () => void;
+    /** The app update's state changed. */
+    onUpdateStatusChange: (
+      callback: (status: import("@/api/update-model").UpdateState) => void,
+    ) => () => void;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */

@@ -26,7 +26,7 @@ Schemas live in [review-model.ts](../src/api/review-model.ts) and [comment-model
 - `PlacedThread`: a `CommentThread` plus server-computed `displaySide`, `displayStartLine`, `displayEndLine`, `anchorStatus` (`exact` | `relocated` | `outdated` | `lost`), and for `outdated` only, `originalContent` and `currentContent`.
 - `DiffFileContext`: what the client sends per diff file: `oldPath`, `newPath`, `oldRef`, `newRef` (null means "not a ref"), optional `worktreePath`.
 
-Request bodies (`CreateThreadRequest`, `CreateReviewRequest`, `UpdateReviewRequest`, `UpdateThreadRequest`, `AddReplyRequest`, `PlacedThreadsRequest`) are defined in the same file and validated with `safeParse` in the routes.
+Request body schemas (`CreateThreadRequestSchema`, `CreateReviewRequestSchema`, `UpdateReviewRequestSchema`, `UpdateThreadRequestSchema`, `AddReplyRequestSchema`, `PlacedThreadsRequestSchema`) are defined in the same file and validated with `safeParse` in [review-routes.ts](../src/server/review-routes.ts).
 
 ## Storage
 
@@ -104,9 +104,9 @@ Which threads are considered: the route calls `listThreads(reviewIds, allPaths)`
 
 ## Rendering in the diff viewer
 
-[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) `DiffContent` builds the `DiffFileContext[]` from the diff (`oldRef` = `diff.baseRef`, `newRef` = the commit hash or null, `worktreePath` for uncommitted diffs) and calls `fetchPlacedThreads` whenever that list or `selectedReviewIds` changes; with no reviews selected it calls `clearAll`. The fetch happens in both view modes, so the Comments panel is populated either way.
+[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) `DiffContent` builds the `DiffFileContext[]` from the diff (`oldRef` = `diff.baseRef`, `newRef` = the commit hash or null, `worktreePath` for uncommitted diffs) and calls `fetchPlacedThreads` whenever that list or `selectedReviewIds` changes; with no reviews selected it calls `clearAll`. While the working-tree side of an uncommitted diff is edited in place, it also fetches whenever that file changes on disk, a save of the side included, so comments move to the saved lines without waiting for the diff refetch; between saves they keep their last placement and can drift from the edited lines. Fetches overlap, so only the latest one's response is applied (and none after `clearAll`). The fetch happens in both view modes, so the Comments panel is populated either way.
 
-Commenting and inline markers exist only in [SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx), which `FileDiffView` uses when the view mode is `split` and there is a commit hash or worktree path. The unified view and the hunk-based fallback (`HunkBasedDiffView`) render no comment UI. The reason is structural: the side-by-side view loads the full content of both file versions into two Monaco editors, which gives real file line numbers on each side and the surrounding lines needed for the anchor's context; the hunk-based view only has hunk lines.
+Commenting and inline markers exist only in the side-by-side view ([SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx)), where [GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx) turns them on with `comments`; `FileDiffView` uses it when the view mode is `split` and there is a commit hash or worktree path. Compare panels render the same view without comments, since their files need not be in the repository. The unified view and the hunk-based fallback (`HunkBasedDiffView`) render no comment UI. The reason is structural: the side-by-side view loads the full content of both file versions into two Monaco editors, which gives real file line numbers on each side and the surrounding lines needed for the anchor's context; the hunk-based view only has hunk lines.
 
 Inside the side-by-side view:
 
@@ -154,6 +154,6 @@ The code block shows the anchor's original `content`, not the current lines, and
 - [src/server/placement.ts](../src/server/placement.ts): two-sided placement
 - [src/lib/content-anchor.ts](../src/lib/content-anchor.ts): anchor creation and relocation
 - [src/store/worktree-reviews.ts](../src/store/worktree-reviews.ts), [src/store/comments.ts](../src/store/comments.ts): client state
-- [src/components/diff/SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx), [src/components/comments/](../src/components/comments/): diff integration
+- [src/components/diff/SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx), [src/components/diff-viewer/GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx), [src/components/comments/](../src/components/comments/): diff integration
 - [src/components/panels/CommentsPanel.tsx](../src/components/panels/CommentsPanel.tsx), [src/components/reviews/ReviewSelector.tsx](../src/components/reviews/ReviewSelector.tsx): panel UI
 - [src/lib/threads-to-markdown.ts](../src/lib/threads-to-markdown.ts): export

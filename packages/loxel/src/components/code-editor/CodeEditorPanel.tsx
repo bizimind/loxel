@@ -2,24 +2,45 @@ import { useQuery } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
 import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
+import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
-import { type MergeCallbacks, useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { EditorBanner } from "@/components/editor/EditorBanner";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import {
+  type MergeCallbacks,
+  useDiskSyncedContent,
+  useFormatOnSave,
+} from "@/hooks/use-disk-synced-content";
+import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { computeLineEdits } from "@/lib/compute-line-edits";
+import { detectIndentation } from "@/lib/detect-indentation";
+import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
+import { fileSchemeLanguages } from "@/lib/lsp-clients";
+import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
+import { requestSchemasForOpenFiles } from "@/lib/schema-sync";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
+import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
+import { registerClosedTabParams } from "@/store/closed-tabs";
+import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import {
+  type IndentationLayer,
   resolveIndentation,
   selectEffectiveFileAssociations,
   useSettingsStore,
@@ -29,6 +50,15 @@ import { useUIStore } from "@/store/ui";
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 
 const identity = (s: string) => s;
+
+const NO_EDITORCONFIG: EditorConfigProperties = {};
+
+/** Longest the editor waits read-only for a file's `.editorconfig` before using the fallbacks. */
+const EDITORCONFIG_GATE_MS = 500;
+
+function rulersFor(editorConfig: EditorConfigProperties): number[] {
+  return editorConfig.maxLineLength === undefined ? [] : [editorConfig.maxLineLength];
+}
 
 function normalizeHex(color: string): string {
   const c = color.toLowerCase().replace(/^#/, "");
@@ -109,6 +139,9 @@ function getResolvedMonacoColor(
   return colorMap[fgIndex].toString();
 }
 
+/** Long enough that a schema URL being typed is not taken for the finished address and prompted. */
+const SCHEMA_DETECTION_DELAY_MS = 2000;
+
 /** Extract $schema URL from the first few lines of a JSON file. */
 const DOLLAR_SCHEMA_RE = /"\$schema"\s*:\s*"([^"]+)"/;
 
@@ -121,6 +154,8 @@ function extractDollarSchema(content: string): string | null {
 
 interface CodeEditorPanelProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   line?: number;
   column?: number;
   onClose: () => void;
@@ -131,6 +166,7 @@ export function CodeEditorPanel({
   filePath,
   line,
   column,
+  movedFrom,
   onClose,
   panelApi,
 }: CodeEditorPanelProps) {
@@ -164,6 +200,9 @@ export function CodeEditorPanel({
       editor.setPosition({ lineNumber: ln, column: col });
       editor.focus();
       mountedRef.current = true;
+      // A one-time jump: left in the params it would repeat when the layout is next restored, and
+      // the same jump asked for again would change no prop and do nothing.
+      panelApi.updateParameters({ line: undefined, column: undefined });
     });
   }
 
@@ -186,7 +225,11 @@ export function CodeEditorPanel({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
+    isError,
+    retryLoad,
     saveNow,
+    recreateFile,
     saveOptionsRef,
     autoSaveOptionsRef,
     handleAcceptDisk: hookAcceptDisk,
@@ -202,14 +245,7 @@ export function CodeEditorPanel({
   });
 
   // Keep save option refs in sync with formatting settings.
-  const formattingSettings = useSettingsStore((s) => s.editor.formatting);
-  saveOptionsRef.current = formattingSettings.enabled
-    ? { format: true, formattingSettings }
-    : undefined;
-  autoSaveOptionsRef.current =
-    formattingSettings.enabled && formattingSettings.formatOnAutoSave
-      ? { format: true, formattingSettings }
-      : undefined;
+  useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
 
   const panelWorktreePath = usePanelWorktreePath();
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);
@@ -220,12 +256,70 @@ export function CodeEditorPanel({
   const resolvedLangRef = useRef(resolvedLang);
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
+  // Creating a model sends it to language servers, so it waits for the file's content, unless that
+  // cannot come (an error): `didOpen` carries the real text, and the
+  // model's URI scheme and first language, which decide its servers, can come from that content (a
+  // shebang script).
+  // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
+  const canCreateModelRef = useRef(false);
+  canCreateModelRef.current ||= diskContent !== null || isError;
+  const canCreateModel = canCreateModelRef.current;
+  const waitedForContent = useRef(!canCreateModel);
+  // An empty model says nothing about the file until a load has succeeded: until then neither an
+  // edit nor a save may replace the file. A confirmed-missing file is a legitimate empty buffer.
+  // Latched like the model: losing loaded content to a refetch must not freeze unsaved edits.
+  const contentLoadedRef = useRef(false);
+  contentLoadedRef.current ||= diskContent !== null;
+  const contentUnknown = !contentLoadedRef.current && !isDeleted;
+  const contentUnknownRef = useRef(contentUnknown);
+  contentUnknownRef.current = contentUnknown;
 
-  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one)
+  // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
+  const editorConfigQuery = useQuery({
+    queryKey: queryKeys.editorConfig(filePath, panelWorktreePath ?? undefined),
+    queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
+  });
+  const { data: editorConfigData } = editorConfigQuery;
+  // Read-only until the first `.editorconfig` load settles, so the first edit already indents by
+  // it; never longer than the cap, and not while the query is paused (offline) or after an error.
+  const editorConfigPending = useFirstLoadGate(
+    editorConfigQuery.isPending && editorConfigQuery.fetchStatus !== "paused",
+    EDITORCONFIG_GATE_MS,
+  );
+  const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
+  const editorConfigRef = useRef(editorConfig);
+  editorConfigRef.current = editorConfig;
+  const readOnly = editorConfigPending || contentUnknown;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  // Detected when the file's content is loaded or replaced from disk, not on the echoes of its own
+  // saves, so neither typing nor a conversion shifts it.
+  const [detectedIndentation, setDetectedIndentation] = useState(() =>
+    diskContent === null ? undefined : detectIndentation(diskContent),
+  );
+  // Chosen with Change Indentation; lasts while the tab is open.
+  const [fileIndentation, setFileIndentation] = useState<IndentationLayer | null>(null);
+  const indentation = useMemo(
+    () =>
+      resolveIndentation(editorSettings, filePath, {
+        language: resolvedLang,
+        editorConfig,
+        detected: detectedIndentation,
+        fileChoice: fileIndentation ?? undefined,
+      }),
+    [editorSettings, filePath, resolvedLang, editorConfig, detectedIndentation, fileIndentation],
+  );
+  const indentationRef = useRef(indentation);
+  indentationRef.current = indentation;
+  const [eol, setEol] = useState<"LF" | "CRLF">("LF");
+
+  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
+  // only for files tsc can report on.
   const { data: diagData } = useQuery({
     queryKey: queryKeys.diagnostics(null, undefined, panelWorktreePath ?? undefined),
     queryFn: () => api.getDiagnostics(panelWorktreePath!),
-    enabled: !!panelWorktreePath,
+    enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });
 
   // Filter diagnostics to this file (d.file is relative, filePath is absolute)
@@ -240,22 +334,13 @@ export function CodeEditorPanel({
 
   // Mount editor once
   useEffect(() => {
+    if (!canCreateModel) return;
     const container = containerRef.current;
     if (!container) return;
 
     const content = diskContent ?? "";
 
-    // Files served by an LSP that cares about real disk paths use file://
-    // URIs (YAML/JSON for schemas, Dockerfile/Terraform for workspace indexing).
-    // Other files use loxel://HEAD/<path> so the existing TS HoverProvider works.
-    const useFileScheme =
-      language === "yaml" ||
-      language === "json" ||
-      language === "dockerfile" ||
-      language === "dockerbake" ||
-      language === "terraform" ||
-      language === "astro" ||
-      language === "xml";
+    const useFileScheme = fileSchemeLanguages.has(language);
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });
@@ -267,51 +352,25 @@ export function CodeEditorPanel({
       model = monaco.editor.createModel(content, language, uri);
     }
 
-    const resolved = resolveIndentation(editorSettings, filePath);
-    model.updateOptions({ tabSize: resolved.tabSize, insertSpaces: resolved.insertSpaces });
-
     const editor = monaco.editor.create(container, {
+      ...CODE_EDITOR_OPTIONS,
       model,
       theme: getMonacoThemeName(darkMode),
-      tabSize: resolved.tabSize,
-      insertSpaces: resolved.insertSpaces,
-      detectIndentation: false,
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      lineHeight: 22,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
-      automaticLayout: true,
-      contextmenu: false,
-      lineNumbers: "on",
-      glyphMargin: true,
-      folding: true,
-      fixedOverflowWidgets: true,
-      suggest: { insertMode: "replace", showIcons: true },
-      suggestFontSize: 13,
-      suggestLineHeight: 28,
-      "semanticHighlighting.enabled": true,
-      stickyScroll: { enabled: false },
-      renderLineHighlight: "line",
-      scrollbar: { vertical: "auto", horizontal: "auto" },
-      overviewRulerLanes: 3,
-      padding: { top: 4 },
-      // Cmd-click "go to definition" navigates to a new editor tab (handled
-      // by our registerEditorOpener in monaco-env.ts). Without these options
-      // Monaco opens its inline "peek" widget, which loads content through
-      // ITextModelService — a path that does not consult registerEditorOpener
-      // and fails with "Model not found" for loxel:// URIs.
-      gotoLocation: {
-        multiple: "goto",
-        multipleDefinitions: "goto",
-        multipleDeclarations: "goto",
-        multipleImplementations: "goto",
-        multipleTypeDefinitions: "goto",
-        multipleReferences: "goto",
-      },
+      readOnly: readOnlyRef.current,
+      rulers: rulersFor(editorConfigRef.current),
+      inlayHints: inlayHintsOption(),
     });
 
     editorRef.current = editor;
+    if (waitedForContent.current) {
+      // `usePanelActivationFocus` found no editor when the panel opened.
+      if (isActivatedPanel(panelApi)) editor.focus();
+      // The content arrived with the model, so the disk-content effect below finds nothing to do.
+      if (diskContent !== null) setDetectedIndentation(detectIndentation(diskContent));
+    }
+    // After `create`: the first editor flips the global `detectIndentation`, which resets models.
+    model.updateOptions(indentationRef.current.indentation);
+    setEol(model.getEOL() === "\r\n" ? "CRLF" : "LF");
 
     // TextMate scope inspector — shows real TextMate scope stack instead of
     // the lossy reverse-mapped scopes from shikiToMonaco.
@@ -388,7 +447,22 @@ export function CodeEditorPanel({
       },
     });
 
-    getSerializedContentRef.current = () => editor.getModel()?.getValue() ?? null;
+    // Whether the last user change was an undo or redo. The autosave that follows it skips the
+    // save actions, which would otherwise redo what the user just undid (and clear redo).
+    let lastChangeWasUndo = false;
+    getSerializedContentRef.current = (reason) => {
+      if (contentUnknownRef.current) return null;
+      if (reason === "explicit" || !lastChangeWasUndo) {
+        // The save actions are part of what gets written, not an edit that needs saving again.
+        isProgrammaticRef.current = true;
+        try {
+          applyEditorConfigOnSave(editor, editorConfigRef.current, reason);
+        } finally {
+          isProgrammaticRef.current = false;
+        }
+      }
+      return editor.getModel()?.getValue() ?? null;
+    };
     mergeGetRef.current = () => editor.getModel()?.getValue() ?? null;
     mergeApplyRef.current = (merged, programmatic) => {
       const model = editor.getModel();
@@ -403,8 +477,12 @@ export function CodeEditorPanel({
     };
 
     // Listen for user edits (guarded against programmatic setValue)
-    editor.onDidChangeModelContent(() => {
+    editor.onDidChangeModelContent((e) => {
+      setEol(e.eol === "\r\n" ? "CRLF" : "LF");
       if (isProgrammaticRef.current) return;
+      // `readOnly` does not stop a language server's edits. Staying clean lets the load replace them.
+      if (contentUnknownRef.current) return;
+      lastChangeWasUndo = e.isUndoing || e.isRedoing;
       handleChange(editor.getModel()?.getValue() ?? "");
     });
 
@@ -436,8 +514,17 @@ export function CodeEditorPanel({
           : new URL(schemaUrl, `file://${filePath}`).href;
       api.resolveSchema(schemaUrl, baseDir).then((schema) => {
         if (schema) setDollarSchema(fileUriStr, resolvedUrl, schema);
+        else removeDollarSchema(fileUriStr);
       });
     }
+
+    // A decision on a schema URL can change what this file's `$schema` resolves to.
+    const unsubscribeSchemaConsent = isJsonFile
+      ? useSchemaConsentStore.subscribe(() => {
+          lastDollarSchema = null;
+          detectAndApplyDollarSchema();
+        })
+      : undefined;
 
     if (isJsonFile) {
       // Initial detection
@@ -445,19 +532,29 @@ export function CodeEditorPanel({
       // Debounced on content change
       editor.onDidChangeModelContent(() => {
         clearTimeout(dollarSchemaTimer);
-        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, 300);
+        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, SCHEMA_DETECTION_DELAY_MS);
+      });
+    }
+
+    // Configured schemas this file matches, and remote schemas a TOML or XML file names.
+    requestSchemasForOpenFiles();
+    let schemaRequestTimer: ReturnType<typeof setTimeout> | undefined;
+    if (language === "toml" || language === "xml") {
+      editor.onDidChangeModelContent(() => {
+        clearTimeout(schemaRequestTimer);
+        schemaRequestTimer = setTimeout(requestSchemasForOpenFiles, SCHEMA_DETECTION_DELAY_MS);
       });
     }
 
     // Cmd+W is handled by the global keybinding system (useKeybindings).
     // saveOptionsRef is kept in sync with formatting settings above,
     // so save() automatically includes format options for both Cmd+S and auto-save.
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveNow());
+    addSaveAction(editor, () => void saveNow());
 
     // Navigate to initial line:column if provided (e.g. from search results).
-    // Only navigate now if diskContent was available at mount (React Query cache hit).
-    // If diskContent is null (still fetching), the editor has empty content and Monaco
-    // would clamp to line 1 — defer navigation to the effect below.
+    // Only navigate now if diskContent is available. It is null here only after a failed load: the
+    // editor is empty and Monaco would clamp to line 1, so the effect below navigates once a retry
+    // brings the content.
     let navRafId: number | undefined;
     if (initialLineRef.current && diskContent !== null) {
       navRafId = navigateToInitialPosition(editor);
@@ -468,6 +565,8 @@ export function CodeEditorPanel({
     return () => {
       if (navRafId !== undefined) cancelAnimationFrame(navRafId);
       clearTimeout(dollarSchemaTimer);
+      clearTimeout(schemaRequestTimer);
+      unsubscribeSchemaConsent?.();
       clearTimeout(inspectTimer);
       cursorDisposable.dispose();
       if (inspectorWidgetRef.current) {
@@ -485,9 +584,9 @@ export function CodeEditorPanel({
       editor.dispose();
       editorModel?.dispose();
     };
-    // Mount-only effect
+    // Mount-only effect, once the model can be created
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canCreateModel]);
 
   // Update content from disk — only when editor state is clean.
   // Reads state live from the store (not the ref) because useEffect runs after paint,
@@ -501,12 +600,13 @@ export function CodeEditorPanel({
       isProgrammaticRef.current = true;
       model.setValue(diskContent);
       isProgrammaticRef.current = false;
+      setDetectedIndentation(detectIndentation(diskContent));
     }
   }, [diskContent, filePath]);
 
   // Deferred initial navigation: when diskContent arrives after mount and initial refs are still pending.
-  // This handles the case where the editor was created with empty content (diskContent was null
-  // during mount) and the mount effect could not navigate. Declared after the content-update effect
+  // This handles the case where the editor was created with empty content (a failed load)
+  // and the mount effect could not navigate. Declared after the content-update effect
   // so React runs them in order — content is set in the model before navigation fires.
   useEffect(() => {
     if (diskContent === null || mountedRef.current) return;
@@ -529,7 +629,18 @@ export function CodeEditorPanel({
     editor.revealLineInCenter(line);
     editor.setPosition({ lineNumber: line, column: column ?? 1 });
     editor.focus();
-  }, [line, column]);
+    panelApi.updateParameters({ line: undefined, column: undefined });
+  }, [line, column, panelApi]);
+
+  // Reopening the closed tab puts the cursor back.
+  useEffect(
+    () =>
+      registerClosedTabParams(panelApi.id, () => {
+        const position = editorRef.current?.getPosition();
+        return position ? { line: position.lineNumber, column: position.column } : {};
+      }),
+    [panelApi.id],
+  );
 
   // Update language
   useEffect(() => {
@@ -546,16 +657,51 @@ export function CodeEditorPanel({
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
   }, [darkMode]);
 
-  // Apply indentation settings (live update when settings change)
+  useInlayHintsOption(editorRef);
+
+  // Apply indentation live, as its sources change.
   useEffect(() => {
+    editorRef.current?.getModel()?.updateOptions(indentation.indentation);
+  }, [indentation]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly, rulers: rulersFor(editorConfig) });
+  }, [readOnly, editorConfig]);
+
+  const convertIndentation = useCallback((insertSpaces: boolean) => {
     const editor = editorRef.current;
-    if (!editor) return;
-    const model = editor.getModel();
-    if (!model) return;
-    const { tabSize, insertSpaces } = resolveIndentation(editorSettings, filePath);
-    editor.updateOptions({ tabSize, insertSpaces, detectIndentation: false });
-    model.updateOptions({ tabSize, insertSpaces });
-  }, [editorSettings, filePath]);
+    const model = editor?.getModel();
+    // Monaco's actions do nothing in a read-only editor, so neither does choosing the style.
+    if (!editor || !model || editor.getOption(monaco.editor.EditorOption.readOnly)) return;
+    // Monaco's actions convert by the model's tab size, then set `insertSpaces` on the model.
+    const action = insertSpaces
+      ? "editor.action.indentationToSpaces"
+      : "editor.action.indentationToTabs";
+    void editor.getAction(action)?.run();
+    // Keep the sizes the conversion used, whichever source they came from.
+    const { tabSize, indentSize } = model.getOptions();
+    setFileIndentation({ insertSpaces, tabSize, indentSize });
+  }, []);
+
+  // Publish the indentation for the status bar while this is the file's tab.
+  const publishedIndentationRef = useRef<EditorIndentation | null>(null);
+  useEffect(() => {
+    const entry: EditorIndentation = {
+      resolution: indentation,
+      eol,
+      setFileChoice: setFileIndentation,
+      convert: convertIndentation,
+    };
+    publishedIndentationRef.current = entry;
+    useEditorIndentationStore.getState().publish(filePath, entry);
+  }, [filePath, indentation, eol, convertIndentation]);
+  useEffect(
+    () => () => {
+      const entry = publishedIndentationRef.current;
+      if (entry) useEditorIndentationStore.getState().remove(filePath, entry);
+    },
+    [filePath],
+  );
 
   // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {
@@ -581,7 +727,7 @@ export function CodeEditorPanel({
     }));
 
     monaco.editor.setModelMarkers(model, "typescript", markers);
-  }, [diagnostics]);
+  }, [diagnostics, canCreateModel]);
 
   // Real-time per-file diagnostics are delivered by TypeScript over LSP (via
   // LspDiagnosticsFeature in monaco-lsp-client) — no HTTP round-trip needed.
@@ -617,7 +763,7 @@ export function CodeEditorPanel({
       const m = editorRef.current?.getModel();
       if (m) monaco.editor.setModelMarkers(m, "json-strict", []);
     };
-  }, [resolvedLang]);
+  }, [resolvedLang, canCreateModel]);
 
   // Handlers for diverged state resolution
   const handleAcceptDisk = useCallback(() => {
@@ -631,10 +777,20 @@ export function CodeEditorPanel({
       model.pushEditOperations([], edits, () => []);
     }
     isProgrammaticRef.current = false;
+    setDetectedIndentation(detectIndentation(content));
   }, [hookAcceptDisk, isProgrammaticRef]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      {contentUnknown && isError && (
+        <EditorBanner
+          tone="danger"
+          message="Could not load this file. Editing is off so nothing can overwrite it."
+          actions={[{ label: "Retry", onClick: retryLoad }]}
+        />
+      )}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

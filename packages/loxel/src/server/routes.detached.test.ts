@@ -33,6 +33,7 @@ describe("detached file project destinations", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -42,11 +43,16 @@ describe("detached file project destinations", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
-      formatContent: async () => null,
+      updateTomlSchemas: () => {},
+      formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 
@@ -162,6 +168,43 @@ describe("detached file project destinations", () => {
     expect((await readdir(join(wt, "src"))).sort()).toEqual(["Shot.md", "shot-1.png"]);
     expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "Shot.md", "shot-1.png"]);
   });
+
+  test("file content of a deleted draft is a 404 with code ENOENT", async () => {
+    const draft = join(detachedDir, "Draft.md");
+    ctx.resolveFilePath = (absolutePath) =>
+      absolutePath === draft
+        ? {
+            type: "detached",
+            wtPath: wt,
+            resources: { detachedFilesService: service } as never,
+            name: "Draft.md",
+          }
+        : null;
+
+    const present = await get(
+      `/api/file-content?path=${encodeURIComponent(draft)}&wt=${encodeURIComponent(wt)}`,
+    );
+    expect(await present.json()).toEqual({ content: "draft" });
+
+    await rm(draft);
+    const missing = await get(
+      `/api/file-content?path=${encodeURIComponent(draft)}&wt=${encodeURIComponent(wt)}`,
+    );
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "File not found", code: "ENOENT" });
+  });
+
+  test("file content for an unresolved path is a 404 without a code", async () => {
+    const res = await get(
+      `/api/file-content?path=${encodeURIComponent(join(root, "elsewhere.md"))}`,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "File not found in any active worktree" });
+  });
+
+  function get(path: string): Promise<Response> {
+    return handleRequest(new Request(`http://localhost${path}`), ctx);
+  }
 
   function post(path: string, body: unknown): Promise<Response> {
     return handleRequest(

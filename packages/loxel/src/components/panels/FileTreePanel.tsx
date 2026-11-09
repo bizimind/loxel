@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useRevertToHeadMutation } from "@/queries/use-git-mutations";
 import { useDiffQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
+import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 interface DiscardTarget {
@@ -124,6 +125,12 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
         worktree: discardTarget.worktree,
         files: discardPaths(discardTarget.files),
       });
+      // A discarded file is no longer the one being edited: once it leaves the diff, the viewer
+      // moves on to another file.
+      const ui = getWorktreeUI(discardTarget.worktree).getState();
+      if (discardTarget.files.some((f) => fileDiffPath(f) === ui.editedDiffFile)) {
+        ui.setEditedDiffFile(null);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to discard changes");
     }

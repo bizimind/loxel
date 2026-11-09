@@ -53,6 +53,22 @@ describe("transformToBare", () => {
     expect(await git(["status", "--porcelain"], worktreePath)).toBe("");
   });
 
+  test("keeps the converted checkout working when per-worktree config is on", async () => {
+    repo = await createTestRepo();
+    await git(["config", "extensions.worktreeConfig", "true"], repo.root);
+    await git(["config", "--worktree", "wt.note", "main checkout"], repo.root);
+
+    const worktreePath = await transformToBare(repo.root, "main");
+
+    expect(await git(["rev-parse", "--is-bare-repository"], repo.root)).toBe("true");
+    expect(await git(["status", "--porcelain"], worktreePath)).toBe("");
+    // The main checkout's own settings follow it into the worktree it became.
+    expect(await git(["config", "--worktree", "--get", "wt.note"], worktreePath)).toBe(
+      "main checkout",
+    );
+    expect(await git(["config", "--get", "core.bare"], repo.root)).toBe("true");
+  });
+
   test("refuses conversion when linked worktrees already exist", async () => {
     repo = await createTestRepo();
     const linkedPath = join(repo.root, "..", "linked");

@@ -1,15 +1,15 @@
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   assertCanTransformToBare,
   planAdd,
-  executeAdd,
   planRemove,
-  executeRemove,
   getWorktreeName,
+  HOOK_INIT,
   listManagedWorktrees,
   detectRepoType,
   hasUncommittedChanges,
@@ -17,37 +17,58 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
+  executeInit,
+  planInit,
   shellQuote,
   type AddPlan,
+  type AddResult,
+  type InitActionId,
   type ProgressHandler,
   type RemovePlan,
+  type RemoveResult,
 } from "@bizimind/wt/lib";
 
 import type { DiffInfo } from "@/api/diff-model";
+import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
-import type { LogCategory, LogLevel } from "@/api/log-entry-model";
-import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
+import type { LogLevel } from "@/api/log-entry-model";
+import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
+import type { PanelPlacement } from "@/api/panel-placement-model";
+import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type {
   BrowseEntry,
   DetectPathResult,
+  ProjectsResponse,
+  Project,
+  ProjectSetupResult,
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
+import type { RepoTrustDecision, RepoTrustListResponse } from "@/api/repo-trust-model";
 import type { SearchMatch } from "@/api/search-model";
-import type { WsMessage } from "@/api/ws-protocol";
+import type {
+  NestedRemoval,
+  NestedWorktreePlan,
+  WorktreeRemovePlan,
+  WorktreeRemoveResult,
+} from "@/api/worktree-removal-model";
+import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
-import { isWithin } from "@/lib/project-file-helpers";
+import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
+import { classifySchemaGlob } from "@/lib/schema-glob";
+import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
+import { resolveEditorConfig } from "./editorconfig";
 import { describeError } from "./error-message";
 import type { FileTree } from "./external-folders-service";
-import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
+import type { FormatResult } from "./format-service";
 import * as git from "./git-commands";
 import {
   IMAGE_ASSETS_DIR,
@@ -59,33 +80,67 @@ import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
+import { SETTINGS_STORE_KEY, stripLegacyAgentSettings } from "./persisted-settings";
 import * as projectStore from "./project-store";
+import {
+  childWorktreeOptions,
+  titleMeta,
+  listProjectWorktrees,
+  nestedBelow,
+  projectWorktreesResponse,
+  updateWorktreeMeta,
+  type ProjectWorktree,
+  type WorktreeMetaUpdate,
+} from "./project-worktrees";
+import {
+  forgetRepoTrust,
+  getRepoTrustStatus,
+  isRepoTrustStoreKey,
+  listRepoTrust,
+  setRepoTrustDecision,
+  setRepoTrusted,
+} from "./repo-trust";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
+import type { SchemaConsent } from "./schema-consent";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
+import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
-import {
-  decryptModelKeys,
-  encryptModelKeys,
-  hasPlaintextModelKeys,
-  isEncryptedStoreKey,
-} from "./store-encryption";
 import { stress } from "./stress-detector";
-import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
+import { toolchainStatusModules } from "./toolchain-statuses";
 import { getCurrentVersion } from "./version";
-import { INTERNAL_WORKTREE_PREFIX, findWorkspacePackages } from "./worktree-utils";
+import {
+  addFirstWorktreeOfNewRepo,
+  addWorktree,
+  isCleanHookHeld,
+  removeWorktree,
+  runHeldInitHook,
+} from "./worktree-hooks";
+import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
+import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
 
 const wtLog = logger.child("worktrees");
+/** The one `wt init` action Loxel applies: turning on worktree metadata, so worktrees can nest. */
+const METADATA_ON_ACTION: InitActionId = "worktree-metadata-on";
 const searchLog = logger.child("search");
 const openInLog = logger.child("launch-services");
+const terminalLog = logger.child("terminal");
 
 const wtProgress: ProgressHandler = {
   log: (msg) => wtLog.info(msg),
   warn: (msg) => wtLog.warn(msg),
 };
+
+/** The window the user is working in: the one `sendToActiveWindow` delivers to. */
+export interface ActiveWindow {
+  windowId: string | null;
+  /** The worktree the window shows; null while it is launching or has no project open. */
+  worktreePath: string | null;
+}
 
 export interface RouteContext {
   broadcastToSubscribers: (wtPath: string, msg: WsMessage) => void;
@@ -96,6 +151,17 @@ export interface RouteContext {
    * else the most recently focused window. Returns false when no window is connected.
    */
   sendToActiveWindow: (windowId: string | null, msg: WsMessage) => boolean;
+  /**
+   * Send to every window subscribed to `wtPath`; the one the user is working in among them
+   * (`windowId`'s, else the most recently focused) gets `primary` instead. Returns false when no
+   * window shows the worktree.
+   */
+  sendToWorktreeWindows: (
+    wtPath: string,
+    windowId: string | null,
+    msg: WsMessage,
+    primary: WsMessage,
+  ) => boolean;
   /** Why a folder cannot be opened in an Others section, or null when it can. */
   externalFolderConflict: (folder: string) => string | null;
   getProject: (cwd: string) => ProjectState | undefined;
@@ -113,20 +179,38 @@ export interface RouteContext {
   resolveFilePath: (absolutePath: string, preferredWtPath?: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
   teardownProject: (cwd: string) => void;
-  shutdown: (exitCode?: number) => void;
+  /** The server is shutting down: it still answers API requests while they drain, then exits. */
+  isShuttingDown: () => boolean;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
-  /** Update YAML LSP schema mappings on all active sessions. */
+  /** The user's decisions on schema URLs named by project files. */
+  schemaConsent: SchemaConsent;
+  /** Download what open files name or match, as far as they may be fetched. */
+  ensureSchemas: (urls: readonly string[]) => Promise<void>;
+  /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
   updateYamlSchemas: (schemaMap: Record<string, string[]>) => void;
+  /** Update TOML LSP schema mappings (schema URL → globs) on all active sessions. */
+  updateTomlSchemas: (schemaMap: Record<string, string[]>) => void;
   /** Format file content using the resolved formatter. */
   formatContent: (
     content: string,
     filePath: string,
     worktreePath: string | undefined,
     settings: FormattingSettings,
-  ) => Promise<string | null>;
+  ) => Promise<FormatResult>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
+  /** The window `sendToActiveWindow` delivers to, or null when no window is connected. */
+  activeWindow: (windowId: string | null) => ActiveWindow | null;
+  /**
+   * Start a terminal's shell with no panel attached, typing `command` into it; the panel's first
+   * attach binds to the running session. Resolves once the shell is running.
+   */
+  startTerminal: (
+    target: Pick<TerminalSpawnTarget, "id" | "cwd" | "worktreePath" | "windowId"> & {
+      command?: string;
+    },
+  ) => Promise<void>;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -154,6 +238,19 @@ function resolveFilePathWithHint(
   if (requireExists && !existsSync(filePath)) return null;
   resources.externalFilesService.addFile(filePath);
   return ctx.resolveFilePath(filePath, worktreeHint);
+}
+
+/** `resolveFilePathWithHint` for a read that leaves no trace: an unknown file is not added. */
+function resolvePreviewPath(
+  ctx: RouteContext,
+  filePath: string,
+  worktreeHint: string | null,
+): ResolvedFilePath | null {
+  const resolved = ctx.resolveFilePath(filePath, worktreeHint ?? undefined);
+  if (resolved || !worktreeHint) return resolved;
+  const resources = ctx.getWorktreeResources(worktreeHint);
+  if (!resources) return null;
+  return { type: "external", wtPath: worktreeHint, resources, absolutePath: filePath };
 }
 
 function resolveProjectFromReq(
@@ -403,6 +500,21 @@ async function handleFileLines(req: Request, ctx: RouteContext): Promise<Respons
 }
 
 // GET /api/file-content - Get full file content at a ref or from worktree disk
+/**
+ * Read a resolved file for `GET /api/file-content`. A missing file (or a missing parent) is a
+ * 404 with `code: "ENOENT"`, which editors use to mark their file as deleted; any other read
+ * failure propagates as a server error so it is never mistaken for a deletion.
+ */
+async function readFileContentResponse(read: () => Promise<string>): Promise<Response> {
+  try {
+    return json({ content: await read() });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return error("File not found", 404, "ENOENT");
+    throw err;
+  }
+}
+
 async function handleFileContent(req: Request, ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
   const path = url.searchParams.get("path");
@@ -415,28 +527,37 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
 
   // Absolute path mode: resolve via ctx.resolveFilePath
   if (path.startsWith("/")) {
-    const resolved = resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
-    if (!resolved) return error("File not found in any active worktree", 404);
+    // `preview=1` is a look only (Monaco's peek widgets): the file is not tracked for renames, and
+    // a file outside every tree is read as the hint worktree's without joining its Others files.
+    const preview = url.searchParams.get("preview") === "1";
+    const resolved = preview
+      ? resolvePreviewPath(ctx, path, url.searchParams.get("wt"))
+      : resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
+    if (!resolved) {
+      // A subscribed worktree would have taken the file as an external one, had it been on disk.
+      const hint = url.searchParams.get("wt");
+      if (hint && ctx.getWorktreeResources(hint) && !existsSync(path)) {
+        return error("File not found", 404, "ENOENT");
+      }
+      // No `code`: the path is not in a subscribed worktree (yet), which says nothing about the file.
+      return error("File not found in any active worktree", 404);
+    }
     if (resolved.type === "detached") {
-      const content = await resolved.resources.detachedFilesService.readFileContent(resolved.name);
-      return json({ content });
+      return readFileContentResponse(() =>
+        resolved.resources.detachedFilesService.readFileContent(resolved.name),
+      );
     }
     if (resolved.type === "external") {
-      try {
-        const content = await resolved.resources.externalFilesService.readFileContent(
-          resolved.absolutePath,
-        );
-        return json({ content });
-      } catch {
-        return error("File not found", 404);
-      }
+      return readFileContentResponse(() =>
+        resolved.resources.externalFilesService.readFileContent(resolved.absolutePath),
+      );
     }
-    try {
+    return readFileContentResponse(async () => {
       const content = await Bun.file(join(resolved.tree.root, resolved.relativePath)).text();
-      return json({ content });
-    } catch {
-      return error("File not found", 404);
-    }
+      // An editor has this file open: follow it if it is renamed or moved.
+      if (!preview) void resolved.tree.filesService.trackFile(resolved.relativePath);
+      return content;
+    });
   }
 
   // Relative path mode (legacy): use wt/ref params, returns { lines }
@@ -460,6 +581,12 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
   const lines = await git.getFileContent(resolved.cwd, path, ref, gitScope);
   return json({ lines });
 }
+
+/** A project's file is data, never a page of this server: media tags and fetches ignore these. */
+const RAW_FILE_HEADERS = {
+  "Content-Security-Policy": "sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
 
 // GET /api/file-raw - Serve raw binary file content with correct Content-Type
 async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response> {
@@ -507,12 +634,13 @@ async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response>
           "Accept-Ranges": "bytes",
           "Content-Length": String(end - start + 1),
           "Content-Type": file.type,
+          ...RAW_FILE_HEADERS,
         },
       });
     }
   }
 
-  return new Response(file, { headers: { "Accept-Ranges": "bytes" } });
+  return new Response(file, { headers: { "Accept-Ranges": "bytes", ...RAW_FILE_HEADERS } });
 }
 
 // GET /api/media-frame - Serve HTML wrapper page for media content in a sandboxed iframe
@@ -637,6 +765,12 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Chromium paints an opaque canvas behind a frame whose color scheme differs from its
+     <iframe> element's, hiding the viewer's checkerboard under transparent pixels. With both
+     schemes allowed, the frame takes the scheme of the <iframe> element (the embedding
+     element's scheme is a frame's preferred scheme), so it always matches the app's, and an
+     SVG's own prefers-color-scheme and light-dark() rules follow the app rather than the OS. */
+  :root { color-scheme: light dark; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
   body { display: flex; align-items: center; justify-content: center; }
   img, video, svg { display: block; max-width: 100%; max-height: 100%; }
@@ -644,13 +778,15 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </head>
 <body>${bodyContent}</body></html>`;
 
-  // CSP varies by media type:
-  // - SVGs: inlined content may contain scripts (for animations). CSP blocks
-  //   ALL network access (no server origin, no https:) so scripts can't reach
-  //   the loxel API or exfiltrate data. Only data:/blob: for embedded resources.
-  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin.
-  //   No untrusted scripts run — only our trusted inline code (postMessage, controls).
-  //   The server origin is safe here because there's no user-controlled script.
+  // CSP varies by media type (the iframe sandbox in MediaViewerPanel varies with it):
+  // - SVGs: inlined content may contain scripts (for animations). The frame has an opaque
+  //   origin (sandbox without allow-same-origin) and CSP blocks ALL network access (no server
+  //   origin, no https:) so scripts can't reach the loxel API or exfiltrate data. Only
+  //   data:/blob: for embedded resources.
+  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin, and the frame
+  //   keeps the server origin (allow-same-origin) so that load is same-origin rather than a
+  //   cross-site subresource request, which request-origin.ts rejects. No untrusted scripts
+  //   run — only our trusted inline code (postMessage, controls).
   const baseCsp = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
@@ -864,9 +1000,13 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     ? parseFormattingSettings(body.formattingSettings)
     : undefined;
 
+  // Returned to the client so it can tell the user why a save went out unformatted.
+  let formatNotice: string | undefined;
   async function maybeFormat(c: string, fp: string, wtPath: string): Promise<string> {
     if (!shouldFormat || !formattingSettings) return c;
-    return (await ctx.formatContent(c, fp, wtPath, formattingSettings)) ?? c;
+    const result = await ctx.formatContent(c, fp, wtPath, formattingSettings);
+    formatNotice = result.notice;
+    return result.content ?? c;
   }
 
   // Absolute path mode: resolve via ctx.resolveFilePath
@@ -898,7 +1038,8 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     await tree.filesService.writeFile(relativePath, nonce, async () => {
       await Bun.write(join(tree.root, relativePath), content);
     });
-    return json({ success: true, content });
+    void tree.filesService.trackFile(relativePath);
+    return json({ success: true, content, formatNotice });
   }
 
   // Relative path mode (legacy): use worktreePath from body
@@ -916,34 +1057,41 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     // Fallback for when no subscriber has activated resources yet
     await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
   }
-  return json({ success: true, content });
+  return json({ success: true, content, formatNotice });
 }
 
 // POST /api/file-upload — Store an image pasted/dropped into a markdown editor.
-// Multipart body: `path` (absolute path of the markdown file), `nonce`, `file`.
+// JSON body: `path` (absolute path of the markdown file), `nonce`, `name` (the pasted file's
+// name, only used to slug the stored name) and `data` (the image bytes, base64). JSON rather
+// than multipart because the server only admits mutations declared as application/json.
 // Project files get `<md dir>/assets/<slug>-<timestamp>.<ext>`; drafts are stored flat in
 // the drafts directory. Responds with the absolute path and the markdown-relative `src`.
 async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Response> {
+  // base64 inflates by 4/3; the extra headroom covers the other fields.
   const declaredLength = Number(req.headers.get("Content-Length") ?? 0);
   if (declaredLength > MAX_IMAGE_UPLOAD_BYTES * 1.5) return error("Image too large", 413);
 
-  let form: FormData;
+  let body: Record<string, unknown>;
   try {
-    form = await req.formData();
+    body = await parseBody(req);
   } catch {
-    return error("Expected multipart form data", 400);
+    return error("Expected a JSON object body", 400);
   }
-  const mdPath = form.get("path");
-  const nonce = form.get("nonce");
-  const file = form.get("file");
+  const { path: mdPath, nonce, name: fileName, data } = body;
   if (typeof mdPath !== "string" || !mdPath.startsWith("/")) {
     return error("Missing or invalid path", 400);
   }
   if (typeof nonce !== "string" || !nonce) return error("Missing nonce", 400);
-  if (!(file instanceof File)) return error("Missing file", 400);
-  if (file.size > MAX_IMAGE_UPLOAD_BYTES) return error("Image too large", 413);
-  // The declared MIME type is not consulted: Bun derives File.type from the filename, so it
-  // says nothing about the content. `detectImageExtension` decides from the bytes below.
+  if (typeof fileName !== "string") return error("Missing name", 400);
+  if (typeof data !== "string" || !data) return error("Missing data", 400);
+
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.fromBase64(data);
+  } catch {
+    return error("data must be base64", 400);
+  }
+  if (bytes.length > MAX_IMAGE_UPLOAD_BYTES) return error("Image too large", 413);
 
   // Only files already owned by a worktree (project tree or drafts) can receive images.
   // Deliberately not using resolveFilePathWithHint: it would register unknown paths as
@@ -954,13 +1102,12 @@ async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Respon
     return error("Image upload is only supported for project files and drafts", 400);
   }
 
-  const bytes = new Uint8Array(await file.arrayBuffer());
   const ext = detectImageExtension(bytes);
   if (!ext) return error("Unsupported image format", 415);
 
   if (resolved.type === "detached") {
     const { detachedFilesService } = resolved.resources;
-    const name = await writeWithUniqueName(file.name, ext, (candidate) =>
+    const name = await writeWithUniqueName(fileName, ext, (candidate) =>
       detachedFilesService.writeNewFile(candidate, bytes, nonce),
     );
     return json({ path: join(detachedFilesService.dir, name), src: `./${name}` });
@@ -973,7 +1120,7 @@ async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Respon
   if (!relativePath) return error("Cannot upload into a folder", 400);
   const relativeDir = join(dirname(relativePath), IMAGE_ASSETS_DIR);
   await mkdir(join(tree.root, relativeDir), { recursive: true });
-  const name = await writeWithUniqueName(file.name, ext, (candidate) =>
+  const name = await writeWithUniqueName(fileName, ext, (candidate) =>
     tree.filesService.writeFile(join(relativeDir, candidate), nonce, () =>
       writeFile(join(tree.root, relativeDir, candidate), bytes, { flag: "wx" }),
     ),
@@ -988,6 +1135,127 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
   if (!wtPath) return error("Missing wt parameter", 400);
   const formatters = ctx.getDetectedFormatters(wtPath);
   return json({ formatters });
+}
+
+// GET /api/editorconfig?path=<abs>&wt= — The .editorconfig properties for a file. Only files in a
+// tree (the worktree or an Others folder) have any: the lookup stops at the tree root, and drafts
+// and individually opened external files have no tree.
+async function handleEditorConfig(req: Request, ctx: RouteContext): Promise<Response> {
+  const url = new URL(req.url);
+  const path = url.searchParams.get("path");
+  if (!path || !isAbsolute(path)) return error("Missing or relative path parameter", 400);
+  const resolved = ctx.resolveFilePath(path, url.searchParams.get("wt") ?? undefined);
+  const response: EditorConfigResponse = {
+    properties:
+      resolved?.type === "tree" && resolved.relativePath
+        ? await resolveEditorConfig(
+            join(resolved.tree.root, resolved.relativePath),
+            resolved.tree.root,
+          )
+        : {},
+  };
+  return json(response);
+}
+
+/**
+ * The worktree path of a `wt` query parameter, once it is known to be a real worktree of its
+ * project: resolving a language's toolchain may run tools in the directory.
+ */
+async function worktreeFromQuery(req: Request, ctx: RouteContext): Promise<string | Response> {
+  const resolved = resolveWorktreeFromReq(req, ctx);
+  if (resolved instanceof Response) return resolved;
+  return validatedWorktreePath(resolved.wtPath, resolved.cwd);
+}
+
+async function validatedWorktreePath(wtPath: string, cwd: string): Promise<string | Response> {
+  const absolute = resolve(wtPath);
+  try {
+    await git.validateWorktreePath(absolute, cwd);
+  } catch {
+    return error("Not a worktree of this project", 400);
+  }
+  return absolute;
+}
+
+/** Every language toolchain's GET routes, given the validated worktree of their `wt` parameter. */
+const toolchainGetRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { GET } }) => Object.entries(GET))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const wtPath = await worktreeFromQuery(req, ctx);
+        return wtPath instanceof Response ? wtPath : handle(wtPath);
+      },
+    ]),
+);
+
+/** Every language toolchain's POST routes, given the validated worktree of `worktreePath`. */
+const toolchainPostRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { POST } }) => Object.entries(POST))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const body = await parseBody(req);
+        const resolved = resolveProjectFromBody(body, ctx);
+        if (resolved instanceof Response) return resolved;
+        const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+        return wtPath instanceof Response ? wtPath : handle(wtPath, body);
+      },
+    ]),
+);
+
+async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await worktreeFromQuery(req, ctx);
+  return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
+}
+
+const REPO_TRUST_DECISIONS: readonly RepoTrustDecision[] = ["trusted", "declined", "undecided"];
+
+function isRepoTrustDecision(value: unknown): value is RepoTrustDecision {
+  return REPO_TRUST_DECISIONS.some((decision) => decision === value);
+}
+
+/**
+ * Answer for a worktree's repository, or forget an answer by repository id: a repository no project
+ * uses has no worktree to name, and forgetting can only take trust away.
+ */
+async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const { decision } = body;
+  if (!isRepoTrustDecision(decision)) return error("Missing 'decision' in body", 400);
+  if (typeof body.repositoryId === "string") {
+    if (decision !== "undecided") return error("Only forgetting takes a repository id", 400);
+    forgetRepoTrust(body.repositoryId);
+    return json({ success: true });
+  }
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+  if (wtPath instanceof Response) return wtPath;
+  setRepoTrustDecision(wtPath, decision, { unlessTrusted: body.unlessTrusted === true });
+  return json(getRepoTrustStatus(wtPath));
+}
+
+/** Every project's repository and every stored answer, for Settings > Security. */
+async function handleListRepoTrust(): Promise<Response> {
+  const { projects } = await projectStore.loadProjects();
+  const worktrees = await Promise.all(
+    projects.map(async (project) => {
+      // A project whose folder is gone has nothing to answer through; its stored answer is still
+      // listed. A bare root's identity is not its worktrees', so it answers through those.
+      if (!existsSync(project.path)) return [];
+      if (!project.isBare) return [project.path];
+      try {
+        return (await listManagedWorktrees(project.path)).map((wt) => wt.path);
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const response: RepoTrustListResponse = { repositories: listRepoTrust(worktrees.flat()) };
+  return json(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,10 +1873,12 @@ function validateCloneUrl(url: string): void {
 }
 
 async function createInitialCommit(bareRepoPath: string): Promise<void> {
-  const result = Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
-    cwd: bareRepoPath,
-    env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
-  });
+  const result = measureSpawn("git commit", () =>
+    Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
+      cwd: bareRepoPath,
+      env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
+    }),
+  );
   if (result.exitCode !== 0) {
     throw new Error(`Failed to create initial commit: ${result.stderr.toString()}`);
   }
@@ -1675,49 +1945,16 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
   }
 }
 
-/** Detection rules for auto-suggesting workspace setup files and commands. */
-const SUGGESTION_RULES: Array<{ file: string; copyFile?: string; commands?: string[] }> = [
-  { file: "bun.lock", commands: ["bun i --frozen-lockfile"] },
-  { file: "bun.lockb", commands: ["bun i --frozen-lockfile"] },
-  { file: "pnpm-lock.yaml", commands: ["pnpm i --frozen-lockfile"] },
-  { file: "package-lock.json", commands: ["npm ci"] },
-  { file: "yarn.lock", commands: ["yarn install --frozen-lockfile"] },
-  { file: ".env", copyFile: ".env" },
-  { file: ".env.local", copyFile: ".env.local" },
-  { file: ".envrc", copyFile: ".envrc", commands: ["direnv allow"] },
-  { file: ".mise.toml", commands: ["mise trust", "mise i"] },
-  { file: ".tool-versions", commands: ["mise trust", "mise i"] },
-];
-
 // GET /api/projects/scan-suggestions?path=... — auto-detect files and commands for workspace setup
-function handleScanSuggestions(req: Request, _ctx: RouteContext): Response {
+async function handleScanSuggestions(req: Request, _ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
   const rawPath = url.searchParams.get("path") ?? "";
-  if (!rawPath) return json({ files: [], commands: [] });
+  const empty: ScanSuggestionsResult = { files: [], commands: [] };
+  if (!rawPath) return json(empty);
   const dirPath = expandTilde(rawPath);
-
-  if (!existsSync(dirPath)) return json({ files: [], commands: [] });
-
-  const files: string[] = [];
-  const commands: string[] = [];
-  const seenCommands = new Set<string>();
-
-  for (const rule of SUGGESTION_RULES) {
-    if (existsSync(join(dirPath, rule.file))) {
-      if (rule.copyFile && !files.includes(rule.copyFile)) {
-        files.push(rule.copyFile);
-      }
-      for (const cmd of rule.commands ?? []) {
-        if (!seenCommands.has(cmd)) {
-          seenCommands.add(cmd);
-          commands.push(cmd);
-        }
-      }
-    }
-  }
-
-  const result: ScanSuggestionsResult = { files, commands };
-  return json(result);
+  if (!existsSync(dirPath)) return json(empty);
+  // The init hook runs with this PATH (the `hookEnv` passed to wt).
+  return json(await scanSetupSuggestions(dirPath, buildSpawnEnv().PATH ?? ""));
 }
 
 // POST /api/projects/create — create a brand new project
@@ -1743,9 +1980,13 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
+  // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
+    setRepoTrusted(projectDir, true);
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
@@ -1753,8 +1994,8 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
     await writeInitHook(projectDir, copyFiles, setupCommands);
 
     try {
-      await executeAdd(
-        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildSpawnEnv() },
+      await addFirstWorktreeOfNewRepo(
+        { name: "main", branch: "main", repoPath: projectDir },
         wtProgress,
       );
     } catch (err) {
@@ -1772,6 +2013,13 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
   return json(project);
+}
+
+/** A set-up project, saying when its first worktree's `init.wt.sh` was held back. */
+function projectSetupResult(project: Project, firstWorktree?: AddResult): ProjectSetupResult {
+  return firstWorktree?.hookSkipped
+    ? { ...project, initHookSkippedAt: firstWorktree.path }
+    : project;
 }
 
 // POST /api/projects/clone — clone a remote repo
@@ -1792,7 +2040,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   if (setup === "single") {
     const repoName = repoNameFromUrl(url);
     const clonedPath = join(destDir, repoName);
-    const result = Bun.spawnSync(["git", "clone", "--", url, clonedPath]);
+    const result = measureSpawn("git clone", () =>
+      Bun.spawnSync(["git", "clone", "--", url, clonedPath]),
+    );
     if (result.exitCode !== 0) {
       return error(`git clone failed: ${result.stderr.toString()}`, 500);
     }
@@ -1812,7 +2062,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const repoName = repoNameFromUrl(url);
   const bareDir = join(destDir, `${repoName}.git`);
 
-  const result = Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]);
+  const result = measureSpawn("git clone", () =>
+    Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]),
+  );
   if (result.exitCode !== 0) {
     return error(`git clone --bare failed: ${result.stderr.toString()}`, 500);
   }
@@ -1830,8 +2082,8 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
 
-  await executeAdd(
-    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildSpawnEnv() },
+  const firstWorktree = await addWorktree(
+    { name: baseBranch, branch: baseBranch, repoPath: bareDir },
     wtProgress,
   );
 
@@ -1843,7 +2095,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(projectSetupResult(project, firstWorktree));
 }
 
 // POST /api/projects/init — initialize git in an existing non-repo folder
@@ -1863,8 +2115,11 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error("Path does not exist", 400);
   }
 
+  let firstWorktree: AddResult | undefined;
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     // For non-empty directories: init as regular repo first, then convert to bare.
@@ -1874,13 +2129,17 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasFiles = entries.some((e) => !e.startsWith("."));
 
     if (hasFiles) {
-      const initResult = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+      const initResult = measureSpawn("git init", () =>
+        Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+      );
       if (initResult.exitCode !== 0) return error("git init failed", 500);
-      const addResult = Bun.spawnSync(["git", "add", "."], { cwd: dirPath });
+      const addResult = measureSpawn("git add", () =>
+        Bun.spawnSync(["git", "add", "."], { cwd: dirPath }),
+      );
       if (addResult.exitCode !== 0) return error("git add failed", 500);
-      const commitResult = Bun.spawnSync(["git", "commit", "-m", "Initial commit"], {
-        cwd: dirPath,
-      });
+      const commitResult = measureSpawn("git commit", () =>
+        Bun.spawnSync(["git", "commit", "-m", "Initial commit"], { cwd: dirPath }),
+      );
       if (commitResult.exitCode !== 0) {
         return error(`git commit failed: ${commitResult.stderr.toString()}`, 500);
       }
@@ -1896,8 +2155,8 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
     if (!hasMain) {
       try {
-        await executeAdd(
-          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildSpawnEnv() },
+        firstWorktree = await addWorktree(
+          { name: "main", branch: "main", repoPath: dirPath },
           wtProgress,
         );
       } catch (err) {
@@ -1914,7 +2173,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(projectSetupResult(project, firstWorktree));
 }
 
 // POST /api/projects/convert — convert regular repo to bare+wt
@@ -1985,8 +2244,6 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   return json(project);
 }
 
-/** Name of the wt add hook script, run in each new worktree. */
-const INIT_HOOK_NAME = "init.wt.sh";
 /** Repo-root directory holding local-only files copied into new worktrees. */
 const LOCAL_RES_DIR = ".wt-local-res";
 
@@ -2032,10 +2289,22 @@ export async function writeInitHook(
 
   if (commands.length > 0) {
     lines.push("");
+    // Python installers (poetry, pdm, pipenv, `uv pip`) target an active virtual environment,
+    // and its `bin` shadows the real tools: both would be another checkout's when `wt add` runs
+    // from one of its terminals.
+    lines.push(
+      'if [[ -n "${VIRTUAL_ENV:-}" ]]; then',
+      '  venv_bin=":$VIRTUAL_ENV/bin:"',
+      '  PATH=":$PATH:"',
+      '  while [[ "$PATH" == *"$venv_bin"* ]]; do PATH=${PATH//"$venv_bin"/:}; done',
+      "  PATH=${PATH#:}; PATH=${PATH%:}",
+      "  unset VIRTUAL_ENV venv_bin",
+      "fi",
+    );
     lines.push(...commands);
   }
 
-  const hookPath = join(repoDir, INIT_HOOK_NAME);
+  const hookPath = join(repoDir, HOOK_INIT);
   await Bun.write(hookPath, `${lines.join("\n")}\n`);
   chmodSync(hookPath, 0o755);
 }
@@ -2047,13 +2316,20 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
     data.projects.map(async (p) => {
       const project = ctx.getProject(p.path);
       if (!project) {
-        return { ...p, worktrees: [], worktreesDir: null };
+        return { ...p, worktrees: [], worktreesDir: null, worktreeMetadata: false };
       }
-      const worktrees = await listProjectWorktrees(project.cwd);
-      return { ...p, isBare: project.isBare, worktreesDir: project.worktreesDir, worktrees };
+      const { worktrees, worktreeMetadata } = await projectWorktreesResponse(project.cwd);
+      return {
+        ...p,
+        isBare: project.isBare,
+        worktreesDir: project.worktreesDir,
+        worktrees,
+        worktreeMetadata,
+      };
     }),
   );
-  return json({ projects: enriched });
+  const response: ProjectsResponse = { projects: enriched, homeDir: homedir() };
+  return json(response);
 }
 
 // POST /api/projects — add a new project and initialize its server state
@@ -2140,46 +2416,9 @@ async function handleDeleteProjectFromDisk(
   return json({ success: true });
 }
 
-/** List wt-managed worktrees for a project (bare or regular). */
-export async function listProjectWorktrees(projectPath: string): Promise<WorktreeEntryResponse[]> {
-  const managed = await listManagedWorktrees(projectPath);
-  return Promise.all(
-    managed
-      .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
-      .map(async (wt) => ({
-        path: wt.path,
-        branch: wt.branch,
-        commit: wt.head,
-        isMain: false,
-        createdAt: await statCreatedAt(wt.path),
-        wtName: wt.name,
-      })),
-  );
-}
-
 // GET /api/projects/:id/worktrees
 async function handleProjectWorktrees(projectPath: string): Promise<Response> {
-  const worktrees = await listProjectWorktrees(projectPath);
-  return json({ worktrees });
-}
-
-/** Shape returned by GET /api/projects/:id/worktrees — WorktreeEntry with a wt name. */
-interface WorktreeEntryResponse {
-  path: string;
-  branch: string | null;
-  commit: string;
-  isMain: boolean;
-  createdAt: string | null;
-  wtName: string;
-}
-
-async function statCreatedAt(dirPath: string): Promise<string | null> {
-  try {
-    const stats = await stat(dirPath);
-    return stats.birthtime.toISOString();
-  } catch {
-    return null;
-  }
+  return json(await projectWorktreesResponse(projectPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -2214,11 +2453,23 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
     body.branchResolution === "use-existing" || body.branchResolution === "delete-and-create"
       ? body.branchResolution
       : undefined;
+  // A child worktree branches from its parent's current commit and is nested under it.
+  const parentPath = typeof body.parentPath === "string" ? body.parentPath : undefined;
+  const title = typeof body.title === "string" ? body.title : undefined;
 
-  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution });
+  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution, parentPath });
   try {
-    const result = await executeAdd(
-      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildSpawnEnv() },
+    const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
+    const meta = { ...child?.meta, ...titleMeta(title) };
+    const result = await addWorktree(
+      {
+        name,
+        branch,
+        branchResolution,
+        repoPath: project.cwd,
+        ...(child ? { base: child.base } : {}),
+        ...(Object.keys(meta).length > 0 ? { meta } : {}),
+      },
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
@@ -2227,6 +2478,103 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   } catch (err) {
     wtLog.error(`Failed to create worktree '${name}'`, { error: err });
     return error(describeError(err, "Failed to create worktree"));
+  }
+}
+
+// POST /api/worktree/run-init-hook — run the init.wt.sh its creation held back, once trusted
+async function handleRunInitHook(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+  const wtPath = requireString(body, "path");
+  await git.validateWorktreePath(wtPath, project.cwd);
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+
+  wtLog.info(`Running ${HOOK_INIT} in '${name}'`);
+  try {
+    const hookRan = await runHeldInitHook(
+      { name, repoPath: project.cwd, worktreePath: wtPath },
+      wtProgress,
+    );
+    return json({ hookRan });
+  } catch (err) {
+    wtLog.error(`Failed to run ${HOOK_INIT} in '${name}'`, { error: err });
+    return error(describeError(err, `Failed to run ${HOOK_INIT}`));
+  }
+}
+
+/** A string, null, or absent (undefined); anything else is a bad request. */
+function optionalNullableString(
+  body: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  const value = body[field];
+  if (value === undefined || value === null || typeof value === "string") return value;
+  throw new Error(`${field} must be a string or null`);
+}
+
+// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its title
+async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const projectPath = requireString(body, "projectPath");
+  const project = ctx.getProject(projectPath);
+  if (!project) return error("Project not found", 404);
+  const wtPath = requireString(body, "path");
+  const update: WorktreeMetaUpdate = {
+    parentPath: optionalNullableString(body, "parentPath"),
+    title: optionalNullableString(body, "title"),
+  };
+
+  try {
+    await updateWorktreeMeta(project.cwd, wtPath, update);
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json({ success: true });
+  } catch (err) {
+    wtLog.error("Failed to update worktree metadata", { path: wtPath, error: err });
+    return error(describeError(err, "Failed to update the worktree"));
+  }
+}
+
+// POST /api/worktree/plan-enable-metadata — what turning on worktree metadata changes
+async function handlePlanEnableWorktreeMetadata(
+  req: Request,
+  ctx: RouteContext,
+): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+
+  try {
+    const plan = await planInit(project.cwd);
+    const action = plan.actions.find((candidate) => candidate.id === METADATA_ON_ACTION) ?? null;
+    return json({ action });
+  } catch (err) {
+    return error(describeError(err, "Failed to inspect the repository"));
+  }
+}
+
+// POST /api/worktree/enable-metadata — `wt init --worktree-metadata on`, and nothing else
+async function handleEnableWorktreeMetadata(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+
+  wtLog.info("Turning on worktree metadata", { project: project.cwd });
+  try {
+    const result = await executeInit(
+      project.cwd,
+      { apply: [METADATA_ON_ACTION], hookEnv: buildSpawnEnv() },
+      wtProgress,
+    );
+    const outcome = result.outcomes.find((candidate) => candidate.id === METADATA_ON_ACTION);
+    if (outcome?.status === "failed") {
+      return error(outcome.error ?? "Failed to turn on worktree metadata", 500);
+    }
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json({ status: outcome?.status ?? "not-needed" });
+  } catch (err) {
+    wtLog.error("Failed to turn on worktree metadata", { error: err });
+    return error(describeError(err, "Failed to turn on worktree metadata"), 500);
   }
 }
 
@@ -2246,9 +2594,66 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
     if (resolve(plan.worktreePath) !== resolve(wtPath)) {
       return error("Worktree path did not resolve to the requested worktree", 400);
     }
-    return json(plan);
+    const { descendants } = nestedBelow(await listProjectWorktrees(project.cwd), plan.worktreePath);
+    const nested: NestedWorktreePlan[] = await Promise.all(
+      descendants.map(async (wt) => ({
+        path: wt.path,
+        dirty: (await planRemove({ name: wt.wtName, repoPath: project.cwd })).dirty,
+      })),
+    );
+    const response: WorktreeRemovePlan = {
+      ...plan,
+      nested,
+      cleanHookHeld: isCleanHookHeld(plan.worktreePath, plan.hasHook),
+    };
+    return json(response);
   } catch (err) {
     return error(describeError(err, "Failed to inspect worktree"));
+  }
+}
+
+/**
+ * Remove one worktree with its watchers suspended, then release everything Loxel kept for it.
+ * On failure the watchers resume and the error is rethrown.
+ */
+async function removeOneWorktree(
+  ctx: RouteContext,
+  project: ProjectState,
+  wtPath: string,
+  options: { deleteBranch: boolean; force: boolean },
+): Promise<RemoveResult> {
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+  wtLog.info(`Removing worktree '${name}'`, options);
+  const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
+  try {
+    const result = await removeWorktree(
+      {
+        name,
+        deleteBranch: options.deleteBranch,
+        // Design decision: checking "Also delete branch" is the confirmation, so skip git's
+        // merged check. It compares commit IDs and refuses squash-merged branches whose content
+        // is on main. This also deletes a branch whose commits were never pushed or merged; that
+        // is intended, not an oversight. The branch is only deleted after the worktree is, and a
+        // dirty worktree needs `force`.
+        forceBranch: options.deleteBranch,
+        force: options.force,
+        repoPath: project.cwd,
+        expectedPath: wtPath,
+      },
+      wtProgress,
+    );
+    wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
+    // Only now: a removal that fails, or a clean hook still running, leaves the terminals alone.
+    ctx.completeWorktreeRemoval(wtPath);
+    return result;
+  } catch (err) {
+    try {
+      await resumeWatchers();
+    } catch (resumeError) {
+      wtLog.error(`Failed to resume watchers for '${name}'`, { error: resumeError });
+    }
+    wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
+    throw err;
   }
 }
 
@@ -2261,45 +2666,72 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
 
   const wtPath = requireString(body, "path");
   await git.validateWorktreePath(wtPath, project.cwd);
-  const name = getWorktreeName(wtPath, project.worktreesDir);
-  const deleteBranch = typeof body.deleteBranch === "boolean" ? body.deleteBranch : false;
-  const force = typeof body.force === "boolean" ? body.force : false;
+  const options = {
+    deleteBranch: typeof body.deleteBranch === "boolean" ? body.deleteBranch : false,
+    force: typeof body.force === "boolean" ? body.force : false,
+  };
+  const nestedRemoval: NestedRemoval = body.nested === "remove" ? "remove" : "move-up";
+  // The nested worktrees the user saw in the plan: one nested since then is not removed
+  // with `force` it was never confirmed for (it shows at the top level once its parent is gone).
+  const confirmedNested = new Set(
+    nestedRemoval === "remove" ? requireStringArray(body, "nestedPaths") : [],
+  );
+  const { parent, children, descendants } = nestedBelow(
+    await listProjectWorktrees(project.cwd),
+    resolve(wtPath),
+  );
 
-  wtLog.info(`Removing worktree '${name}'`, { deleteBranch, force });
-  const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
+  let branchesDeleted = true;
   try {
-    const result = await executeRemove(
-      {
-        name,
-        deleteBranch,
-        // Design decision: checking "Also delete branch" is the confirmation, so skip git's
-        // merged check. It compares commit IDs and refuses squash-merged branches whose content
-        // is on main. This also deletes a branch whose commits were never pushed or merged; that
-        // is intended, not an oversight. The branch is only deleted after the worktree is, and a
-        // dirty worktree needs `force`.
-        forceBranch: deleteBranch,
-        force,
-        repoPath: project.cwd,
-        expectedPath: wtPath,
-        hookEnv: buildSpawnEnv(),
-      },
-      wtProgress,
-    );
-    wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-    ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section.
-    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    return json(result);
-  } catch (err) {
-    try {
-      await resumeWatchers();
-    } catch (resumeError) {
-      wtLog.error(`Failed to resume watchers for '${name}'`, { error: resumeError });
+    if (nestedRemoval === "remove") {
+      // Deepest first, so no worktree is ever left nested under one that is gone.
+      for (const wt of descendants.toReversed()) {
+        if (!confirmedNested.has(wt.path)) continue;
+        const result = await removeOneWorktree(ctx, project, wt.path, options);
+        branchesDeleted &&= result.branchDeleted;
+      }
     }
-    wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
+    const result = await removeOneWorktree(ctx, project, wtPath, options);
+    const branchDeleted = result.branchDeleted && branchesDeleted;
+    const unmoved =
+      nestedRemoval === "move-up" ? await moveChildrenUp(project.cwd, children, parent) : [];
+    const response: WorktreeRemoveResult = {
+      ...result,
+      branchDeleted,
+      ...(unmoved.length > 0
+        ? {
+            warning: `The worktree was removed, but ${unmoved.join(", ")} could not be moved up and now ${unmoved.length === 1 ? "shows" : "show"} at the top level.`,
+          }
+        : {}),
+    };
+    return json(response);
+  } catch (err) {
     return error(describeError(err, "Failed to remove worktree"));
+  } finally {
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
   }
+}
+
+/**
+ * Nest the children of a removed worktree under its parent. Without one they are already shown
+ * at the top level (their parent id matches no worktree), but the stale link is cleared too.
+ * Returns the names of the children that could not be moved.
+ */
+async function moveChildrenUp(
+  projectPath: string,
+  children: readonly ProjectWorktree[],
+  parent: ProjectWorktree | null,
+): Promise<string[]> {
+  const failed: string[] = [];
+  for (const child of children) {
+    try {
+      await updateWorktreeMeta(projectPath, child.path, { parentPath: parent?.path ?? null });
+    } catch (err) {
+      wtLog.warn("Failed to move a nested worktree up", { path: child.path, error: err });
+      failed.push(child.wtName);
+    }
+  }
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2315,13 +2747,13 @@ async function handleLogIngest(req: Request): Promise<Response> {
 
   if (!level || !cat || !msg) return error("Missing required fields: level, cat, msg");
   if (!(level in LOG_LEVEL_PRIORITY)) return error(`Invalid level: ${level}`);
-  if (!LOG_CATEGORIES.includes(cat as LogCategory)) return error(`Invalid category: ${cat}`);
+  if (!isLogCategory(cat)) return error(`Invalid category: ${cat}`);
 
   const ctx =
     typeof body.ctx === "object" && body.ctx !== null
       ? (body.ctx as Record<string, unknown>)
       : undefined;
-  logger.ingest(level as LogLevel, cat as LogCategory, msg, ctx);
+  logger.ingest(level as LogLevel, cat, msg, ctx);
   return json({ ok: true });
 }
 
@@ -2338,22 +2770,19 @@ function handleLogs(req: Request, _ctx: RouteContext): Response {
 // Schema resolution routes
 // ---------------------------------------------------------------------------
 
-/** Classify a glob as JSON-applicable, YAML-applicable, or both. */
-function classifyGlob(glob: string): { json: boolean; yaml: boolean } {
-  const extensions = new Set<string>();
-  const braceMatch = /\.\{([^}]+)\}$/.exec(glob);
-  if (braceMatch) {
-    for (const ext of braceMatch[1]!.split(",")) extensions.add(ext.trim());
-  } else {
-    const simpleMatch = /\.(\w+)$/.exec(glob);
-    if (simpleMatch) extensions.add(simpleMatch[1]!);
-  }
+/**
+ * The schema URL a language server fetches itself: HTTP(S) and other URLs as they are, an absolute
+ * local path as a `file://` URL. Other relative paths are passed on unchanged.
+ */
+function languageServerSchemaUrl(url: string): string {
+  return url.startsWith("/") ? pathToFileURL(url).href : url;
+}
 
-  const isJson = extensions.has("json") || extensions.has("jsonc");
-  const isYaml = extensions.has("yml") || extensions.has("yaml");
-  // If neither matched (e.g. **/*), apply to both
-  if (!isJson && !isYaml) return { json: true, yaml: true };
-  return { json: isJson, yaml: isYaml };
+/** Add `glob` to the globs mapped to `url`. */
+function addSchemaGlob(map: Record<string, string[]>, url: string, glob: string): void {
+  const existing = map[url];
+  if (existing) existing.push(glob);
+  else map[url] = [glob];
 }
 
 // GET /api/schemas/resolve?url=<urlOrPath>&baseDir=<dir>
@@ -2363,113 +2792,85 @@ async function handleSchemaResolve(req: Request, ctx: RouteContext): Promise<Res
   if (!schemaUrl) return error("Missing url parameter");
 
   const baseDir = url.searchParams.get("baseDir") ?? undefined;
+  if (isRemoteSchemaUrl(schemaUrl) && ctx.schemaConsent.request(schemaUrl) !== "allowed") {
+    return json(null);
+  }
   const schema = await ctx.resolveSchema(schemaUrl, baseDir);
   if (schema === null) return error("Failed to resolve schema", 404);
   return json(schema);
 }
 
-// POST /api/schemas/sync — resolve configured schemas, update YAML LSP
+// POST /api/schemas/ensure — download schemas that open files name or match, when allowed
+async function handleSchemaEnsure(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (!Array.isArray(body.urls)) return error("urls must be an array");
+  const urls = body.urls.filter((url): url is string => typeof url === "string");
+  void ctx.ensureSchemas(urls.filter(isRemoteSchemaUrl));
+  return json({ ok: true });
+}
+
+// POST /api/schemas/consent — record, change or forget the decision on one schema URL
+async function handleSchemaConsent(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const { url, decision } = body;
+  if (typeof url !== "string") return error("url must be a string");
+  if (decision !== "trust" && decision !== "deny" && decision !== null) {
+    return error('decision must be "trust", "deny" or null');
+  }
+  ctx.schemaConsent.decide(url, decision);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/never-fetch — the "Never ask" switch
+async function handleSchemaNeverFetch(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.neverFetch !== "boolean") return error("neverFetch must be a boolean");
+  ctx.schemaConsent.setNeverFetch(body.neverFetch);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/sync — take the configured schemas, update the YAML and TOML language servers
 async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const schemas = body.schemas;
   if (!Array.isArray(schemas)) return error("schemas must be an array");
 
+  // Nothing is downloaded here: a schema is fetched when an open file first matches its glob.
+  const configuredUrls: string[] = [];
   const yamlMap: Record<string, string[]> = {};
-
-  // Collect JSON schemas to resolve and build YAML map in a single pass
-  const jsonToResolve: { glob: string; url: string }[] = [];
+  const tomlMap: Record<string, string[]> = {};
 
   for (const entry of schemas) {
     if (typeof entry !== "object" || entry === null) continue;
     const { glob, url } = entry as { glob?: string; url?: string };
     if (typeof glob !== "string" || typeof url !== "string") continue;
 
-    const classification = classifyGlob(glob);
-
-    if (classification.json) {
-      jsonToResolve.push({ glob, url });
-    }
-
-    if (classification.yaml) {
-      // Convert local file paths to file:// URLs for yaml-language-server
-      let yamlSchemaUrl = url;
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        yamlSchemaUrl = url.startsWith("/") ? `file://${url}` : url;
-      }
-      const existing = yamlMap[yamlSchemaUrl];
-      if (existing) {
-        existing.push(glob);
-      } else {
-        yamlMap[yamlSchemaUrl] = [glob];
-      }
-    }
+    const languages = classifySchemaGlob(glob);
+    configuredUrls.push(url);
+    if (languages.yaml) addSchemaGlob(yamlMap, languageServerSchemaUrl(url), glob);
+    if (languages.toml) addSchemaGlob(tomlMap, languageServerSchemaUrl(url), glob);
   }
 
-  // Resolve JSON schemas in parallel
-  const jsonResults = await Promise.all(
-    jsonToResolve.map(async ({ glob, url }) => {
-      const schema = await ctx.resolveSchema(url);
-      return { glob, url, schema };
-    }),
-  );
-
+  ctx.schemaConsent.setConfigured(configuredUrls);
   ctx.updateYamlSchemas(yamlMap);
-  return json({ json: jsonResults, yaml: { synced: true } });
+  ctx.updateTomlSchemas(tomlMap);
+  return json({ synced: true });
 }
 
 // ---------------------------------------------------------------------------
-// Update routes
+// Version route
 // ---------------------------------------------------------------------------
 
 // GET /api/version
-function handleGetVersion(): Response {
-  return json({ version: getCurrentVersion(), isDev: config.isDev });
-}
-
-// GET /api/update/status
-function handleGetUpdateStatus(): Response {
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/check
-async function handleUpdateCheck(_req: Request, ctx: RouteContext): Promise<Response> {
-  await checkForUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/download
-async function handleUpdateDownload(_req: Request, ctx: RouteContext): Promise<Response> {
-  await downloadUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/install
-function handleUpdateInstall(_req: Request, ctx: RouteContext): Response {
-  if (config.isDev) return error("Updates are not available in development mode");
-
-  const status = getUpdateStatus();
-  if (status.state !== "ready") return error("No update is ready to install");
-
-  const resourcesDir = process.env.LOXEL_RESOURCES_DIR;
-  if (!resourcesDir) return error("Cannot determine resources directory");
-
-  // Check write access before committing to exit
-  try {
-    mkdirSync(resourcesDir, { recursive: true });
-    accessSync(resourcesDir, constants.W_OK);
-  } catch {
-    return error("Resources directory is not writable");
-  }
-
-  if (!prepareInstall()) return error("Failed to prepare update");
-
-  // Broadcast installing state before shutdown
-  ctx.broadcastAll({ type: "update_status_changed", data: { state: "installing" } });
-
-  // Schedule shutdown after response is sent
-  setTimeout(() => ctx.shutdown(42), 100);
-
-  return json({ success: true });
+function handleGetVersion(_req: Request, ctx: RouteContext): Response {
+  // appOwned: started by the desktop app, so it exits with that app. shuttingDown: about to exit,
+  // so clients wait for its replacement instead of using it (see SHARED_SERVER.md).
+  return json({
+    version: getCurrentVersion(),
+    isDev: config.isDev,
+    appOwned: config.parentPid !== null,
+    shuttingDown: ctx.isShuttingDown(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2533,10 +2934,119 @@ async function handleExternalFolderRemove(req: Request, ctx: RouteContext): Prom
 // Open file, folder or URL (CLI and Finder integration)
 // ---------------------------------------------------------------------------
 
-// POST /api/open — open a file, folder or URL in the appropriate panel (triggered by the `loxel`
-// CLI and by files and folders macOS hands to the app)
+/**
+ * Canonicalize the path of a placement's `group` tab like opened files' paths, so it matches the
+ * tab's `filePath`; a path where nothing exists is dropped and the tab is matched by title only.
+ */
+async function canonicalPlacement(
+  placement: PanelPlacement | undefined,
+): Promise<PanelPlacement | undefined> {
+  if (!placement?.group?.path) return placement;
+  const { path: rawPath, ...group } = placement.group;
+  const path = await canonicalPath(rawPath);
+  return { ...placement, group: { ...group, ...(path ? { path } : {}) } };
+}
+
+/**
+ * The worktree holding `dir`, from its project's current worktree list (so one `wt add` created a
+ * moment ago counts), or null when `dir` is in no project's worktree or the list is unavailable.
+ */
+async function owningWorktree(ctx: RouteContext, dir: string): Promise<string | null> {
+  const project = ctx.findProjectForPath(dir);
+  if (!project) return null;
+  let worktrees: string[];
+  try {
+    worktrees = (await listProjectWorktrees(project.cwd)).map((wt) => wt.path);
+  } catch (err) {
+    terminalLog.warn("Could not list a project's worktrees", { project: project.cwd, error: err });
+    return null;
+  }
+  return findTreeRoot(dir, project.isBare ? worktrees : [...worktrees, project.cwd]);
+}
+
+/** The worktree a request names (any path in it), or null when it names none that exists. */
+async function namedWorktree(ctx: RouteContext, path: unknown): Promise<string | null> {
+  if (typeof path !== "string") return null;
+  const canonical = await canonicalPath(path);
+  return canonical ? owningWorktree(ctx, canonical) : null;
+}
+
+// POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
+// `loxel` CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
+  const windowId = typeof body.windowId === "string" ? body.windowId : null;
+  let placement: PanelPlacement | undefined;
+  try {
+    placement = await canonicalPlacement(parsePanelPlacement(body.placement));
+  } catch (err) {
+    return error(err instanceof Error ? err.message : "Invalid placement", 400);
+  }
+  if (body.focus !== undefined && typeof body.focus !== "boolean") {
+    return error("focus must be a boolean", 400);
+  }
+  // Opening without focus leaves the window's worktree and active tab alone.
+  const unfocused = body.focus === false ? { focus: false } : {};
+  const placed = { ...(placement ? { placement } : {}), ...unfocused };
+  const pinned = await namedWorktree(ctx, body.pinWtPath);
+  if (body.pinWtPath !== undefined && !pinned) {
+    return error("No project found for worktree", 404);
+  }
+
+  // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd` by the
+  // server right away, with an optional command typed into it. The command goes to that one spawn
+  // only, so it is never persisted with the layout and cannot run twice.
+  if (body.terminal !== undefined) {
+    const terminal = body.terminal;
+    if (typeof terminal !== "object" || terminal === null || Array.isArray(terminal)) {
+      return error("terminal must be an object", 400);
+    }
+    const { cwd: rawCwd, command, title } = terminal as Record<string, unknown>;
+    if (typeof rawCwd !== "string") return error("Missing terminal.cwd in body", 400);
+    if (command !== undefined && typeof command !== "string") {
+      return error("terminal.command must be a string", 400);
+    }
+    if (title !== undefined && typeof title !== "string") {
+      return error("terminal.title must be a string", 400);
+    }
+    const cwd = await canonicalPath(rawCwd);
+    const cwdStats = cwd ? await stat(cwd).catch(() => null) : null;
+    if (!cwd || !cwdStats) return error("Directory not found", 404);
+    if (!cwdStats.isDirectory()) return error("Not a directory", 400);
+
+    // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
+    // window shows.
+    const owner = pinned ?? (await owningWorktree(ctx, cwd));
+    const window = ctx.activeWindow(windowId);
+    if (!window) return error("No Loxel window is open", 503);
+    const worktreePath = owner ?? window.worktreePath;
+    // 503 like no window at all: a window that is still launching shows its worktree in a moment,
+    // and the CLI retries a 503 for a while.
+    if (!worktreePath) return error("Open a project in Loxel before opening terminals", 503);
+
+    const terminalId = crypto.randomUUID();
+    const sent = ctx.sendToActiveWindow(windowId, {
+      type: "open_terminal",
+      data: { terminalId, cwd, worktreePath, ...(title ? { title } : {}), ...placed },
+    });
+    if (!sent) return error("No Loxel window is open", 503);
+    // Started here, not by the panel's attach: the panel may not mount for hours (a background
+    // tab, a worktree the user is not on, a window that is not painting), and the command must
+    // run now. Started in the same tick as the send, so the panel's attach finds it.
+    try {
+      await ctx.startTerminal({
+        id: terminalId,
+        cwd,
+        worktreePath,
+        ...(window.windowId ? { windowId: window.windowId } : {}),
+        ...(command ? { command } : {}),
+      });
+    } catch (err) {
+      terminalLog.error("Failed to start terminal", { terminalId, error: err });
+      return error("Failed to start the terminal", 500);
+    }
+    return json({ ok: true, terminalId });
+  }
 
   // URL mode: open in browser panel
   if (typeof body.url === "string") {
@@ -2544,12 +3054,24 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       return error("Invalid URL — only http and https URLs are supported", 400);
     }
 
-    const wtPath = typeof body.wtPath === "string" ? body.wtPath : null;
-    if (!wtPath || !ctx.findProjectForPath(wtPath)) {
-      return error("No project found for worktree", 404);
-    }
+    const wtPath = await namedWorktree(ctx, body.wtPath);
+    if (!wtPath) return error("No project found for worktree", 404);
 
-    ctx.broadcastToSubscribers(wtPath, { type: "open_url", wtPath, data: { url: body.url } });
+    // Every window showing the worktree gets the page, but only the one in use applies the
+    // placement and takes focus: a `--replace` must not close tabs, nor a page take over, in
+    // windows the user did not target.
+    const primary: WsMessage = { type: "open_url", wtPath, data: { url: body.url, ...placed } };
+    const shown = ctx.sendToWorktreeWindows(
+      wtPath,
+      windowId,
+      { type: "open_url", wtPath, data: { url: body.url, focus: false } },
+      primary,
+    );
+    // No window shows the worktree: the window in use opens it there, like a file. 503 like a file
+    // when no window is connected, which the CLI retries while Loxel launches.
+    if (!shown && !ctx.sendToActiveWindow(windowId, primary)) {
+      return error("No Loxel window is open", 503);
+    }
     return json({ ok: true });
   }
 
@@ -2560,18 +3082,31 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (!stats) return error("File not found", 404);
   // Pipes and devices would hang or flood the editor's read
   if (!stats.isFile() && !stats.isDirectory()) return error("Not a file or folder", 400);
-
   // Files and folders go to the window in use — from a loxel terminal, that terminal's window;
   // otherwise the focused one — which opens them in their worktree or its Others section.
   const path = (await canonicalPath(absolutePath)) ?? absolutePath;
-  const windowId = typeof body.windowId === "string" ? body.windowId : null;
-  const sent = ctx.sendToActiveWindow(
-    windowId,
-    stats.isDirectory()
-      ? { type: "open_folder", data: { path } }
-      : { type: "open_file", data: { filePath: path } },
+  if (!stats.isDirectory()) {
+    // The worktree of the command's URLs, if it is a project's: the file can open without it.
+    const worktreePath = pinned ?? (await namedWorktree(ctx, body.commandWtPath));
+    const sent = ctx.sendToActiveWindow(windowId, {
+      type: "open_file",
+      data: { filePath: path, ...(worktreePath ? { worktreePath } : {}), ...placed },
+    });
+    return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+  }
+
+  // A folder is revealed in the file tree, which takes focus, and is never placed as a panel.
+  if (body.focus === false) {
+    return json({ ok: true, warning: "A folder is only revealed with focus; pass --focus" });
+  }
+  const sent = ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } });
+  if (!sent) return error("No Loxel window is open", 503);
+  const ignored = placement ? "Layout flags do not" : pinned ? "--worktree does not" : null;
+  return json(
+    ignored
+      ? { ok: true, warning: `${ignored} apply to a folder; it opens in the file tree` }
+      : { ok: true },
   );
-  return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
 }
 
 // ---------------------------------------------------------------------------
@@ -2755,7 +3290,9 @@ async function handleSearch(req: Request, ctx: RouteContext): Promise<Response> 
   }
 
   try {
-    const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() });
+    const proc = measureSpawn("rg", () =>
+      Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() }),
+    );
     const result = await collectSearchMatches(proc, maxResults, req.signal);
     const exitCode = await proc.exited;
 
@@ -2850,9 +3387,12 @@ const BINARY_EXTENSIONS = new Set([
 async function collectWorktreeFileIndex(
   wtPath: string,
 ): Promise<{ dirs: string[]; extensions: string[] }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -2894,9 +3434,12 @@ const FILE_INDEX_MAX_FILES = 100_000;
 
 /** Use ripgrep --files to collect all relative file paths in the worktree for quick-open search. */
 async function collectFileList(wtPath: string): Promise<{ files: string[]; truncated: boolean }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -2962,8 +3505,11 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
     "/api/version": handleGetVersion,
-    "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
+    ...toolchainGetRoutes,
+    "/api/repo-trust": handleGetRepoTrust,
+    "/api/repo-trust/list": handleListRepoTrust,
+    "/api/editorconfig": handleEditorConfig,
   },
   POST: {
     "/api/log": handleLogIngest,
@@ -2991,8 +3537,12 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-upload": handleFileUpload,
     "/api/worktree/plan-add": handlePlanAddWorktree,
     "/api/worktree/create": handleCreateWorktree,
+    "/api/worktree/run-init-hook": handleRunInitHook,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,
     "/api/worktree/remove": handleRemoveWorktree,
+    "/api/worktree/meta": handleUpdateWorktreeMeta,
+    "/api/worktree/plan-enable-metadata": handlePlanEnableWorktreeMetadata,
+    "/api/worktree/enable-metadata": handleEnableWorktreeMetadata,
     "/api/files/unwatch": handleFilesUnwatch,
     "/api/files/rename": handleFileRename,
     "/api/files/delete": handleFileDelete,
@@ -3008,12 +3558,14 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-rename": handleDetachedFileRename,
     "/api/detached-file-copy-to-project": handleDetachedFileCopyToProject,
     "/api/schemas/sync": handleSchemaSync,
-    "/api/update/check": handleUpdateCheck,
-    "/api/update/download": handleUpdateDownload,
-    "/api/update/install": handleUpdateInstall,
+    "/api/schemas/ensure": handleSchemaEnsure,
+    "/api/schemas/consent": handleSchemaConsent,
+    "/api/schemas/never-fetch": handleSchemaNeverFetch,
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
+    ...toolchainPostRoutes,
+    "/api/repo-trust": handleSetRepoTrust,
   },
 };
 
@@ -3025,7 +3577,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const url = new URL(req.url);
   const method = req.method;
   const pathname = url.pathname;
-  stress.track("api-request", { method, path: pathname });
+  stress.track("api-request", `${method} ${pathname}`);
 
   // Static route table — checked first so dynamic patterns don't shadow named routes
   const handler = routes[method]?.[pathname];
@@ -3098,25 +3650,25 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const storeKeyMatch = pathname.match(/^\/api\/stores\/([^/]+)$/);
   if (storeKeyMatch?.[1]) {
     const storeKey = decodeURIComponent(storeKeyMatch[1]);
-    const isSettings = isEncryptedStoreKey(storeKey);
+    const isSettings = storeKey === SETTINGS_STORE_KEY;
     try {
       if (method === "GET") {
-        let value = storeDb.getStore(storeKey);
-        if (isSettings && value && hasPlaintextModelKeys(value)) {
-          // Rows written before API keys were encrypted at rest are migrated on first read.
-          value = encryptModelKeys(value);
-          storeDb.putStore(storeKey, value);
-        }
-        return json({ value: isSettings && value ? decryptModelKeys(value) : value });
+        const value = storeDb.getStore(storeKey);
+        if (!isSettings || !value) return json({ value });
+        const stripped = stripLegacyAgentSettings(value);
+        if (stripped !== value) storeDb.putStore(storeKey, stripped);
+        return json({ value: stripped });
       }
       if (method === "PUT") {
+        if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
-        const stored = isSettings ? encryptModelKeys(body.value) : body.value;
+        if (isLayoutRowOfMissingWorktree(storeKey)) return json({ success: true });
+        const stored = isSettings ? stripLegacyAgentSettings(body.value) : body.value;
         storeDb.putStore(storeKey, stored);
-        // Broadcast to all clients for cross-tab sync (broadcast plaintext state)
+        // Broadcast to all clients for cross-tab sync
         try {
-          const parsed = JSON.parse(body.value);
+          const parsed = JSON.parse(stored);
           if (parsed?.state && typeof parsed.state === "object") {
             const nonce = typeof body.nonce === "string" ? body.nonce : undefined;
             ctx.broadcastAll({

@@ -3,8 +3,20 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
+import type { SplitDirection } from "@/api/panel-placement-model";
+import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { activeGroupMaximizeLabel, canToggleActiveGroupMaximized } from "@/lib/center-maximize";
+import type { EditorCodeActionId } from "@/lib/editor-code-actions";
+import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
+import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { canRenameActiveTab } from "@/lib/tab-rename";
+import { useEditorIndentationStore } from "@/store/editor-indentation";
+import { useWorktreeStore } from "@/store/worktrees";
 
 /**
  * All action IDs in the application. Adding an action here automatically
@@ -14,11 +26,15 @@ export type ActionId =
   | "panel.new.terminal"
   | "panel.new.markdown"
   | "panel.new.drawing"
-  | "panel.new.agent"
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
+  | "panel.reopenClosed"
   | "panel.newTab"
+  | "panel.rename"
+  | "panel.toggleMaximize"
+  | "browser.hardRefresh"
+  | "browser.toggleBookmark"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -49,12 +65,12 @@ export type ActionId =
   | "toggle.git"
   | "toggle.comments"
   | "toggle.logs"
-  | "toggle.forkTree"
   | "nav.project"
   | "nav.worktree"
   | "nav.commandPalette"
   | "nav.search"
   | "nav.openFile"
+  | "nav.goToSymbol"
   | "nav.recentNotification"
   | "find.open"
   | "find.next"
@@ -85,11 +101,12 @@ export type ActionId =
   | "tree.toggleExpanded"
   | "tree.open"
   | "tree.rename"
+  | "editor.changeIndentation"
+  | ToolchainSelectActionId
+  | EditorCodeActionId
+  | "language.restartServers"
+  | "worktree.manageRepoTrust"
   | "app.settings";
-
-/** Directions a panel can be split toward. */
-export const SPLIT_DIRECTIONS = ["right", "left", "up", "down"] as const;
-export type SplitDirection = (typeof SPLIT_DIRECTIONS)[number];
 
 /**
  * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`
@@ -97,7 +114,6 @@ export type SplitDirection = (typeof SPLIT_DIRECTIONS)[number];
  */
 export const SPLIT_PANEL_TYPES = [
   { type: "terminal", label: "Terminal" },
-  { type: "agent", label: "Agent" },
   { type: "editor", label: "Markdown" },
   { type: "excalidraw", label: "Drawing" },
   { type: "browser", label: "Browser" },
@@ -111,11 +127,22 @@ const DIRECTION_LABELS: Record<SplitDirection, string> = {
   down: "Down",
 };
 
-export type ActionCategory = "panel" | "toggle" | "nav" | "sidebar" | "worktree" | "tree" | "app";
+export type ActionCategory =
+  | "panel"
+  | "toggle"
+  | "nav"
+  | "sidebar"
+  | "worktree"
+  | "tree"
+  | "editor"
+  | "language"
+  | "app";
 
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the command palette calls the action now, when that depends on the state it would change. */
+  contextLabel?: () => string;
   category: ActionCategory;
   hidden?: boolean;
   /**
@@ -123,6 +150,25 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+  /**
+   * An action this one may hold the same key as, which then runs whichever of the two is enabled
+   * where focus is (this one, if both are). For a key that means different things by focus.
+   */
+  sharesKeyWith?: ActionId;
+}
+
+/** Whether the active center panel is a code editor tab (one that publishes its indentation). */
+function isCodeEditorActive(): boolean {
+  const filePath = getActiveEditorFilePath();
+  return filePath !== null && useEditorIndentationStore.getState().byFile.has(filePath);
+}
+
+function hasActiveWorktree(): boolean {
+  return useWorktreeStore.getState().activeWorktreePath !== null;
+}
+
+function isBrowserPanelFocused(): boolean {
+  return getFocusedBrowserPanel() !== undefined;
 }
 
 function isFindTargetFocused(): boolean {
@@ -138,15 +184,44 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
   { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
   { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
-  { id: "panel.new.agent", label: "New Agent", category: "panel" },
   { id: "panel.new.browser", label: "New Browser", category: "panel" },
   { id: "panel.open.localdb", label: "Open Database", category: "panel" },
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
+  { id: "panel.reopenClosed", label: "Reopen Closed Tab", category: "panel" },
 
   // New tab of the active panel's type, in its group
   { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
+
+  // Inline rename of the active center tab; when that tab isn't renameable the key is left to
+  // what focus holds: a browser panel's hard refresh, or the focused widget.
+  { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
+
+  {
+    id: "panel.toggleMaximize",
+    label: "Maximize / Restore Group",
+    contextLabel: activeGroupMaximizeLabel,
+    category: "panel",
+    isEnabled: canToggleActiveGroupMaximized,
+  },
+
+  // Reload the focused browser panel's page, bypassing the cache.
+  {
+    id: "browser.hardRefresh",
+    label: "Hard Refresh Browser Tab",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
+    sharesKeyWith: "panel.rename",
+  },
+
+  // Bookmark the focused browser panel's page, or remove its bookmark.
+  {
+    id: "browser.toggleBookmark",
+    label: "Bookmark Browser Page",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
+  },
 
   // Split — new panel of the active panel's type, or of a specific type
   ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({
@@ -198,7 +273,6 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "toggle.git", label: "Toggle Git", category: "toggle" },
   { id: "toggle.comments", label: "Toggle Comments", category: "toggle" },
   { id: "toggle.logs", label: "Toggle Logs", category: "toggle" },
-  { id: "toggle.forkTree", label: "Toggle Fork Tree", category: "toggle" },
 
   // Navigation
   { id: "nav.project", label: "Switch Project", category: "nav" },
@@ -206,6 +280,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "nav.commandPalette", label: "Command Palette", category: "nav", hidden: true },
   { id: "nav.search", label: "Find in Files", category: "nav" },
   { id: "nav.openFile", label: "Open File", category: "nav" },
+  { id: "nav.goToSymbol", label: "Go to Symbol in Workspace", category: "nav" },
   { id: "nav.recentNotification", label: "Go to Recent Notification", category: "nav" },
 
   // Find in the focused panel (browser, terminal). Elsewhere the key reaches the widget's own find.
@@ -273,6 +348,49 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "tree.open", label: "Tree: Open", category: "tree", hidden: true },
   { id: "tree.rename", label: "Tree: Rename", category: "tree", hidden: true },
 
+  // Editor
+  {
+    id: "editor.changeIndentation",
+    label: "Editor: Change Indentation",
+    category: "editor",
+    isEnabled: isCodeEditorActive,
+  },
+
+  // Languages
+  ...toolchainStatuses.map(({ selectAction: { id, label } }): ActionDef => ({
+    id,
+    label,
+    category: "language",
+    isEnabled: hasActiveWorktree,
+  })),
+  // Code actions of the focused editor's language servers, enabled only where one offers the kind
+  ...(
+    [
+      ["codeAction.quickFix", "Quick Fix…"],
+      ["codeAction.fixAll", "Fix All"],
+      ["codeAction.organizeImports", "Organize Imports"],
+      ["codeAction.sourceAction", "Source Action…"],
+      ["codeAction.refactor", "Refactor…"],
+    ] as const
+  ).map(([id, label]): ActionDef => ({
+    id,
+    label,
+    category: "language",
+    isEnabled: () => canRunEditorCodeAction(id),
+  })),
+  {
+    id: "language.restartServers",
+    label: "Restart Language Servers",
+    category: "language",
+    isEnabled: hasActiveWorktree,
+  },
+  {
+    id: "worktree.manageRepoTrust",
+    label: "Manage Repository Trust",
+    category: "worktree",
+    isEnabled: hasActiveWorktree,
+  },
+
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
 ];
@@ -285,9 +403,18 @@ export function getActionDef(id: ActionId): ActionDef | undefined {
   return actionDefMap.get(id);
 }
 
+/** Whether one of the two actions declares that they may hold the same key. */
+export function canShareBinding(a: ActionId, b: ActionId): boolean {
+  return getActionDef(a)?.sharesKeyWith === b || getActionDef(b)?.sharesKeyWith === a;
+}
+
 export function getActionsByCategory(category: ActionCategory): ActionDef[] {
   return ACTIONS.filter((a) => a.category === category);
 }
 
 /** All action IDs as a set, for fast membership checks. */
 export const ACTION_IDS = new Set<ActionId>(ACTIONS.map((a) => a.id));
+
+export function isActionId(id: string): id is ActionId {
+  return (ACTION_IDS as ReadonlySet<string>).has(id);
+}

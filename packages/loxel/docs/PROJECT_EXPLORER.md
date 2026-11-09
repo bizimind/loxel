@@ -6,7 +6,7 @@ Behavior contract of the Project Explorer (the "Project Files" panel, `ProjectFi
 
 From top to bottom the panel shows:
 
-- a header with the worktree path (with a copy button) and a button that reveals the active editor's file;
+- a header with the worktree path, shortened to `~/…` under the home folder (its copy button copies the full path), and a button that reveals the active editor's file;
 - a **Drafts** section listing detached draft files (`DetachedFileNode`), when there are any;
 - one `FilesTree` (see [FILES_TREE.md](FILES_TREE.md)) whose roots are the active worktree, then each folder in the **Others** section, then each individually opened Others file. The Others heading is rendered with `renderRootHeader` above the first root after the worktree.
 
@@ -136,6 +136,8 @@ Row-level drop handlers always stop drag auto-scroll. The scroll container handl
 `selectedProjectFile` is stored in `worktree-ui` and uses absolute paths.
 
 Focus inside the Project Explorer updates `selectedProjectFile` and closes any open project file context menu.
+
+The context menu of a file offers **Compare Files** when another file is selected: the selected file becomes the left side and the clicked file the right side, dispatched as `loxel-compare-files`. The selection is read when the right mouse button goes down, before the click focuses the clicked row (a menu opened without a mouse reads it at that time). Folders and media files are not offered.
 
 Focus and selection are not the active/opened visual state. Clicking a row focuses it. The focused row (by click or keyboard) has a stronger tint and an outline than the light hover tint (see [FILES_TREE.md](FILES_TREE.md#focus-selection-and-active-rows)). The stronger active background is only applied to the file path currently opened in the active center editor panel.
 

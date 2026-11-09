@@ -1,10 +1,12 @@
-import { join } from "node:path";
-
 import type { FileSink, Subprocess } from "bun";
 
-import type { FormatterBackend } from "./formatter-backends";
+import { type FormatterBackend, idleTimer, killProcessGroup } from "./formatter-backends";
+import { projectToolPath } from "./js-formatter";
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
@@ -28,13 +30,27 @@ export class OxfmtLspBackend implements FormatterBackend {
   private initPromise: Promise<boolean> | null = null;
   private dead = false;
 
-  constructor(private worktreePath: string) {}
+  private readonly idle = idleTimer(
+    () => this.pendingRequests.size > 0,
+    () => this.destroy(),
+  );
+
+  /**
+   * `dir` is the workspace root oxfmt takes its config from, and the search for its install starts
+   * at `toolDir`, both in the worktree `worktreePath`.
+   */
+  constructor(
+    private readonly dir: string,
+    private readonly toolDir: string,
+    private readonly worktreePath: string,
+  ) {}
 
   async format(content: string, filePath: string): Promise<string | null> {
     const ready = await this.ensureInitialized();
     if (!ready) return null;
+    this.idle.touch();
 
-    const uri = `file://${filePath}`;
+    const uri = fileUri(filePath);
     const languageId = this.inferLanguageId(filePath);
 
     try {
@@ -48,6 +64,9 @@ export class OxfmtLspBackend implements FormatterBackend {
         textDocument: { uri },
         options: { tabSize: 2, insertSpaces: true },
       })) as LspTextEdit[] | null;
+
+      // Stopped meanwhile, which also answers null: that is not "no changes".
+      if (this.dead) return null;
 
       // Close document
       this.sendNotification("textDocument/didClose", { textDocument: { uri } });
@@ -64,25 +83,19 @@ export class OxfmtLspBackend implements FormatterBackend {
   }
 
   isAlive(): boolean {
-    return !this.dead && this.proc !== null && !this.proc.killed;
+    return !this.dead;
   }
 
   destroy(): void {
     this.dead = true;
+    this.idle.clear();
     for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timer);
       pending.resolve(null);
     }
     this.pendingRequests.clear();
-    if (this.proc) {
-      try {
-        this.sendNotification("shutdown", {});
-        this.proc.kill();
-      } catch {
-        // Already dead
-      }
-      this.proc = null;
-    }
+    if (this.proc) killProcessGroup(this.proc.pid);
+    this.proc = null;
     this.initPromise = null;
     this.stdoutBuf = Buffer.alloc(0);
   }
@@ -93,33 +106,34 @@ export class OxfmtLspBackend implements FormatterBackend {
 
   private async ensureInitialized(): Promise<boolean> {
     if (this.dead) return false;
-    if (this.proc && !this.proc.killed && this.initPromise) return this.initPromise;
-
-    // Start fresh
-    this.initPromise = this.startAndInitialize();
+    // One start for concurrent saves; starting awaits before there is a process.
+    this.initPromise ??= this.startAndInitialize();
     return this.initPromise;
   }
 
   private async startAndInitialize(): Promise<boolean> {
-    const binary = this.resolveBinary();
-    if (!binary) {
-      log.warn("oxfmt binary not found", { worktreePath: this.worktreePath });
+    const PATH = await projectToolPath(this.toolDir, this.worktreePath);
+    const binary = Bun.which("oxfmt", { PATH });
+    // Asked again here: nothing else separates the save's detection from this spawn.
+    if (!binary || this.dead || !isRepoTrusted(this.worktreePath)) {
+      log.warn("oxfmt not started", { dir: this.dir, found: binary !== null });
       this.dead = true;
       return false;
     }
 
-    const env = buildSpawnEnv();
-    const localBin = join(this.worktreePath, "node_modules", ".bin");
-    env.PATH = env.PATH ? `${localBin}:${env.PATH}` : localBin;
-
     try {
-      this.proc = Bun.spawn([binary, "--lsp"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: this.worktreePath,
-        env,
-      });
+      this.proc = measureSpawn("oxfmt", () =>
+        Bun.spawn([binary, "--lsp"], {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+          // It takes its config from `rootUri`. A version manager's shim for `node` would act on
+          // the pin files of a directory in the project.
+          cwd: "/",
+          env: { ...buildSpawnEnv(), PATH, MISE_NOT_FOUND_AUTO_INSTALL: "0" },
+          detached: true,
+        }),
+      );
 
       // Start reading stdout for responses
       this.readStdout();
@@ -127,7 +141,9 @@ export class OxfmtLspBackend implements FormatterBackend {
 
       // Monitor process exit
       this.proc.exited.then((code) => {
-        log.info("oxfmt LSP process exited", { code, worktreePath: this.worktreePath });
+        log.info("oxfmt LSP process exited", { code, dir: this.dir });
+        // FormatService replaces a backend that is not alive.
+        this.dead = true;
         this.proc = null;
         this.initPromise = null;
         // Reject all pending requests
@@ -141,12 +157,12 @@ export class OxfmtLspBackend implements FormatterBackend {
       // Send initialize request
       const result = (await this.sendRequest("initialize", {
         processId: process.pid,
-        rootUri: `file://${this.worktreePath}`,
+        rootUri: fileUri(this.dir),
         capabilities: {},
       })) as { capabilities?: { documentFormattingProvider?: boolean } } | null;
 
       if (!result?.capabilities?.documentFormattingProvider) {
-        log.warn("oxfmt LSP does not support formatting", { worktreePath: this.worktreePath });
+        log.warn("oxfmt LSP does not support formatting", { dir: this.dir });
         this.destroy();
         return false;
       }
@@ -154,11 +170,11 @@ export class OxfmtLspBackend implements FormatterBackend {
       // Send initialized notification
       this.sendNotification("initialized", {});
 
-      log.info("oxfmt LSP backend initialized", { worktreePath: this.worktreePath });
+      log.info("oxfmt LSP backend initialized", { dir: this.dir });
       return true;
     } catch (err) {
       log.warn("Failed to start oxfmt LSP", {
-        worktreePath: this.worktreePath,
+        dir: this.dir,
         error: err instanceof Error ? err.message : String(err),
       });
       this.destroy();
@@ -295,14 +311,6 @@ export class OxfmtLspBackend implements FormatterBackend {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  private resolveBinary(): string | null {
-    // Check node_modules/.bin first
-    const localBin = join(this.worktreePath, "node_modules", ".bin", "oxfmt");
-    if (Bun.file(localBin).size) return localBin;
-
-    return Bun.which("oxfmt");
-  }
 
   private inferLanguageId(filePath: string): string {
     const ext = filePath.slice(filePath.lastIndexOf(".") + 1).toLowerCase();

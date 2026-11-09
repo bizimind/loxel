@@ -18,10 +18,13 @@ import { FileSearchModal } from "./components/file-search/FileSearchModal";
 import { StatusBar } from "./components/panels/StatusBar";
 import { TopBar } from "./components/panels/TopBar";
 import { SearchModal } from "./components/search/SearchModal";
+import { SchemaConsentPrompt } from "./components/settings/SchemaConsentPrompt";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
+import { SymbolSearchModal } from "./components/symbol-search/SymbolSearchModal";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
+import { ConfirmDialogHost } from "./components/ui/confirm-dialog-host";
 import { ToastContainer } from "./components/ui/toast";
 import { useDiffSource } from "./hooks/useDiffSource";
 import { useKeybindings } from "./hooks/useKeybindings";
@@ -29,15 +32,18 @@ import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
+import { useUpdateStatusBridge } from "./queries/use-update-status";
 import { useWsBridge } from "./queries/ws-bridge";
 import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
 
 import "./styles/dockview-theme.css";
+import "./styles/worktree-tree.css";
 import { useWorktreeStore } from "./store/worktrees";
 
 export default function App() {
   useWsBridge();
+  useUpdateStatusBridge();
   useDiffSource();
   useKeybindings();
   useLoxelEventListeners();
@@ -107,7 +113,10 @@ export default function App() {
       <SearchModal />
       <FileSearchModal />
       <CommandPaletteModal />
+      <SymbolSearchModal />
       <ToastContainer />
+      <SchemaConsentPrompt />
+      <ConfirmDialogHost />
     </div>
   );
 }

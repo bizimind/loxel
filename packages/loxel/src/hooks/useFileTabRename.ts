@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from "react";
 
 import { showToast } from "@/components/ui/toast";
+import { renameFile } from "@/lib/file-operations";
 import { isWithin } from "@/lib/project-file-helpers";
-import { renameFile } from "@/lib/rename-file";
 import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo-queries";
 import { useWorktreeStore } from "@/store/worktrees";
 

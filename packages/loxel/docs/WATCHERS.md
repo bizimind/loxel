@@ -4,16 +4,20 @@ How the server keeps project files, Git status, refs, logs, worktrees, drafts an
 
 ## Watcher inventory
 
-| Watcher                    | Owner               | Scope                                   | Consumer                                               |
-| -------------------------- | ------------------- | --------------------------------------- | ------------------------------------------------------ |
-| Project `FileWatcher`      | `initializeProject` | Git directory/common directory          | refs, log, worktree lifecycle, and regular-repo status |
-| Per-worktree `FileWatcher` | `subscribeWorktree` | linked-worktree Git admin directory     | status only                                            |
-| `ProjectFilesService`      | worktree resources  | working tree, recursive                 | file tree and status overlays                          |
-| `DetachedFilesService`     | worktree resources  | detached draft directory                | detached-file panels                                   |
-| `ExternalFilesService`     | worktree resources  | individually opened external files      | external-file panels                                   |
-| `ExternalFolderRegistry`   | server-wide         | each Others folder, git status disabled | Others section of every worktree listing the folder    |
-| Git fsmonitor              | Git (user config)   | one daemon per Git directory            | Git status acceleration, only if the user enables it   |
-| Language servers           | LSP managers        | implementation-specific                 | diagnostics and language features                      |
+| Watcher                    | Owner                                                            | Scope                                                                                                                 | Consumer                                                                                                    |
+| -------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Project `FileWatcher`      | `initializeProject`                                              | Git directory/common directory                                                                                        | refs, log, worktree lifecycle, and regular-repo status                                                      |
+| Per-worktree `FileWatcher` | `subscribeWorktree`                                              | linked-worktree Git admin directory                                                                                   | status only                                                                                                 |
+| `ProjectFilesService`      | worktree resources                                               | working tree, recursive                                                                                               | file tree and status overlays                                                                               |
+| `DetachedFilesService`     | worktree resources                                               | detached draft directory                                                                                              | detached-file panels                                                                                        |
+| `ExternalFilesService`     | worktree resources                                               | individually opened external files                                                                                    | external-file panels                                                                                        |
+| `ExternalFolderRegistry`   | server-wide                                                      | each Others folder, git status disabled                                                                               | Others section of every worktree listing the folder                                                         |
+| Git fsmonitor              | Git (user config)                                                | one daemon per Git directory                                                                                          | Git status acceleration in trusted repositories and commands that change one, only if the user enables it   |
+| Language servers           | LSP managers                                                     | implementation-specific                                                                                               | diagnostics and language features                                                                           |
+| Python environment         | `python-env.ts` shared resolution (`subscribePythonEnv`)         | candidate and resolved envs, flat                                                                                     | the interpreter and installed packages for basedpyright, ruff, terminals, format on save and the status bar |
+| JDKs                       | `java-env.ts` one shared watch (`subscribeJavaEnv`)              | JDK install locations and homes, flat                                                                                 | the worktree's JDK and the machine's JDKs, once a worktree has asked for them                               |
+| Go toolchain               | `go-env.ts` shared resolution (`subscribeGoEnv`)                 | root `go.mod` and `go.work`, `go` and `gopls` on `PATH`, the chosen `go`, wanted toolchains in the module cache, flat | the toolchain for the status bar, gopls and format on save                                                  |
+| Rust toolchain             | `rust-toolchain.ts` shared resolution (`subscribeRustToolchain`) | toolchain files and rustup's toolchains, flat                                                                         | the toolchain for the status bar                                                                            |
 
 For a bare project, the project Git directory is also the repository root and therefore contains `.worktrees`. Classification must stay allowlist-based and anchored at the beginning of the reported path; a catch-all would treat source edits and dependency writes as Git metadata.
 
@@ -25,15 +29,16 @@ Nothing Loxel runs to read state may write under the Git directory, `objects/` i
 
 Important classifications:
 
-| Path                                                    | Refreshes             |
-| ------------------------------------------------------- | --------------------- |
-| `index` / `index.lock`                                  | status                |
-| root `HEAD`, branch/tag refs and reflogs                | refs and log          |
-| root operation heads such as `MERGE_HEAD`               | status and refs       |
-| loose objects                                           | status, refs, and log |
-| `worktrees/<name>/gitdir` or `commondir`                | worktree lifecycle    |
-| per-worktree metadata seen through the common directory | none                  |
-| `.worktrees/<name>/...` source paths in a bare repo     | none                  |
+| Path                                                            | Refreshes                |
+| --------------------------------------------------------------- | ------------------------ |
+| `index` / `index.lock`                                          | status                   |
+| root `HEAD`, branch/tag refs and reflogs                        | refs and log             |
+| root operation heads such as `MERGE_HEAD`                       | status and refs          |
+| loose objects                                                   | status, refs, and log    |
+| `worktrees/<name>/gitdir` or `commondir`                        | worktree lifecycle       |
+| `config`, `config.worktree`, `worktrees/<name>/config.worktree` | worktree list (metadata) |
+| `worktrees/<name>/HEAD`, `index` or `logs/` churn               | none                     |
+| `.worktrees/<name>/...` source paths in a bare repo             | none                     |
 
 The project watcher owns project-scoped events. A per-worktree watcher accepts only `status`; it must not recursively watch the common directory once per worktree for events the project watcher already handles.
 
@@ -60,23 +65,40 @@ The client refetches only working-tree diffs (staged, unstaged, uncommitted) on 
 - Write nonces annotate the resulting event so the originating editor can suppress its echo.
 - `pause()` closes active watch handles but deliberately keeps caches, tracked files, queued changes, and nonce state. It waits for an in-flight flush to finish before removal starts. `resume()` recreates those handles, requests a conservative directory rescan, and emits a catch-up notification for every individually watched file because `fs.watch` cannot replay the paused interval. `stop()` is permanent teardown and clears state.
 
+A worktree's `ProjectFilesService` also hands each batch's absolute paths to `onPathsChanged` before its refresh pass, which `server.ts` forwards to the worktree's language servers as `workspace/didChangeWatchedFiles` (see "Watched files" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)). Language servers therefore add no watcher of their own: they see each named-path batch the file tree sees, git-ignored directories excluded. The events the filter drops for being inside a git-ignored directory go one by one to `onIgnoredPathChanged`, which `server.ts` hands to the worktree's `NodeModulesChanges`, so dependency installs under `node_modules` still reach the language servers (see "Dependency installs" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)), and to each language-server manager, which forwards the paths it asked for (see "Ignored paths a manager asks for" there). Rescans without named paths (a null-filename event, the conservative rescan after `resume()`) reach no language server.
+
+`ProjectFilesService` (worktree trees and Others folders) also recognizes renames and moves of files editors have open, through [file-move-detector.ts](../src/server/file-move-detector.ts). Routes track a file's identity (device, inode and birth time, from `lstat` so symlinks are never followed) when an editor reads or writes it, up to 1,000 per tree with the least recently used dropped. Each pass stats only the tracked files whose path or an ancestor directory changed. Only when one of them vanished does it look for where it went: a tracked path that now holds its identity (renamed onto another open file), or among the pass's other changed paths, capped at 200 stats, a file with the same identity or the same relative path under a directory that appeared. A vanished file stays matchable for 2 s, which covers a move whose new path is reported in a later pass than the old one, not the reverse order. Matches are broadcast as `file_moved { oldPath, newPath, source }` before the pass's `file_content_changed` events, which still include the old path (the diff view needs it; editors ignore it once the move is applied). `FileOperationsService` brackets every operation with the tree's `beginOperation`, and each change is stamped when it is queued rather than when its pass runs, so changes queued during an operation or within 1 s after it make the pass's moves `loxel`; anything else is `external`. Drafts and individually opened external files are not covered, and a move across volumes is a copy plus a delete.
+
 The pause/stop distinction is important during worktree removal. A failed removal must resume the same service state; calling `stop()` would erase `ProjectFilesService` caches, `DetachedFilesService` entries, and `ExternalFilesService`'s tracked-file set.
 
 ## Worktree lifecycle
 
-On a `worktrees` event the server broadcasts `worktrees_changed` before reconciling deleted resource entries. `broadcastToProject` discovers recipients through those entries, so reversing the order can prevent the client that had the deleted worktree open from hearing the update.
+On a `worktrees` event the server broadcasts `worktrees_changed` before reconciling. `broadcastToProject` discovers recipients through the resource entries, so reversing the order can prevent the client that had the deleted worktree open from hearing the update.
 
-Reconciliation then:
+That event also fires for config and metadata changes and for worktrees added or moved, so `reconcileWorktrees` asks [`RegisteredWorktrees`](../src/server/registered-worktrees.ts) what happened. It keeps each worktree's admin directory (`<common dir>/worktrees/<id>`, read from the checkout's `.git` file), and compares with the current list. The admin directory is what tells a removal from a move: a move leaves the old path empty too, but only a removal unregisters the worktree.
 
-1. finds resources for the exact project whose worktree path no longer exists;
-2. removes the path from each subscriber's subscription set;
-3. tears down its Git/file/detached/external watchers and related caches.
+Ending terminals and deleting rows cannot be undone, while a missed removal only leaves a shell running until the server stops, so a worktree counts as removed only on positive evidence:
 
-Before an in-app removal, filesystem delivery for that worktree is paused. `wt` renames the checkout into `<worktreesDir>/.wt-trash/` and returns once Git has unregistered it; the files are deleted afterwards by a detached `rm -rf`, so the route answers in well under a second rather than after the many seconds the deletion takes. Those deletions happen outside any subscribed working tree: in a bare repo the project watcher sees them under `.worktrees/` and classifies them as nothing, and a regular repository's root checkout ignores `.worktrees/` through `info/exclude`.
+| Seen                                                         | Counts as | What the server does                                                     |
+| ------------------------------------------------------------ | --------- | ------------------------------------------------------------------------ |
+| Unlisted, admin directory reported not found, directory gone | removed   | `completeWorktreeRemoval`                                                |
+| Unlisted, admin directory points elsewhere                   | moved     | sessions follow to the new path, resources of the old path are released  |
+| Directory gone, anything else (deleted by hand, mid-`wt rm`) | neither   | resources are released unless a removal has them suspended; nothing else |
+| Anything else: a read that fails, an unknown admin directory | neither   | nothing                                                                  |
 
-If Git refuses removal, every service is given a chance to resume without losing state, and a failure in one does not prevent the others; the server then sends `worktree_files_resynced` so the client refetches worktree-scoped file queries, and dirty editors use the normal conflict-aware disk-change path rather than silently accepting new content. If removal succeeds, the route sends the final project broadcast and immediately performs permanent teardown; a later lifecycle event is harmless and keeps external removals covered.
+`completeWorktreeRemoval` in [server.ts](../src/server/server.ts) is the one routine both removal paths end in, covering every worktree the project had, subscribed or not:
 
-The client validates its active path after every worktree-list refresh, not only during hydration. If an externally removed linked worktree was active, it purges worktree-scoped stores, unsubscribes the dead path, and switches to a surviving worktree. A regular repository falls back to its root checkout; a bare repository falls back to its first remaining worktree or no active path. Project ownership must use explicit worktree membership or path-boundary-aware matching — never a raw prefix such as `/repo`, which also matches `/repo-other`.
+1. removes the path from each subscriber's subscription set and tears down its Git/file/detached/external watchers and related caches, and deletes its jdtls workspace;
+2. ends its terminal sessions, at once for an in-app removal and after a delay otherwise (see [TERMINALS.md](TERMINALS.md#ownership-and-lifetime-in-serverts)) and dismisses their notifications;
+3. deletes its rows from `stores.db` ([worktree-rows.ts](../src/server/worktree-rows.ts)).
+
+It may run twice for an in-app removal, from the route and from the event that follows, or the other way round, and the second run finds nothing to do. A worktree removed while no server was watching has no event: `initializeProject` deletes the rows of any path under the worktrees directory that is neither registered nor on disk, and its jdtls workspace. Removed and added again at one path between two reads goes unnoticed, leaving the old shell running: the path is listed both times, and the safe failure is preferred over guessing.
+
+Before an in-app removal, filesystem delivery for that worktree is paused. `wt` renames the checkout into `<worktreesDir>/.wt-trash/`, has Git unregister it, handles the branch and returns; the files are deleted afterwards by a detached `rm -rf`, so the route answers in well under a second rather than after the many seconds the deletion takes. Those deletions happen outside any subscribed working tree: in a bare repo the project watcher sees them under `.worktrees/` and classifies them as nothing, and a regular repository's root checkout ignores `.worktrees/` through `info/exclude`.
+
+If Git refuses removal, every service is given a chance to resume without losing state, and a failure in one does not prevent the others; the server then sends `worktree_files_resynced` so the client refetches worktree-scoped file queries, and dirty editors use the normal conflict-aware disk-change path rather than silently accepting new content. If removal succeeds, the route performs permanent teardown and sends the final project broadcast; a later lifecycle event is harmless and keeps external removals covered. Nothing permanent happens before `executeRemove` returns: a clean hook still running, or a removal that fails, leaves the terminals and rows alone.
+
+After every worktree-list refresh the client releases each worktree that left the list, active or not (per-worktree stores and caches, file search, query caches, cached layouts, its subscription), so a worktree later created at that path starts fresh. It validates its active path at the same point, not only during hydration: if the active worktree is gone, it switches to a surviving one. A regular repository falls back to its root checkout; a bare repository falls back to its first remaining worktree or no active path. Project ownership must use explicit worktree membership or path-boundary-aware matching — never a raw prefix such as `/repo`, which also matches `/repo-other`.
 
 ## Performance notes
 
@@ -86,30 +108,47 @@ Mass deletion is usually coalesced into relatively few FSEvents events. The expe
 
 ## External processes
 
-Loxel never passes `-c core.fsmonitor=true`; whether Git's fsmonitor daemon runs is the user's Git configuration to decide. Forcing it buys nothing: with `GIT_OPTIONAL_LOCKS=0` Git can never save the fsmonitor token in the index, so every query gets a "trivial" answer followed by a full scan, while a persistent daemon is left behind for every Git directory a status touches (every worktree and, because `-c` settings travel to child Git processes, every submodule).
-
-Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMODULE_GITLINK_ONLY` in `git-env.ts`): a submodule is reported only when its checked-out commit differs from the recorded one, never for edits or untracked files inside it. Otherwise Git runs a status inside every submodule, recursively, on every refresh — 4s instead of 0.3s in a repository with 76 submodules. This is a deliberate design decision. It is a default, so a repository's own `submodule.<name>.ignore` still wins: an `ignore=all` submodule stays hidden, and one set to `none` is still inspected in full.
+Loxel never passes `core.fsmonitor=true`. Forcing it buys nothing: with `GIT_OPTIONAL_LOCKS=0` Git can never save the fsmonitor token in the index, while a persistent daemon is left behind for every Git directory a status touches. In a trusted repository, whether fsmonitor runs on a read is the user's Git configuration to decide. `readOnlyGitEnv(cwd)` sets `core.fsmonitor=false` for a repository that isn't trusted and for a call with no `cwd`, and the checks that decide what Loxel runs (`shipped-by-repo.ts`, clangd's `ls-files`) always set it. The setting travels to the child Git processes a status starts, so this covers submodules too. Commands that change the repository, such as commit and checkout, keep the user's Git configuration.
 
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
-Language servers may run their own watchers. Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
+Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMODULE_GITLINK_ONLY` in `git-env.ts`): a submodule is reported only when its checked-out commit differs from the recorded one, never for edits or untracked files inside it. Otherwise Git runs a status inside every submodule, recursively, on every refresh — 4s instead of 0.3s in a repository with 76 submodules. This is a deliberate design decision. It is a default, so a repository's own `submodule.<name>.ignore` still wins: an `ignore=all` submodule stays hidden, and one set to `none` is still inspected in full.
+
+Language servers may run their own watchers; basedpyright, ruff, mypy, Kotlin lint, TypeScript and Tombi instead receive the worktree watcher's changes (the shared Python environment resolution also watches environments, see [languages/python.md](languages/python.md#python-environment)). A language server rooted at a removed worktree stops with its client's connection, not with the worktree's teardown: the client connects each worktree-scoped language server to the active worktree only, so the switch away from a removed worktree, or to no worktree at all, closes the socket that keeps the server running. A worktree that is not active has none.
 
 ## Review checklist
 
 When changing watcher behavior, verify:
 
-- read-only Git calls use `readOnlyGitEnv()` and never pass `-c core.fsmonitor`;
+- read-only Git calls use `readOnlyGitEnv(cwd)`, which keeps fsmonitor off unless the repository is trusted, and never pass `core.fsmonitor=true`;
 - nothing a read path runs writes under the Git directory, `objects/` included;
 - watcher-driven status consumers use the files-service snapshot instead of running another `git status` (an explicit `/api/status` request still reads fresh, so it reflects a just-finished mutation);
 - a burst of events is coalesced, never dropped: the last event is always reflected;
 - bare-repo source paths cannot match Git metadata rules;
 - project-level events are not multiplied once per subscribed worktree;
 - worktree lifecycle broadcasts precede resource teardown;
+- only a worktree git has unregistered counts as removed, never a move, a failed removal or a metadata change;
 - temporary suspension preserves caches, tracked paths, pending changes, and nonces;
 - restarting a stopped `FileWatcher` restores Git event delivery without duplicate handles;
 - permanent teardown closes every watch handle and clears timers;
 - regular-repository root checkouts remain valid active paths;
 - similarly prefixed and external-`WT_DIR` projects are not confused;
 - deleted paths are treated as expected lifecycle races while other failures retain useful error context.
+
+## Sync invariant tests
+
+Three invariants must survive any change to this pipeline. Each has a suite against real temporary repositories, in both bare and regular layouts, and a smoke test and a renderer test cover the two ends:
+
+| Suite                                                                   | Locks                                                                                         |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove |
+| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing  |
+| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                 |
+| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process, and what removing a worktree ends   |
+| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message writes or invalidates in the renderer  |
+
+The first three use [git-sync-harness.ts](../src/test/git-sync-harness.ts), which wires the real watchers and services the way `initializeProject` and `subscribeWorktree` do and captures what they would broadcast, plus what a client reads back after each message. A change to that wiring in `server.ts` has to be mirrored there; the smoke test runs a real server, for one pass, and is the only check of `server.ts` itself.
+
+These tests never wait on time. A native watch arms asynchronously and gives no signal, so `SyncProject` repeats a write until one is delivered. Absence is asserted with a sentinel: a later operation known to emit a different event (`git config` emits only `worktrees`, a new tag only `refs` and `log`). Watcher events are delivered in order and debounced alike, so whatever an earlier operation caused arrives before the sentinel's event; a ref sentinel tags twice, since commits emit what it waits for. Intended behavior that does not hold yet is a `test.todo` naming its issue; running with `--todo` shows it failing.
 
 Native watcher behavior is platform-specific. The lifecycle and feedback-loop integration tests need real macOS FSEvents access and cannot be meaningfully validated inside a restricted filesystem sandbox.

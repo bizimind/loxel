@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { createNotificationSequencesCache, parseNotificationSequences } from "./terminal-settings";
+import {
+  createNotificationSequencesCache,
+  parseNotificationSequences,
+  parseTerminalSpawnSettings,
+} from "./terminal-settings";
 
 const all = { osc9: true, osc777: true, osc99: true };
 
@@ -44,5 +48,24 @@ describe("createNotificationSequencesCache", () => {
     cache.invalidate();
     expect(cache.isEnabled("osc9")).toBe(true);
     expect(reads).toBe(2);
+  });
+});
+
+describe("parseTerminalSpawnSettings", () => {
+  test("reads the scrollback and Python environment settings", () => {
+    const raw = JSON.stringify({
+      state: { terminal: { scrollbackLines: 2000, activatePythonEnv: false } },
+    });
+    expect(parseTerminalSpawnSettings(raw)).toEqual({
+      scrollbackLines: 2000,
+      activatePythonEnv: false,
+    });
+  });
+
+  test("leaves out missing or malformed values, so the spawn defaults apply", () => {
+    expect(parseTerminalSpawnSettings(null)).toEqual({});
+    expect(parseTerminalSpawnSettings("not json")).toEqual({});
+    const raw = JSON.stringify({ state: { terminal: { scrollbackLines: "a lot" } } });
+    expect(parseTerminalSpawnSettings(raw)).toEqual({});
   });
 });

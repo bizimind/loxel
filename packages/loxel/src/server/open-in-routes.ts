@@ -11,6 +11,7 @@ import type { OpenInApp, OpenInApps } from "@/api/open-in-model";
 
 import type { LaunchServicesClient } from "./launch-services-client";
 import { error, json } from "./response-helpers";
+import { measureSpawn } from "./spawn-metrics";
 
 export interface OpenInRouteContext {
   /** True when `path` is a file or folder Loxel manages (worktree, draft or external file). */
@@ -23,7 +24,9 @@ export interface OpenInRouteContext {
 }
 
 export async function runOpenCommand(args: string[]): Promise<void> {
-  const proc = Bun.spawn(["/usr/bin/open", ...args], { stdout: "ignore", stderr: "pipe" });
+  const proc = measureSpawn("open", () =>
+    Bun.spawn(["/usr/bin/open", ...args], { stdout: "ignore", stderr: "pipe" }),
+  );
   const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   if (exitCode !== 0) throw new Error(stderr.trim() || `open exited with code ${exitCode}`);
 }
@@ -45,14 +48,8 @@ async function resolveTarget(
   return { path, isDirectory: info.isDirectory() };
 }
 
-/**
- * POST bodies must be declared as JSON. Browsers only send that content type cross-site after
- * a CORS preflight, which this server never approves, so other web pages can't trigger these
- * actions with a plain form-style POST.
- */
+/** Malformed JSON becomes `null`, which the schema parse below rejects as an invalid request. */
 async function readJsonBody(req: Request): Promise<unknown> {
-  const mimeType = req.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (mimeType !== "application/json") return null;
   return req.json().catch(() => null);
 }
 

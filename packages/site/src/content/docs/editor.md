@@ -1,7 +1,8 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, and conflict handling.
-order: 10
+description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
+section: "In the code"
+order: 1
 ---
 
 The editor is Monaco-based with a few Loxel-specific behaviors layered on top: fast file navigation, autosave with conflict detection, and formatter auto-detection that works across the languages and toolchains your project actually uses.
@@ -15,6 +16,14 @@ Press `Cmd+P` to open Quick Open. Type any part of a file path and results filte
 When the query is empty, Quick Open shows your 15 most recently opened files — useful for returning to files you were working in without retyping.
 
 **Jump to a line:** append `:line` or `:line:col` to the filename. For example, `src/app.ts:42` opens `app.ts` and scrolls to line 42; `src/app.ts:42:8` positions the cursor at column 8 on that line. Line numbers are 1-indexed.
+
+---
+
+## Go to Symbol
+
+Press `Cmd+Alt+O` (or run **Go to Symbol in Workspace** from the command palette) to find a class, function, method or other symbol anywhere in the worktree by name. Results filter with fuzzy matching as you type and show each symbol's kind, the class or module that contains it, and its file and line. Press `Enter` to open the file at the symbol.
+
+Symbols come from the worktree's language servers, so what is searched follows what you have open: TypeScript symbols cover the projects of the TypeScript files you have open (in a monorepo, open a file in a package to include that package), and other languages whose language server supports symbol search, such as Python and Terraform, are searched once a file of that language is open. Among equally good matches, your project's own symbols are listed before those of installed packages. Results appear as each language server answers.
 
 ---
 
@@ -38,32 +47,121 @@ Loxel autosaves 250ms after you stop typing, with a maximum 5s wait. You never h
 
 Press `Cmd+S` to save immediately. Explicit save is the trigger for format on save — by default, the formatter runs only on `Cmd+S`, not on autosave. If you want the formatter to also run on autosave, enable **Also format on auto-save** in Settings > Editor.
 
-> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting.
+> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed, can't start, or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
+
+If a file can't be loaded, the editor stays read-only and a banner says so, so nothing you type can overwrite the file. Click **Retry** in the banner to load it again.
 
 ---
 
 ## Formatter auto-detection
 
-Loxel detects which formatters are available in the active worktree by inspecting config files and `package.json`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
+Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, Maven and Gradle build files and .NET tool manifests. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
 
 Supported formatters:
 
-| Formatter      | Detected from                                              | Formats                                              |
-| -------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
-| `prettier`     | A Prettier config file or `prettier` key in `package.json` | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
-| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency              | The same as Prettier, plus TOML                      |
-| `rustfmt`      | `rustfmt.toml`                                             | `.rs` files                                          |
-| `ruff`         | `pyproject.toml`                                           | `.py` files                                          |
-| `clang-format` | `.clang-format`                                            | C and C++ files                                      |
-| `deno`         | `deno.json`                                                | JS and TS files                                      |
+| Formatter       | Detected from                                                            | Formats                                              |
+| --------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `biome`         | `biome.json`, `biome.jsonc` or an `@biomejs/biome` dependency            | JS/TS, JSON, CSS, GraphQL                            |
+| `prettier`      | A Prettier config file, `prettier` key in `package.json`, or dependency  | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
+| `oxfmt`         | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
+| `rustfmt`       | [`Cargo.toml` or `rustfmt.toml`](/docs/languages/rust#format-on-save)    | `.rs` files                                          |
+| `ruff`          | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
+| `black`         | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
+| `ktfmt/ktlint`  | [A Gradle plugin or `ktlint_*`](/docs/languages/kotlin#format-on-save)   | `.kt` and `.kts` files                               |
+| `gjf/palantir`  | [A Maven or Gradle build](/docs/languages/java#format-on-save)           | `.java` files                                        |
+| `clang-format`  | [`.clang-format` or `_clang-format`](/docs/languages/c-cpp#formatting)   | C, C++ and Objective-C++ files                       |
+| `deno`          | `deno.json`                                                              | JS and TS files                                      |
+| `golangci-lint` | A `version: "2"` `.golangci.*` config that enables formatters            | `.go` files                                          |
+| `gofmt`         | `go.mod` or `go.work`                                                    | `.go` files                                          |
+| `csharpier`     | A `.csharpierrc*` file, or `csharpier` in a `dotnet-tools.json` manifest | `.cs` and `.csx` files                               |
 
-When a project has both Prettier and oxfmt, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Biome, Prettier and oxfmt are detected from the folder closest to the file, and run only in a [repository you trust](/docs/repository-trust). In one folder Biome comes first, then Prettier, then oxfmt, each for the languages it supports. See [JavaScript](/docs/languages/javascript#format-on-save).
+
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. In a repository you [trust](/docs/repository-trust), Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. Until then, ruff formatting uses the ruff that ships with Loxel, and black doesn't run. Go formatters are also detected from the config closest to the file: see [Go](/docs/languages/go#format-on-save). So is rustfmt, for Rust: see [Rust](/docs/languages/rust#format-on-save). Java's formatters too: see [Java](/docs/languages/java#format-on-save). CSharpier is detected from the config or tool manifest closest to the file too. A `.csproj` or `.editorconfig` alone doesn't turn it on, though CSharpier reads `.editorconfig` for its options when there is no `.csharpierrc`. In a repository you [trust](/docs/repository-trust), Loxel runs the version in your tool manifest with `dotnet tool run`. Otherwise it runs a `csharpier` on your `PATH`, which you can install with `dotnet tool install -g csharpier`, and a notice tells you when there is none. A manual override that runs a tool from a project's manifest, such as `dotnet tool run csharpier`, also waits until you trust the repository. Files in `.csharpierignore` are left as they are. Loxel never restores or downloads the tool: if a manifest's version isn't restored, a notice tells you to run `dotnet tool restore` in a terminal. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+
+---
+
+## Indentation
+
+Each file's indentation comes from the first of these that sets it:
+
+1. A choice made for the file with **Editor: Change Indentation**, for as long as its tab is open.
+2. The project's [`.editorconfig`](#editorconfig).
+3. A **Per-Extension Override** in **Settings > Editor**.
+4. The file's own content: an existing file keeps the style it's written in, so Enter and Tab don't mix 2-space indents into a 4-space file or spaces into a tab-indented one.
+5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Razor, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. C, C++ and Objective-C have no single style guide and also use 4 spaces. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
+6. **Default Indentation** in **Settings > Editor**, 2 spaces unless you change it.
+
+Each property is looked up on its own, so an `.editorconfig` that only sets `indent_style = space` takes the size from the next source down. A project's `.editorconfig` wins over your per-extension overrides because it's the convention everyone working on the project, and its formatters, follow; your overrides apply wherever a project doesn't set one.
+
+TypeScript and JavaScript quick fixes, such as **Implement interface**, indent the code they insert the same way as the file you apply them in.
+
+While a code file is the active editor, the status bar shows its indentation (`Spaces: 4` or `Tab Size: 4`), where that came from, and its line endings (`LF` or `CRLF`). Hover it for details, including when the project's `.editorconfig` outranks one of your overrides. Click it, or run **Editor: Change Indentation** from the command palette, to indent the file with spaces or tabs at another size, convert its existing indentation to spaces or tabs, or go back to the automatic choice.
+
+---
+
+## Inlay hints
+
+Inlay hints are the types and parameter names a language server shows inline in your code, such as `add(first: 1)`. They aren't part of the file, and they push the text after them to the right. Choose when they appear with **Inlay Hints** in **Settings > Editor**, which applies to every language and takes effect immediately:
+
+| Mode                              | Behavior                         |
+| --------------------------------- | -------------------------------- |
+| On (default)                      | Always shown                     |
+| Off                               | Never shown                      |
+| On, hidden while holding Ctrl+Alt | Shown until you hold `Ctrl+Alt`  |
+| Off, shown while holding Ctrl+Alt | Hidden until you hold `Ctrl+Alt` |
+
+Diff views show the code as it is, without hints.
+
+---
+
+## EditorConfig
+
+Loxel follows your project's [`.editorconfig`](https://editorconfig.org) files. For each file it reads the `.editorconfig` in the file's folder and in every folder above it, up to the worktree root (or the root of an [other folder](#other-folders)), and stops early at one that sets `root = true`. When several set the same property, the closest file wins.
+
+| Property                                   | Effect                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `indent_style`, `indent_size`, `tab_width` | Indentation as you type, over your settings (see [Indentation](#indentation)) |
+| `max_line_length`                          | A vertical ruler at that column                                               |
+| `trim_trailing_whitespace`                 | Trailing spaces and tabs are removed on save                                  |
+| `insert_final_newline`                     | A missing final newline is added on save; `false` leaves the file as it is    |
+| `end_of_line`                              | Line endings are converted to `lf` or `crlf` on save                          |
+
+Changes made on save are a separate step in the undo history, so `Cmd+Z` brings them back, and the autosave after an undo leaves the file as you restored it. On autosave, whitespace at the end of the lines you're typing on is kept, so a space you just typed doesn't vanish; it's removed by a later save. Edits to an `.editorconfig` apply to open files right away.
+
+A newly opened file can be edited once its `.editorconfig` has been read, at most half a second after it opens, so your first keystrokes already follow it. `charset` and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
+
+---
+
+## Python files
+
+Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and [Python language features](/docs/languages/python). Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
+
+Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
+
+## Gradle and Maven files
+
+`.gradle` and `.groovy` files and `Jenkinsfile` are highlighted as Groovy, including comment toggling and bracket matching. Typing `"""` or `'''` adds the closing quotes, and typing the closing quotes steps over them.
+
+`.properties` files, such as `gradle.properties` and `gradle-wrapper.properties`, get their own highlighting, with `#` and `!` comments. Toggling a comment uses `#`. The `gradlew` and `mvnw` wrapper scripts are highlighted as shell, and `gradlew.bat` and `mvnw.cmd` as batch.
+
+In the file tree, Gradle build and settings files, `gradle.properties`, `libs.versions.toml`, and the `gradlew` scripts show a Gradle icon, `pom.xml` and the `mvnw` scripts a Maven icon, and Groovy files and `Jenkinsfile` a Groovy icon.
+
+---
+
+## Go project files
+
+`go.mod`, `go.work`, `go.sum`, and `go.work.sum` are highlighted in the editor: directives, module paths, versions, `=>` and comments, and in the checksum files the module, version and hash. In `go.mod` and `go.work`, toggling a line comment uses `//`, and pressing Enter inside a `require ( ... )` block indents the new line.
 
 ---
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `Shift+Enter` starts a new line within a paragraph and saves it as a plain line break, and line breaks already in the file show as new lines; pressing it twice starts a new paragraph. GitHub and most markdown renderers display a plain line break as a space. A trailing `\` or two trailing spaces keep the break visible everywhere, and Loxel keeps such breaks (writing them as `\` when you edit their paragraph). An empty line inside a paragraph can only be written as a `\` line, so Loxel saves it that way. `:::localdb` blocks render as [database widgets](#data-widgets); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+
+### Data widgets
+
+A `:::localdb` block puts a database view inside the document: a Table, Kanban, Calendar, Gantt, Graph or Form, for task boards, decision logs or anything else you want to track next to your notes. Add one from the block menu: **Data > Database Widget**. Widget data is stored per project and updates live in every open editor that shows it.
 
 Images referenced by relative path (`![alt](./diagram.png)`) render inline, resolved against the markdown file's location; `http(s)` and `data:` URLs render as-is. Paste or drop image files (PNG, JPEG, GIF, WebP, SVG, up to 10 MB) to upload them: in a repo file they are stored next to it under `assets/` and inserted as `![name](./assets/name-<timestamp>.png)`; in a [draft](/docs/drafts) they are stored alongside the draft. The markdown keeps the relative path you see, so the file stays portable. A failed upload shows a toast and inserts nothing; an image that cannot be loaded shows a dashed placeholder with its alt text.
 
@@ -79,6 +177,24 @@ You have two choices:
 
 - **Accept disk version** — discard your in-editor edits and load the version from disk
 - **Keep my changes** — dismiss the banner and keep your current edits; the on-disk change is ignored until the next save
+
+## Deleted files
+
+If a file you have open is deleted outside Loxel (a `git checkout`, an agent cleaning up, `rm` in a terminal), the tab stays open but its name is struck through and dimmed, and a banner at the top of the editor says the file was deleted from disk. Your content stays in the editor and you can keep editing, but nothing is written while the file is gone: autosave does not quietly bring it back.
+
+To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or click **Re-create file** in the banner. Either writes the editor's current content back to disk. If something else restores the file first, the tab returns to normal on its own: a clean editor reloads the new content, and an editor with unsaved edits merges them with the usual conflict detection.
+
+---
+
+## Moved and renamed files
+
+When a file you have open is renamed or moved, by Loxel or by anything else (`mv`, `git mv`, an agent refactoring, another editor), its tab follows it: the tab takes the new name and keeps its place, and unsaved edits are saved to the new location. If the file was also changed at its new location, your edits are merged into that version; if they overlap, the tab stays where it was and shows as deleted, so neither side is lost. Moving a folder works the same way for every open file inside it.
+
+If the move happened outside Loxel, a banner at the top of the editor shows where the file was and where it is now, so the changed tab doesn't come as a surprise. It stays until you click **Dismiss**. Renames and moves you make in Loxel don't show the banner, and other Loxel windows on the same worktree follow them too.
+
+A file showing the [conflict banner](#conflict-detection) doesn't follow a move, because saving your side at the new location would overwrite the other change. Its tab stays where it was and shows as deleted, so you can copy what you need or re-create it.
+
+A file moved to another disk, or into a folder Loxel doesn't watch (such as a git-ignored folder or one outside the project), can't be followed, so it shows as [deleted](#deleted-files) instead. The same applies to drafts and to files opened on their own from outside a project.
 
 ---
 
@@ -110,11 +226,13 @@ Clicking an entry focuses it, so keyboard navigation continues from there.
 
 **Context menu:** right-click a file or folder for New File, New Directory, Rename, Cut, Copy, Paste, Delete, Copy Name, Copy Relative Path, and Copy Absolute Path; on macOS also **Reveal in Finder** and **Open In** (the apps macOS offers for a file; installed terminals and editors for a folder). A modified file or folder also gets **Git Restore**.
 
+**Compare Files:** click a file, then right-click another file and choose **Compare Files** to open both in a diff, the first file on the left. Both sides stay editable. See [Comparing two files](/docs/diff-viewer#comparing-two-files).
+
 **Reveal the active file:** press `Cmd+Alt+E` to show the active editor's file in the tree. To do this automatically whenever you switch tabs, turn on auto-reveal in **Settings > General**.
 
 ### Other folders
 
-Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [the `loxel` CLI](/docs/reference-env-files-cli-settings#loxel-cli)), or by `Cmd`-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, Loxel switches to that worktree and reveals the folder in its tree.
+Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [Loxel CLI](/docs/cli)), or by `Cmd`-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, Loxel switches to that worktree and reveals the folder in its tree.
 
 A folder that contains one of your projects can't be opened this way, nor can the filesystem root or your home folder (they are too large to watch); open a folder inside them instead. Other folders belong to the worktree they were opened in and are remembered across restarts, until the worktree is removed. A folder opened in several worktrees stays in sync across all of them. They work like the project tree — open, edit and save files with conflict detection, create, rename, delete, cut/copy/paste and drag within the folder, undo with `Cmd+Z` — with these differences:
 
@@ -136,12 +254,12 @@ An opened file or folder goes to the most recently focused Loxel window, launchi
 
 ## TypeScript diagnostics
 
-Real-time errors and warnings from TypeScript appear inline in the editor as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
+Real-time errors and warnings from TypeScript appear inline in the editor as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [Language Intelligence](/docs/language-intelligence), along with the language servers for Python and other languages.
 
 ---
 
 ## See also
 
-- [TypeScript Intelligence](/docs/typescript-intelligence) — per-worktree language server, completions, hover, go-to-definition, and more
+- [Language Intelligence](/docs/language-intelligence) — per-worktree language servers, Python environments, completions, hover, go-to-definition, and more
 - [Drafts](/docs/drafts) — draft files autosave on the same schedule as the code editor
 - [Diff Viewer](/docs/diff-viewer) — viewing file changes in split or unified view

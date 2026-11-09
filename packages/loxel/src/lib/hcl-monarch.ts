@@ -139,26 +139,4 @@ export function registerDockerBakeMonarch(): void {
   // Only dockerbake needs a Monarch tokenizer — terraform uses Shiki's TextMate grammar
   // via shikiToMonaco. dockerbake is a custom Monaco language ID not in Shiki.
   monaco.languages.setMonarchTokensProvider("dockerbake", HCL_MONARCH);
-  monaco.languages.setLanguageConfiguration("dockerbake", HCL_LANG_CONFIG);
 }
-
-const HCL_LANG_CONFIG: monaco.languages.LanguageConfiguration = {
-  comments: { lineComment: "#", blockComment: ["/*", "*/"] },
-  brackets: [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-  ],
-  autoClosingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-  ],
-  surroundingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-  ],
-};

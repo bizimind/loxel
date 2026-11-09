@@ -1,7 +1,7 @@
 import * as monaco from "monaco-editor";
 import picomatch from "picomatch";
 
-import type { Command, Diagnostic, DocumentSelector, Location, LocationLink } from "../../types";
+import type { Diagnostic, DocumentSelector, Location, LocationLink } from "../../types";
 import {
   CodeActionKind,
   CodeActionTriggerKind,
@@ -19,6 +19,7 @@ import {
   SymbolTag,
 } from "../../types";
 import { LspConnection } from "../LspConnection";
+import { toMonacoRange } from "../ranges";
 
 // ============================================================================
 // Code Action Kind
@@ -41,6 +42,15 @@ export function toMonacoCodeActionKind(kind: CodeActionKind | undefined): string
     return undefined;
   }
   return lspCodeActionKindToMonacoCodeActionKind.get(kind) ?? kind;
+}
+
+/**
+ * Whether one code action kind contains the other (`source` and `source.fixAll.ruff`), the test
+ * Monaco applies to a provider's `providedCodeActionKinds` when asked for a kind. The empty kind
+ * contains every kind.
+ */
+export function codeActionKindsIntersect(a: string, b: string): boolean {
+  return a === "" || b === "" || a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
 }
 
 // ============================================================================
@@ -269,20 +279,6 @@ export function toMonacoFoldingRangeKind(
 // Diagnostic Severity
 // ============================================================================
 
-export const monacoMarkerSeverityToLspDiagnosticSeverity = new Map<
-  monaco.MarkerSeverity,
-  DiagnosticSeverity
->([
-  [monaco.MarkerSeverity.Error, DiagnosticSeverity.Error],
-  [monaco.MarkerSeverity.Warning, DiagnosticSeverity.Warning],
-  [monaco.MarkerSeverity.Info, DiagnosticSeverity.Information],
-  [monaco.MarkerSeverity.Hint, DiagnosticSeverity.Hint],
-]);
-
-export function toLspDiagnosticSeverity(severity: monaco.MarkerSeverity): DiagnosticSeverity {
-  return monacoMarkerSeverityToLspDiagnosticSeverity.get(severity) ?? DiagnosticSeverity.Error;
-}
-
 export const lspDiagnosticSeverityToMonacoMarkerSeverity = new Map<
   DiagnosticSeverity,
   monaco.MarkerSeverity
@@ -338,19 +334,6 @@ export function toLspSignatureHelpTriggerKind(
     monacoSignatureHelpTriggerKindToLspSignatureHelpTriggerKind.get(monacoKind) ??
     SignatureHelpTriggerKind.Invoked
   );
-}
-
-// ============================================================================
-// Command
-// ============================================================================
-
-export function toMonacoCommand(
-  command: Command | undefined,
-): monaco.languages.Command | undefined {
-  if (!command) {
-    return undefined;
-  }
-  return { id: command.command, title: command.title, arguments: command.arguments };
 }
 
 // ============================================================================
@@ -443,19 +426,34 @@ export function toMonacoLanguageSelector(
     return [filter];
   });
 }
+/**
+ * Whether `model` matches `selector`, with the same semantics as
+ * `toMonacoLanguageSelector`: a null or empty selector (which servers such as
+ * basedpyright send when registering pull diagnostics) falls back to the client's
+ * own language ids, and `typescript`/`javascript` filters also match tsx/jsx.
+ */
 export function matchesDocumentSelector(
   model: monaco.editor.ITextModel,
   selector: DocumentSelector | null,
+  defaultLanguageIds?: readonly string[],
 ): boolean {
-  if (!selector || selector.length === 0) {
-    return true;
-  }
   const languageId = model.getLanguageId();
+  if (!selector || selector.length === 0) {
+    if (!defaultLanguageIds || defaultLanguageIds.length === 0) return true;
+    return defaultLanguageIds.includes(languageId);
+  }
   const uri = model.uri;
 
   for (const filter of selector) {
     if ("notebook" in filter) continue;
-    if (filter.language && filter.language !== "*" && filter.language !== languageId) continue;
+    if (
+      filter.language &&
+      filter.language !== "*" &&
+      filter.language !== languageId &&
+      LANGUAGE_ALIASES[filter.language] !== languageId
+    ) {
+      continue;
+    }
     if (filter.scheme && filter.scheme !== uri.scheme) continue;
     if (filter.pattern && !picomatch.isMatch(uri.path, filter.pattern)) continue;
     return true;
@@ -463,15 +461,17 @@ export function matchesDocumentSelector(
   return false;
 }
 export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarkerData {
+  const code = diagnostic.code === undefined ? undefined : String(diagnostic.code);
   const marker: monaco.editor.IMarkerData = {
     severity: toMonacoDiagnosticSeverity(diagnostic.severity),
-    startLineNumber: diagnostic.range.start.line + 1,
-    startColumn: diagnostic.range.start.character + 1,
-    endLineNumber: diagnostic.range.end.line + 1,
-    endColumn: diagnostic.range.end.character + 1,
+    ...toMonacoRange(diagnostic.range),
     message: diagnostic.message,
     source: diagnostic.source,
-    code: typeof diagnostic.code === "string" ? diagnostic.code : diagnostic.code?.toString(),
+    // With a description the code links to it in the hover (ruff's rule pages, for example).
+    code:
+      code !== undefined && diagnostic.codeDescription
+        ? { value: code, target: monaco.Uri.parse(diagnostic.codeDescription.href) }
+        : code,
   };
 
   if (diagnostic.tags) {
@@ -483,10 +483,7 @@ export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarke
   if (diagnostic.relatedInformation) {
     marker.relatedInformation = diagnostic.relatedInformation.map((info) => ({
       resource: monaco.Uri.parse(info.location.uri),
-      startLineNumber: info.location.range.start.line + 1,
-      startColumn: info.location.range.start.character + 1,
-      endLineNumber: info.location.range.end.line + 1,
-      endColumn: info.location.range.end.character + 1,
+      ...toMonacoRange(info.location.range),
       message: info.message,
     }));
   }

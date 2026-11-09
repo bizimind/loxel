@@ -1,4 +1,14 @@
 import type { DockviewPanelApi } from "dockview-react";
+import type {
+  DidFailLoadEvent,
+  DidNavigateEvent,
+  DidNavigateInPageEvent,
+  ContextMenuEvent,
+  FoundInPageEvent,
+  PageFaviconUpdatedEvent,
+  PageTitleUpdatedEvent,
+  WebviewTag,
+} from "electron";
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -9,87 +19,46 @@ import {
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
+import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
+import {
+  type BrowserBookmark,
+  useBrowserBookmarksStore,
+  useIsBookmarked,
+} from "@/store/browser-bookmarks";
 import { reattachActiveContent } from "@/store/layout-actions";
+import { isHttpUrl } from "@/url-utils";
+
+import {
+  BookmarksMenu,
+  BookmarksStartPage,
+  BookmarkToggle,
+  type OpenBookmark,
+} from "./BrowserBookmarks";
+import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
+import { JavaScriptDialog } from "./JavaScriptDialog";
+import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
+import { webSearchUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
-/** Electron webview event payloads (not in standard DOM typings). */
-interface WebviewNavigateEvent extends Event {
-  url: string;
-}
-interface WebviewTitleEvent extends Event {
-  title: string;
-}
-interface WebviewFailLoadEvent extends Event {
-  errorCode: number;
-  errorDescription: string;
-  validatedURL: string;
-}
-interface WebviewFaviconEvent extends Event {
-  favicons: string[];
-}
-interface WebviewFoundInPageEvent extends Event {
-  result: {
-    requestId: number;
-    /** 1-based position of the active match. */
-    activeMatchOrdinal: number;
-    matches: number;
-  };
-}
-/** Typed subset of Electron's webview API (not in React/DOM typings). */
-interface ElectronWebView extends HTMLElement {
-  loadURL(url: string): void;
-  goBack(): void;
-  goForward(): void;
-  reload(): void;
-  stop(): void;
-  canGoBack(): boolean;
-  canGoForward(): boolean;
-  openDevTools(): void;
-  closeDevTools(): void;
-  isDevToolsOpened(): boolean;
-  /** `findNext: true` starts a new find session (new query); false steps to the next match. */
-  findInPage(text: string, options?: { forward?: boolean; findNext?: boolean }): number;
-  stopFindInPage(action: "clearSelection" | "keepSelection" | "activateSelection"): void;
+/**
+ * Let pages ask for new tabs and windows (⌘-click, middle-click, `target="_blank"`,
+ * `window.open`), which the main process turns into browser tabs. Passed as a string: React drops `true` for attributes it does not know, though @types/react
+ * types this one as a boolean.
+ */
+const popupAttributes: Record<string, string> = window.electronAPI ? { allowpopups: "" } : {};
 
-  addEventListener(
-    type: "did-navigate" | "did-navigate-in-page",
-    listener: (event: WebviewNavigateEvent) => void,
-  ): void;
-  addEventListener(type: "page-title-updated", listener: (event: WebviewTitleEvent) => void): void;
-  addEventListener(type: "did-fail-load", listener: (event: WebviewFailLoadEvent) => void): void;
-  addEventListener(
-    type: "page-favicon-updated",
-    listener: (event: WebviewFaviconEvent) => void,
-  ): void;
-  addEventListener(type: "found-in-page", listener: (event: WebviewFoundInPageEvent) => void): void;
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-
-  removeEventListener(
-    type: "did-navigate" | "did-navigate-in-page",
-    listener: (event: WebviewNavigateEvent) => void,
-  ): void;
-  removeEventListener(
-    type: "page-title-updated",
-    listener: (event: WebviewTitleEvent) => void,
-  ): void;
-  removeEventListener(type: "did-fail-load", listener: (event: WebviewFailLoadEvent) => void): void;
-  removeEventListener(
-    type: "page-favicon-updated",
-    listener: (event: WebviewFaviconEvent) => void,
-  ): void;
-  removeEventListener(
-    type: "found-in-page",
-    listener: (event: WebviewFoundInPageEvent) => void,
-  ): void;
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
+/** Whether `url` is the empty page a new browser panel opens on. */
+function isBlankPage(url: string): boolean {
+  return !url || url === "about:blank";
 }
 
 export interface BrowserPanelParams {
@@ -103,7 +72,7 @@ interface BrowserPanelProps {
 }
 
 export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
-  const webviewRef = useRef<ElectronWebView | null>(null);
+  const webviewRef = useRef<WebviewTag | null>(null);
   const readyRef = useRef(false);
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [inputUrl, setInputUrl] = useState(initialUrl);
@@ -112,6 +81,29 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<BrowserContextMenuState | null>(null);
+  const [webContentsId, setWebContentsId] = useState<number | null>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  // The page shown or loading, for the activation focus, which runs outside render.
+  const currentUrlRef = useRef(currentUrl);
+  useEffect(() => {
+    currentUrlRef.current = currentUrl;
+  }, [currentUrl]);
+  // The page that committed, which a bookmark saves: the address bar and the panel title run ahead
+  // of it while the next page loads, and the title and favicon arrive after it commits. Its URL is
+  // empty while there is none, or after a load failed.
+  const pageRef = useRef<BrowserBookmark>({ url: "", title: "" });
+  const [pageUrl, setPageUrl] = useState("");
+  const isBookmarked = useIsBookmarked(pageUrl);
+
+  // The page's alert() / confirm() / prompt(), shown over the page one at a time.
+  // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
+  const {
+    dialog,
+    answer: answerDialog,
+    dismissAll: dismissDialogs,
+  } = useJavaScriptDialogs(webContentsId);
+  const dialogFocusRef = useRef<HTMLElement | null>(null);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -149,15 +141,38 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     reattachActiveContent(panelApi.group);
   }, [panelApi]);
 
-  // Hand keyboard focus to the page when the panel is activated (e.g. directional focus).
+  // Hand keyboard focus to the page when the panel is activated (e.g. directional focus), or to
+  // the address bar while the panel shows no page yet, so a new blank tab is ready for a URL.
   // Skip when focus is already inside the panel so clicking the URL bar keeps its focus.
   usePanelActivationFocus(
     panelApi,
     useCallback(() => {
       const webview = webviewRef.current;
       if (!webview || rootRef.current?.contains(document.activeElement)) return;
-      webview.focus();
-    }, []),
+      const page = isBlankPage(currentUrlRef.current) ? urlInputRef.current : webview;
+      const target = dialogFocusRef.current ?? page;
+      if (!target) return;
+      target.focus();
+      // A tab switched to is unhidden a frame later (dockview's overlay for "always"-rendered
+      // panels), and its hidden elements can't take focus until then. The webview can.
+      if (document.activeElement === target) return;
+      requestAnimationFrame(() => {
+        if (isActivatedPanel(panelApi) && !rootRef.current?.contains(document.activeElement)) {
+          target.focus();
+        }
+      });
+    }, [panelApi]),
+  );
+
+  // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
+  useEffect(
+    () =>
+      window.electronAPI?.onOpenInNewBrowserTab((webContentsId, url, background) => {
+        const webview = webviewRef.current;
+        if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
+        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: !background });
+      }),
+    [panelApi],
   );
 
   // Attach webview event listeners
@@ -166,10 +181,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     if (!webview) return;
 
     const onDomReady = () => {
+      // Every dom-ready: a webview re-attached to the DOM gets a new guest.
+      setWebContentsId(webview.getWebContentsId());
       if (!readyRef.current) {
         readyRef.current = true;
-        if (initialUrl && initialUrl !== "about:blank") {
-          webview.loadURL(initialUrl);
+        if (!isBlankPage(initialUrl)) {
+          loadUrl(webview, initialUrl);
         }
       }
     };
@@ -191,42 +208,71 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       updateNavState();
     };
 
-    const onDidNavigate = (event: WebviewNavigateEvent) => {
+    const onDidNavigate = (event: DidNavigateEvent | DidNavigateInPageEvent) => {
+      // Before the first dom-ready this is the placeholder `src="about:blank"`, not the panel's
+      // page: it would make a panel opened on a URL count as blank until that page commits.
+      if (!readyRef.current) return;
       if (event.type === "did-navigate") {
         // A new page drops the matches and the find session.
         setFindMatches(null);
         findSessionStaleRef.current = true;
       }
-      setCurrentUrl(event.url);
-      setInputUrl(event.url);
-      panelApi.updateParameters({ url: event.url, faviconUrl: undefined });
+      // The page's own URL, not `event.url`: that is a subframe's for in-page navigations in
+      // frames, and drops the `view-source:` prefix of a source view.
+      const url = webview.getURL();
+      setCurrentUrl(url);
+      setInputUrl(url);
+      setPageUrl(url);
+      if (event.type === "did-navigate") {
+        pageRef.current = { url, title: "" };
+        panelApi.updateParameters({ url, faviconUrl: undefined });
+      } else {
+        // The same document, which keeps its title and favicon (Chromium reports them per document).
+        pageRef.current = { ...pageRef.current, url };
+        panelApi.updateParameters({ url });
+      }
       updateNavState();
     };
 
-    const onTitleUpdate = (event: WebviewTitleEvent) => {
+    const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
+      pageRef.current = { ...pageRef.current, title: event.title };
       panelApi.setTitle(event.title);
     };
 
-    const onFaviconUpdate = (event: WebviewFaviconEvent) => {
+    const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
       const favicon = event.favicons[0];
       if (favicon) {
+        pageRef.current = { ...pageRef.current, faviconUrl: favicon };
         panelApi.updateParameters({ faviconUrl: favicon });
       }
     };
 
-    const onFailLoad = (event: WebviewFailLoadEvent) => {
-      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error
-      if (event.errorCode === -3) return;
+    const onFailLoad = (event: DidFailLoadEvent) => {
+      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error. A subframe that
+      // fails (a dead or framing-blocked embed) leaves the page itself loaded.
+      if (event.errorCode === -3 || !event.isMainFrame) return;
+      pageRef.current = { url: "", title: "" };
+      setPageUrl("");
       setLoadError(
         `Failed to load ${event.validatedURL}: ${event.errorDescription} (${event.errorCode})`,
       );
       setIsLoading(false);
     };
 
-    const onFoundInPage = ({ result }: WebviewFoundInPageEvent) => {
+    const onFoundInPage = ({ result }: FoundInPageEvent) => {
       // Ignore results of a superseded search (the query changed since).
       if (result.requestId !== findRequestRef.current) return;
       setFindMatches({ active: result.activeMatchOrdinal, total: result.matches });
+    };
+
+    const onContextMenu = ({ params }: ContextMenuEvent) => {
+      setContextMenu({
+        open: true,
+        webview,
+        params,
+        canGoBack: webview.canGoBack(),
+        canGoForward: webview.canGoForward(),
+      });
     };
 
     const onDevToolsOpened = () => setDevToolsOpen(true);
@@ -240,6 +286,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     webview.addEventListener("page-favicon-updated", onFaviconUpdate);
     webview.addEventListener("did-fail-load", onFailLoad);
     webview.addEventListener("found-in-page", onFoundInPage);
+    webview.addEventListener("context-menu", onContextMenu);
     webview.addEventListener("devtools-opened", onDevToolsOpened);
     webview.addEventListener("devtools-closed", onDevToolsClosed);
 
@@ -254,43 +301,79 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       webview.removeEventListener("page-favicon-updated", onFaviconUpdate);
       webview.removeEventListener("did-fail-load", onFailLoad);
       webview.removeEventListener("found-in-page", onFoundInPage);
+      webview.removeEventListener("context-menu", onContextMenu);
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
   }, [panelApi]);
 
-  const navigate = useCallback((url: string) => {
-    const webview = webviewRef.current;
-    if (!webview || !readyRef.current) return;
+  const navigate = useCallback(
+    (url: string) => {
+      const webview = webviewRef.current;
+      if (!webview || !readyRef.current) return;
 
-    let normalized = url.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
-      // If it looks like a domain (contains a dot), prepend https://
-      // Otherwise treat it as a search query
-      if (/^[^\s]+\.[^\s]+/.test(normalized)) {
-        normalized = `https://${normalized}`;
-      } else {
-        normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
+      let normalized = url.trim();
+      // A web URL, or the source view of one (View Page Source puts those in the address bar).
+      if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
+        // If it looks like a domain (contains a dot), prepend https://
+        // Otherwise treat it as a search query
+        if (/^[^\s]+\.[^\s]+/.test(normalized)) {
+          normalized = `https://${normalized}`;
+        } else {
+          normalized = webSearchUrl(normalized);
+        }
       }
-    }
 
-    setInputUrl(normalized);
-    setCurrentUrl(normalized);
-    setLoadError(null);
-    webview.loadURL(normalized);
-  }, []);
+      setInputUrl(normalized);
+      setCurrentUrl(normalized);
+      setLoadError(null);
+      dismissDialogs();
+      loadUrl(webview, normalized);
+    },
+    [dismissDialogs],
+  );
 
   const goBack = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.goBack();
-  }, []);
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.goBack();
+  }, [dismissDialogs]);
 
   const goForward = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.goForward();
-  }, []);
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.goForward();
+  }, [dismissDialogs]);
 
   const reload = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.reload();
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.reload();
+  }, [dismissDialogs]);
+
+  const hardRefresh = useCallback(() => {
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.reloadIgnoringCache();
+  }, [dismissDialogs]);
+
+  // Pages of the web only: not the blank page, or Chromium's error and internal pages.
+  const canBookmark = isHttpUrl(pageUrl);
+  const toggleBookmark = useCallback(() => {
+    const page = pageRef.current;
+    if (!isHttpUrl(page.url)) return;
+    useBrowserBookmarksStore.getState().toggleBookmark({ ...page, title: page.title || page.url });
   }, []);
+
+  const browserPanelTarget = useMemo(
+    () => ({ hardRefresh, toggleBookmark }),
+    [hardRefresh, toggleBookmark],
+  );
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    return registerBrowserPanelTarget(root, browserPanelTarget);
+  }, [browserPanelTarget]);
 
   const stopLoading = useCallback(() => {
     if (readyRef.current) webviewRef.current?.stop();
@@ -305,6 +388,21 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       wv.openDevTools();
     }
   }, []);
+
+  const openBookmark = useCallback<OpenBookmark>(
+    (url, inNewTab) => {
+      if (inNewTab) {
+        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: inNewTab.activate });
+        return;
+      }
+      navigate(url);
+      webviewRef.current?.focus();
+    },
+    [navigate, panelApi],
+  );
+
+  // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
+  const returnFocusToPage = useCallback(() => webviewRef.current?.focus(), []);
 
   const handleUrlKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -364,6 +462,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             <GlobeIcon className="text-muted-foreground size-3 shrink-0" />
           )}
           <input
+            ref={urlInputRef}
             type="text"
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}
@@ -372,7 +471,14 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             className="text-foreground min-w-0 flex-1 bg-transparent text-xs outline-none"
             spellCheck={false}
           />
+          <BookmarkToggle
+            bookmarked={isBookmarked}
+            disabled={!canBookmark}
+            onToggle={toggleBookmark}
+          />
         </div>
+
+        <BookmarksMenu onOpen={openBookmark} />
 
         <NavButton
           onClick={toggleDevTools}
@@ -396,13 +502,37 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           ref={webviewRef as React.Ref<HTMLElement>}
           src="about:blank"
           partition={BROWSER_PARTITION}
+          {...popupAttributes}
           className="flex-1"
           style={{ display: "flex" }}
         />
+        {isBlankPage(currentUrl) && <BookmarksStartPage onOpen={openBookmark} />}
         {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
+        {dialog && (
+          <JavaScriptDialog
+            key={dialog.id}
+            request={dialog}
+            focusScopeRef={rootRef}
+            focusRef={dialogFocusRef}
+            onAnswer={answerDialog}
+            onReturnFocus={returnFocusToPage}
+          />
+        )}
       </div>
+      {contextMenu && (
+        <BrowserContextMenu
+          menu={contextMenu}
+          panelId={panelApi.id}
+          onOpenChange={(open) => setContextMenu((menu) => menu && { ...menu, open })}
+        />
+      )}
     </div>
   );
+}
+
+/** Load a URL, leaving failures to the `did-fail-load` event, which reports them in the panel. */
+function loadUrl(webview: WebviewTag, url: string): void {
+  webview.loadURL(url).catch(() => {});
 }
 
 function NavButton({

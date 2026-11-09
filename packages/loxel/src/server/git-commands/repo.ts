@@ -1,12 +1,14 @@
 import path from "node:path";
 
-import { $ } from "bun";
-
 import { resolveCommit } from "./diff";
 import { readOnlyGitEnv } from "./git-env";
+import { gitText } from "./run-git";
 
 export async function isBareRepo(cwd: string): Promise<boolean> {
-  const result = await $`git -C ${cwd} rev-parse --is-bare-repository`.env(readOnlyGitEnv()).text();
+  const result = await gitText(["rev-parse", "--is-bare-repository"], {
+    cwd,
+    env: readOnlyGitEnv(cwd),
+  });
   return result.trim() === "true";
 }
 
@@ -38,17 +40,23 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
   // A bare repository's own HEAD *is* the default branch, and it is shared by
   // every linked worktree through the common git dir. A worktree's own HEAD
   // is merely the checked-out branch, so this only applies when the
-  // repository itself is bare (core.bare is inherited by linked worktrees,
-  // where --is-bare-repository would say false).
-  if (await isBareRepositoryConfig(cwd)) {
-    const commonDir = await $`git -C ${cwd} rev-parse --path-format=absolute --git-common-dir`
-      .env(readOnlyGitEnv())
-      .nothrow()
-      .text();
-    const head = await $`git -C ${commonDir.trim()} symbolic-ref --short HEAD`
-      .env(readOnlyGitEnv())
-      .nothrow()
-      .text();
+  // repository itself is bare. Read core.bare in the common dir: from a linked
+  // worktree it is not inherited once per-worktree config
+  // (extensions.worktreeConfig) moves it into the bare dir's own
+  // config.worktree, which only the common dir reads.
+  const commonDir = (
+    await gitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+      nothrow: true,
+    })
+  ).trim();
+  if (commonDir && (await isBareRepository(cwd, commonDir))) {
+    const head = await gitText(["symbolic-ref", "--short", "HEAD"], {
+      cwd: commonDir,
+      env: readOnlyGitEnv(cwd),
+      nothrow: true,
+    });
     // HEAD is set once at creation and never rewritten, so it dangles after
     // `init --bare` followed by a push of `main`, or a `master` -> `main`
     // rename upstream. Only a branch that exists can be a base.
@@ -58,10 +66,11 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
 
   // A repository created locally with a custom init.defaultBranch has no
   // remote to learn the name from, but the config still records it.
-  const configured = await $`git -C ${cwd} config --get init.defaultBranch`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const configured = await gitText(["config", "--get", "init.defaultBranch"], {
+    cwd,
+    env: readOnlyGitEnv(cwd),
+    nothrow: true,
+  });
   const candidates = [configured.trim(), "main", "master"].filter((name) => name.length > 0);
   for (const candidate of candidates) {
     if (await refExists(cwd, candidate)) return candidate;
@@ -73,10 +82,11 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
 /** The short ref a remote HEAD points at (`origin/main`), preferring `origin`. */
 async function resolveRemoteHead(cwd: string): Promise<string | null> {
   const format = "%(refname) %(symref)";
-  const output = await $`git -C ${cwd} for-each-ref --format=${format} refs/remotes`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const output = await gitText(["for-each-ref", `--format=${format}`, "refs/remotes"], {
+    cwd,
+    env: readOnlyGitEnv(cwd),
+    nothrow: true,
+  });
   const heads = output
     .trim()
     .split("\n")
@@ -91,11 +101,15 @@ async function resolveRemoteHead(cwd: string): Promise<string | null> {
   return chosen ? chosen[1].slice("refs/remotes/".length) : null;
 }
 
-async function isBareRepositoryConfig(cwd: string): Promise<boolean> {
-  const result = await $`git -C ${cwd} config --get core.bare`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+async function isBareRepository(cwd: string, gitDir: string): Promise<boolean> {
+  // Read the config key rather than `rev-parse --is-bare-repository`: run inside
+  // a git dir that command finds no work tree, so it reports `true` for any repo
+  // whose config simply omits core.bare.
+  const result = await gitText(["config", "--get", "--type=bool", "core.bare"], {
+    cwd: gitDir,
+    env: readOnlyGitEnv(cwd),
+    nothrow: true,
+  });
   return result.trim() === "true";
 }
 
@@ -105,11 +119,17 @@ async function refExists(cwd: string, ref: string): Promise<boolean> {
 
 export async function getGitRoot(cwd: string): Promise<string> {
   try {
-    const result = await $`git -C ${cwd} rev-parse --show-toplevel`.env(readOnlyGitEnv()).text();
+    const result = await gitText(["rev-parse", "--show-toplevel"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+    });
     return result.trim();
   } catch {
     // Bare repos don't have a working tree — use the git-common-dir as the root
-    const result = await $`git -C ${cwd} rev-parse --git-common-dir`.env(readOnlyGitEnv()).text();
+    const result = await gitText(["rev-parse", "--git-common-dir"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+    });
     const trimmed = result.trim();
     return trimmed.startsWith("/") ? trimmed : path.resolve(cwd, trimmed);
   }

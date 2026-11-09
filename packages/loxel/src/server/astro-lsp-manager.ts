@@ -1,27 +1,23 @@
 import path from "node:path";
 
-import type { ServerWebSocket, Subprocess } from "bun";
+import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
 
-import {
-  type SpawnOptions,
-  StdioLspManager,
-  type WtLspContext,
-  type WtLspSession,
-} from "./stdio-lsp-manager";
+/** Exported for tests. */
+export const ASTRO_REPO_TRUST_RESTRICTION =
+  "The Astro language server doesn't run, since it loads the project's own TypeScript and packages.";
 
-export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+/**
+ * astro-ls has no restricted mode: it requires a TypeScript to load by path, the project's own in
+ * `node_modules`, and loads the project's Prettier and its Vue and Svelte editor integrations. So it
+ * runs only in a trusted repository, and starts when the repository is trusted.
+ */
+export class AstroLspManager extends WorktreeLspManager {
   protected override readonly disableSemanticTokens = true;
+  protected override readonly repoTrustRestriction = ASTRO_REPO_TRUST_RESTRICTION;
+  protected override readonly runsOnlyWhenTrusted = true;
 
   constructor() {
     super("astro-lsp");
-  }
-
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
   }
 
   protected resolveBinary(): string | null {
@@ -30,32 +26,6 @@ export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext>
 
   protected override spawnArgs(): readonly string[] {
     return ["--stdio"];
-  }
-
-  protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: WtLspContext,
-  ): WtLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-    };
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string | null {
-    return session.wtPath;
   }
 
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {

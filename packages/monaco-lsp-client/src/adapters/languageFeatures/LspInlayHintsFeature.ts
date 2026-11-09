@@ -10,8 +10,9 @@ import { capabilities, api } from "../../types";
 import { Disposable } from "../../utils";
 import { assertTargetTextModel } from "../ITextModelBridge";
 import { LspConnection } from "../LspConnection";
+import { toMonacoRange } from "../ranges";
 import { toMonacoLanguageSelector } from "./common";
-import { toMonacoCommand, toMonacoInlayHintKind } from "./common";
+import { toMonacoInlayHintKind } from "./common";
 
 export class LspInlayHintsFeature extends Disposable {
   private readonly _providers = new Set<LspInlayHintsProvider>();
@@ -107,7 +108,7 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
         }
 
         if (resolved.label !== hint._lspInlayHint.label) {
-          hint.label = toLspInlayHintLabel(resolved.label);
+          hint.label = toLspInlayHintLabel(resolved.label, this._client);
         }
 
         if (resolved.textEdits) {
@@ -134,14 +135,14 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
     range: monaco.Range,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.InlayHintList | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
-    const result = await retryOnContentModified(() =>
-      this._client.server.textDocumentInlayHint({
-        textDocument: translated.textDocument,
-        range: this._client.bridge.translateRange(model, range),
-      }),
-    );
+    // A request an edit made stale rejects as cancelled; Monaco asks again for the new content.
+    const result = await this._client.server.textDocumentInlayHint({
+      textDocument: translated.textDocument,
+      range: this._client.bridge.translateRange(model, range),
+    });
 
     if (!result) {
       return null;
@@ -150,7 +151,7 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
     return {
       hints: result.map((hint) => {
         const monacoHint: ExtendedInlayHint = {
-          label: toLspInlayHintLabel(hint.label),
+          label: toLspInlayHintLabel(hint.label, this._client),
           position: assertTargetTextModel(
             this._client.bridge.translateBack(translated.textDocument, hint.position),
             model,
@@ -176,24 +177,9 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
   }
 }
 
-async function retryOnContentModified<T>(cb: () => Promise<T>): Promise<T> {
-  const nRetries = 3;
-  let triesLeft = nRetries;
-  while (true) {
-    try {
-      return await cb();
-    } catch (e) {
-      if (e instanceof Error && e.message === "content modified" && triesLeft > 0) {
-        triesLeft--;
-        continue;
-      }
-      throw e;
-    }
-  }
-}
-
 function toLspInlayHintLabel(
   label: string | InlayHintLabelPart[],
+  client: LspConnection,
 ): string | monaco.languages.InlayHintLabelPart[] {
   if (typeof label === "string") {
     return label;
@@ -203,18 +189,13 @@ function toLspInlayHintLabel(
     const monacoLabelPart: monaco.languages.InlayHintLabelPart = {
       label: part.value,
       tooltip: toMonacoTooltip(part.tooltip),
-      command: toMonacoCommand(part.command),
+      command: client.commands.toMonacoCommand(part.command),
     };
 
     if (part.location) {
       monacoLabelPart.location = {
         uri: monaco.Uri.parse(part.location.uri),
-        range: new monaco.Range(
-          part.location.range.start.line + 1,
-          part.location.range.start.character + 1,
-          part.location.range.end.line + 1,
-          part.location.range.end.character + 1,
-        ),
+        range: toMonacoRange(part.location.range),
       };
     }
 

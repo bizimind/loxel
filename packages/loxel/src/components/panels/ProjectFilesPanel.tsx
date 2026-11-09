@@ -14,6 +14,7 @@ import type { FilesTreeHandle, TreeNode } from "@/components/tree";
 import { FilesTree, InlineRenameInput, TREE_PATH_ATTR, TREE_SECTION_ATTR } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast } from "@/components/ui/toast";
+import { useActiveEditorFilePath } from "@/hooks/useActiveEditorFilePath";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
 import { useFileClipboard } from "@/hooks/useFileClipboard";
 import { useFileOperations } from "@/hooks/useFileOperations";
@@ -22,8 +23,9 @@ import { useProjectFileDrag } from "@/hooks/useProjectFileDrag";
 import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboardNav";
 import { copyToClipboard } from "@/lib/clipboard";
 import { getDisplayFilename, toAbsoluteDir } from "@/lib/detached-path";
-import { onLoxelEvent } from "@/lib/loxel-events";
-import { dispatchOpenFile } from "@/lib/open-file";
+import { abbreviateHomePath } from "@/lib/home-path";
+import { dispatchLoxelEvent, onLoxelEvent } from "@/lib/loxel-events";
+import { dispatchOpenFile, filePanelType } from "@/lib/open-file";
 import { registerPanelFocus } from "@/lib/panel-focus";
 import {
   fileParentDir,
@@ -41,9 +43,9 @@ import { queryKeys } from "@/queries/query-keys";
 import { useDiscardChangesMutation } from "@/queries/use-git-mutations";
 import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo-queries";
 import { getQueryScope } from "@/queries/use-scope";
-import { useEditorStateStore } from "@/store/editor-state";
+import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
+import { useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCenterApi, subscribeCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -57,6 +59,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const displayPath = activeWorktreePath;
+  const homeDir = useProjectStore((s) => s.homeDir);
   const rootName = displayPath ? displayPath.split("/").pop() || displayPath : "Project";
   const expandedProjectFolders = useWorktreeUI((s) => s.expandedProjectFolders);
   const setExpandedProjectFolders = useWorktreeUI((s) => s.setExpandedProjectFolders);
@@ -124,7 +127,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         new Set([...ui.expandedProjectFolders].filter((p) => !isWithin(p, path))),
       );
       // Editors still open on its files keep receiving disk changes as individual Others files.
-      const openPaths = [...useEditorStateStore.getState().files.keys()].filter((p) =>
+      const openPaths = openEditorPaths(useEditorStateStore.getState().files).filter((p) =>
         isWithin(p, path),
       );
       if (openPaths.length > 0) {
@@ -140,15 +143,47 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     path: string;
     isDir: boolean;
     status?: ProjectFileStatus;
+    /** The focused file, offered for "Compare Files" against the clicked one */
+    compareWith: string | null;
   } | null>(null);
+
+  // The focused file is read when the right button goes down, before the click focuses the
+  // clicked row. A context menu opened without a mouse falls back to the focus at that time.
+  const compareCandidateRef = useRef<string | null>(null);
+  const focusedFilePath = useCallback((): string | null => {
+    const selected = getCurrentWorktreeUI().getState().selectedProjectFile;
+    if (!selected) return null;
+    const row = scrollRef.current?.querySelector<HTMLElement>(
+      `button[${TREE_PATH_ATTR}="${CSS.escape(selected)}"]`,
+    );
+    return row && !row.hasAttribute("data-tree-dir") ? selected : null;
+  }, []);
+  const captureCompareCandidate = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button === 2) compareCandidateRef.current = focusedFilePath();
+    },
+    [focusedFilePath],
+  );
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, path: string, isDir: boolean, status?: ProjectFileStatus) => {
       e.preventDefault();
       e.stopPropagation();
-      setContextMenu({ position: { x: e.clientX, y: e.clientY }, path, isDir, status });
+      const focused = compareCandidateRef.current ?? focusedFilePath();
+      compareCandidateRef.current = null;
+      const compareWith =
+        !isDir && focused && focused !== path && isComparable(focused) && isComparable(path)
+          ? focused
+          : null;
+      setContextMenu({
+        position: { x: e.clientX, y: e.clientY },
+        path,
+        isDir,
+        status,
+        compareWith,
+      });
     },
-    [],
+    [focusedFilePath],
   );
 
   // --- File operations (rename, delete, undo/redo, new file/dir) ---
@@ -228,20 +263,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   }, [revealFileInTree]);
 
   const autoReveal = useSettingsStore((s) => s.autoRevealInExplorer);
-  const [centerApi, setCenterApiState] = useState(() => getCenterApi());
-  const [activeEditorFilePath, setActiveEditorFilePath] = useState(() => getActiveEditorFilePath());
-  useEffect(() => subscribeCenterApi(setCenterApiState), []);
-
-  useEffect(() => {
-    if (!centerApi) {
-      setActiveEditorFilePath(null);
-      return;
-    }
-    const updateActiveEditorFilePath = () => setActiveEditorFilePath(getActiveEditorFilePath());
-    updateActiveEditorFilePath();
-    const disposable = centerApi.onDidActivePanelChange(updateActiveEditorFilePath);
-    return () => disposable.dispose();
-  }, [centerApi]);
+  const activeEditorFilePath = useActiveEditorFilePath();
 
   useEffect(() => {
     if (!autoReveal || !activeEditorFilePath) return;
@@ -651,8 +673,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         </div>
         {displayPath && (
           <div className="mt-1 flex items-center gap-1">
+            {/* rtl truncates from the start; <bdi> keeps the path itself in reading order. */}
             <span className="text-muted-foreground min-w-0 truncate text-[11px]" dir="rtl">
-              {displayPath}
+              <bdi>{abbreviateHomePath(displayPath, homeDir)}</bdi>
             </span>
             <button
               onClick={handleCopy}
@@ -686,6 +709,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
             setContextMenu(null);
           }
         }}
+        onMouseDownCapture={captureCompareCandidate}
         onDragLeave={onContainerDragLeave}
         onDrop={onContainerDrop}
         onDragOverCapture={onContainerDragOver}
@@ -777,6 +801,8 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           onRemoveFromOthers={
             ctxIsOthersRoot ? () => handleRemoveFromOthers(contextMenu.path) : undefined
           }
+          compareWith={contextMenu.compareWith ?? undefined}
+          onCompare={compareFiles(contextMenu.compareWith, contextMenu.path)}
         />
       )}
 
@@ -805,4 +831,15 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       />
     </div>
   );
+}
+
+/** Text files only: media files open in a viewer and have no lines to compare. */
+function isComparable(path: string): boolean {
+  return filePanelType(path) !== "media";
+}
+
+/** "Compare Files" for the focused file (left) and the clicked one (right), if offered. */
+function compareFiles(oldPath: string | null, newPath: string): (() => void) | undefined {
+  if (!oldPath) return undefined;
+  return () => dispatchLoxelEvent("loxel-compare-files", { oldPath, newPath });
 }

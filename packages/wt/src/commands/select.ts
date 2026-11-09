@@ -5,11 +5,13 @@ import { isTTY, pickWorktree } from "../prompt.ts";
  * The worktree name to act on: the one given, or one picked from a list.
  *
  * @param action - Verb used in prompts and error messages ("view", "remove")
+ * @param usage - Usage line for the non-interactive error (default: `wt <action> <name>`)
  */
 export async function resolveWorktreeName(
   name: string | undefined,
   action: string,
   repoPath: string,
+  usage = `wt ${action} <name>`,
 ): Promise<string> {
   if (name) return name;
 
@@ -20,9 +22,7 @@ export async function resolveWorktreeName(
   // Unattended callers must name the target explicitly: auto-picking the sole
   // worktree would let a bare `wt remove` in a script delete it.
   if (!isTTY()) {
-    throw new Error(
-      `Worktree name required in non-interactive mode.\n\nUsage: wt ${action} <name>`,
-    );
+    throw new Error(`Worktree name required in non-interactive mode.\n\nUsage: ${usage}`);
   }
   if (managed.length === 1 && managed[0]) return managed[0].name;
 

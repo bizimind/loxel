@@ -22,8 +22,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 .env.*.local
 
-# wrangler local secrets
+# wrangler local secrets and dev state
 .dev.vars
+.wrangler
 
 # native build output
 build/

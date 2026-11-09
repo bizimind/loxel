@@ -1,8 +1,8 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectDockerLsp, disconnect: disconnectDockerLsp } = createWorktreeLspClient(
-  "ws/docker-lsp",
-  ["dockerfile", "dockerbake"],
-);
-
-export { connectDockerLsp, disconnectDockerLsp };
+// docker-language-server: only worktrees with Dockerfile/docker-bake.hcl pay.
+export default createLspClient({
+  route: "ws/docker-lsp",
+  name: "Docker",
+  languageId: ["dockerfile", "dockerbake"],
+});

@@ -6,6 +6,11 @@ import * as api from "@/api/client";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
+import { registerLayoutCache } from "@/store/worktree-cache";
+import { isListedWorktree } from "@/store/worktrees";
+
+import { dropUnregisteredPanels } from "./drop-unregistered-panels";
+import { layoutSnapshot } from "./layout-snapshot";
 
 interface PersistedLayout {
   version: number;
@@ -144,7 +149,7 @@ async function fetchLayout(
 /**
  * Module-level flag set by the OUTER PersistedLayout during its swap cycle.
  * The center dockview's onDidRemovePanel handler checks this to avoid
- * destroying terminal PTYs and detaching agents during worktree switches
+ * destroying terminal PTYs during worktree switches
  * (the outer clear unmounts CenterHost, which fires removal events).
  */
 let outerSwapping = false;
@@ -168,6 +173,8 @@ export function PersistedLayoutComponent({
   performClear,
   apiRef: externalApiRef,
   swappingRef: externalSwappingRef,
+  components,
+  tabComponents,
   ...dockviewProps
 }: PersistedLayoutProps) {
   const internalApiRef = useRef<DockviewApi | null>(null);
@@ -183,6 +190,8 @@ export function PersistedLayoutComponent({
   // (a single map is fine because each PersistedLayoutComponent owns its own).
   const pendingPayloadRef = useRef<Map<string, string>>(new Map());
   const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => registerLayoutCache(cacheRef.current), []);
 
   // Stable refs for callbacks to avoid stale closures
   const onLayoutRestoredRef = useRef(onLayoutRestored);
@@ -264,7 +273,8 @@ export function PersistedLayoutComponent({
     (async () => {
       const layout = await fetchLayout(storagePrefix, layoutKey, layoutVersion);
       if (cancelled) return;
-      initialLayoutRef.current = layout;
+      initialLayoutRef.current =
+        layout && dropUnregisteredPanels(layout, { components, tabComponents });
       setHydrated(true);
     })();
     return () => {
@@ -284,7 +294,7 @@ export function PersistedLayoutComponent({
    */
   const settleAfterRestore = useCallback(
     (dvApi: DockviewApi, key: string, sourceWasServer: boolean) => {
-      const data = dvApi.toJSON();
+      const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       lastSavedRef.current = snapshot;
       cacheRef.current.set(key, data);
@@ -310,19 +320,23 @@ export function PersistedLayoutComponent({
 
     // Save the old layout (in-memory cache + flush pending debounce + immediate write)
     if (dvApi.panels.length > 0) {
-      const data = dvApi.toJSON();
+      const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       cacheRef.current.set(oldKey, data);
       flushPendingSave();
       // Skip writes when nothing changed since last settle/save. This protects an
       // additional (non-first) window that opened with the default layout for the
       // OLD worktree and never modified it — without this gate, the swap would
-      // promote the unmodified default into canonical on close.
+      // promote the unmodified default into canonical on close. If the old worktree
+      // was removed, the server drops this write, so it cannot bring its rows back.
       if (snapshot !== lastSavedRef.current) {
         lastSavedRef.current = snapshot;
         api.putStore(sessionKey(storagePrefix, oldKey), snapshot).catch(() => {});
       }
     }
+
+    // Leaving a worktree that was removed: a worktree later created there starts fresh.
+    if (!isListedWorktree(oldKey)) cacheRef.current.delete(oldKey);
 
     // Begin swap
     swappingRef.current = true;
@@ -344,7 +358,7 @@ export function PersistedLayoutComponent({
         const fetched = await fetchLayout(storagePrefix, newKey, layoutVersion);
         if (cancelled) return;
         if (fetched) {
-          dvApi.fromJSON(fetched);
+          dvApi.fromJSON(dropUnregisteredPanels(fetched, { components, tabComponents }));
           sourceWasServer = true;
         } else {
           createDefaultRef.current(dvApi);
@@ -369,6 +383,8 @@ export function PersistedLayoutComponent({
     flushPendingSave,
     settleAfterRestore,
     externalSwappingRef,
+    components,
+    tabComponents,
   ]);
 
   const onReady = useCallback(
@@ -391,7 +407,7 @@ export function PersistedLayoutComponent({
 
       dvApi.onDidLayoutChange(() => {
         if (swappingRef.current || outerSwapping) return;
-        const data = dvApi.toJSON();
+        const data = layoutSnapshot(dvApi);
         const snapshot = JSON.stringify({ version: layoutVersion, data });
         if (snapshot === lastSavedRef.current) return;
         lastSavedRef.current = snapshot;
@@ -407,5 +423,12 @@ export function PersistedLayoutComponent({
 
   if (!hydrated) return null;
 
-  return <DockviewReact {...dockviewProps} onReady={onReady} />;
+  return (
+    <DockviewReact
+      {...dockviewProps}
+      components={components}
+      tabComponents={tabComponents}
+      onReady={onReady}
+    />
+  );
 }

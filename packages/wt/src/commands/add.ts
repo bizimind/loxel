@@ -1,7 +1,7 @@
 import { createResult } from "@bizimind/cli-common";
 
 import type { AddResult } from "../lib/index.ts";
-import { executeAdd, planAdd } from "../lib/index.ts";
+import { executeAdd, parseMetaAssignments, planAdd } from "../lib/index.ts";
 import { inputWorktreeName, isTTY, selectBranchExistsAction } from "../prompt.ts";
 import type { AbortedResult } from "./aborted.ts";
 import { abortedResult, runCommand } from "./aborted.ts";
@@ -9,6 +9,7 @@ import { abortedResult, runCommand } from "./aborted.ts";
 interface AddOptions {
   branch?: string;
   base?: string;
+  meta?: string[];
   json?: boolean;
 }
 
@@ -23,10 +24,11 @@ export async function addCommand(
     if (options.branch && options.base) {
       throw new Error("--base only applies to a new branch; it cannot be combined with -b");
     }
+    const meta = parseMetaAssignments(options.meta ?? []);
     const name = providedName ?? (await promptForName());
     const repoPath = process.cwd();
 
-    const plan = await planAdd({ name, repoPath });
+    const plan = await planAdd({ name, repoPath, meta });
     const resolution = await resolveBranchConflict(plan, options);
     if (resolution === "cancel") return abortedResult("User cancelled");
     if (resolution === "use-existing" && options.base) {
@@ -34,7 +36,14 @@ export async function addCommand(
     }
 
     const result = await executeAdd(
-      { name, repoPath, branch: options.branch, base: options.base, branchResolution: resolution },
+      {
+        name,
+        repoPath,
+        branch: options.branch,
+        base: options.base,
+        meta,
+        branchResolution: resolution,
+      },
       { log: ctx.log, warn: ctx.warn },
     );
 

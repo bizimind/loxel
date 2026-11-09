@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import type { Page } from "@playwright/test";
 
-const SCREENSHOTS_DIR = resolve(import.meta.dirname, "../../../site/public/screenshots");
+const SCREENSHOTS_DIR = resolve(import.meta.dirname, "../test-results/screenshots");
 
 /**
  * Capture a screenshot of the current page.
@@ -11,7 +11,8 @@ const SCREENSHOTS_DIR = resolve(import.meta.dirname, "../../../site/public/scree
  *   - `<name>.png`            — full-page screenshot
  *   - `<name>-viewport.png`   — viewport-clipped crop (1440×900)
  *
- * Both are written to `packages/site/public/screenshots/`.
+ * Both are written to `e2e/test-results/screenshots/`; the site's screenshots come from
+ * `scripts/demo/` instead.
  */
 export async function captureScreenshot(page: Page, name: string): Promise<void> {
   const fullPath = resolve(SCREENSHOTS_DIR, `${name}.png`);

@@ -2,6 +2,7 @@ import type { FormattingSettings } from "@/lib/formatting-model";
 
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
+import type { EditorConfigResponse } from "./editorconfig-model";
 import type {
   BranchCommits,
   BranchInfo,
@@ -9,7 +10,6 @@ import type {
   GraphData,
   RefInfo,
   StatusInfo,
-  WorktreeEntry,
   WorktreeStatusInfo,
 } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
@@ -21,9 +21,11 @@ import type {
   ConvertProjectRequest,
   CreateProjectRequest,
   DetectPathResult,
-  EnrichedProject,
   InitProjectRequest,
   Project,
+  ProjectSetupResult,
+  ProjectsResponse,
+  ProjectWorktreesResponse,
   ScanSuggestionsResult,
 } from "./project-model";
 import type {
@@ -35,28 +37,56 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
-import type { UpdateState } from "./update-model";
+import type { SchemaConsentDecision } from "./schema-consent-model";
+import type {
+  NestedRemoval,
+  WorktreeRemovePlan,
+  WorktreeRemoveResult,
+} from "./worktree-removal-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
 const API_BASE = "/api";
 
 /** Append wt or project scope param to a URL path. */
-function withScope(path: string, scope: { wt?: string; project?: string }): string {
+export function withScope(path: string, scope: { wt?: string; project?: string }): string {
   const url = new URL(`http://x${path}`);
   if (scope.wt) url.searchParams.set("wt", scope.wt);
   if (scope.project) url.searchParams.set("project", scope.project);
   return `${url.pathname}${url.search}`;
 }
 
-async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+/** Error thrown for non-2xx API responses, with the HTTP status and the server's optional reason code. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/**
+ * The server confirmed the file does not exist on disk (`404` with `code: "ENOENT"`). A plain
+ * 404 only means the path could not be resolved, e.g. its worktree is not subscribed yet.
+ */
+export function isFileMissingError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
+}
+
+export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(error.error || "Request failed");
+    const body: unknown = await response.json().catch(() => null);
+    const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const message = typeof fields.error === "string" ? fields.error : "Request failed";
+    const code = typeof fields.code === "string" ? fields.code : undefined;
+    throw new ApiError(message, response.status, code);
   }
 
   return response.json();
@@ -68,8 +98,14 @@ export async function getStore(key: string): Promise<string | null> {
   return value;
 }
 
-export async function putStore(key: string, value: string, nonce?: string): Promise<void> {
+export async function putStore(
+  key: string,
+  value: string,
+  nonce?: string,
+  options?: Pick<RequestInit, "keepalive">,
+): Promise<void> {
   await fetchJson(`/stores/${encodeURIComponent(key)}`, {
+    ...options,
     method: "PUT",
     body: JSON.stringify({ value, nonce }),
   });
@@ -201,6 +237,33 @@ export async function getFileContentByPath(
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`, { signal });
 }
 
+/**
+ * A file's content for a look only, such as a peek widget's: unlike `getFileContentByPath` it
+ * neither tracks the file for renames nor adds a file outside every tree to the worktree's Others.
+ */
+export async function getFilePreviewContent(
+  absolutePath: string,
+  worktreePath?: string | null,
+): Promise<{ content: string }> {
+  const params = new URLSearchParams();
+  params.set("path", absolutePath);
+  if (worktreePath) params.set("wt", worktreePath);
+  params.set("preview", "1");
+  return fetchJson<{ content: string }>(`/file-content?${params.toString()}`);
+}
+
+/** The `.editorconfig` properties that apply to a file (empty when none do). */
+export async function getEditorConfig(
+  absolutePath: string,
+  worktreePath?: string | null,
+  signal?: AbortSignal,
+): Promise<EditorConfigResponse> {
+  const params = new URLSearchParams();
+  params.set("path", absolutePath);
+  if (worktreePath) params.set("wt", worktreePath);
+  return fetchJson<EditorConfigResponse>(`/editorconfig?${params.toString()}`, { signal });
+}
+
 export async function writeFileContent(options: {
   path: string;
   content: string;
@@ -209,7 +272,9 @@ export async function writeFileContent(options: {
   format?: boolean;
   formattingSettings?: FormattingSettings;
 }) {
-  return fetchJson<{ success: boolean; content?: string }>("/file-write", {
+  // `formatNotice`: why a save requested with `format` went out unformatted, when the user can
+  // act on it (formatter not installed, timed out).
+  return fetchJson<{ success: boolean; content?: string; formatNotice?: string }>("/file-write", {
     method: "POST",
     body: JSON.stringify(options),
   });
@@ -224,11 +289,17 @@ export async function uploadFile(options: {
   file: File;
   nonce: string;
 }): Promise<{ path: string; src: string }> {
-  const form = new FormData();
-  form.set("path", options.path);
-  form.set("nonce", options.nonce);
-  form.set("file", options.file, options.file.name);
-  const response = await fetch(`${API_BASE}/file-upload`, { method: "POST", body: form });
+  const data = new Uint8Array(await options.file.arrayBuffer()).toBase64();
+  const response = await fetch(`${API_BASE}/file-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: options.path,
+      nonce: options.nonce,
+      name: options.file.name,
+      data,
+    }),
+  });
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const message =
@@ -514,7 +585,7 @@ export async function unstageHunk(wt: string, patch: string) {
 // --- Project API ---
 
 export async function getProjects() {
-  return fetchJson<{ projects: EnrichedProject[] }>("/projects");
+  return fetchJson<ProjectsResponse>("/projects");
 }
 
 export async function addProject(path: string, name?: string) {
@@ -560,11 +631,17 @@ export async function createProject(req: CreateProjectRequest) {
 }
 
 export async function cloneProject(req: CloneProjectRequest) {
-  return fetchJson<Project>("/projects/clone", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/clone", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function initProject(req: InitProjectRequest) {
-  return fetchJson<Project>("/projects/init", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/init", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function convertProject(req: ConvertProjectRequest) {
@@ -573,18 +650,24 @@ export async function convertProject(req: ConvertProjectRequest) {
 
 // --- Schema API ---
 
-export interface SchemaSyncResult {
-  json: Array<{ glob: string; url: string; schema: unknown }>;
-  yaml: { synced: boolean };
+export async function syncSchemas(schemas: Array<{ glob: string; url: string }>): Promise<void> {
+  await fetchJson("/schemas/sync", { method: "POST", body: JSON.stringify({ schemas }) });
 }
 
-export async function syncSchemas(
-  schemas: Array<{ glob: string; url: string }>,
-): Promise<SchemaSyncResult> {
-  return fetchJson<SchemaSyncResult>("/schemas/sync", {
-    method: "POST",
-    body: JSON.stringify({ schemas }),
-  });
+export async function ensureSchemas(urls: readonly string[]): Promise<void> {
+  await fetchJson("/schemas/ensure", { method: "POST", body: JSON.stringify({ urls }) });
+}
+
+/** Record a decision on a schema URL a project file names; null forgets it. */
+export async function decideSchemaConsent(
+  url: string,
+  decision: SchemaConsentDecision | null,
+): Promise<void> {
+  await fetchJson("/schemas/consent", { method: "POST", body: JSON.stringify({ url, decision }) });
+}
+
+export async function setSchemaNeverFetch(neverFetch: boolean): Promise<void> {
+  await fetchJson("/schemas/never-fetch", { method: "POST", body: JSON.stringify({ neverFetch }) });
 }
 
 export async function resolveSchema(url: string, baseDir?: string): Promise<unknown> {
@@ -601,12 +684,12 @@ export async function resolveSchema(url: string, baseDir?: string): Promise<unkn
 
 export type { AddPlan as AddWorktreePlan, AddResult as AddWorktreeResult } from "@bizimind/wt/lib";
 export type {
-  RemovePlan as RemoveWorktreePlan,
+  InitAction as WorktreeMetadataAction,
   RemoveResult as RemoveWorktreeResult,
 } from "@bizimind/wt/lib";
 
 export async function getProjectWorktrees(projectId: string) {
-  return fetchJson<{ worktrees: WorktreeEntry[] }>(
+  return fetchJson<ProjectWorktreesResponse>(
     `/projects/${encodeURIComponent(projectId)}/worktrees`,
   );
 }
@@ -618,10 +701,19 @@ export async function planAddWorktree(projectPath: string, name: string) {
   });
 }
 
+export interface CreateWorktreeOptions {
+  branch?: string;
+  branchResolution?: "use-existing" | "delete-and-create";
+  /** Create a child of this worktree: branched from its current commit and nested under it */
+  parentPath?: string;
+  /** Show the new worktree by this title (`loxel-title` metadata) */
+  title?: string;
+}
+
 export async function createWorktree(
   projectPath: string,
   name: string,
-  options?: { branch?: string; branchResolution?: "use-existing" | "delete-and-create" },
+  options?: CreateWorktreeOptions,
 ) {
   return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
     method: "POST",
@@ -629,8 +721,43 @@ export async function createWorktree(
   });
 }
 
+/** Run the `init.wt.sh` a worktree's creation held back, once its repository is trusted. */
+export async function runInitHook(projectPath: string, wtPath: string) {
+  return fetchJson<{ hookRan: boolean }>("/worktree/run-init-hook", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath }),
+  });
+}
+
+/** Nest a worktree under another or move it to the top level (`parentPath: null`), or rename it. */
+export async function updateWorktreeMeta(
+  projectPath: string,
+  wtPath: string,
+  update: { parentPath?: string | null; title?: string | null },
+) {
+  return fetchJson<{ success: true }>("/worktree/meta", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath, ...update }),
+  });
+}
+
+/** The `wt init` action that turns on worktree metadata; null when there is nothing to do. */
+export async function planEnableWorktreeMetadata(projectPath: string) {
+  return fetchJson<{ action: import("@bizimind/wt/lib").InitAction | null }>(
+    "/worktree/plan-enable-metadata",
+    { method: "POST", body: JSON.stringify({ projectPath }) },
+  );
+}
+
+export async function enableWorktreeMetadata(projectPath: string) {
+  return fetchJson<{ status: "applied" | "not-needed" }>("/worktree/enable-metadata", {
+    method: "POST",
+    body: JSON.stringify({ projectPath }),
+  });
+}
+
 export async function planRemoveWorktree(projectPath: string, wtPath: string) {
-  return fetchJson<import("@bizimind/wt/lib").RemovePlan>("/worktree/plan-remove", {
+  return fetchJson<WorktreeRemovePlan>("/worktree/plan-remove", {
     method: "POST",
     body: JSON.stringify({ projectPath, path: wtPath }),
   });
@@ -639,16 +766,17 @@ export async function planRemoveWorktree(projectPath: string, wtPath: string) {
 export async function removeWorktreeByWtPath(
   projectPath: string,
   wtPath: string,
-  options: { deleteBranch: boolean; force: boolean },
+  options: {
+    deleteBranch: boolean;
+    force: boolean;
+    nested?: NestedRemoval;
+    /** With `nested: "remove"`: the nested worktrees the user confirmed removing */
+    nestedPaths?: string[];
+  },
 ) {
-  return fetchJson<import("@bizimind/wt/lib").RemoveResult>("/worktree/remove", {
+  return fetchJson<WorktreeRemoveResult>("/worktree/remove", {
     method: "POST",
-    body: JSON.stringify({
-      projectPath,
-      path: wtPath,
-      deleteBranch: options.deleteBranch,
-      force: options.force,
-    }),
+    body: JSON.stringify({ projectPath, path: wtPath, ...options }),
   });
 }
 
@@ -826,7 +954,7 @@ class WsClient {
       this.ws = ws;
 
       if (this.wasConnected) {
-        // Server came back — check if it was updated (version changed → full page reload)
+        // Server came back — check whether a different build is running (full page reload)
         this.checkVersionAndRecover();
       } else {
         // First connection: record server version and flush pending messages
@@ -899,8 +1027,8 @@ class WsClient {
 
   /**
    * On reconnect, compare the server version to the one recorded at first connect.
-   * If the version changed (update installed), reload the page to pick up new renderer
-   * assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
+   * If the version changed (a different build of the server started), reload the page to pick
+   * up its renderer assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
    */
   private async checkVersionAndRecover(): Promise<void> {
     this.pendingMessages = [];
@@ -985,24 +1113,8 @@ class WsClient {
 
 export const wsClient = new WsClient();
 
-// --- Update API ---
+// --- Version API ---
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
   return fetchJson("/version");
-}
-
-export async function getUpdateStatus(): Promise<UpdateState> {
-  return fetchJson("/update/status");
-}
-
-export async function checkForUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/check", { method: "POST" });
-}
-
-export async function downloadUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/download", { method: "POST" });
-}
-
-export async function installUpdate(): Promise<void> {
-  await fetchJson("/update/install", { method: "POST" });
 }

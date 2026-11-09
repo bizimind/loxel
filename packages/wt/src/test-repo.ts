@@ -95,3 +95,26 @@ export function seedPath(bareRoot: string): string {
 export async function writeHook(root: string, hook: string, body: string): Promise<void> {
   await Bun.write(join(root, hook), `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`);
 }
+
+const CLI = join(import.meta.dir, "cli.ts");
+
+/** Run the CLI with no terminal on stdin, as an agent or script would, and parse its `-j` output. */
+export async function runCli(
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ exitCode: number; json: unknown }> {
+  const proc = Bun.spawn([process.execPath, CLI, ...args], {
+    cwd,
+    env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, , exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode, json: JSON.parse(stdout) };
+}

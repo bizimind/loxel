@@ -4,6 +4,14 @@ import { useEffect } from "react";
 import { registerPanelFocus } from "@/lib/panel-focus";
 
 /**
+ * Whether the panel is activated: the active tab in its group, in the active group. Only then may
+ * a panel move DOM focus into itself, e.g. once its widget has mounted.
+ */
+export function isActivatedPanel(api: DockviewPanelApi): boolean {
+  return api.isActive && api.isGroupActive;
+}
+
+/**
  * Delegate panel activation to an underlying widget.
  *
  * "Activated" here means: this panel is the active tab in its group AND the
@@ -29,7 +37,7 @@ import { registerPanelFocus } from "@/lib/panel-focus";
 export function usePanelActivationFocus(api: DockviewPanelApi, focus: () => void): void {
   useEffect(() => {
     const tryFocus = () => {
-      if (!api.isActive || !api.isGroupActive) return;
+      if (!isActivatedPanel(api)) return;
       requestAnimationFrame(() => {
         if (api.isGroupActive) focus();
       });
@@ -40,10 +48,12 @@ export function usePanelActivationFocus(api: DockviewPanelApi, focus: () => void
     // move fires _onDidActiveChange({isActive:false}) before the destination
     // group is activated, and the subsequent group activation is suppressed
     // by the dedup logic in setupGroupEventListeners. Schedule a delayed
-    // focus so the move transaction settles before we check isGroupActive.
+    // focus so the move transaction settles before we check isGroupActive,
+    // reading the group's active tab rather than the possibly stale isActive:
+    // a tab moved in the background (`loxel --no-focus`) must not take focus.
     const m = api.onDidGroupChange(() => {
       requestAnimationFrame(() => {
-        if (api.isGroupActive) {
+        if (api.isGroupActive && api.group.activePanel?.id === api.id) {
           requestAnimationFrame(focus);
         }
       });

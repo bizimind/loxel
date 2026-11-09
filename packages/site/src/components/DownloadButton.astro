@@ -1,0 +1,79 @@
+---
+import { trackClick } from "../lib/analytics";
+import { BUTTON_BASE, BUTTON_SIZES, BUTTON_VARIANTS } from "../lib/button-styles";
+
+interface Props {
+  version: string;
+  binaries: Record<string, string>;
+  /** Where the button sits on the site, reported with the `download_clicked` event. */
+  location: string;
+  size?: "md" | "lg";
+}
+
+const { version, binaries, location, size = "md" } = Astro.props;
+const iconSize = size === "lg" ? 18 : 16;
+
+// Every variant is rendered; the script below shows the one for the visitor's platform. Without
+// JavaScript the Apple Silicon one stays visible.
+const macBuilds = [
+  { platform: "mac-arm", label: "Apple Silicon", arch: "arm64", url: binaries["darwin-arm64"] },
+  { platform: "mac-intel", label: "Intel", arch: "x64", url: binaries["darwin-x64"] },
+];
+const fallbackLinkClass =
+  "text-accent underline underline-offset-2 transition-opacity hover:opacity-75";
+---
+
+{
+  macBuilds.map(({ platform, label, arch, url }) => (
+    <div data-download-variant={platform} hidden={platform !== "mac-arm"}>
+      {url ? (
+        <div class="flex flex-col items-center gap-2">
+          <a
+            href={url}
+            {...trackClick("download_clicked", { platform: "darwin", arch, version, location })}
+            class:list={[
+              BUTTON_BASE,
+              BUTTON_VARIANTS.primary,
+              BUTTON_SIZES[size],
+              {
+                "shadow-[0_6px_20px_-10px_color-mix(in_srgb,var(--accent)_55%,transparent)]":
+                  size === "lg",
+              },
+            ]}
+          >
+            <svg
+              class="shrink-0"
+              width={iconSize}
+              height={iconSize}
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M8 12L3 7h3V1h4v6h3L8 12z" />
+              <path d="M2 14h12v1.5H2z" />
+            </svg>
+            Download for macOS ({label})
+          </a>
+          <span class="text-muted-foreground text-xs">v{version} · Free</span>
+        </div>
+      ) : (
+        <p class="text-muted-foreground text-sm">
+          No build available for macOS ({label}) yet. <a href="/download" class={fallbackLinkClass}>See all downloads</a>.
+        </p>
+      )}
+    </div>
+  ))
+}
+<p data-download-variant="other" hidden class="text-muted-foreground text-sm">
+  macOS only for now. <a href="/download" class={fallbackLinkClass}>See all downloads</a> for updates.
+</p>
+
+<script>
+  import { detectPlatform } from "../lib/platform";
+
+  void detectPlatform().then((platform) => {
+    for (const variant of document.querySelectorAll<HTMLElement>("[data-download-variant]")) {
+      variant.hidden = variant.dataset.downloadVariant !== platform;
+    }
+  });
+</script>

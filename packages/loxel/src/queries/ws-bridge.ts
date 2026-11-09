@@ -2,10 +2,13 @@ import { useEffect } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder } from "@/lib/open-path";
+import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
+import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -13,6 +16,7 @@ import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -21,6 +25,152 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./query-keys";
 
 const log = frontendLog.child("files");
+
+const EDITORCONFIG_SUFFIX = "/.editorconfig";
+
+/** Refetch the `.editorconfig` properties of open files under `dir` (ending in `/`; "" for all). */
+function invalidateEditorConfigBelow(dir: string): void {
+  queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === "editorConfig" &&
+      typeof queryKey[1] === "string" &&
+      queryKey[1].startsWith(dir),
+  });
+}
+
+/**
+ * Apply a `file_content_changed` event to an open editor (`editorKey`, see `useEditorStateStore`):
+ * clean editors refresh their query (or take the stashed content of their own write), dirty ones
+ * go through the state machine.
+ */
+export function refreshOpenFile(
+  projectPath: string | null,
+  wtPath: string,
+  editorKey: string,
+  nonces: string[],
+): void {
+  const editorStore = useEditorStateStore.getState();
+  const entry = editorStore.files.get(editorKey);
+  // A moved file's tab is being replaced; the old path no longer concerns it.
+  if (!entry || entry.movedTo) return;
+  const path = entry.filePath;
+
+  const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
+  // Content from the file-write response (matched by nonce) saves an HTTP round-trip.
+  let stashedContent: string | undefined;
+  for (const n of nonces) {
+    stashedContent = consumeSavedContent(n, editorKey);
+    if (stashedContent !== undefined) break;
+  }
+
+  // A file marked deleted needs its content run through the state machine, which clears the
+  // flag: a clean editor's refetch alone may not (identical content keeps the same query data).
+  if (entry.state === "clean" && !entry.deleted) {
+    for (const n of nonces) {
+      if (entry.pendingNonces.has(n)) editorStore.clearPendingNonce(editorKey, n);
+    }
+    if (stashedContent !== undefined) {
+      // Duplicate FS event from our own write: update the cache instead of refetching.
+      queryClient.setQueryData(queryKey, { content: stashedContent });
+    } else {
+      // The refetch also tells the editor whether the file still exists (404 → deleted).
+      queryClient.invalidateQueries({ queryKey: queryKeys.fileContentPrefix(projectPath, path) });
+    }
+    return;
+  }
+
+  if (stashedContent !== undefined) {
+    // If the matched nonces are superseded (a newer save is still pending), the stashed
+    // content is stale — the latest write has already overwritten disk. Hand it to the state
+    // machine (which short-circuits) but don't put the stale value in the query cache.
+    const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
+    const superseded = matchedNonces.length > 0 && entry.pendingNonces.size > matchedNonces.length;
+    editorStore.handleDiskChange(editorKey, nonces, stashedContent);
+    if (!superseded) queryClient.setQueryData(queryKey, { content: stashedContent });
+    return;
+  }
+
+  void fetchIntoOpenFile(projectPath, wtPath, editorKey, path, nonces);
+}
+
+/**
+ * Fetch the current disk content of a non-clean open file and run it through the state machine.
+ * A 404 means the file was deleted: the editor keeps its content, autosave stops, and the next
+ * event for the path (restore or re-create) brings it back through the same function.
+ */
+async function fetchIntoOpenFile(
+  projectPath: string | null,
+  wtPath: string,
+  editorKey: string,
+  path: string,
+  nonces: string[],
+): Promise<void> {
+  const editorStore = useEditorStateStore.getState();
+  const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
+  try {
+    const data = await api.getFileContentByPath(path, wtPath);
+    editorStore.handleDiskChange(editorKey, nonces, data.content);
+    await applyFetchedContent(queryKey, data);
+  } catch (error: unknown) {
+    if (api.isFileMissingError(error)) {
+      editorStore.setDeleted(editorKey, true);
+      return;
+    }
+    log.error("Failed to refresh editor after external file change", {
+      error,
+      path,
+      projectPath,
+      worktreePath: wtPath,
+    });
+  }
+}
+
+/**
+ * Re-check whether an open editor's file still exists after its parent directory changed. Marks
+ * it deleted on a confirmed 404; if it was deleted and is back, feeds the content to the state
+ * machine like an external restore. A file that exists and was not deleted is left alone.
+ */
+export async function checkOpenFileExists(
+  projectPath: string | null,
+  wtPath: string,
+  editorKey: string,
+): Promise<void> {
+  const initial = useEditorStateStore.getState().files.get(editorKey);
+  if (!initial || initial.movedTo) return;
+  const path = initial.filePath;
+  try {
+    const data = await api.getFileContentByPath(path, wtPath);
+    // Read the entry after the fetch: another request (e.g. the editor's own refetch) may have
+    // marked it deleted, or a move may have started, while this one was in flight.
+    const entry = useEditorStateStore.getState().files.get(editorKey);
+    if (!entry?.deleted || entry.movedTo) return;
+    useEditorStateStore.getState().handleDiskChange(editorKey, [], data.content);
+    await applyFetchedContent(queryKeys.fileContent(projectPath, path, undefined, wtPath), data);
+  } catch (error: unknown) {
+    if (api.isFileMissingError(error)) {
+      useEditorStateStore.getState().setDeleted(editorKey, true);
+      return;
+    }
+    log.error("Failed to check an open file after its directory changed", {
+      error,
+      path,
+      projectPath,
+      worktreePath: wtPath,
+    });
+  }
+}
+
+/**
+ * Put freshly fetched content in the query cache. An older refetch still in flight (e.g. from
+ * an invalidation) is cancelled first, so it cannot land a stale 404 after the file is back.
+ */
+async function applyFetchedContent(
+  queryKey: ReturnType<typeof queryKeys.fileContent>,
+  data: { content: string },
+): Promise<void> {
+  await queryClient.cancelQueries({ queryKey, exact: true });
+  queryClient.setQueryData(queryKey, data);
+}
 
 /**
  * Bridges WebSocket messages to TanStack React Query cache operations.
@@ -33,13 +183,6 @@ export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
 
-    // On reconnect, invalidate update status so React Query refetches from the (new) server.
-    // This clears the stale "installing" state when the version didn't change (failed update
-    // fallback) — if the version DID change, the WsClient reloads the page instead.
-    const unsubReconnect = wsClient.onReconnect(() => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.updateStatus() });
-    });
-
     const getLogsIsActive = (): boolean => {
       const { activeLeftPanel, activeBottomPanel, activeRightPanel } =
         getCurrentWorktreeToolsBar().getState();
@@ -49,6 +192,18 @@ export function useWsBridge(): void {
     };
 
     const unsubscribe = wsClient.subscribe((message: WsMessage) => {
+      if (isToolchainChangedMessage(message)) {
+        const toolchain = toolchainStatuses.find((t) => t.changedMessage === message.type);
+        if (!toolchain) return;
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.toolchainStatus(
+            toolchain.id,
+            deriveProjectPath(message.wtPath),
+            message.wtPath,
+          ),
+        });
+        return;
+      }
       switch (message.type) {
         // --- Worktree-scoped events (carry wtPath) ---
 
@@ -91,81 +246,33 @@ export function useWsBridge(): void {
             queryClient.invalidateQueries({ queryKey: diffContentKey, exact: true });
           }
 
-          const editorStore = useEditorStateStore.getState();
-          const entry = editorStore.files.get(changedPath);
-          if (!entry) break;
+          if (changedPath.endsWith(EDITORCONFIG_SUFFIX)) {
+            invalidateEditorConfigBelow(changedPath.slice(0, -EDITORCONFIG_SUFFIX.length + 1));
+          }
 
-          const prefixKey = queryKeys.fileContentPrefix(projectPath, changedPath);
-          if (entry.state === "clean") {
-            for (const n of nonces) {
-              if (entry.pendingNonces.has(n)) editorStore.clearPendingNonce(changedPath, n);
-            }
-            // Check for stashed content (duplicate FS event from our own write).
-            // If found, update cache directly instead of invalidating (which refetches).
-            let cleanStashed: string | undefined;
-            for (const n of nonces) {
-              cleanStashed = consumeSavedContent(n);
-              if (cleanStashed !== undefined) break;
-            }
-            if (cleanStashed !== undefined) {
-              const queryKey = queryKeys.fileContent(
-                projectPath,
-                changedPath,
-                undefined,
-                message.wtPath,
-              );
-              queryClient.setQueryData(queryKey, { content: cleanStashed });
-            } else {
-              queryClient.invalidateQueries({ queryKey: prefixKey });
-            }
-          } else {
-            // Try to use stashed content from the file-write response (matched by nonce)
-            // to avoid an extra HTTP round-trip.
-            let stashedContent: string | undefined;
-            for (const n of nonces) {
-              stashedContent = consumeSavedContent(n);
-              if (stashedContent !== undefined) break;
-            }
-
-            const queryKey = queryKeys.fileContent(
-              projectPath,
-              changedPath,
-              undefined,
-              message.wtPath,
-            );
-
-            // If the matched nonces are superseded (a newer save is still pending),
-            // the stashed content is stale — the latest write has already overwritten
-            // disk. Hand it to the state machine (which will short-circuit) but don't
-            // update the query cache with a stale value; invalidate for a fresh fetch
-            // when we eventually need it.
-            const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
-            const superseded =
-              matchedNonces.length > 0 && entry.pendingNonces.size > matchedNonces.length;
-
-            if (stashedContent !== undefined) {
-              editorStore.handleDiskChange(changedPath, nonces, stashedContent);
-              if (!superseded) {
-                queryClient.setQueryData(queryKey, { content: stashedContent });
-              }
-            } else {
-              // External change (no matching nonce) — must fetch from server
-              api
-                .getFileContentByPath(changedPath, message.wtPath)
-                .then((data) => {
-                  editorStore.handleDiskChange(changedPath, nonces, data.content);
-                  queryClient.setQueryData(queryKey, data);
-                })
-                .catch((error: unknown) => {
-                  log.error("Failed to refresh editor after external file change", {
-                    error,
-                    path: changedPath,
-                    projectPath,
-                    worktreePath: message.wtPath,
-                  });
-                });
+          for (const [editorKey, entry] of useEditorStateStore.getState().files) {
+            if (entry.filePath === changedPath) {
+              refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
+            } else if (entry.filePath.startsWith(changedPath + "/")) {
+              // A removed or re-created directory is reported as one event for the directory,
+              // not for the files inside it. Only their existence can have changed (a modified
+              // file reports itself), so just re-check that, and re-read the `.editorconfig`s
+              // that may have come or gone with it.
+              void checkOpenFileExists(projectPath, message.wtPath, editorKey);
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.editorConfigPrefix(entry.filePath),
+              });
             }
           }
+          break;
+        }
+
+        case "file_moved": {
+          const { oldPath, newPath, source } = message.data;
+          // Moves done in Loxel are also reported here so every window's tabs follow them;
+          // the window that made the move has usually handled it already (a no-op then).
+          // Only a move from outside Loxel is announced in the editor.
+          void handleFileMoved(oldPath, newPath, { announce: source === "external" });
           break;
         }
 
@@ -195,27 +302,17 @@ export function useWsBridge(): void {
           queryClient.invalidateQueries({
             queryKey: queryKeys.externalFiles(projectPath, message.wtPath),
           });
+          // Covers the worktree's Others folders too, whose paths share no prefix with it.
+          invalidateEditorConfigBelow("");
 
           // A broad query invalidation refreshes clean editors. Dirty/saving editors
           // need the same conflict-aware state-machine path as a normal file event.
-          for (const [path, entry] of editorStore.files) {
+          for (const [editorKey, entry] of editorStore.files) {
             if (entry.state === "clean") continue;
+            const path = entry.filePath;
             const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
-            api
-              .getFileContentByPath(path, message.wtPath)
-              .then((data) => {
-                editorStore.handleDiskChange(path, [], data.content);
-                queryClient.setQueryData(queryKey, data);
-              })
-              .catch((error: unknown) => {
-                log.error("Failed to refresh dirty editor after worktree resync", {
-                  error,
-                  path,
-                  projectPath,
-                  worktreePath: message.wtPath,
-                });
-              });
+            void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
           }
           break;
         }
@@ -239,17 +336,19 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath);
+          void openFile(message.data);
           break;
 
         case "open_folder":
           void openFolder(message.data.path);
           break;
 
+        case "open_terminal":
+          void openTerminal(message.data);
+          break;
+
         case "open_url":
-          window.dispatchEvent(
-            new CustomEvent("loxel-create-browser", { detail: { url: message.data.url } }),
-          );
+          void openUrl(message.wtPath, message.data);
           break;
 
         // --- Project-scoped events (carry projectPath) ---
@@ -324,11 +423,11 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "update_status_changed":
-          queryClient.setQueryData(queryKeys.updateStatus(), message.data);
-          break;
-
         // --- Notification events (global) ---
+
+        case "schema_consent_changed":
+          useSchemaConsentStore.setState(message.data);
+          break;
 
         case "notifications_sync":
           usePanelNotificationStore.getState().syncAll(message.data);
@@ -346,6 +445,12 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().clearFromServer();
           break;
 
+        case "repo_trust_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          // What a toolchain reports can depend on trust, such as a shim's version.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
+          break;
+
         case "store_updated":
           if (message.nonce && consumeNonce(message.nonce)) break;
           applyStoreUpdate(message.key, message.state);
@@ -354,11 +459,6 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_state":
         case "error":
-        case "agent_event":
-        case "agent_exit":
-        case "agent_sessions":
-        case "agent_replay_done":
-        case "agent_error":
           break;
 
         default: {
@@ -371,7 +471,6 @@ export function useWsBridge(): void {
     });
 
     return () => {
-      unsubReconnect();
       unsubscribe();
       wsClient.disconnect();
     };

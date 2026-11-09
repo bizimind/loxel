@@ -154,7 +154,10 @@ function moveInCenter(direction: MoveDirection): boolean {
 function enterCenter(from: CenterEdge): boolean {
   const api = getCenterApi();
   if (!api) return false;
-  const groups = api.groups.filter((g) => g.panels.length > 0);
+  // A maximized group is the only one on screen.
+  const groups = api.groups.filter(
+    (g) => g.panels.length > 0 && (!api.hasMaximizedGroup() || g.api.isMaximized()),
+  );
   if (groups.length === 0) return false;
 
   const rects = new Map(groups.map((g) => [g, g.element.getBoundingClientRect()]));
@@ -173,7 +176,7 @@ function enterCenter(from: CenterEdge): boolean {
   return true;
 }
 
-/** Return keyboard focus to the center's active panel (e.g. Escape from a tool bar). */
+/** Return keyboard focus to the center's active panel (e.g. Escape from a tool bar or a tab rename). */
 export function focusActiveCenterPanel(): void {
   const api = getCenterApi();
   const panel = api?.activePanel;
@@ -265,6 +268,12 @@ function sidebarEntries(): HTMLElement[] {
 function focusSidebarEntry(entry: HTMLElement): void {
   entry.focus();
   entry.scrollIntoView({ block: "nearest" });
+}
+
+/** Move the worktree sidebar cursor to the entry for `path`, if it is shown. */
+export function focusSidebarEntryForPath(path: string): void {
+  const entry = sidebarEntries().find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === path);
+  if (entry) focusSidebarEntry(entry);
 }
 
 /**

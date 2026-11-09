@@ -89,6 +89,7 @@ describe("POST /api/file-upload", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -98,11 +99,16 @@ describe("POST /api/file-upload", () => {
       resolveFilePath,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
-      formatContent: async () => null,
+      updateTomlSchemas: () => {},
+      formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 
@@ -166,7 +172,7 @@ describe("POST /api/file-upload", () => {
     expect(d2.src).toBe(d1.src.replace(/\.png$/, "-2.png"));
   });
 
-  test("derives the extension from content, not the declared name or mime", async () => {
+  test("derives the extension from content, not the file name", async () => {
     const res = await upload({
       path: join(wt, "docs", "plan.md"),
       file: new File([PNG], "evil.html", { type: "image/jpeg" }),
@@ -204,7 +210,7 @@ describe("POST /api/file-upload", () => {
     expect(res.status).toBe(400);
   });
 
-  test("accepts image bytes regardless of the declared mime or missing extension", async () => {
+  test("accepts image bytes whose file name has no extension", async () => {
     const res = await upload({
       path: join(wt, "docs", "plan.md"),
       file: new File([PNG], "pasted", { type: "" }),
@@ -213,7 +219,7 @@ describe("POST /api/file-upload", () => {
     expect((await res.json()).src).toMatch(/^\.\/assets\/pasted-\d{8}-\d{6}\.png$/);
   });
 
-  test("rejects non-image content even when declared as an image", async () => {
+  test("rejects non-image content even when named as an image", async () => {
     const content = await upload({
       path: join(wt, "docs", "plan.md"),
       file: new File(["<script>alert(1)</script>"], "a.png", { type: "image/png" }),
@@ -232,38 +238,38 @@ describe("POST /api/file-upload", () => {
     expect(res.status).toBe(413);
   });
 
-  test("rejects missing nonce and non-multipart bodies", async () => {
-    const form = new FormData();
-    form.set("path", join(wt, "docs", "plan.md"));
-    form.set("file", png("a.png"));
-    const noNonce = await handleRequest(
-      new Request("http://localhost/api/file-upload", { method: "POST", body: form }),
-      ctx,
-    );
-    expect(noNonce.status).toBe(400);
-
-    const jsonBody = await handleRequest(
-      new Request("http://localhost/api/file-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "x" }),
-      }),
-      ctx,
-    );
-    expect(jsonBody.status).toBe(400);
+  test("rejects missing fields, non-base64 data and non-object bodies", async () => {
+    const path = join(wt, "docs", "plan.md");
+    const data = PNG.toBase64();
+    for (const body of [
+      { path, name: "a.png", data },
+      { path, nonce: "n", data },
+      { path, nonce: "n", name: "a.png" },
+      { path, nonce: "n", name: "a.png", data: "not base64!" },
+      ["not", "an", "object"],
+    ]) {
+      const res = await post(body);
+      expect(res.status).toBe(400);
+    }
+    expect(existsSync(join(wt, "docs", "assets"))).toBe(false);
   });
 
   function png(name: string): File {
     return new File([PNG], name, { type: "image/png" });
   }
 
-  function upload(options: { path: string; file: File }): Promise<Response> {
-    const form = new FormData();
-    form.set("path", options.path);
-    form.set("nonce", "nonce-1");
-    form.set("file", options.file, options.file.name);
+  async function upload(options: { path: string; file: File }): Promise<Response> {
+    const data = new Uint8Array(await options.file.arrayBuffer()).toBase64();
+    return post({ path: options.path, nonce: "nonce-1", name: options.file.name, data });
+  }
+
+  function post(body: unknown): Promise<Response> {
     return handleRequest(
-      new Request("http://localhost/api/file-upload", { method: "POST", body: form }),
+      new Request("http://localhost/api/file-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
       ctx,
     );
   }

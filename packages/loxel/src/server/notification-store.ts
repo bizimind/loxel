@@ -2,7 +2,7 @@
  * Server-side in-memory notification store.
  *
  * Generic notification model — not tied to terminals. Future notification sources
- * (CI, coding-agent, etc.) can use the same system by adding new source kinds.
+ * (CI, etc.) can use the same system by adding new source kinds.
  *
  * Ephemeral: state is lost on server restart (matches current notification behavior).
  * All connected clients are kept in sync via WS broadcasts from the caller.
@@ -40,6 +40,17 @@ export class NotificationStore {
       (n) => !(n.source.kind === "terminal" && n.source.panelId === panelId),
     );
     return this.notifications.length !== before;
+  }
+
+  /** Dismiss what a worktree's terminals raised. Returns the panels that had notifications. */
+  dismissByWorktree(worktreePath: string): string[] {
+    const panelIds = new Set<string>();
+    this.notifications = this.notifications.filter((n) => {
+      if (n.source.worktreePath !== worktreePath) return true;
+      panelIds.add(n.source.panelId);
+      return false;
+    });
+    return [...panelIds];
   }
 
   dismissAll(): void {

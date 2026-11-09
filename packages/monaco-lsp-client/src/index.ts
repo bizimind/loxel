@@ -6,6 +6,14 @@ import { MonacoLspClient } from "./adapters/LspClient";
 
 export { MonacoLspClient, WebSocketTransport, createTransportToWorker, createTransportToIFrame };
 export { capabilities } from "./types";
+export { appliedRenameSummary } from "./adapters/languageFeatures/LspRenameFeature";
 export type { MonacoLspClientOptions };
+export type {
+  WorkspaceEditSummary,
+  WorkspaceFileSystem,
+  WorkspaceFileType,
+} from "./adapters/WorkspaceEditApplier";
+export type { SemanticTokenStyling } from "./adapters/languageFeatures/LspSemanticTokensFeature";
+export type { WorkspaceSymbolItem } from "./adapters/languageFeatures/LspWorkspaceSymbolFeature";
 export type { RegistrableCapability, OptionsOf } from "./adapters/LspCapabilitiesRegistry";
 export type { ClientCapabilities } from "./types";

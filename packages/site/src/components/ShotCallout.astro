@@ -1,0 +1,58 @@
+---
+// A glassy chip floating over a feature section's screenshot, pointing at something in the shot.
+// Decorative: the screenshot's alt text already describes what it shows. From `lg` only, where the
+// screenshot is big enough to carry it.
+import { FEATURE_ICONS, type FeatureIcon } from "../lib/feature-icons";
+
+export interface Props {
+  icon: FeatureIcon;
+  text: string;
+  /** Position of the chip's anchor in % of the screenshot box (both windows, for a pair). */
+  x: number;
+  y: number;
+  /** Which end of the chip sits on the anchor: `start` grows right from it, `end` grows left. */
+  align?: "start" | "end";
+  /** A red dot on the icon, as on a task whose agent wants you. */
+  dot?: boolean;
+  /** Shifts the chip's scroll-driven entrance later, in % of its scroll range. */
+  delay?: number;
+}
+
+const { icon, text, x, y, align = "start", dot = false, delay = 0 } = Astro.props;
+---
+
+<div
+  class:list={[
+    "pointer-events-none absolute z-10 hidden -translate-y-1/2 lg:block",
+    { "-translate-x-full": align === "end" },
+  ]}
+  style={`left: ${x}%; top: ${y}%;`}
+  aria-hidden="true"
+>
+  <div
+    class="shot-callout flex items-center gap-2 rounded-full border border-white/12 bg-surface-1/75 py-1.5 pr-3.5 pl-1.5 text-[13px] font-medium whitespace-nowrap text-foreground shadow-[0_10px_30px_-6px_rgb(0_0_0/0.6),inset_0_1px_0_rgb(255_255_255/0.06)] backdrop-blur-md"
+    style={delay ? `--callout-delay: ${delay}%;` : undefined}
+  >
+    <span
+      class="relative grid size-6 shrink-0 place-items-center rounded-full bg-accent/15 text-accent-soft"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={FEATURE_ICONS[icon]}
+      />
+      {
+        dot && (
+          <span class="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-destructive ring-2 ring-surface-1" />
+        )
+      }
+    </span>
+    {text}
+  </div>
+</div>

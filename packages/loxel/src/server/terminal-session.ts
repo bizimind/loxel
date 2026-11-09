@@ -15,6 +15,7 @@ import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 import { stress } from "./stress-detector";
 
 const log = logger.child("terminal");
@@ -38,6 +39,8 @@ export interface TerminalSessionOptions {
   cols: number;
   rows: number;
   cwd: string;
+  /** The worktree the panel belongs to; notifications are filed under it. Defaults to `cwd`. */
+  worktreePath?: string;
   scrollbackLines?: number;
   env: Record<string, string | undefined>;
   /** Command to run in the PTY. Defaults to the user's login shell. */
@@ -132,6 +135,8 @@ export class TerminalSession {
   /** Identifies this spawn; a client may only resume with offsets it got under this epoch. */
   readonly epoch = crypto.randomUUID();
   readonly cwd: string;
+  /** The worktree this session belongs to; follows the worktree when it is moved. */
+  worktreePath: string;
   cols: number;
   rows: number;
   /** Resolves with the shell's exit code once the process is gone. */
@@ -162,6 +167,7 @@ export class TerminalSession {
   constructor(private readonly options: TerminalSessionOptions) {
     this.id = options.id;
     this.cwd = options.cwd;
+    this.worktreePath = options.worktreePath ?? options.cwd;
     const size = clampTerminalSize(options.cols, options.rows);
     this.cols = size.cols;
     this.rows = size.rows;
@@ -180,15 +186,17 @@ export class TerminalSession {
     this.registerNotificationHandlers();
 
     const command = options.command ?? [process.env.SHELL || "/bin/bash", "-il"];
-    this.proc = Bun.spawn(command, {
-      cwd: options.cwd,
-      env: options.env,
-      terminal: {
-        cols: size.cols,
-        rows: size.rows,
-        data: (_terminal, data) => this.onPtyData(data),
-      },
-    });
+    this.proc = measureSpawn("terminal", () =>
+      Bun.spawn(command, {
+        cwd: options.cwd,
+        env: options.env,
+        terminal: {
+          cols: size.cols,
+          rows: size.rows,
+          data: (_terminal, data) => this.onPtyData(data),
+        },
+      }),
+    );
     this.exited = this.proc.exited;
     this.exited
       .then((exitCode) => this.onExited(exitCode))

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { useEditorStateStore } from "./editor-state";
+import { openEditorPaths, useEditorStateStore } from "./editor-state";
 
 const FILE = "test.md";
 
@@ -20,6 +20,20 @@ describe("editor state machine", () => {
     expect(entry).toBeDefined();
     expect(entry!.state).toBe("clean");
     expect(entry!.pendingNonces.size).toBe(0);
+  });
+
+  test("several editors of one file get independent entries", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.openFile("compare-1:old", FILE);
+    store.markDirty("compare-1:old");
+
+    const { files } = useEditorStateStore.getState();
+    expect(files.get("compare-1:old")?.filePath).toBe(FILE);
+    expect(files.get("compare-1:old")?.state).toBe("dirty");
+    expect(getEntry()?.filePath).toBe(FILE);
+    expect(getEntry()?.state).toBe("clean");
+    expect(openEditorPaths(files)).toEqual([FILE]);
   });
 
   test("markDirty transitions clean → dirty", () => {
@@ -531,5 +545,52 @@ describe("auto-merge apply failure", () => {
     expect(getEntry()!.state).toBe("diverged");
     expect(getEntry()!.diskContent).toBe("a\nb\nZ");
     expect(getEntry()!.baseContent).toBe("a\nb\nc");
+  });
+});
+
+describe("deleted files — echoes", () => {
+  test("a superseded echo still clears deleted", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.markDirty(FILE);
+    store.markSaving(FILE, "n1");
+    store.markSaving(FILE, "n2");
+    store.setDeleted(FILE, true);
+
+    store.handleDiskChange(FILE, ["n1"], "first");
+
+    expect(getEntry()?.deleted).toBe(false);
+    expect(getEntry()?.pendingNonces.has("n1")).toBe(false);
+    expect(getEntry()?.pendingNonces.has("n2")).toBe(true);
+    expect(getEntry()?.state).toBe("saving");
+  });
+
+  test("setDeleted and handleDiskChange ignore unknown paths", () => {
+    const store = useEditorStateStore.getState();
+    store.setDeleted("missing.md", true);
+    store.handleDiskChange("missing.md", [], "x");
+    expect(store.files.size).toBe(0);
+  });
+});
+
+describe("moved files", () => {
+  test("setMovedTo records the new path on existing entries only", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setMovedTo(FILE, "new.md");
+    expect(getEntry()?.movedTo).toBe("new.md");
+
+    store.setMovedTo("unknown.md", "x.md");
+    expect(useEditorStateStore.getState().files.has("unknown.md")).toBe(false);
+  });
+
+  test("registerPendingEdit sets and clears the editor's pending-edit taker", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    const take = () => null;
+    store.registerPendingEdit(FILE, take);
+    expect(getEntry()?.takePendingEdit).toBe(take);
+    store.registerPendingEdit(FILE, null);
+    expect(getEntry()?.takePendingEdit).toBeNull();
   });
 });

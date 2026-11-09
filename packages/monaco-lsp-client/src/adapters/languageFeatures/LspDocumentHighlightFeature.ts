@@ -46,6 +46,7 @@ class LspDocumentHighlightProvider implements monaco.languages.DocumentHighlight
     position: monaco.Position,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.DocumentHighlight[] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentDocumentHighlight({

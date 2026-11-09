@@ -18,6 +18,7 @@ function project(path: string, worktreePaths: string[]): EnrichedProject {
     addedAt: "2026-01-01T00:00:00.000Z",
     isBare: false,
     worktreesDir: `${path}/.worktrees`,
+    worktreeMetadata: false,
     worktrees: worktreePaths.map((worktreePath) => ({
       path: worktreePath,
       branch: "topic",

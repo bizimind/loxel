@@ -93,7 +93,14 @@ const FRAME_STEP = 1 / 30; // ~1 frame at 30fps
 
 export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) {
   const worktreePath = usePanelWorktreePath();
-  const isVideo = getMediaType(filePath) === "video";
+  const mediaType = getMediaType(filePath);
+  const isVideo = mediaType === "video";
+  // SVGs are inlined into the frame and may carry their own scripts, so they stay in an opaque
+  // origin (no allow-same-origin) and rely on the frame's network-free CSP. Images and videos run
+  // only our own inline script and load their bytes from /api/file-raw; that fetch must come from
+  // the app's own origin, since the server rejects cross-site subresource loads
+  // (src/server/request-origin.ts), so those frames keep the server origin.
+  const frameSandbox = mediaType === "svg" ? "allow-scripts" : "allow-scripts allow-same-origin";
 
   // --- State ---
   const [version, setVersion] = useState(1);
@@ -489,7 +496,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           {iframeSrc && (
             <iframe
               ref={iframeRef}
-              sandbox="allow-scripts"
+              sandbox={frameSandbox}
               src={iframeSrc}
               className="border-none"
               style={{

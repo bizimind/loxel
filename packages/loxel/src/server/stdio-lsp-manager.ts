@@ -2,9 +2,27 @@ import path from "node:path";
 
 import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 
-import type { LogCategory } from "@/api/log-entry-model";
+import type { LspName } from "@/api/log-entry-model";
+import {
+  LSP_EXITED_CLOSE_CODE,
+  LSP_REPLACED_CLOSE_CODE,
+  LSP_RESTART_CLOSE_CODE,
+  LSP_START_FAILED_CLOSE_CODE,
+} from "@/api/ws-protocol";
+import { isRecord } from "@/lib/is-record";
 
+import { ProcessTreeRecord, killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
+import {
+  type FileEvent,
+  splitWatchedFilesRegistration,
+  WatchedFilesForwarder,
+  withWatchedFilesCapability,
+} from "./lsp-watched-files";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -28,18 +46,21 @@ export interface BaseLspSession {
 
 export interface WtLspContext {
   wtPath: string;
+  /**
+   * Whether this server may run the repository's code, fixed when it starts like its arguments.
+   * Never permits downloads. See {@link WorktreeLspManager.repoTrustRestriction}.
+   */
+  repoTrusted: boolean;
 }
 
-export interface WtLspSession extends BaseLspSession {
-  wtPath: string;
-}
+export interface WtLspSession extends BaseLspSession, WtLspContext {}
 
 export interface SpawnOptions {
   cwd?: string;
   env?: Record<string, string>;
 }
 
-export interface LspPosition {
+interface LspPosition {
   line: number;
   character: number;
 }
@@ -53,6 +74,22 @@ interface LspContentChange {
   range?: LspRange;
   text: string;
 }
+
+/** How long a server has to exit after SIGTERM before it gets SIGKILL; a hung one never exits. */
+export const SERVER_STOP_GRACE_MS = 3000;
+
+/** A WebSocket close frame's limit on its reason, in UTF-8 bytes (RFC 6455). */
+const MAX_CLOSE_REASON_BYTES = 123;
+
+/** The server capability that advertises each suppressible LSP feature statically. */
+const SERVER_CAPABILITY_OF = {
+  "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/inlayHint": "inlayHintProvider",
+  "textDocument/rangeFormatting": "documentRangeFormattingProvider",
+  "textDocument/semanticTokens": "semanticTokensProvider",
+} as const;
+
+export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
 
 /**
  * Base class for language-server subprocess bridges. Handles the
@@ -71,46 +108,115 @@ interface LspContentChange {
 export abstract class StdioLspManager<TSession extends BaseLspSession, TContext = void> {
   protected readonly sessions = new Map<ServerWebSocket<unknown>, TSession>();
   private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
+  /** Client frames received while an async {@link resolveBinary} runs, replayed once spawned. */
+  private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
+  /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
+  private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
+  /** What each session's server is running, when {@link stopsProcessTree}. */
+  private readonly processTrees = new Map<TSession, ProcessTreeRecord>();
+  /** Servers told to stop that have not exited yet, whichever session they belonged to. */
+  private readonly stopping = new Set<Promise<unknown>>();
+  /** Sessions whose process trees were ended, so that a second release leaves a newer one's alone. */
+  private readonly treesEnded = new WeakSet<TSession>();
   protected readonly log: ReturnType<typeof logger.child>;
 
-  constructor(protected readonly name: LogCategory) {
+  constructor(readonly name: LspName) {
     this.log = logger.child(name);
   }
 
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    const frame = this.forwardWatchedFiles ? withWatchedFilesCapability(data) : data;
+    const pending = this._pendingFrames.get(ws);
+    if (pending) {
+      pending.push(frame);
+      return;
+    }
     const session = this.sessions.get(ws);
     if (!session) return;
-    this.handleClientData(session, data);
+    this.handleClientData(session, frame);
+  }
+
+  /**
+   * Forward changed files of a worktree, as reported by its file watcher, to the language servers
+   * rooted there with a matching file watcher. Only managers with
+   * {@link forwardWatchedFiles} have such servers.
+   */
+  notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
+    const root = path.resolve(wtPath);
+    for (const [session, forwarder] of this.watchedFiles) {
+      if (forwarder.root === root && this.isSessionLive(session)) forwarder.queue(paths);
+    }
+  }
+
+  /**
+   * Report a file-watcher event inside a git-ignored directory, at a worktree-relative,
+   * `/`-separated path. It goes through {@link notifyWatchedFilesChanged} only when a session
+   * rooted there asked for it with {@link watchedIgnoredGlobs}; the rest are dropped. Runs per
+   * event, for builds and installs that write thousands of files.
+   */
+  notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    if (this.watchedIgnoredGlobs.length === 0) return;
+    const root = path.resolve(wtPath);
+    for (const forwarder of this.watchedFiles.values()) {
+      if (forwarder.root !== root || !forwarder.wantsIgnoredPath(relPath)) continue;
+      this.notifyWatchedFilesChanged(wtPath, [path.join(root, relPath)]);
+      return;
+    }
   }
 
   detach(ws: ServerWebSocket<unknown>): void {
-    const session = this.sessions.get(ws);
-    if (!session) return;
-    this.killSession(session);
-    this.sessions.delete(ws);
+    this._pendingFrames.delete(ws);
+    // Also without a session (still resolving its binary, or it failed to start): the key is
+    // claimed from the start.
     for (const [key, mappedWs] of this._sessionsByKey) {
       if (mappedWs === ws) {
         this._sessionsByKey.delete(key);
         break;
       }
     }
+    const session = this.sessions.get(ws);
+    if (!session) return;
+    this.killSession(session);
+    this.sessions.delete(ws);
   }
 
-  destroy(): void {
+  /** Stop every session. Settles once every server stopped so far has exited. */
+  async destroy(): Promise<void> {
     for (const session of this.sessions.values()) {
       this.killSession(session);
     }
     this.sessions.clear();
     this._sessionsByKey.clear();
+    this._pendingFrames.clear();
+    await Promise.all(this.stopping);
   }
 
   // ---------------------------------------------------------------------------
   // Hooks for subclasses
 
-  protected abstract resolveBinary(): string | null;
+  /**
+   * The server binary for a session, or null when none is available. May be
+   * async (a lookup in the session's project); frames the client sends
+   * meanwhile are held and replayed once the server is spawned.
+   */
+  protected abstract resolveBinary(context: TContext): string | null | Promise<string | null>;
 
-  protected spawnArgs(): readonly string[] {
+  protected spawnArgs(_context: TContext): readonly string[] {
     return ["--stdio"];
+  }
+
+  /** Whether the context went out of date during an async {@link resolveBinary}: spawn nothing. */
+  protected isContextOutdated(_context: TContext): boolean {
+    return false;
+  }
+
+  /**
+   * What to tell the user when this server cannot start or exits, in place of the generic "binary
+   * not found" or "exited with code N": a missing runtime, or an error only the server's own log
+   * holds. Null keeps the generic text. It is cut to what a WebSocket close frame can carry.
+   */
+  protected serverFailureReason(_context: TContext): string | null {
+    return null;
   }
 
   protected spawnOptions(_context: TContext): SpawnOptions {
@@ -133,6 +239,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly disableSemanticTokens: boolean = false;
 
   /**
+   * Set to true for servers that mark completions as snippets without escaping them, so that text
+   * such as `$HOME` in the completion would be expanded on insertion. We strip `snippetSupport`
+   * from the client's initialize request, so a server that honors it answers in plain text.
+   */
+  protected readonly disableCompletionSnippets: boolean = false;
+
+  /**
    * Set to true for servers that advertise `TextDocumentSyncKind.Full` or
    * otherwise mis-handle incremental `textDocument/didChange` notifications.
    * When set, we track each document's content from didOpen and apply
@@ -141,6 +254,68 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * its entire document with each incremental fragment's replacement text.
    */
   protected readonly requiresFullTextSync: boolean = false;
+
+  /**
+   * LSP features Monaco must not get from this server: their capability is
+   * deleted from the initialize response and their dynamic
+   * `client/registerCapability` entries are dropped (the server is told they
+   * succeeded), whichever way the server advertises them. Semantic tokens are
+   * suppressed as well when `disableSemanticTokens` is set.
+   */
+  protected readonly suppressedFeatures: readonly SuppressibleFeature[] = [];
+
+  /**
+   * Set to true for servers that should hear about on-disk changes to files that are not open
+   * (dependencies, config files, edits by git or agents). The `workspace.didChangeWatchedFiles`
+   * client capability is added to `initialize`, the server's watcher registrations are answered
+   * here instead of reaching the client, and {@link notifyWatchedFilesChanged} forwards matching
+   * changes as `workspace/didChangeWatchedFiles`. Needs {@link getSessionWorkspace}: only changes
+   * inside the session's worktree are reported, outside its git-ignored directories except for
+   * dependency installs under `node_modules` (see `node-modules-changes.ts`) and
+   * {@link watchedIgnoredGlobs}.
+   */
+  protected readonly forwardWatchedFiles: boolean = false;
+
+  /**
+   * Worktree-relative globs to report changes for without any registration from the server, for
+   * servers that register no watchers of their own and rely on the client to pick them (ESLint).
+   * They add to whatever the server registers and apply once the client's `initialized` passed
+   * through the base's {@link handleClientData}. Needs {@link forwardWatchedFiles}.
+   */
+  protected readonly watchedFileGlobs: readonly string[] = [];
+
+  /**
+   * Like {@link watchedFileGlobs}, and also matched against events inside git-ignored directories,
+   * which reach servers only through this: `obj/project.assets.json` (C#). Keep them narrow, since
+   * build output is the busiest part of a worktree. A manager that must act on such a file itself,
+   * rather than tell its server, can override {@link notifyWatchedFilesChanged}, or
+   * {@link notifyIgnoredPathChanged} to tell these paths from the rest (clangd). Needs
+   * {@link forwardWatchedFiles}.
+   */
+  protected readonly watchedIgnoredGlobs: readonly string[] = [];
+
+  /**
+   * Return true for a server whose own stop leaves the processes it started running (a build in a
+   * process group of its own, or a server with no signal handler to stop its children). Releasing
+   * the session then ends the server's whole process tree while the server is still there to find
+   * it from (see `kill-process-tree.ts`), after {@link onSessionClosed}, so it must not depend on
+   * state that hook clears. Asked once the session is built too: a server that exits on its own
+   * then has what it had running at the last look, a few seconds old at most, ended once it has
+   * gone.
+   */
+  protected stopsProcessTree(_session: TSession): boolean {
+    return false;
+  }
+
+  /**
+   * Processes of the session's beside its server, such as daemons the server detached from itself,
+   * whose trees end with the server's in the same pass when the session is released, even if the
+   * server has already exited. Asked once per session, after {@link onSessionClosed}. Each number
+   * must still be the process it names, since an ended process's number can be reused.
+   */
+  protected processTreeRoots(_session: TSession): readonly number[] {
+    return [];
+  }
 
   /**
    * Return a dedup key for this session context. When non-null, the base class
@@ -159,6 +334,9 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * `rootUri` / `rootPath` / `workspaceFolders` injected into the
    * `initialize` request. Returns null by default (no injection).
    * Subclasses that carry `wtPath` on their session override this.
+   * It is also the single folder the base answers `workspace/workspaceFolders`
+   * with, and the root whose file changes reach the server when
+   * {@link forwardWatchedFiles} is set.
    */
   protected getSessionWorkspace(_session: TSession): string | null {
     return null;
@@ -170,13 +348,32 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    *
    * Use this for config the server reads once at startup and cannot change
    * later — e.g. Terraform's `indexing.ignoreDirectoryNames`, Astro's
-   * `typescript.tsdk` path, Pyright's analysis settings. For servers that
-   * expect push-based config via `workspace/didChangeConfiguration` after
-   * initialization, use {@link onClientInitialized} instead.
+   * `typescript.tsdk` path. For servers that expect push-based config via
+   * `workspace/didChangeConfiguration` after initialization, use
+   * {@link onClientInitialized}; for servers that pull it, use
+   * {@link workspaceConfiguration}. A throw closes the session as a start failure, so a server
+   * never starts without the settings meant for it.
    */
   protected getInitializationOptions(_session: TSession): Record<string, unknown> | null {
     return null;
   }
+
+  /**
+   * Answer the server's `workspace/configuration` requests here instead of
+   * forwarding them (monaco-lsp-client does not implement that request).
+   * Returns the value for one requested `section`; `null` means unset.
+   * `scopeUri` is the resource the server asks about, for settings per file
+   * (ESLint's working directory), undefined when it asks for the workspace.
+   * Defining it also advertises the `workspace.configuration` client
+   * capability in `initialize`, which pull-based servers such as basedpyright
+   * need before they ask. Call {@link notifyConfigurationChanged} when an
+   * answer would change.
+   */
+  protected workspaceConfiguration?(
+    session: TSession,
+    section: string | undefined,
+    scopeUri: string | undefined,
+  ): Promise<unknown>;
 
   /**
    * Handle a JSON-RPC frame from the WebSocket client. Default: forward to
@@ -194,7 +391,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             rootUri?: string | null;
             rootPath?: string | null;
             workspaceFolders?: unknown;
-            capabilities?: { textDocument?: Record<string, unknown> };
+            capabilities?: {
+              textDocument?: Record<string, unknown> & {
+                completion?: { completionItem?: { snippetSupport?: boolean } };
+              };
+              workspace?: Record<string, unknown>;
+            };
             initializationOptions?: Record<string, unknown>;
           };
         };
@@ -202,18 +404,30 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           if (this.disableSemanticTokens && msg.params?.capabilities?.textDocument) {
             delete msg.params.capabilities.textDocument.semanticTokens;
           }
+          if (this.disableCompletionSnippets) {
+            delete msg.params?.capabilities?.textDocument?.completion?.completionItem
+              ?.snippetSupport;
+          }
+          if (this.workspaceConfiguration && msg.params?.capabilities) {
+            msg.params.capabilities.workspace = {
+              ...msg.params.capabilities.workspace,
+              configuration: true,
+            };
+          }
           const workspace = this.getSessionWorkspace(session);
           if (workspace && msg.params) {
-            const rootUri = `file://${workspace}`;
-            if (!msg.params.rootUri) msg.params.rootUri = rootUri;
+            if (!msg.params.rootUri) msg.params.rootUri = fileUri(workspace);
             if (!msg.params.rootPath) msg.params.rootPath = workspace;
-            if (!msg.params.workspaceFolders) {
-              msg.params.workspaceFolders = [
-                { uri: rootUri, name: path.basename(workspace) || workspace },
-              ];
-            }
+            if (!msg.params.workspaceFolders)
+              msg.params.workspaceFolders = workspaceFolders(workspace);
           }
-          const initOpts = this.getInitializationOptions(session);
+          let initOpts: Record<string, unknown> | null;
+          try {
+            initOpts = this.getInitializationOptions(session);
+          } catch (err) {
+            this.failStart(session, err);
+            return;
+          }
           if (initOpts) {
             msg.params ??= {};
             msg.params.initializationOptions = mergeInitOptions(
@@ -226,6 +440,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         }
         if (msg.method === "initialized") {
           this.writeToStdin(session, data);
+          this.watchedFiles.get(session)?.serverInitialized();
           this.onClientInitialized(session);
           return;
         }
@@ -322,11 +537,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * Fired after the client's `initialized` notification is forwarded.
    *
    * Override to push runtime configuration via `workspace/didChangeConfiguration`
-   * for servers whose config protocol is push-based — e.g. Docker's compose/
-   * telemetry settings, YAML's schema mappings. For config the server reads
+   * for servers whose config protocol is push-based — e.g. YAML's schema
+   * mappings. For config the server reads
    * from `initializationOptions` at startup, use {@link getInitializationOptions}.
    */
   protected onClientInitialized(_session: TSession): void {}
+
+  /**
+   * Fired once a session is gone: detached, destroyed, or its process
+   * exited. May fire more than once for the same session, so overrides must
+   * be idempotent. Override to release per-session resources.
+   */
+  protected onSessionClosed(_session: TSession): void {}
 
   /**
    * Handle a decoded JSON-RPC frame from the LSP server. Default: forward to
@@ -346,7 +568,30 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       // Not JSON — skip.
     }
     if (didParse && typeof preparsed === "object" && preparsed !== null) {
-      const m = preparsed as { error?: { code?: number; message?: string; data?: unknown } };
+      const m = preparsed as {
+        id?: number | string;
+        method?: string;
+        params?: { items?: unknown };
+        error?: { code?: number; message?: string; data?: unknown };
+      };
+      if (
+        this.workspaceConfiguration &&
+        m.method === "workspace/configuration" &&
+        m.id !== undefined &&
+        Array.isArray(m.params?.items)
+      ) {
+        void this.answerWorkspaceConfiguration(session, m.id, m.params.items);
+        return;
+      }
+      // monaco-lsp-client does not implement this request either (Tombi sends it).
+      const workspace = this.getSessionWorkspace(session);
+      if (workspace && m.method === "workspace/workspaceFolders" && m.id !== undefined) {
+        this.writeToStdin(
+          session,
+          JSON.stringify({ jsonrpc: "2.0", id: m.id, result: workspaceFolders(workspace) }),
+        );
+        return;
+      }
       if (m.error && typeof m.error === "object") {
         this.log.info(`[${this.name}] LSP error response`, {
           code: m.error.code,
@@ -356,7 +601,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       }
     }
 
-    if (this.disableSemanticTokens) {
+    const suppressed: readonly SuppressibleFeature[] = this.disableSemanticTokens
+      ? [...this.suppressedFeatures, "textDocument/semanticTokens"]
+      : this.suppressedFeatures;
+    if (suppressed.length > 0) {
       try {
         const parsed = didParse ? preparsed : JSON.parse(body);
         if (typeof parsed === "object" && parsed !== null) {
@@ -367,14 +615,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             result?: { capabilities?: Record<string, unknown> };
           };
 
-          // Dynamic registration — drop semantic-tokens entries before they
-          // reach Monaco so no provider ever gets registered.
+          // Dynamic registration — drop suppressed entries before they reach
+          // Monaco so no provider ever gets registered.
           if (
             msg.method === "client/registerCapability" &&
             Array.isArray(msg.params?.registrations)
           ) {
             const filtered = msg.params.registrations.filter(
-              (r) => r?.method !== "textDocument/semanticTokens",
+              (r) => !suppressed.some((method) => method === r?.method),
             );
             if (filtered.length === 0 && msg.id !== undefined) {
               this.writeToStdin(
@@ -388,11 +636,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             return;
           }
 
-          // initialize response — strip semanticTokensProvider so Monaco
+          // initialize response — strip the suppressed capabilities so Monaco
           // never registers a provider in the first place.
           if (msg.id !== undefined && msg.result?.capabilities) {
-            if ("semanticTokensProvider" in msg.result.capabilities) {
-              delete msg.result.capabilities.semanticTokensProvider;
+            const caps = msg.result.capabilities;
+            const present = suppressed
+              .map((method) => SERVER_CAPABILITY_OF[method])
+              .filter((key) => key in caps);
+            if (present.length > 0) {
+              for (const key of present) delete caps[key];
               session.ws.send(JSON.stringify(parsed));
               return;
             }
@@ -421,7 +673,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (existingWs && existingWs !== ws) {
         this.detach(existingWs);
         try {
-          existingWs.close(4000, "Replaced by newer connection");
+          existingWs.close(LSP_REPLACED_CLOSE_CODE, "Replaced by newer connection");
         } catch (err) {
           this.log.debug("close() on replaced WebSocket threw (already closed)", { error: err });
         }
@@ -429,27 +681,101 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       this._sessionsByKey.set(key, ws);
     }
 
-    const bin = this.resolveBinary();
-    if (!bin) {
-      this.log.error(`${this.name} binary not found`);
-      ws.close(4001, `${this.name} binary not found — is it installed?`);
+    const bin = this.resolveBinary(context);
+    if (!(bin instanceof Promise)) {
+      this.spawnSession(ws, context, bin);
       return;
     }
+    const frames: string[] = [];
+    this._pendingFrames.set(ws, frames);
+    void bin
+      .catch((err: unknown) => {
+        this.log.error(`${this.name} binary resolution failed`, { error: err });
+        return null;
+      })
+      .then((resolved) => {
+        // Detached (or replaced by a newer connection) while resolving.
+        if (this._pendingFrames.get(ws) !== frames) return;
+        this._pendingFrames.delete(ws);
+        this.spawnSession(ws, context, resolved);
+        const session = this.sessions.get(ws);
+        if (!session) return;
+        for (const frame of frames) {
+          // A frame can end the session (see `failStart`); the rest then have nowhere to go.
+          if (!this.isSessionLive(session)) break;
+          this.handleClientData(session, frame);
+        }
+      });
+  }
 
-    const args = this.spawnArgs();
+  /**
+   * Spawn the server for `ws`, or, when it cannot start, release `ws`'s session and close it with
+   * {@link LSP_START_FAILED_CLOSE_CODE}: nothing else would answer the client's `initialize`, so it
+   * fails visibly.
+   */
+  private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
+    if (this.isContextOutdated(context)) {
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, "Settings changed while starting; reconnect");
+      return;
+    }
+    let reason: string;
+    if (bin) {
+      try {
+        this.spawnProcess(ws, context, bin);
+        return;
+      } catch (err) {
+        // E.g. `Bun.spawn` throwing synchronously because the binary cannot be executed (EACCES,
+        // ENOEXEC).
+        this.log.error(`${this.name} failed to start`, { error: err });
+        reason = `${this.name} failed to start`;
+      }
+    } else {
+      this.log.error(`${this.name} binary not found`);
+      reason = `${this.name} binary not found — is it installed?`;
+    }
+    this.detach(ws);
+    ws.close(LSP_START_FAILED_CLOSE_CODE, this.failureCloseReason(context, reason));
+  }
+
+  private spawnProcess(ws: ServerWebSocket<unknown>, context: TContext, bin: string): void {
+    const args = this.spawnArgs(context);
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
 
-    const proc = Bun.spawn([bin, ...args], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: opts.cwd,
-      env: { ...process.env, NODE_OPTIONS: "", ...opts.env },
-    });
+    const proc = measureSpawn("lsp", () =>
+      Bun.spawn([bin, ...args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: opts.cwd,
+        // Login-shell environment, so servers that run user tools (basedpyright's
+        // interpreter probe, terraform-ls's `terraform`) find the user's PATH
+        // even when Loxel was launched from Finder.
+        env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
+      }),
+    );
 
-    const session = this.buildSession(ws, proc, context);
+    // Until it is in `sessions` nothing else would kill the process (`detach` finds the session there).
+    let session: TSession;
+    try {
+      session = this.buildSession(ws, proc, context);
+    } catch (err) {
+      this.stopProcess(proc);
+      throw err;
+    }
     this.sessions.set(ws, session);
+    if (this.stopsProcessTree(session))
+      this.processTrees.set(session, new ProcessTreeRecord(proc.pid));
+    // From the start, so changes made before the server registers its watchers reach it too.
+    const watchedRoot = this.forwardWatchedFiles ? this.getSessionWorkspace(session) : null;
+    if (watchedRoot) {
+      const forwarder = new WatchedFilesForwarder(path.resolve(watchedRoot), (changes) =>
+        this.sendWatchedFilesChanged(session, changes),
+      );
+      forwarder.declareWatchers(this.watchedFileGlobs, this.watchedIgnoredGlobs);
+      this.watchedFiles.set(session, forwarder);
+    }
 
     // Per-session token bucket to cap stderr volume so a chatty LSP (e.g.
     // terraform-ls's workspace-walker spew) can't evict useful entries from
@@ -473,6 +799,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     proc.exited.then(async (code) => {
       this.log.info(`${this.name} exited with code ${code}`);
       throttle.dispose();
+      // Now, not once stderr has drained: what the server left running may hold stderr open.
+      this.takeProcessTree(session)?.killSurvivors();
       // Wait for the stderr stream to drain before checking recent lines —
       // proc.exited may resolve before the last stderr chunk is delivered.
       await stderrDone;
@@ -481,10 +809,75 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           stderr: recentStderrLines.join("\n") || "(empty)",
         });
       }
-      if (this.sessions.get(ws) === session) {
-        this.sessions.delete(ws);
+      this.releaseSession(session);
+      // Still live: it exited on its own (crash, out of memory, killed outside Loxel), not through
+      // `detach` / `destroy`. The socket would otherwise stay open with nothing answering it, so
+      // release the session's key and close the socket, which tells the client to reconnect.
+      if (!this.isSessionLive(session)) return;
+      this.detach(ws);
+      try {
+        const how = proc.signalCode
+          ? `was killed by ${proc.signalCode}`
+          : `exited with code ${code}`;
+        ws.close(LSP_EXITED_CLOSE_CODE, this.failureCloseReason(context, `${this.name} ${how}`));
+      } catch (err) {
+        this.log.debug("close() on an exited server's WebSocket threw (already closed)", {
+          error: err,
+        });
       }
     });
+  }
+
+  /** Have every client reconnect to a fresh server, one that reads its schemas again. */
+  restartSessions(reason: string): void {
+    for (const { ws } of [...this.sessions.values()]) {
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, reason);
+    }
+  }
+
+  /** End a running session that cannot go on, the way a server that cannot start ends. */
+  private failStart(session: TSession, err: unknown): void {
+    this.log.error(`${this.name} failed to start`, { error: err });
+    const { ws } = session;
+    this.detach(ws);
+    try {
+      ws.close(LSP_START_FAILED_CLOSE_CODE, closeReason(`${this.name} failed to start`));
+    } catch (closeErr) {
+      this.log.debug("close() on a failed server's WebSocket threw (already closed)", {
+        error: closeErr,
+      });
+    }
+  }
+
+  /** The close reason for a failed server; a throwing hook must not keep the socket from closing. */
+  private failureCloseReason(context: TContext, generic: string): string {
+    try {
+      return closeReason(this.serverFailureReason(context) ?? generic);
+    } catch (err) {
+      this.log.warn(`${this.name} failure reason threw`, { error: err });
+      return closeReason(generic);
+    }
+  }
+
+  /** True while `session` is still the live session of its WebSocket. */
+  protected isSessionLive(session: TSession): boolean {
+    return this.sessions.get(session.ws) === session;
+  }
+
+  /**
+   * Tell the server its configuration changed. Sends `settings: null`, so a
+   * server that pulls configuration asks {@link workspaceConfiguration} again.
+   */
+  protected notifyConfigurationChanged(session: TSession): void {
+    this.writeToStdin(
+      session,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workspace/didChangeConfiguration",
+        params: { settings: null },
+      }),
+    );
   }
 
   /** Write a JSON-RPC message to the LSP stdin with Content-Length framing. */
@@ -519,17 +912,134 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (Bun.file(localBin).size) return localBin;
     }
 
-    return Bun.which(binaryName);
+    const found = Bun.which(binaryName, { PATH: buildSpawnEnv().PATH ?? "" });
+    // It may have been installed since the login-shell PATH was captured; the next start retries.
+    if (!found) void refreshLoginShellEnv();
+    return found;
   }
 
   // ---------------------------------------------------------------------------
 
   private killSession(session: TSession): void {
-    try {
-      session.proc.kill();
-    } catch {
-      // Already dead
+    this.releaseSession(session);
+    this.stopProcess(session.proc);
+  }
+
+  /** Ask the server to exit, and force it after {@link SERVER_STOP_GRACE_MS} if it has not. */
+  private stopProcess(proc: Subprocess): void {
+    const signal = (name: "SIGTERM" | "SIGKILL"): void => {
+      try {
+        proc.kill(name);
+      } catch {
+        // Already dead
+      }
+    };
+    signal("SIGTERM");
+    const forceKill = setTimeout(() => {
+      this.log.warn(`${this.name} did not exit after SIGTERM, sending SIGKILL`);
+      signal("SIGKILL");
+    }, SERVER_STOP_GRACE_MS);
+    const stopped = proc.exited.finally(() => {
+      clearTimeout(forceKill);
+      this.stopping.delete(stopped);
+    });
+    this.stopping.add(stopped);
+  }
+
+  private releaseSession(session: TSession): void {
+    this.watchedFiles.get(session)?.dispose();
+    this.watchedFiles.delete(session);
+    this.onSessionClosed(session);
+    const record = this.takeProcessTree(session);
+    const { proc } = session;
+    const alive = proc.exitCode === null && proc.signalCode === null;
+    if (alive) record?.dispose();
+    else record?.killSurvivors();
+    // Released again as the process exits, when a newer session may hold the roots by then.
+    if (this.treesEnded.has(session)) return;
+    this.treesEnded.add(session);
+    // Once the server is gone so is its tree, and its number may be someone else's.
+    const server = alive && this.stopsProcessTree(session) ? [proc.pid] : [];
+    const roots = [...server, ...this.processTreeRoots(session)];
+    if (roots.length > 0) killProcessTrees(roots);
+  }
+
+  private takeProcessTree(session: TSession): ProcessTreeRecord | undefined {
+    const record = this.processTrees.get(session);
+    this.processTrees.delete(session);
+    return record;
+  }
+
+  /** Look at each server's process tree now, rather than at the next tick. */
+  protected async recordProcessTrees(): Promise<void> {
+    await Promise.all([...this.processTrees.values()].map((record) => record.record()));
+  }
+
+  /**
+   * Take the server's `workspace/didChangeWatchedFiles` (un)registrations out of a
+   * `client/registerCapability` / `client/unregisterCapability` request before it reaches the
+   * client, which cannot watch files: remember the watchers and acknowledge the request, or pass
+   * on what remains when it carries other registrations too. True when the frame was consumed.
+   */
+  private interceptWatchedFilesRegistration(session: TSession, body: string): boolean {
+    if (!this.forwardWatchedFiles) return false;
+    const request = splitWatchedFilesRegistration(body);
+    if (!request) return false;
+    const forwarder = this.watchedFiles.get(session);
+    // None: the session is gone (drop the frame) or has no worktree (leave it to the client).
+    if (!forwarder) return !this.isSessionLive(session);
+
+    for (const entry of request.entries) {
+      if (request.register) forwarder.register(entry.id, entry.registerOptions);
+      else forwarder.unregister(entry.id);
     }
+
+    if (request.remainder === null) {
+      this.writeToStdin(
+        session,
+        JSON.stringify({ jsonrpc: "2.0", id: request.requestId, result: null }),
+      );
+    } else {
+      this.handleServerFrame(session, request.remainder);
+    }
+    return true;
+  }
+
+  private sendWatchedFilesChanged(session: TSession, changes: FileEvent[]): void {
+    if (!this.isSessionLive(session)) return;
+    this.writeToStdin(
+      session,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workspace/didChangeWatchedFiles",
+        params: { changes },
+      }),
+    );
+  }
+
+  private async answerWorkspaceConfiguration(
+    session: TSession,
+    id: number | string,
+    items: unknown[],
+  ): Promise<void> {
+    let result: unknown[];
+    try {
+      result = await Promise.all(
+        items.map((item) => {
+          const { section, scopeUri } = isRecord(item) ? item : {};
+          return this.workspaceConfiguration?.(
+            session,
+            typeof section === "string" ? section : undefined,
+            typeof scopeUri === "string" ? scopeUri : undefined,
+          );
+        }),
+      );
+    } catch (err) {
+      this.log.warn(`[${this.name}] workspace/configuration answer failed`, { error: err });
+      result = items.map(() => null);
+    }
+    if (!this.isSessionLive(session)) return;
+    this.writeToStdin(session, JSON.stringify({ jsonrpc: "2.0", id, result }));
   }
 
   private async readStdout(session: TSession): Promise<void> {
@@ -569,6 +1079,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       const body = session.stdoutBuf.subarray(messageStart, messageEnd).toString("utf-8");
       session.stdoutBuf = session.stdoutBuf.subarray(messageEnd);
 
+      if (this.interceptWatchedFilesRegistration(session, body)) continue;
       this.handleServerFrame(session, body);
     }
   }
@@ -613,6 +1124,159 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 }
 
 /**
+ * Base for servers run one per worktree: started in the worktree, rooted at it (`rootUri`,
+ * `workspaceFolders`, watched files), and replaced when a newer connection asks for the same
+ * worktree. Subclasses supply what differs per server: the binary, its arguments and settings.
+ * {@link WorktreeLspManager} is this with the plain session; a server keeping more per session
+ * extends this with its own session type and builds it.
+ */
+export abstract class WorktreeSessionLspManager<
+  TSession extends WtLspSession,
+> extends StdioLspManager<TSession, WtLspContext> {
+  /**
+   * Set by a server that behaves differently in a trusted repository: what it leaves out until
+   * then, as one sentence for the user ("Build scripts don't run"). Its hooks read `repoTrusted`
+   * from the context or session, and the base does the rest: the sentence is what asks the user to
+   * trust the repository, and the server restarts when the answer changes.
+   */
+  protected readonly repoTrustRestriction: string | null = null;
+  /**
+   * False for a server that only knows once it has looked at the machine whether anything is held
+   * back: it calls `reportRepoRestriction` itself, as a repository nothing is held back in stays quiet.
+   */
+  protected readonly reportsRestrictionAtStart: boolean = true;
+  /**
+   * Set, with {@link repoTrustRestriction}, by a server that has no restricted mode, such as one
+   * that loads the project's own packages to run: in an untrusted repository its connection is
+   * answered as a server with no features, and the server starts once the repository is trusted.
+   */
+  protected readonly runsOnlyWhenTrusted: boolean = false;
+  /** The worktree of each connection answered without a server, by socket. */
+  private readonly heldUntilTrusted = new Map<ServerWebSocket<unknown>, string>();
+  private unsubscribeRepoTrust: (() => void) | null = null;
+
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+    if (this.runsOnlyWhenTrusted && !this.repoTrustRestriction) {
+      throw new Error(`${this.name} sets runsOnlyWhenTrusted without a repoTrustRestriction`);
+    }
+    const repoTrusted = isRepoTrusted(wtPath);
+    if (this.repoTrustRestriction) {
+      this.unsubscribeRepoTrust ??= onRepoTrustChange(() => this.followRepoTrust());
+      if (!repoTrusted && this.reportsRestrictionAtStart) {
+        reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      }
+      if (!repoTrusted && this.runsOnlyWhenTrusted) {
+        this.detach(ws);
+        this.heldUntilTrusted.set(ws, wtPath);
+        return;
+      }
+    }
+    this.startSession(ws, { wtPath, repoTrusted });
+  }
+
+  override handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    if (this.heldUntilTrusted.has(ws)) answerWithoutServer(ws, data);
+    else super.handleMessage(ws, data);
+  }
+
+  override detach(ws: ServerWebSocket<unknown>): void {
+    this.heldUntilTrusted.delete(ws);
+    super.detach(ws);
+  }
+
+  override async destroy(): Promise<void> {
+    this.unsubscribeRepoTrust?.();
+    this.unsubscribeRepoTrust = null;
+    this.heldUntilTrusted.clear();
+    await super.destroy();
+  }
+
+  private followRepoTrust(): void {
+    for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
+    for (const [ws, wtPath] of [...this.heldUntilTrusted]) {
+      if (!isRepoTrusted(wtPath)) continue;
+      this.log.info("Starting for a change of repository trust", { wtPath });
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, "Repository trust changed; reconnect");
+    }
+  }
+
+  // A server must not start on an answer the user has just taken back.
+  protected override isContextOutdated({ wtPath, repoTrusted }: WtLspContext): boolean {
+    return this.repoTrustRestriction !== null && isRepoTrusted(wtPath) !== repoTrusted;
+  }
+
+  private restartIfTrustChanged(session: TSession): void {
+    if (!this.isSessionLive(session)) return;
+    if (isRepoTrusted(session.wtPath) === session.repoTrusted) return;
+    const { ws } = session;
+    this.log.info("Restarting for a change of repository trust", { wtPath: session.wtPath });
+    this.detach(ws);
+    ws.close(LSP_RESTART_CLOSE_CODE, "Repository trust changed; reconnect");
+  }
+
+  destroySession(ws: ServerWebSocket<unknown>): void {
+    this.detach(ws);
+  }
+
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
+    return { cwd: context.wtPath };
+  }
+
+  protected override getSessionKey(context: WtLspContext): string {
+    return context.wtPath;
+  }
+
+  protected override getSessionWorkspace(session: TSession): string {
+    return session.wtPath;
+  }
+}
+
+/** {@link WorktreeSessionLspManager} for a server that keeps nothing more per session. */
+export abstract class WorktreeLspManager extends WorktreeSessionLspManager<WtLspSession> {
+  protected buildSession(
+    ws: ServerWebSocket<unknown>,
+    proc: Subprocess,
+    context: WtLspContext,
+  ): WtLspSession {
+    return {
+      ws,
+      proc,
+      wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
+      stdoutBuf: Buffer.alloc(0),
+      documentContents: new Map(),
+    };
+  }
+}
+
+/** JSON-RPC's code for a request the server does not handle. */
+const METHOD_NOT_FOUND = -32601;
+
+/**
+ * Answer a client frame as a server with no features would: `initialize` with document sync only,
+ * `shutdown`, and any other request as not handled. Notifications need no answer.
+ */
+export function answerWithoutServer(ws: ServerWebSocket<unknown>, frame: string): void {
+  let message: unknown;
+  try {
+    message = JSON.parse(frame);
+  } catch {
+    return;
+  }
+  if (!isRecord(message) || typeof message.method !== "string") return;
+  const { id, method } = message;
+  if (typeof id !== "number" && typeof id !== "string") return;
+  const reply =
+    method === "initialize"
+      ? { result: { capabilities: { textDocumentSync: { openClose: true, change: 0 } } } }
+      : method === "shutdown"
+        ? { result: null }
+        : { error: { code: METHOD_NOT_FOUND, message: `Unhandled method ${method}` } };
+  ws.send(JSON.stringify({ jsonrpc: "2.0", id, ...reply }));
+}
+
+/**
  * Merge server-supplied `initializationOptions` into the client-supplied ones.
  * One level deep: nested plain objects are merged key-by-key, everything else
  * is replaced. The client's values win over the server's on shallow keys to
@@ -626,7 +1290,7 @@ function mergeInitOptions(
   const out: Record<string, unknown> = { ...(existing ?? {}) };
   for (const [key, addValue] of Object.entries(add)) {
     const existingValue = out[key];
-    if (isPlainObject(existingValue) && isPlainObject(addValue)) {
+    if (isRecord(existingValue) && isRecord(addValue)) {
       out[key] = { ...addValue, ...existingValue };
     } else if (existingValue === undefined) {
       out[key] = addValue;
@@ -635,11 +1299,27 @@ function mergeInitOptions(
   return out;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * `reason` cut, at a character boundary, to what a close frame carries. Bun sends a longer one
+ * anyway, which the browser rejects as an invalid frame, losing the close code as well.
+ */
+function closeReason(reason: string): string {
+  let cut = "";
+  let bytes = 0;
+  for (const char of reason) {
+    bytes += Buffer.byteLength(char);
+    if (bytes > MAX_CLOSE_REASON_BYTES) break;
+    cut += char;
+  }
+  return cut;
 }
 
-export function buildLineOffsets(content: string): number[] {
+/** The session's single workspace folder, as `initialize` and `workspace/workspaceFolders` carry it. */
+export function workspaceFolders(workspace: string): { uri: string; name: string }[] {
+  return [{ uri: fileUri(workspace), name: path.basename(workspace) || workspace }];
+}
+
+function buildLineOffsets(content: string): number[] {
   const offsets = [0];
   for (let i = 0; i < content.length; i++) {
     if (content[i] === "\n") offsets.push(i + 1);
@@ -647,7 +1327,7 @@ export function buildLineOffsets(content: string): number[] {
   return offsets;
 }
 
-export function offsetAt(lineOffsets: number[], totalLength: number, pos: LspPosition): number {
+function offsetAt(lineOffsets: number[], totalLength: number, pos: LspPosition): number {
   const base = lineOffsets[pos.line];
   if (base === undefined) return totalLength;
   return Math.min(base + pos.character, totalLength);

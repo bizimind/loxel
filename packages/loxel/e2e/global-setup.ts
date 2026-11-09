@@ -4,6 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 
+import { withoutAgentEnv } from "../src/coding-agent-env";
+
 const LOXEL_ROOT = resolve(import.meta.dirname, "..");
 const BASE_PORT = 17434;
 const MAX_PORT = 17534;
@@ -61,7 +63,7 @@ export default async function globalSetup() {
   const proc = spawn("bun", ["run", "src/server/index.ts"], {
     cwd: LOXEL_ROOT,
     env: {
-      ...process.env,
+      ...withoutAgentEnv(process.env),
       LOXEL_DEV: "1",
       LOXEL_STATE_DIR: stateDir,
       LOXEL_SERVE_PORT: String(port),

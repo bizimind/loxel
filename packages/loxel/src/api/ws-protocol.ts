@@ -1,54 +1,18 @@
-import type { SessionConfig } from "@bizimind/coding-agent";
+import type { OpenTerminalRequest } from "@/open-request";
 
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
+import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
-import type { UpdateState } from "./update-model";
+import type { SchemaConsentState } from "./schema-consent-model";
+import type { ToolchainChangedMessage } from "./toolchain-status-model";
 
-export type AgentStatus = "starting" | "ready" | "running" | "waiting" | "exited";
-
-/** Options for creating a new coding-agent session, derived from SessionConfig. */
-export type AgentSessionOptions = Pick<
-  SessionConfig,
-  "models" | "mode" | "profile" | "declaredTools"
->;
-
-/** Derive agent session status from a protocol event type. Returns undefined if no status change. */
-export function deriveAgentStatus(eventType: string): AgentStatus | undefined {
-  switch (eventType) {
-    case "session.started":
-    case "session.resumed":
-    case "session.rewound":
-    case "run.completed":
-    case "run.failed":
-    case "run.cancelled":
-    case "plan.mode.entered":
-    case "plan.mode.exited":
-      return "ready";
-    case "run.started":
-    case "human.input.response":
-    case "approval.granted":
-    case "approval.denied":
-      return "running";
-    case "human.input.requested":
-    case "approval.requested":
-      return "waiting";
-    default:
-      return undefined;
-  }
-}
-
-/** Minimal protocol event shape forwarded from the coding-agent subprocess. */
-export interface AgentEventPayload {
-  type: string;
-  session_id: string;
-  run_id?: string;
-  request_id?: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
-  [key: string]: unknown;
-}
+/**
+ * Who moved a file: Loxel (a file operation in any window) or another process. Only moves from
+ * another process are announced to the user; Loxel's own are already visible where they happened.
+ */
+export type FileMoveSource = "loxel" | "external";
 
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
@@ -56,13 +20,22 @@ export type WsMessage =
   | { type: "status_changed"; wtPath: string; data: StatusInfo }
   | { type: "files_dir_changed"; wtPath: string; data: { dir: string; entries: DirEntry[] } }
   | { type: "file_content_changed"; wtPath: string; data: { path: string; nonces: string[] } }
+  /** A file an editor has open was renamed or moved (absolute paths). */
+  | {
+      type: "file_moved";
+      wtPath: string;
+      data: { oldPath: string; newPath: string; source: FileMoveSource };
+    }
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
-  | { type: "open_url"; wtPath: string; data: { url: string } }
+  | ToolchainChangedMessage
+  // Worktree-scoped, or for the window in use when no window shows the worktree.
+  | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: { filePath: string } }
+  | { type: "open_file"; data: OpenFilePanel }
   | { type: "open_folder"; data: { path: string } }
+  | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }
@@ -77,26 +50,19 @@ export type WsMessage =
   | { type: "error"; message: string }
   | { type: "terminal_exit"; id: string; exitCode: number }
   | ({ type: "terminal_state" } & TerminalState)
-  | { type: "agent_event"; id: string; seq: number; event: AgentEventPayload }
-  | { type: "agent_exit"; id: string; exitCode: number }
-  | {
-      type: "agent_sessions";
-      scopeKey: string;
-      sessions: Array<{ id: string; status: string; codingAgentSessionId: string | null }>;
-    }
-  | { type: "agent_replay_done"; id: string }
-  | { type: "agent_error"; id: string; message: string }
   | { type: "log_entries"; data: LogEntry[] }
   | { type: "log_error_count"; delta: number }
   | { type: "log_error_snapshot"; total: number }
-  | { type: "update_status_changed"; data: UpdateState }
   // Notifications (global)
   | { type: "notification_added"; data: ServerNotification }
   | { type: "notification_dismissed"; id: string }
   | { type: "notification_panel_dismissed"; panelId: string }
   | { type: "notifications_cleared" }
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
-  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string };
+  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
+  | { type: "schema_consent_changed"; data: SchemaConsentState }
+  // Some repository's trust or restrictions changed (global, like the worktrees sharing it)
+  | { type: "repo_trust_changed" };
 
 /** Terminal notification sequences Loxel understands; see docs/TERMINALS.md#notifications. */
 export const NOTIFICATION_SEQUENCES = ["osc9", "osc777", "osc99"] as const;
@@ -167,30 +133,56 @@ export interface TerminalState {
   rows: number;
 }
 
+/**
+ * A file the server asks a window to open (`loxel <file>`, Finder). It opens in `worktreePath` if
+ * the command named one, else in the worktree holding it, else in the window's active worktree.
+ */
+export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelOpenOptions;
+
+/**
+ * A terminal panel the server asks a window to create (`loxel terminal`). The server has already
+ * minted `terminalId` and started its shell in `cwd`, with the command typed in, so the renderer
+ * only places the panel in `worktreePath`, the worktree the session belongs to.
+ */
+export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
+  terminalId: string;
+  worktreePath: string;
+} & PanelOpenOptions;
+
+/** A terminal session and where its shell starts, as the panel sends it when attaching. */
+export interface TerminalSpawnTarget {
+  id: string;
+  /** Directory the shell starts in. */
+  cwd: string;
+  /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; defaults to `cwd`. */
+  worktreePath?: string;
+  scrollbackLines?: number;
+  /** The panel's window, exposed to the shell as `LOXEL_WINDOW_ID`. */
+  windowId?: string;
+  /** Activate the worktree's Python environment in the shell (`terminal.activatePythonEnv`); defaults to true. */
+  activatePythonEnv?: boolean;
+}
+
 /** Client-to-server WebSocket message types (JSON text frames) */
 export type WsClientMessage =
   | { type: "subscribe_worktree"; worktreePath: string }
   | { type: "unsubscribe_worktree"; worktreePath: string }
   | { type: "subscribe_logs" }
   | { type: "unsubscribe_logs" }
-  | {
+  | ({
       /**
        * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
-       * exist. `cwd`, `windowId` and the env apply only when spawning; `cols`, `rows` and
-       * `scrollbackLines` are applied on every attach. `sinceEpoch`/`sinceOffset` identify the
-       * session and stream offset the client's xterm is already current to (a reconnect with a
-       * live xterm); omit them for a fresh xterm.
+       * exist. The {@link TerminalSpawnTarget} fields apply only when spawning, except
+       * `scrollbackLines`, which is applied on every attach like `cols` and `rows`.
+       * `sinceEpoch`/`sinceOffset` identify the session and stream offset the client's xterm is
+       * already current to (a reconnect with a live xterm); omit them for a fresh xterm.
        */
       type: "terminal_attach";
-      id: string;
       cols: number;
       rows: number;
-      cwd: string;
-      scrollbackLines?: number;
-      windowId?: string;
       sinceEpoch?: string;
       sinceOffset?: number;
-    }
+    } & TerminalSpawnTarget)
   /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
   | { type: "terminal_detach"; id: string }
   | { type: "terminal_resize"; id: string; cols: number; rows: number }
@@ -200,21 +192,6 @@ export type WsClientMessage =
    * `terminal_state` carried `syncOffset`; acks for an older sync are ignored.
    */
   | { type: "terminal_ack"; id: string; syncOffset: number; bytes: number }
-  | {
-      type: "agent_create";
-      id: string;
-      scopeKey: string;
-      workspaceRoot: string;
-      sessionOptions?: AgentSessionOptions;
-      /** If set, resume this existing forked coding-agent session instead of starting a new one. */
-      forkedSessionId?: string;
-      /** If set with forkedSessionId, rewind to this message (the fork point). */
-      forkPointMessageId?: string;
-    }
-  | { type: "agent_request"; id: string; request: Record<string, unknown> }
-  | { type: "agent_destroy"; id: string }
-  | { type: "agent_detach"; id: string }
-  | { type: "agent_list"; scopeKey: string }
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }
@@ -285,3 +262,21 @@ export function parseOutputFrame(
   const offset = Number(new DataView(data.buffer, data.byteOffset).getBigUint64(BIN_HEADER_SIZE));
   return { terminalId, offset, payload: data.subarray(BIN_OUTPUT_HEADER_SIZE) };
 }
+
+// Close codes of a language-server socket, which tell the client whether to reconnect (see
+// `lsp-connection.ts`).
+
+/**
+ * Another connection (another window) took over the worktree's server. Final: reconnecting would
+ * take it back, and the other window would then do the same.
+ */
+export const LSP_REPLACED_CLOSE_CODE = 4000;
+/** The server could not start (no binary, or it cannot be executed). Final until the user retries. */
+export const LSP_START_FAILED_CLOSE_CODE = 4001;
+/** Loxel restarts the server (a different binary was picked); the client reconnects at once. */
+export const LSP_RESTART_CLOSE_CODE = 4002;
+/**
+ * The server process exited on its own (crash, out of memory, killed outside Loxel); the client
+ * reconnects with backoff.
+ */
+export const LSP_EXITED_CLOSE_CODE = 4003;
