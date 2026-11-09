@@ -26,11 +26,11 @@
   --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 7%, transparent);
   --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
   --crepe-color-selected: var(--primary);
-  --crepe-font-default:
-    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --crepe-font-code:
-    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --crepe-font-title: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* The fonts and sizes from Settings > Fonts (font-settings.ts). Prose sizes below are a 15px
+     design scaled to the prose size. */
+  --crepe-font-default: var(--loxel-font-prose);
+  --crepe-font-code: var(--loxel-font-code);
+  --crepe-font-title: var(--loxel-font-prose);
 }
 
 /* Dark mode variable overrides */
@@ -117,45 +117,45 @@
 }
 
 .milkdown .ProseMirror h1 {
-  font-size: 28px;
-  line-height: 36px;
+  font-size: calc(var(--loxel-font-prose-size) * 28 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 36 / 15);
   margin-top: 16px;
   margin-bottom: 12px;
 }
 
 .milkdown .ProseMirror h2 {
-  font-size: 24px;
-  line-height: 32px;
+  font-size: calc(var(--loxel-font-prose-size) * 24 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 32 / 15);
   margin-top: 14px;
   margin-bottom: 10px;
 }
 
 .milkdown .ProseMirror h3 {
-  font-size: 20px;
-  line-height: 28px;
+  font-size: calc(var(--loxel-font-prose-size) * 20 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 28 / 15);
   margin-top: 12px;
   margin-bottom: 8px;
 }
 
 .milkdown .ProseMirror h4 {
-  font-size: 17px;
-  line-height: 24px;
+  font-size: calc(var(--loxel-font-prose-size) * 17 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 24 / 15);
   margin-top: 10px;
   margin-bottom: 6px;
   font-weight: 700;
 }
 
 .milkdown .ProseMirror h5 {
-  font-size: 15px;
-  line-height: 22px;
+  font-size: calc(var(--loxel-font-prose-size) * 15 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 22 / 15);
   margin-top: 8px;
   margin-bottom: 6px;
   font-weight: 700;
 }
 
 .milkdown .ProseMirror h6 {
-  font-size: 14px;
-  line-height: 20px;
+  font-size: calc(var(--loxel-font-prose-size) * 14 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 20 / 15);
   margin-top: 8px;
   margin-bottom: 4px;
   font-weight: 700;
@@ -165,8 +165,8 @@
 /* ── Body text ── */
 
 .milkdown .ProseMirror p {
-  font-size: 15px;
-  line-height: 26px;
+  font-size: var(--loxel-font-prose-size);
+  line-height: calc(var(--loxel-font-prose-size) * 26 / 15);
 }
 
 /* ── Inline code — neutral gray tint, sized relative to surrounding text ── */
@@ -193,7 +193,7 @@
 }
 
 .milkdown .milkdown-list-item-block li .label-wrapper .label {
-  font-size: 15px;
+  font-size: var(--loxel-font-prose-size);
   font-family: var(--crepe-font-default);
 }
 
@@ -319,7 +319,7 @@
   position: absolute;
   right: 0;
   color: var(--crepe-color-on-surface-variant);
-  font-size: 15px;
+  font-size: var(--loxel-font-prose-size);
   font-family: var(--crepe-font-default);
   content: counter(ordered-list, decimal) ".";
 }
@@ -374,7 +374,7 @@
 .milkdown .milkdown-code-block .cm-editor {
   background: var(--crepe-color-surface);
   font-family: var(--crepe-font-code);
-  font-size: 13px;
+  font-size: var(--loxel-font-code-size);
   line-height: 1.5;
 }
 
@@ -386,7 +386,7 @@
 
 .milkdown .milkdown-code-block .cm-gutters .cm-gutterElement {
   color: var(--editor-line-number);
-  font-size: 12px;
+  font-size: calc(var(--loxel-font-code-size) - 1px);
 }
 
 .milkdown .milkdown-code-block .cm-content {
@@ -484,7 +484,7 @@
   table-layout: auto;
   width: auto;
   min-width: 55%;
-  font-size: 14px;
+  font-size: calc(var(--loxel-font-prose-size) * 14 / 15);
 }
 
 /* Cells are border-box (prosemirror-tables), so the `ch` clamps include the inline padding.
@@ -502,12 +502,12 @@
   overflow-wrap: break-word;
 }
 
-/* The theme's `.ProseMirror p` uses fixed px sizes and the vendor reset pads paragraphs, so
-   cell paragraphs need their own metrics. */
+/* The theme's `.ProseMirror p` sizes body text and the vendor reset pads paragraphs, so cell
+   paragraphs need their own metrics. */
 .milkdown .milkdown-table-block th p,
 .milkdown .milkdown-table-block td p {
-  font-size: 14px;
-  line-height: 22px;
+  font-size: calc(var(--loxel-font-prose-size) * 14 / 15);
+  line-height: calc(var(--loxel-font-prose-size) * 22 / 15);
   padding: 0;
 }
 

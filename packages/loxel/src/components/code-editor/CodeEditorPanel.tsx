@@ -18,6 +18,7 @@ import {
   useDiskSyncedContent,
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
@@ -359,6 +360,7 @@ export function CodeEditorPanel({
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
       inlayHints: inlayHintsOption(),
+      ...codeFontOptions(),
     });
 
     editorRef.current = editor;
@@ -658,6 +660,7 @@ export function CodeEditorPanel({
   }, [darkMode]);
 
   useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
 
   // Apply indentation live, as its sources change.
   useEffect(() => {

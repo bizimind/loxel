@@ -52,6 +52,8 @@ export interface IndentationOverride {
 // Formatting
 // ---------------------------------------------------------------------------
 
+import type { FontKind, FontSettings } from "@/lib/font-settings";
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
@@ -495,6 +497,7 @@ type SettingsSection =
   | "layout"
   | "terminal"
   | "editor"
+  | "fonts"
   | "schemas"
   | "fileAssociations"
   | "security"
@@ -504,6 +507,7 @@ export interface SettingsState {
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
+  fonts: FontSettings;
   /** User-added schemas + builtin overrides (disabled builtins). */
   schemas: SchemaMapping[];
   /** User file association overrides (language per glob). */
@@ -537,6 +541,9 @@ export interface SettingsState {
   addFormatterOverride: (extensions: string, command: string, args: string) => void;
   updateFormatterOverride: (id: string, updates: Partial<Omit<FormatterOverride, "id">>) => void;
   removeFormatterOverride: (id: string) => void;
+
+  // Font actions
+  updateFont: <K extends FontKind>(kind: K, partial: Partial<FontSettings[K]>) => void;
 
   // Schema actions
   addSchema: (glob: string, url: string) => void;
@@ -629,6 +636,7 @@ export const useSettingsStore = create<SettingsState>()(
         activatePythonEnv: true,
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
+      fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
@@ -771,6 +779,11 @@ export const useSettingsStore = create<SettingsState>()(
           },
         })),
 
+      // -- Fonts --
+
+      updateFont: (kind, partial) =>
+        set((s) => ({ fonts: { ...s.fonts, [kind]: { ...s.fonts[kind], ...partial } } })),
+
       // -- Schemas --
 
       addSchema: (glob, url) =>
@@ -857,12 +870,13 @@ export const useSettingsStore = create<SettingsState>()(
         layout: state.layout,
         terminal: state.terminal,
         editor: state.editor,
+        fonts: state.fonts,
         schemas: state.schemas,
         fileAssociations: state.fileAssociations,
         autoRevealInExplorer: state.autoRevealInExplorer,
         autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 14,
+      version: 16,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -996,6 +1010,13 @@ export const useSettingsStore = create<SettingsState>()(
               : undefined;
           if (editor && !editor.inlayHints) {
             editor.inlayHints = DEFAULT_EDITOR_SETTINGS.inlayHints;
+          }
+        }
+
+        if (version <= 15) {
+          // v15 → v16: add font settings
+          if (typeof state.fonts !== "object" || state.fonts === null) {
+            state.fonts = structuredClone(DEFAULT_FONT_SETTINGS);
           }
         }
 

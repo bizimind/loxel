@@ -4,6 +4,7 @@ import * as monaco from "monaco-editor";
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 import { useUIStore } from "@/store/ui";
@@ -50,6 +51,7 @@ export function FrontmatterEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -116,8 +118,7 @@ export function FrontmatterEditor({
       wordWrap: "on",
       scrollBeyondLastLine: false,
       lineHeight: LINE_HEIGHT,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+      ...codeFontOptions(),
       automaticLayout: true,
       contextmenu: false,
       renderLineHighlight: "none",

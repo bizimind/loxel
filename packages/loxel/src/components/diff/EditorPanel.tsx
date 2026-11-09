@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { PlacedThread } from "@/api/review-model";
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 
@@ -91,6 +92,7 @@ export function EditorPanel({
   onContentChangeRef.current = onContentChange;
   const isEditable = onContentChange !== undefined;
   useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
 
   // Mount editor once
   useEffect(() => {
@@ -116,8 +118,7 @@ export function EditorPanel({
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",
       lineHeight: 22,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+      ...codeFontOptions(),
       automaticLayout: true,
       contextmenu: false,
       scrollbar: { vertical: "hidden", horizontal: "hidden", handleMouseWheel: false },
