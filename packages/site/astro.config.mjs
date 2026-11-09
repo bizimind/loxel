@@ -36,7 +36,8 @@ const redirects = {
 // #fragment, so `/docs/old-page#section` would land at the top of the new page. Cloudflare Pages
 // serves the same entries from `_redirects` as real 301s instead (applied before any asset, so the
 // meta-refresh pages don't shadow them), and browsers carry the fragment across a redirect; the new
-// page's `movedAnchors` then maps renamed ones. The meta-refresh pages stay for `astro dev`.
+// page's `movedAnchors` then maps renamed ones. `astro dev` serves these as real 301s too, so the
+// meta-refresh pages only matter to `astro preview` and hosts that ignore `_redirects`.
 /** @type {import("astro").AstroIntegration} */
 const cloudflareRedirects = {
   name: "cloudflare-redirects",
