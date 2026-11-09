@@ -7,7 +7,9 @@ import { EMPTY_SCHEMA_CONSENT_STATE } from "@/api/schema-consent-model";
 const decisions: unknown[][] = [];
 const switches: boolean[] = [];
 
+const originalClient = await import("@/api/client");
 await mock.module("@/api/client", () => ({
+  ...originalClient,
   decideSchemaConsent: async (...args: unknown[]) => {
     decisions.push(args);
   },
