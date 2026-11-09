@@ -9,7 +9,7 @@ import type {
   Diagnostic,
   PublishDiagnosticsParams,
 } from "../../types";
-import { CodeActionKind, capabilities } from "../../types";
+import { CodeActionKind, capabilities, DiagnosticSeverity, DiagnosticTag } from "../../types";
 import type { IDisposable } from "../../utils";
 import type { LspConnection } from "../LspConnection";
 
@@ -29,12 +29,12 @@ const range = (line: number) => ({ start: { line, character: 0 }, end: { line, c
 /** ruff's diagnostic for an unused import, with the fix it reads back from `data`. */
 const unusedImport: Diagnostic = {
   range: range(0),
-  severity: 2,
+  severity: DiagnosticSeverity.Warning,
   code: "F401",
   codeDescription: { href: "https://docs.astral.sh/ruff/rules/unused-import" },
   source: "Ruff",
   message: "`os` imported but unused",
-  tags: [1],
+  tags: [DiagnosticTag.Unnecessary],
   data: { title: "Remove unused import: `os`", edits: [] },
 };
 

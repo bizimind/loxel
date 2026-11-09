@@ -53,8 +53,9 @@ Before finalizing Convex code changes:
 - ALWAYS use the new function syntax for Convex functions. For example:
 
 ```typescript
-import { query } from "./_generated/server";
 import { v } from "convex/values";
+
+import { query } from "./_generated/server";
 export const f = query({
   args: {},
   returns: v.null(),
@@ -70,6 +71,7 @@ export const f = query({
 
 ```typescript
 import { httpRouter } from "convex/server";
+
 import { httpAction } from "./_generated/server";
 const http = httpRouter();
 http.route({
@@ -89,8 +91,9 @@ http.route({
 - Below is an example of an array validator:
 
 ```typescript
-import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+
+import { mutation } from "./_generated/server";
 
 export default mutation({
   args: { simpleArray: v.array(v.union(v.string(), v.number())) },
@@ -119,8 +122,9 @@ export default defineSchema({
 - Always use the `v.null()` validator when returning a null value. Below is an example query that returns a null value:
 
 ```typescript
-import { query } from "./_generated/server";
 import { v } from "convex/values";
+
+import { query } from "./_generated/server";
 
 export const exampleQuery = query({
   args: {},
@@ -204,9 +208,10 @@ export const g = query({
 - You can define pagination using the following syntax:
 
 ```ts
-import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
+import { v } from "convex/values";
+
+import { query, mutation } from "./_generated/server";
 export const listWithExtraArg = query({
   args: { paginationOpts: paginationOptsValidator, author: v.string() },
   handler: async (ctx, args) => {
@@ -247,8 +252,8 @@ Note: `paginationOpts` is an object with the following properties:
 - If you need to define a `Record` make sure that you correctly provide the type of the key and value in the type. For example a validator `v.record(v.id('users'), v.string())` would have the type `Record<Id<'users'>, string>`. Below is an example of using `Record` with an `Id` type in a query:
 
 ```ts
-import { query } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
+import { query } from "./_generated/server";
 
 export const exampleQuery = query({
   args: { userIds: v.array(v.id("users")) },
@@ -330,6 +335,7 @@ export const exampleAction = action({
 
 ```ts
 import { cronJobs } from "convex/server";
+
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 
@@ -549,6 +555,10 @@ Internal Functions:
 #### convex/index.ts
 
 ```typescript
+import { v } from "convex/values";
+import OpenAI from "openai";
+
+import { internal } from "./_generated/api";
 import {
   query,
   mutation,
@@ -556,9 +566,6 @@ import {
   internalMutation,
   internalAction,
 } from "./_generated/server";
-import { v } from "convex/values";
-import OpenAI from "openai";
-import { internal } from "./_generated/api";
 
 /**
  * Create a user with a given name.

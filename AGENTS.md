@@ -259,7 +259,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`)
 5. Creates a GitHub release with R2 download links (no binary attachments)
 
-**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
+**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
 
 **Version checking**: When debugging CLI issues, verify the user has the latest version. Check the manifest at `https://loxel.bizimind.io/<pkg>/manifest.json` for current version and compare with local binary. Don't manually bump versions - releases are automated.
 
