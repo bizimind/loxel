@@ -308,40 +308,64 @@ exec /bin/cat > /dev/null
       }
     }
 
-    test("gives the bundled clangd its headers, and a clangd without them none", async () => {
-      const bundled = await launch({ developerTools: true, resourceDir: true });
-      expect(bundled.args).toContain(`--resource-dir=${join(bundled.bin, "clangd-resource")}`);
+    // Each launch runs new executables, which macOS checks before their first run: under load that
+    // alone can take seconds.
+    test(
+      "gives the bundled clangd its headers",
+      async () => {
+        const { args, bin } = await launch({ developerTools: true, resourceDir: true });
+        expect(args).toContain(`--resource-dir=${join(bin, "clangd-resource")}`);
+      },
+      TEST_TIMEOUT_MS,
+    );
 
-      const fromPath = await launch({ developerTools: true, resourceDir: false });
-      expect(fromPath.args.filter((arg) => arg.startsWith("--resource-dir"))).toEqual([]);
-    });
+    test(
+      "gives a clangd without headers none",
+      async () => {
+        const { args } = await launch({ developerTools: true, resourceDir: false });
+        expect(args.filter((arg) => arg.startsWith("--resource-dir"))).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
 
-    test("reads the version from the filesystem root", async () => {
-      const { bin } = await launch({ developerTools: true, resourceDir: true });
-      expect((await readFile(join(bin, "version-cwd.txt"), "utf8")).trim()).toBe("/");
-    });
+    test(
+      "reads the version from the filesystem root",
+      async () => {
+        const { bin } = await launch({ developerTools: true, resourceDir: true });
+        expect((await readFile(join(bin, "version-cwd.txt"), "utf8")).trim()).toBe("/");
+      },
+      TEST_TIMEOUT_MS,
+    );
 
-    test("leaves Apple's stubs alone with the developer tools installed", async () => {
-      const { args, path, client } = await launch({ developerTools: true, resourceDir: true });
-      expect(args.join(" ")).toContain("/usr/bin/*clang*");
-      expect(path.split(":")).toContain("/usr/bin");
-      expect(client.shownMessages).toEqual([]);
-    });
+    test(
+      "leaves Apple's stubs alone with the developer tools installed",
+      async () => {
+        const { args, path, client } = await launch({ developerTools: true, resourceDir: true });
+        expect(args.join(" ")).toContain("/usr/bin/*clang*");
+        expect(path.split(":")).toContain("/usr/bin");
+        expect(client.shownMessages).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
 
-    test("keeps clangd from Apple's stubs without the developer tools, and says what to run", async () => {
-      const { args, path, client, bin } = await launch({
-        developerTools: false,
-        resourceDir: true,
-      });
-      expect(args.join(" ")).not.toContain("/usr/bin/");
-      expect(path.split(":")).not.toContain("/usr/bin");
-      // The check for the index directory runs git before clangd starts.
-      expect((await readFile(join(bin, "git-path.txt"), "utf8")).trim().split(":")).not.toContain(
-        "/usr/bin",
-      );
-      expect(client.shownMessages).toHaveLength(1);
-      expect(client.shownMessages[0]).toContain("xcode-select --install");
-    });
+    test(
+      "keeps clangd from Apple's stubs without the developer tools, and says what to run",
+      async () => {
+        const { args, path, client, bin } = await launch({
+          developerTools: false,
+          resourceDir: true,
+        });
+        expect(args.join(" ")).not.toContain("/usr/bin/");
+        expect(path.split(":")).not.toContain("/usr/bin");
+        // The check for the index directory runs git before clangd starts.
+        expect((await readFile(join(bin, "git-path.txt"), "utf8")).trim().split(":")).not.toContain(
+          "/usr/bin",
+        );
+        expect(client.shownMessages).toHaveLength(1);
+        expect(client.shownMessages[0]).toContain("xcode-select --install");
+      },
+      TEST_TIMEOUT_MS,
+    );
   });
 
   test.skipIf(process.platform === "win32")("says what to run for a missing clangd", async () => {

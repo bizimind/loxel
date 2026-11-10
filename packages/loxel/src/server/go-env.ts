@@ -687,8 +687,9 @@ function watchTargets(wtPath: string, current: GoEnv | null): WatchTargets {
       if (!name || !path.isAbsolute(gomodcache)) continue;
       const dir = path.join(gomodcache, "golang.org", name);
       addByAncestor(dir);
-      // `go` makes its binaries executable only after unpacking.
-      if (isDirectory(path.join(dir, "bin"))) add(path.join(dir, "bin"), GO);
+      // Also by its `go`, which a toolchain still being unpacked may not have, nor its `bin`: `go`
+      // makes its binaries executable only after unpacking.
+      addByAncestor(path.join(dir, "bin", GO));
     }
   }
   if (current) {
