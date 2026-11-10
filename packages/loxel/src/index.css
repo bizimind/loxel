@@ -90,12 +90,12 @@
   --surface-0: #ebecf0; /* elevated elements, hovers, buttons on cards */
   --surface-1: #ffffff; /* panels, cards, popups */
   --surface-2: #ffffff; /* editor, inputs */
-  --surface-3: #dcdee3; /* borders */
+  --surface-3: #cfd2d8; /* borders */
 
   --background: #ffffff;
   --foreground: #1e1f22;
   /* Chrome: sidebars, tool bars, title and status bars */
-  --card: #f7f8fa;
+  --card: #f3f4f6;
   --card-foreground: #1e1f22;
   --popover: #ffffff;
   --popover-foreground: #1e1f22;
@@ -110,20 +110,22 @@
   --secondary: #e2e4e9;
   --secondary-foreground: #1e1f22;
   --muted: #ebecf0;
-  --muted-foreground: #646875;
+  --muted-foreground: #5e6270;
   /* Selected segment / active nav item */
   --accent: #d4e2ff;
   --accent-foreground: #1e1f22;
   --destructive: #db3b4b;
   --warning: #a46704;
-  --border: #dcdee3;
-  --input: #c9ccd6;
+  --border: #cfd2d8;
+  --input: #b9bdc8;
   --ring: #3574f0;
   --radius: 0.5rem;
 
   /* Elevation for menus and popovers: hairline edge plus a soft drop shadow */
-  --shadow-popover: 0 0 0 1px rgb(0 0 0 / 0.08), 0 4px 16px 0 rgb(0 0 0 / 0.12);
-  --shadow-dialog: 0 0 0 1px rgb(0 0 0 / 0.04), 0 16px 48px -8px rgb(0 0 0 / 0.28);
+  --shadow-popover: 0 0 0 1px rgb(0 0 0 / 0.2), 0 6px 20px -4px rgb(0 0 0 / 0.2);
+  --shadow-dialog: 0 0 0 1px rgb(0 0 0 / 0.08), 0 16px 48px -8px rgb(0 0 0 / 0.3);
+  /* Pickers (Quick Open, command palette): they float over the IDE without a scrim in light */
+  --shadow-picker: 0 0 0 1px rgb(0 0 0 / 0.05), 0 10px 32px -6px rgb(0 0 0 / 0.22);
   /* Settings section nav: the section in view */
   --nav-active: var(--accent);
   --text-shadow: none;
@@ -137,24 +139,32 @@
   --surface-muted: #ebecf0;
 
   /* Ref badge colors (light mode) */
-  --ref-head: oklch(0.5 0.18 290);
-  --ref-local: oklch(0.5 0.15 170);
-  --ref-remote: oklch(0.5 0.12 80);
-  --ref-tag: oklch(0.55 0.18 85);
+  --ref-head: oklch(0.46 0.18 290);
+  --ref-local: oklch(0.41 0.09 175);
+  --ref-remote: oklch(0.44 0.13 45);
+  --ref-tag: oklch(0.45 0.1 70);
+  /* Light ref pill fills (dark tints the ref color instead, and fills HEAD with it) */
+  --ref-head-bg: oklch(0.93 0.05 290);
+  --ref-local-bg: oklch(0.94 0.04 175);
+  --ref-remote-bg: oklch(0.94 0.035 50);
+  --ref-tag-bg: oklch(0.94 0.05 85);
 
   /* Branch colors for graph */
-  --branch-1: oklch(0.65 0.2 250);
-  --branch-2: oklch(0.65 0.2 150);
-  --branch-3: oklch(0.65 0.2 30);
-  --branch-4: oklch(0.65 0.2 300);
-  --branch-5: oklch(0.65 0.2 200);
-  --branch-6: oklch(0.65 0.2 80);
+  --branch-1: oklch(0.53 0.19 255);
+  --branch-2: oklch(0.53 0.15 150);
+  --branch-3: oklch(0.57 0.19 35);
+  --branch-4: oklch(0.52 0.21 300);
+  --branch-5: oklch(0.5 0.12 205);
+  --branch-6: oklch(0.6 0.14 75);
 
   /* Tree colors (light mode) */
   --tree-folder: #1e1f22;
+  /* Git status of files and change counts (file trees, status bar); dark uses the diff text colors */
+  --vcs-modified: #1c58d9;
+  --vcs-untracked: #217f00;
 
   /* Editor line numbers */
-  --editor-line-number: #8c90a0;
+  --editor-line-number: #7f8391;
   --editor-line-number-active: #1e1f22;
 
   /* Diff colors (light mode) */
@@ -162,51 +172,59 @@
   /* Gutter fills are translucent: the diff connector paints over the line numbers. */
   --diff-modify-gutter: #7f8fb033;
   --diff-modify-text: #2e5fc7;
-  --diff-add-bg: #e3f5e6;
-  --diff-add-gutter: #27af4340;
+  --diff-add-bg: #e5f4e7;
+  --diff-add-gutter: #27af4347;
   --diff-add-text: #1a7f37;
   --diff-del-bg: #fbe7e7;
-  --diff-del-gutter: #db3f3f40;
+  --diff-del-gutter: #db3f3f38;
   --diff-del-text: #c4232f;
-  --diff-add-inline-bg: #9be0aa;
-  --diff-del-inline-bg: #f6a9b0;
+  --diff-add-inline-bg: #b2e0b5;
+  --diff-del-inline-bg: #f4adb3;
+  /* Gutter connectors: the fill is the gutter tint, the edge a step stronger */
+  --diff-add-connector-fill: var(--diff-add-gutter);
+  --diff-add-connector-edge: #27af4380;
+  --diff-del-connector-fill: var(--diff-del-gutter);
+  --diff-del-connector-edge: #db3f3f70;
 
   /* Comment colors (light mode) */
-  --comment-bg: rgba(255, 196, 46, 0.1);
+  --comment-bg: rgba(255, 190, 40, 0.12);
   --comment-bg-resolved: rgba(128, 128, 128, 0.05);
-  --comment-marker: #b07400;
-  --comment-stripe: rgba(196, 132, 0, 0.18);
+  --comment-marker: #9a5d00;
+  /* Left edge of commented code lines (light only) */
+  --comment-edge: #eba200;
+  --comment-stripe: rgba(214, 140, 0, 0.34);
   --comment-stripe-resolved: rgba(128, 128, 128, 0.15);
 
   /* Collapse squiggly line colors (light mode) */
   --diff-collapse-line: #c0c0c0;
   --diff-collapse-line-hover: #808080;
   /* Edges of the side-by-side diff's line-number gutter */
-  --diff-gutter-border: var(--border);
+  --diff-gutter-border: #c6c9d1;
 
-  /* Terminal ANSI colors (light mode). Normal colors stay dark enough to read on white and light
-   * enough to carry black text as backgrounds; bright colors are lighter (as backgrounds they carry
-   * black text, as text the minimum contrast below lifts them); white stays a light grey and bright
-   * white an off-white that still shows as a swatch, so "white on color" output stays readable. */
+  /* Terminal ANSI colors (light mode). Normal colors are deep (7-9:1 on white); bright colors
+   * are vivid and light, so as backgrounds they carry black text and as text the minimum contrast
+   * below darkens them to 4.5:1, which keeps each one lighter than its normal color. Bright black
+   * is a dark grey; white a light grey and bright white an off-white, both still visible as
+   * swatches. */
   --term-foreground: #1e1f22;
   --term-cursor: #1e1f22;
   --term-selection: rgba(53, 116, 240, 0.22);
   --term-black: #1e1f22;
-  --term-red: #b31d28;
-  --term-green: #1a7f37;
-  --term-yellow: #985a00;
-  --term-blue: #0550ae;
-  --term-magenta: #8250df;
-  --term-cyan: #0f7b83;
-  --term-white: #b0b4bc;
-  --term-bright-black: #6c707e;
-  --term-bright-red: #e0464e;
-  --term-bright-green: #2da44e;
-  --term-bright-yellow: #d4a72c;
-  --term-bright-blue: #3574f0;
-  --term-bright-magenta: #a475f9;
-  --term-bright-cyan: #3192aa;
-  --term-bright-white: #eef0f3;
+  --term-red: #a31621;
+  --term-green: #0e5a26;
+  --term-yellow: #7f4300;
+  --term-blue: #06449a;
+  --term-magenta: #7e2a98;
+  --term-cyan: #08525a;
+  --term-white: #b6bac2;
+  --term-bright-black: #40444d;
+  --term-bright-red: #f2453d;
+  --term-bright-green: #1cc24f;
+  --term-bright-yellow: #f5a623;
+  --term-bright-blue: #4a8cff;
+  --term-bright-magenta: #b56cff;
+  --term-bright-cyan: #2bb5e0;
+  --term-bright-white: #e6e8ec;
   /* xterm.js minimumContrastRatio: lifts white-on-white and light brights to readable; vite.config.ts
    * patches the WebGL renderer so dim text meets it as drawn too */
   --term-min-contrast: 4.5;
@@ -369,6 +387,10 @@
   --color-ref-local: var(--ref-local);
   --color-ref-remote: var(--ref-remote);
   --color-ref-tag: var(--ref-tag);
+  --color-ref-head-bg: var(--ref-head-bg);
+  --color-ref-local-bg: var(--ref-local-bg);
+  --color-ref-remote-bg: var(--ref-remote-bg);
+  --color-ref-tag-bg: var(--ref-tag-bg);
   --color-branch-1: var(--branch-1);
   --color-branch-2: var(--branch-2);
   --color-branch-3: var(--branch-3);
@@ -385,6 +407,8 @@
   --color-diff-del-gutter: var(--diff-del-gutter);
   --color-diff-del-text: var(--diff-del-text);
   --color-tree-folder: var(--tree-folder);
+  --color-vcs-modified: var(--vcs-modified);
+  --color-vcs-untracked: var(--vcs-untracked);
   --color-editor-line-number: var(--editor-line-number);
   --color-editor-line-number-active: var(--editor-line-number-active);
   --color-comment-bg: var(--comment-bg);
@@ -453,8 +477,8 @@
   background-color: var(--diff-modify-gutter);
   color: var(--diff-modify-text);
 }
-/* Light split diffs tint a modified line by its side, removed red and added green; the gutter
- * connector between the sides keeps the modify color. Dark tints both sides with it. */
+/* Light split diffs tint a modified line by its side, removed red and added green, and so does the
+ * gutter connector between the sides (DiffGutter). Dark tints both with the modify color. */
 :root:not(.dark) [data-diff-side="old"] {
   --diff-modify-bg: var(--diff-del-bg);
   --diff-modify-text: var(--diff-del-text);
@@ -462,6 +486,20 @@
 :root:not(.dark) [data-diff-side="new"] {
   --diff-modify-bg: var(--diff-add-bg);
   --diff-modify-text: var(--diff-add-text);
+}
+/* Light gutter connectors get an edge a step stronger than their fill (DiffGutter) */
+:root:not(.dark) .diff-connector {
+  stroke-width: 1px;
+}
+:root:not(.dark) .diff-connector[data-connector="add"] {
+  stroke: var(--diff-add-connector-edge);
+}
+:root:not(.dark) .diff-connector[data-connector="delete"] {
+  stroke: var(--diff-del-connector-edge);
+}
+:root:not(.dark) .diff-connector[data-connector="modify"] {
+  fill: var(--diff-modify-fill);
+  stroke: var(--diff-modify-edge);
 }
 
 /* Intra-line changes inside modification blocks (rendered above the line background) */
@@ -526,6 +564,13 @@
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {
   flex-shrink: 0;
   max-width: none;
+}
+
+/* The caret row's band while text is selected (code-editor/caret-row.ts); light mode only. Below the
+ * selection, which Monaco draws in an earlier overlay than decorations. */
+:root:not(.dark) .monaco-editor .loxel-caret-row {
+  z-index: -1;
+  background-color: var(--vscode-editor-lineHighlightBackground);
 }
 
 /* Prevent overscroll bounce on Monaco and diff containers */
@@ -602,6 +647,13 @@
   );
   background-size: 10px 10px;
 }
+/* Light marks commented code lines with an amber left edge alone: over the diff tints an amber
+ * fill or hatch turns muddy. */
+:root:not(.dark) .comment-highlight::after {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: inset 3px 0 0 var(--comment-edge);
+}
 .comment-highlight-resolved {
   position: relative;
 }
@@ -663,6 +715,10 @@
     transparent 50%
   );
   background-size: 10px 10px;
+}
+/* Light drops the hatch: over the diff tints it turns muddy (LineNumbersColumn keeps the marker). */
+:root:not(.dark) .line-comment-stripe {
+  background-image: none;
 }
 
 /* Selection highlight — full-row background for lines being targeted for a comment */

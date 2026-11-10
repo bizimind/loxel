@@ -28,7 +28,7 @@ export function DialogShell({ open, onCancel, className, children }: DialogShell
       <dialog
         ref={dialogRef}
         className={cn(
-          "bg-popover text-foreground border-border m-auto rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/50",
+          "bg-popover text-foreground border-border m-auto rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/20 dark:backdrop:bg-black/50",
           className,
         )}
         onClose={onCancel}

@@ -15,7 +15,12 @@
   --dv-tabs-and-actions-container-background-color: var(--card);
 
   /* Tab colors */
-  --dv-activegroup-visiblepanel-tab-background-color: var(--editor-surface);
+  /* The focused group's active tab carries a faint accent tint on top of its underline */
+  --dv-activegroup-visiblepanel-tab-background-color: color-mix(
+    in srgb,
+    var(--button-primary) 15%,
+    var(--editor-surface)
+  );
   --dv-activegroup-hiddenpanel-tab-background-color: var(--card);
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor-surface);
   --dv-inactivegroup-hiddenpanel-tab-background-color: var(--card);
@@ -33,6 +38,15 @@
   /* Drag and drop indicators - JetBrains blue */
   --dv-drag-over-background-color: rgb(53 116 240 / 0.15);
   --dv-drag-over-border-color: #3574f0;
+}
+
+/* Light: tool windows (the side and bottom zones) sit on the chrome grey and the editor area
+ * (the center dockview, nested in the outer one) stays white, as in JetBrains New UI Light */
+:root:not(.dark) .dockview-theme-abyss {
+  --dv-group-view-background-color: var(--card);
+}
+:root:not(.dark) .dv-shell .dv-shell {
+  --dv-group-view-background-color: var(--editor-surface);
 }
 
 /* Dark mode - JetBrains New UI colors */
@@ -160,6 +174,16 @@
   box-shadow: inset 0 -2px 0 #467ff2;
 }
 
+/* Light: the New UI Light underline, a touch thicker in the light accent (inner dockviews keep
+   their subtle indicator) */
+:root:not(.dark)
+  .dockview-theme-abyss
+  .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab:not(.dockview-inner *) {
+  box-shadow: inset 0 -3px 0 #3574f0;
+}
+
 /* Panel content fills container */
 .dockview-theme-abyss .dv-groupview .dv-groupview-panel {
   overflow: hidden;
@@ -243,6 +267,13 @@
 .dockview-inner .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab .dv-tab {
   padding: 0;
   box-shadow: none;
+}
+/* Light: the header tab spans the bar, so its fill doesn't stop short of the group's edge */
+:root:not(.dark)
+  .dockview-inner
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab
+  .dv-tab {
+  max-width: none;
 }
 
 /* Collapsed sidebar — tab header fills full height, content panel is hidden.

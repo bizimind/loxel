@@ -25,7 +25,7 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" vi
  */
 const shot: PanelShot = {
   description:
-    "Media viewer showing a partly transparent SVG badge on the transparency checkerboard, with the viewer toolbar (file name, zoom out/in, zoom percentage, fit to panel, actual size, auto-fit toggle)",
+    "Media viewer showing a partly transparent SVG badge on the transparency checkerboard, with the viewer toolbar (image dimensions, zoom out/in, zoom percentage, fit to panel, actual size, auto-fit toggle)",
   run: async (ctx) => {
     const assets = resolve(ctx.fixture, "../../assets");
     mkdirSync(assets, { recursive: true });

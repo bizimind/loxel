@@ -209,19 +209,19 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
  * block follows the app theme without being rebuilt.
  */
 const CODE_COLORS = {
-  keyword: ["#cf8e6d", "#0033b3"],
+  keyword: ["#cf8e6d", "#1f3a93"],
   operator: ["#cf8e6d", "#1e1f22"],
   name: ["#bcbec4", "#1e1f22"],
-  property: ["#c77dbb", "#871094"],
-  function: ["#56a8f5", "#00627a"],
-  type: ["#2fbaa3", "#000000"],
-  string: ["#6aab73", "#067d17"],
-  number: ["#2aacb8", "#1750eb"],
-  comment: ["#7a7e85", "#808080"],
+  property: ["#c77dbb", "#85358C"],
+  function: ["#56a8f5", "#156275"],
+  type: ["#2fbaa3", "#0a6b72"],
+  string: ["#6aab73", "#1f7a2b"],
+  number: ["#2aacb8", "#a85400"],
+  comment: ["#7a7e85", "#747882"],
   meta: ["#bbb529", "#9e880d"],
-  tag: ["#e8bf6a", "#0033b3"],
+  tag: ["#e8bf6a", "#1f3a93"],
   attribute: ["#bababa", "#174ad4"],
-  attributeValue: ["#6a8759", "#067d17"],
+  attributeValue: ["#6a8759", "#1f7a2b"],
   link: ["#56a8f5", "#2a5dd8"],
 } satisfies Record<string, [dark: string, light: string]>;
 
@@ -963,25 +963,29 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
-      <div
-        ref={containerRef}
-        key={crepeKey}
-        className="flex-1 overflow-hidden"
-        data-diff-view-mode={diffViewMode}
-        onClick={handleContainerClick}
-      />
-      <button
-        onClick={handleCopy}
-        title="Copy markdown"
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity group-hover/editor:opacity-100"
-      >
-        {copied ? (
-          <CheckIcon className="size-3.5 text-green-500" />
-        ) : (
-          <ClipboardIcon className="size-3.5" />
-        )}
-      </button>
+      {/* The copy button floats over the document body, below the banners and the frontmatter
+          header, so it never covers their controls. */}
+      <div className="relative min-h-0 flex-1">
+        {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+        <div
+          ref={containerRef}
+          key={crepeKey}
+          className="h-full overflow-hidden"
+          data-diff-view-mode={diffViewMode}
+          onClick={handleContainerClick}
+        />
+        <button
+          onClick={handleCopy}
+          title="Copy markdown"
+          className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted not-dark:bg-background not-dark:border-input not-dark:text-foreground/75 not-dark:hover:bg-muted not-dark:hover:text-foreground absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity not-dark:shadow-sm group-hover/editor:opacity-100"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-green-500" />
+          ) : (
+            <ClipboardIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

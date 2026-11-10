@@ -27,6 +27,15 @@ const shot: PanelShot = {
       .first()
       .waitFor({ state: "visible" });
     await ctx.settle();
+    // A previous shot's window can still flush its save of this copy after the copy above was
+    // rewritten, which this window then sees as an external change. That is a staging race, not
+    // the state this panel shows: take the disk version (the same drawing) so the banner goes.
+    const acceptDisk = ctx.page.getByRole("button", { name: "Accept disk version" });
+    if (await acceptDisk.isVisible()) {
+      await acceptDisk.click();
+      await acceptDisk.waitFor({ state: "hidden" });
+      await ctx.settle();
+    }
     // Select the "Catalog API" box so the selection handles and the shape properties panel show.
     const box = await canvas.boundingBox();
     if (!box) throw new Error("canvas has no box");

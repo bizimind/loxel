@@ -67,7 +67,7 @@ export function LocalDbPanel() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Sidebar: table list */}
-      <aside className="border-border flex w-48 shrink-0 flex-col overflow-hidden border-r">
+      <aside className="border-border bg-card flex w-48 shrink-0 flex-col overflow-hidden border-r dark:bg-transparent">
         <div className="text-muted-foreground border-border flex items-center justify-between border-b px-3 py-2 text-[10px] font-semibold tracking-widest uppercase">
           TABLES
           <Button
@@ -163,28 +163,28 @@ export function LocalDbPanel() {
               <span className="text-foreground text-xs font-semibold">
                 {schemaQuery.data.table.label}
               </span>
-              <span className="text-muted-foreground font-mono text-[10px]">
+              <span className="text-foreground/85 dark:text-muted-foreground font-mono text-[11px] dark:text-[10px]">
                 {schemaQuery.data.table.name}
               </span>
-              <div className="ml-auto flex gap-1">
+              <div className="bg-muted ml-auto flex gap-0.5 rounded-md p-0.5 dark:gap-1 dark:rounded-none dark:bg-transparent dark:p-0">
                 <button
                   type="button"
                   onClick={() => setView("data")}
-                  className={`h-6 rounded px-2 text-[10px] font-medium transition-colors ${view === "data" ? "text-foreground bg-[var(--surface-0)]" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`h-5 rounded px-2 text-[10px] font-medium transition-colors dark:h-6 ${view === "data" ? "bg-button-primary text-button-primary-foreground dark:text-foreground dark:bg-[var(--surface-0)]" : "text-foreground/70 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground"}`}
                 >
                   Data
                 </button>
                 <button
                   type="button"
                   onClick={() => setView("schema")}
-                  className={`h-6 rounded px-2 text-[10px] font-medium transition-colors ${view === "schema" ? "text-foreground bg-[var(--surface-0)]" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`h-5 rounded px-2 text-[10px] font-medium transition-colors dark:h-6 ${view === "schema" ? "bg-button-primary text-button-primary-foreground dark:text-foreground dark:bg-[var(--surface-0)]" : "text-foreground/70 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground"}`}
                 >
                   Schema
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-3">
+            <div className="bg-card flex-1 overflow-auto p-3 dark:bg-transparent">
               {pendingPlan && (
                 <div className="mb-4">
                   <MigrationReview
@@ -260,12 +260,12 @@ function TableListItem({
       className={[
         "w-full text-left px-3 py-2 flex flex-col border-l-2 transition-colors",
         selected
-          ? "bg-primary/15 text-link border-l-link"
+          ? "bg-primary/80 dark:bg-primary/15 text-link border-l-link"
           : "hover:bg-muted text-foreground border-l-transparent",
       ].join(" ")}
     >
       <span className="text-xs leading-tight font-medium">{table.label}</span>
-      <span className="text-muted-foreground font-mono text-[10px] leading-tight">
+      <span className="text-foreground/85 dark:text-muted-foreground font-mono text-[11px] leading-tight dark:text-[10px]">
         {table.name}
       </span>
     </button>

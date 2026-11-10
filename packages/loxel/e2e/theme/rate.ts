@@ -33,14 +33,16 @@ Score 0-10:
 - 7: works; only contrast issues (faint text, low-contrast borders, washed-out highlights or selection).
 - 8-9: purely aesthetic nitpicks remain (spacing of tones, slightly off accent, minor inconsistency).
 - 10: a beautiful, polished, coherent light theme.
+Half points (for example 7.5 or 8.5) are allowed.
 
 Look closely at every region: text contrast, syntax colors, selection/hover/active states, borders, badges, icons, scrollbars, code blocks, gutters, diff colors, and anything that still looks dark.
 Respond with ONLY a JSON object, no prose, no code fence:
-{"score": <integer 0-10>, "summary": "<one sentence>", "issues": ["<specific issue: where, what is wrong, what it should be>", ...]}`;
+{"score": <number 0-10 in steps of 0.5>, "summary": "<one sentence>", "explanation": "<a detailed explanation of the score: what earns it, and what specifically keeps it from scoring higher>", "issues": ["<specific issue: where, what is wrong, what it should be>", ...]}`;
 
 interface Verdict {
   score: number;
   summary: string;
+  explanation: string;
   issues: string[];
 }
 
@@ -53,6 +55,7 @@ function parseVerdict(raw: string): Verdict {
   return {
     score: parsed.score,
     summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    explanation: typeof parsed.explanation === "string" ? parsed.explanation : "",
     issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
   };
 }

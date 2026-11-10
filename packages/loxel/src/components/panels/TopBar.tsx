@@ -103,7 +103,7 @@ export function TopBar() {
           <div className="border-border mx-1 h-4 border-l" />
 
           {/* Project */}
-          <div className="text-muted-foreground flex items-center gap-1.5">
+          <div className="text-muted-foreground not-dark:text-foreground/80 flex items-center gap-1.5">
             <ProjectIcon id={activeProject.id} name={activeProject.name} size="xs" />
             <span>{activeProject.name}</span>
           </div>

@@ -12,7 +12,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { PlacedThread } from "@/api/review-model";
-import { CommentMarkdown } from "@/components/comments/CommentMarkdown";
+import { CommentMarkdown, CommentPreview } from "@/components/comments/CommentMarkdown";
 import { OutdatedDiff } from "@/components/comments/OutdatedDiff";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { ReviewSelector } from "@/components/reviews/ReviewSelector";
@@ -287,14 +287,15 @@ function ThreadRow({
 
       {/* Preview of first comment */}
       {firstComment && (
-        <p
+        <CommentPreview
+          content={firstComment.body}
           className={cn(
-            "line-clamp-2 pl-[18px] text-[11px] leading-snug",
-            isResolved ? "text-muted-foreground/60" : "text-muted-foreground",
+            "line-clamp-2 pl-[18px] text-xs leading-snug dark:text-[11px]",
+            isResolved
+              ? "text-muted-foreground/60"
+              : "text-foreground/90 dark:text-muted-foreground",
           )}
-        >
-          {firstComment.body}
-        </p>
+        />
       )}
     </div>
   );
@@ -344,7 +345,7 @@ function ThreadDetail({ thread }: { thread: PlacedThread }) {
       {thread.comments.map((comment) => (
         <div key={comment.id} className="border-border border-b px-3 py-2 last:border-b-0">
           <CommentMarkdown content={comment.body} />
-          <div className="text-muted-foreground mt-1 text-right text-[10px]">
+          <div className="text-muted-foreground mt-1 text-right text-[11px] dark:text-[10px]">
             {comment.authorName ?? "Anonymous"}, {formatTimestamp(comment.createdAt)}
           </div>
         </div>
@@ -361,7 +362,7 @@ function ThreadDetail({ thread }: { thread: PlacedThread }) {
       <div className="border-border border-t p-2">
         <textarea
           ref={textareaRef}
-          className="bg-muted border-border text-foreground placeholder:text-muted-foreground w-full resize-none rounded border p-2 text-xs focus:ring-1 focus:ring-[var(--ring)] focus:outline-none"
+          className="bg-background border-input text-foreground placeholder:text-muted-foreground dark:bg-muted dark:border-border w-full resize-none rounded border p-2 text-xs focus:ring-1 focus:ring-[var(--ring)] focus:outline-none"
           rows={2}
           placeholder="Reply..."
           value={replyBody}
@@ -370,13 +371,13 @@ function ThreadDetail({ thread }: { thread: PlacedThread }) {
           disabled={submitting}
         />
         <div className="mt-1.5 flex items-center justify-between">
-          <span className="text-muted-foreground dark:text-muted-foreground/60 text-[10px]">
+          <span className="text-muted-foreground dark:text-muted-foreground/60 text-[11px] dark:text-[10px]">
             {/Mac|iPhone/.test(navigator.userAgent) ? "Cmd" : "Ctrl"}+Enter
           </span>
           <Button
             variant="default"
             size="sm"
-            className="h-6 gap-1 px-2 text-[11px]"
+            className="disabled:border-input h-6 gap-1 px-2 text-[11px] disabled:opacity-100 dark:disabled:border-transparent dark:disabled:opacity-50"
             onClick={handleReply}
             disabled={!replyBody.trim() || submitting}
           >

@@ -167,15 +167,15 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
   if (!data) return null;
 
   return (
-    <div className="localdb-data-table flex flex-col">
+    <div className="localdb-data-table border-input dark:border-border bg-background flex flex-col overflow-hidden rounded-md border dark:overflow-visible dark:rounded-none dark:border-0 dark:bg-transparent">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-border border-b bg-[var(--surface-2)]/60">
+            <tr className="border-muted-foreground/45 dark:border-border bg-muted/80 border-b dark:bg-[var(--surface-2)]/60">
               {orderedCols.map((col) => (
                 <th
                   key={col!.id}
-                  className="text-muted-foreground px-4 py-2.5 text-left text-[0.8125rem] font-medium whitespace-nowrap"
+                  className="text-foreground/75 dark:text-muted-foreground px-4 py-2.5 text-left text-[0.8125rem] font-semibold whitespace-nowrap dark:font-medium"
                 >
                   {col!.def.label}
                 </th>
@@ -184,7 +184,15 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
           </thead>
           <tbody>
             {data.rows.map((row) => (
-              <tr key={row["id"] as number} className="border-border/50 border-b">
+              <tr
+                key={row["id"] as number}
+                className={cn(
+                  "border-input/80 dark:border-border/50 border-b",
+                  // Light: tint the row being edited.
+                  editingCell?.rowId === row["id"] &&
+                    "bg-primary/80 shadow-[inset_2px_0_0_var(--link)] dark:bg-transparent dark:shadow-none",
+                )}
+              >
                 {orderedCols.map((col) => {
                   const colName = col!.name;
                   const rowId = row["id"] as number;
@@ -286,7 +294,7 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
         <button
           type="button"
           onClick={startAdding}
-          className="border-border/50 text-muted-foreground hover:text-foreground w-full cursor-pointer border-t bg-transparent px-4 py-1.5 text-left text-xs"
+          className="border-border/50 text-link dark:text-muted-foreground hover:text-foreground w-full cursor-pointer border-t bg-transparent px-4 py-1.5 text-left text-xs"
         >
           + Add row
         </button>

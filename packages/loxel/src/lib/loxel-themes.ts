@@ -145,8 +145,10 @@ export const loxelDark: ThemeRegistrationRaw = {
 };
 
 /**
- * Light counterpart of `loxelDark`, in the JetBrains New UI Light (IntelliJ Light) palette. It
- * follows loxelDark's scope groups, splitting a few where the light palette tells them apart.
+ * Light counterpart of `loxelDark`, in the JetBrains New UI Light (IntelliJ Light) palette with its
+ * keyword, property, string and function colors a touch less saturated, so they sit calmly on white,
+ * and numbers in a warm amber (as loxelDark's are orange) to set them apart from the keyword blue.
+ * It follows loxelDark's scope groups, splitting a few where the light palette tells them apart.
  */
 export const loxelLight: ThemeRegistrationRaw = {
   name: "loxel-light",
@@ -154,10 +156,10 @@ export const loxelLight: ThemeRegistrationRaw = {
   semanticHighlighting: true,
   colors: {
     "editor.foreground": "#1E1F22",
-    "editor.selectionBackground": "#A6D2FF",
+    "editor.selectionBackground": "#A3C3FA",
     "editorCursor.foreground": "#000000",
-    "editorIndentGuide.background": "#E1E3E8",
-    "editorIndentGuide.activeBackground": "#C5C9D1",
+    "editorIndentGuide.background": "#C6CAD2",
+    "editorIndentGuide.activeBackground": "#9DA2AE",
     "editorBracketMatch.background": "#93D9D980",
     "editorBracketMatch.border": "#00000000",
     "editorWhitespace.foreground": "#1E1F2233",
@@ -168,23 +170,23 @@ export const loxelLight: ThemeRegistrationRaw = {
     // Comments
     {
       scope: ["comment", "punctuation.definition.comment"],
-      settings: { foreground: "#808080", fontStyle: "italic" },
+      settings: { foreground: "#747882", fontStyle: "italic" },
     },
     {
       scope: "comment.block.documentation",
-      settings: { foreground: "#808080", fontStyle: "italic" },
+      settings: { foreground: "#747882", fontStyle: "italic" },
     },
 
     // Keywords & storage
-    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#0033B3" } },
+    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#1F3A93" } },
 
     // Strings
-    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#067D17" } },
+    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#1F7A2B" } },
     { scope: ["keyword.operator"], settings: { foreground: "#1E1F22" } },
     // Word operators read as keywords
     {
       scope: ["keyword.operator.new", "keyword.operator.expression"],
-      settings: { foreground: "#0033B3" },
+      settings: { foreground: "#1F3A93" },
     },
     {
       scope: [
@@ -220,12 +222,14 @@ export const loxelLight: ThemeRegistrationRaw = {
         "variable.other.object.property",
         "support.variable",
         "meta.object-literal.key",
+        // YAML keys are properties too; as tags they'd share the number blue's hue
+        "entity.name.tag.yaml",
       ],
-      settings: { foreground: "#871094" },
+      settings: { foreground: "#85358C" },
     },
 
     // Variable language (this, super); Python's self/cls take the semantic self/cls color
-    { scope: "variable.language", settings: { foreground: "#0033B3" } },
+    { scope: "variable.language", settings: { foreground: "#1F3A93" } },
     {
       scope: [
         "variable.language.special.self.python",
@@ -236,15 +240,15 @@ export const loxelLight: ThemeRegistrationRaw = {
       settings: { foreground: "#94558D" },
     },
 
-    { scope: ["keyword.operator.expression.instanceof.tsx"], settings: { foreground: "#0033B3" } },
+    { scope: ["keyword.operator.expression.instanceof.tsx"], settings: { foreground: "#1F3A93" } },
 
     // Constants
-    { scope: ["constant", "constant.numeric"], settings: { foreground: "#1750EB" } },
-    { scope: "constant.language", settings: { foreground: "#0033B3" } },
-    { scope: "constant.other", settings: { foreground: "#871094" } },
+    { scope: ["constant", "constant.numeric"], settings: { foreground: "#A85400" } },
+    { scope: "constant.language", settings: { foreground: "#1F3A93" } },
+    { scope: "constant.other", settings: { foreground: "#85358C" } },
     {
       scope: "variable.other.enummember",
-      settings: { foreground: "#871094", fontStyle: "italic" },
+      settings: { foreground: "#85358C", fontStyle: "italic" },
     },
 
     // Tags (HTML/JSX)
@@ -255,7 +259,7 @@ export const loxelLight: ThemeRegistrationRaw = {
         "punctuation.definition.tag.begin",
         "punctuation.definition.tag.end",
       ],
-      settings: { foreground: "#0033B3" },
+      settings: { foreground: "#1F3A93" },
     },
 
     // Punctuation & delimiters
@@ -274,17 +278,17 @@ export const loxelLight: ThemeRegistrationRaw = {
 
     // Meta tags
     { scope: ["meta.embedded.line", "meta.tag"], settings: { foreground: "#1E1F22" } },
-    { scope: ["string.quoted.double.html"], settings: { foreground: "#067D17" } },
+    { scope: ["string.quoted.double.html"], settings: { foreground: "#1F7A2B" } },
 
     // Import/export
     {
       scope: ["keyword.control.import", "keyword.control.export", "keyword.control.from"],
-      settings: { foreground: "#0033B3" },
+      settings: { foreground: "#1F3A93" },
     },
 
     {
       scope: ["entity.name.function", "support.function", "support.class.component"],
-      settings: { foreground: "#00627A" },
+      settings: { foreground: "#156275" },
     },
     {
       scope: ["entity.name.type.enum", "entity.name.namespace", "entity.name.module"],
@@ -301,11 +305,11 @@ export const loxelLight: ThemeRegistrationRaw = {
     // Markdown
     {
       scope: ["markup.heading", "markup.heading entity.name"],
-      settings: { foreground: "#0033B3", fontStyle: "bold" },
+      settings: { foreground: "#1F3A93", fontStyle: "bold" },
     },
     { scope: "markup.italic", settings: { fontStyle: "italic" } },
     { scope: "markup.bold", settings: { fontStyle: "bold" } },
-    { scope: "markup.inline.raw", settings: { foreground: "#067D17" } },
+    { scope: "markup.inline.raw", settings: { foreground: "#1F7A2B" } },
     { scope: "markup.underline.link", settings: { foreground: "#2A5DD8" } },
   ],
 };

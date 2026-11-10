@@ -161,7 +161,7 @@ export function PickerDialog<T>({
     <ModalErrorBoundary name={name} onClose={onClose}>
       <dialog
         ref={dialogRef}
-        className="bg-popover text-popover-foreground border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/50"
+        className="bg-popover text-popover-foreground border-input dark:border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 not-dark:shadow-(--shadow-picker) backdrop:bg-transparent dark:shadow-(--shadow-dialog) dark:backdrop:bg-black/50"
         onClose={handleDialogClose}
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
@@ -169,8 +169,8 @@ export function PickerDialog<T>({
         onKeyDown={handleKeyDown}
       >
         <div className="flex flex-col">
-          <div className="border-border flex items-center gap-1 border-b px-2 py-2.5">
-            <SearchIcon className="text-muted-foreground size-4 shrink-0" />
+          <div className="border-input dark:border-border not-dark:bg-card flex items-center gap-1 border-b px-2 py-2.5 not-dark:rounded-t-lg">
+            <SearchIcon className="text-foreground/75 dark:text-muted-foreground size-4 shrink-0" />
             <input
               ref={inputRef}
               type="text"
@@ -184,7 +184,8 @@ export function PickerDialog<T>({
             {inputAdornment}
           </div>
 
-          <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
+          {/* Light mode insets the rows with rounded selection, as in JetBrains New UI popups */}
+          <div ref={listRef} className="max-h-[50vh] overflow-y-auto not-dark:p-1">
             {items.length === 0 && emptyState}
             {items.map((item, index) => (
               <button
@@ -193,7 +194,7 @@ export function PickerDialog<T>({
                 data-picker-option
                 data-active={inputFocused && index === 0 ? "" : undefined}
                 className={cn(
-                  "border-border/50 w-full border-b px-3 text-left transition-colors outline-none last:border-b-0",
+                  "dark:border-border/50 w-full border-b border-transparent px-3 text-left transition-colors outline-none not-dark:rounded-md not-dark:px-2 last:border-b-0",
                   "hover:bg-primary/50 focus:bg-primary data-active:bg-primary",
                   itemClassName,
                 )}

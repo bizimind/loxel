@@ -359,7 +359,7 @@ function SectionHeader({
 }) {
   return (
     <button
-      className="bg-muted/50 hover:bg-muted flex w-full items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors duration-100"
+      className="hover:bg-muted/60 dark:bg-muted/50 dark:hover:bg-muted flex w-full items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors duration-100"
       onClick={onToggle}
     >
       <span className="flex size-3 shrink-0 items-center justify-center">
@@ -371,7 +371,7 @@ function SectionHeader({
       </span>
       {icon}
       <span className="text-foreground">{title}</span>
-      <span className="text-muted-foreground ml-auto text-[10px]">{count}</span>
+      <span className="text-muted-foreground ml-auto text-[11px] dark:text-[10px]">{count}</span>
     </button>
   );
 }
@@ -433,7 +433,9 @@ function BranchGroupSection({
         </span>
         <FolderIcon className="text-muted-foreground size-3 shrink-0" />
         <span className="text-muted-foreground">{group.prefix}/</span>
-        <span className="text-muted-foreground ml-auto text-[10px]">{group.branches.length}</span>
+        <span className="text-muted-foreground ml-auto text-[11px] dark:text-[10px]">
+          {group.branches.length}
+        </span>
       </button>
       {expanded &&
         group.branches.map((branch) => (
@@ -504,7 +506,9 @@ function RemoteBranchGroupSection({
         </span>
         <FolderIcon className="text-muted-foreground size-3 shrink-0" />
         <span className="text-muted-foreground">{group.prefix}/</span>
-        <span className="text-muted-foreground ml-auto text-[10px]">{group.branches.length}</span>
+        <span className="text-muted-foreground ml-auto text-[11px] dark:text-[10px]">
+          {group.branches.length}
+        </span>
       </button>
       {expanded &&
         group.branches.map((branch) => {
@@ -573,8 +577,9 @@ function BranchItem({
   return (
     <div
       className={cn(
-        "group hover:bg-primary/50 flex items-center gap-1 py-1 pr-2 text-xs transition-colors duration-100",
-        branch.isHead && "bg-primary",
+        "group hover:bg-muted dark:hover:bg-primary/50 flex items-center gap-1 py-1 pr-2 text-xs transition-colors duration-100",
+        // Light marks the current branch with its check and weight, keeping blue for selection.
+        branch.isHead && "dark:bg-primary font-medium dark:font-normal",
       )}
       style={{ paddingLeft: indentPx }}
       onContextMenu={onContextMenu}

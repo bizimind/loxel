@@ -26,7 +26,7 @@ export function ProjectIcon({ id, name, size, active }: ProjectIconProps) {
         "corner-superellipse flex shrink-0 items-center justify-center rounded-2xl border-[1.5px] font-semibold select-none",
         sizeClasses[size],
         active &&
-          "shadow-[0_0_0_2px_white,0_0_0_4px_var(--ring)] dark:shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
+          "shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
       )}
       // An outline in the project color, so a project reads differently from the solid worktree
       // icons in the same column. Unmixed, the line keeps 3:1 contrast on the card in both themes.

@@ -160,7 +160,7 @@ export function CenterWatermark(_props: IWatermarkPanelProps) {
         <img
           src="/watermark.svg"
           alt=""
-          className="h-20 w-20 opacity-50 invert select-none dark:opacity-100 dark:invert-0"
+          className="h-20 w-20 opacity-85 invert select-none dark:opacity-100 dark:invert-0"
           draggable={false}
         />
 

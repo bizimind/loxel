@@ -51,6 +51,12 @@ const SECTIONS: SectionDef[] = [
   { key: "security", label: "Security", icon: ShieldIcon },
 ];
 
+/**
+ * A section below the first, with a divider above it. Light scrolls a section 1px past its
+ * divider, so a section scrolled to the top does not show its divider right under the header's.
+ */
+const SECTION_CLASS = "border-border mt-8 border-t pt-8 not-dark:-scroll-mt-px";
+
 export function SettingsModal() {
   const isOpen = useSettingsStore((s) => s.isOpen);
   const activeSection = useSettingsStore((s) => s.activeSection);
@@ -153,7 +159,7 @@ export function SettingsModal() {
   return createPortal(
     <ModalErrorBoundary name="Settings" onClose={handleCancel}>
       <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20 dark:bg-black/50"
         onClick={handleBackdropClick}
       >
         <div className="bg-popover border-border flex max-h-[85vh] w-full max-w-[min(calc(100%-2rem),960px)] flex-col overflow-hidden rounded-lg border shadow-(--shadow-dialog)">
@@ -171,7 +177,7 @@ export function SettingsModal() {
           {/* Body: left nav + right content */}
           <div className="flex min-h-0 flex-1">
             {/* Left nav — CSS scrollspy via scroll-target-group */}
-            <nav className="settings-scrollspy border-border flex w-[180px] shrink-0 flex-col gap-0.5 border-r p-3">
+            <nav className="settings-scrollspy border-border not-dark:bg-card flex w-[180px] shrink-0 flex-col gap-0.5 border-r p-3">
               {SECTIONS.map((section) => (
                 <a
                   key={section.key}
@@ -190,39 +196,39 @@ export function SettingsModal() {
                 <GeneralSection />
               </div>
 
-              <div id="settings-appearance" className="border-border mt-8 border-t pt-8">
+              <div id="settings-appearance" className={SECTION_CLASS}>
                 <AppearanceSection />
               </div>
 
-              <div id="settings-keybindings" className="border-border mt-8 border-t pt-8">
+              <div id="settings-keybindings" className={SECTION_CLASS}>
                 <KeybindingsSection />
               </div>
 
-              <div id="settings-layout" className="border-border mt-8 border-t pt-8">
+              <div id="settings-layout" className={SECTION_CLASS}>
                 <LayoutSection />
               </div>
 
-              <div id="settings-terminal" className="border-border mt-8 border-t pt-8">
+              <div id="settings-terminal" className={SECTION_CLASS}>
                 <TerminalSection />
               </div>
 
-              <div id="settings-editor" className="border-border mt-8 border-t pt-8">
+              <div id="settings-editor" className={SECTION_CLASS}>
                 <EditorSection />
               </div>
 
-              <div id="settings-fonts" className="border-border mt-8 border-t pt-8">
+              <div id="settings-fonts" className={SECTION_CLASS}>
                 <FontsSection />
               </div>
 
-              <div id="settings-schemas" className="border-border mt-8 border-t pt-8">
+              <div id="settings-schemas" className={SECTION_CLASS}>
                 <SchemasSection />
               </div>
 
-              <div id="settings-fileAssociations" className="border-border mt-8 border-t pt-8">
+              <div id="settings-fileAssociations" className={SECTION_CLASS}>
                 <FileAssociationsSection />
               </div>
 
-              <div id="settings-security" className="border-border mt-8 border-t pt-8">
+              <div id="settings-security" className={SECTION_CLASS}>
                 <SecuritySection />
               </div>
             </div>

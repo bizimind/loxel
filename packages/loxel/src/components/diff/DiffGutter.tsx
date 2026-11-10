@@ -1,6 +1,6 @@
 import type { editor } from "monaco-editor";
-import type { RefObject } from "react";
-import { useEffect, useRef } from "react";
+import type { CSSProperties, RefObject } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import type { ScrollBy } from "@/hooks/useMonacoSyncScroll";
 import { cn } from "@/lib/utils";
@@ -159,6 +159,7 @@ export function DiffGutter({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const gutterWidth = LINE_NUM_COL_WIDTH * 2; // 128px — both custom LineNumbersColumns
+  const modifyGradientId = `diff-modify-${useId().replaceAll(/[^\w-]/g, "")}`;
 
   // Filter to non-expanded collapse regions for rendering
   const visibleCollapseRegions = collapseRegions.filter((r) => !expandedSet.has(r.index));
@@ -383,18 +384,48 @@ export function DiffGutter({
         width={gutterWidth}
         height="100%"
       >
+        {/* Light modify connectors take the removed color over the old side's line-number column
+            and the added color over the new side's, with an edge a step stronger (index.css
+            applies both in light; dark fills them with the modify color). A hard stop at the
+            columns' seam keeps the two tints clean instead of blending them. */}
+        <defs>
+          {(["fill", "edge"] as const).map((part) => (
+            <linearGradient
+              key={part}
+              id={`${modifyGradientId}-${part}`}
+              gradientUnits="userSpaceOnUse"
+              x1={0}
+              y1={0}
+              x2={gutterWidth}
+              y2={0}
+            >
+              <stop offset={0.5} stopColor={`var(--diff-del-connector-${part})`} />
+              <stop offset={0.5} stopColor={`var(--diff-add-connector-${part})`} />
+            </linearGradient>
+          ))}
+        </defs>
+
         {/* Change pair connectors */}
         {pairs.map((pair, i) => (
           <g key={i} data-pair-index={i}>
             {/* Main connector path - d attribute updated via DOM */}
             <path
               d=""
+              data-connector={pair.type}
               className={cn(
-                "fill-current",
+                "diff-connector fill-current",
                 pair.type === "delete" && "text-diff-del-gutter",
                 pair.type === "add" && "text-diff-add-gutter",
                 pair.type === "modify" && "text-diff-modify-gutter",
               )}
+              style={
+                pair.type === "modify"
+                  ? ({
+                      "--diff-modify-fill": `url(#${modifyGradientId}-fill)`,
+                      "--diff-modify-edge": `url(#${modifyGradientId}-edge)`,
+                    } as CSSProperties)
+                  : undefined
+              }
             />
             {/* Marker line for insertions/deletions - y attribute updated via DOM */}
             {(pair.type === "add" || pair.type === "delete") && (

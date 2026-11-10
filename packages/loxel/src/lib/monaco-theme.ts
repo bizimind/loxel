@@ -37,8 +37,9 @@ function readThemeColors(mode: ThemeMode): Record<string, string> {
     "editorLineNumber.foreground": color("--editor-line-number"),
     "editorLineNumber.activeForeground": color("--editor-line-number-active"),
     "editorGutter.background": editorBg,
-    // Dark keeps no current-line fill; light paints JetBrains' faint blue caret row.
-    "editor.lineHighlightBackground": mode === "dark" ? editorBg : "#EFF3FB",
+    // Dark keeps no current-line fill; light paints JetBrains' faint blue caret row (#E9EFF9 on
+    // white), translucent so the band keeps showing a line's diff or search tint beneath it.
+    "editor.lineHighlightBackground": mode === "dark" ? editorBg : "#5F87D726",
   };
   probe.remove();
   return colors;
@@ -74,27 +75,27 @@ const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
 
 /** `DARK_SEMANTIC_RULES` in the IntelliJ Light palette of `loxelLight`. */
 const LIGHT_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
-  { token: "function", foreground: "00627A" }, // #00627A
-  { token: "member", foreground: "00627A" }, // #00627A
-  { token: "method", foreground: "00627A" }, // #00627A
+  { token: "function", foreground: "156275" }, // #156275
+  { token: "member", foreground: "156275" }, // #156275
+  { token: "method", foreground: "156275" }, // #156275
   { token: "decorator", foreground: "9E880D" }, // #9E880D
-  { token: "keyword", foreground: "0033B3" }, // #0033B3
+  { token: "keyword", foreground: "1F3A93" }, // #1F3A93
   { token: "type", foreground: "000000" }, // #000000
   // Python `self` / `cls`, matching loxelLight's TextMate self/cls color
   { token: "selfParameter", foreground: "94558D" }, // #94558D
   { token: "clsParameter", foreground: "94558D" }, // #94558D
-  { token: "enumMember", foreground: "871094", fontStyle: "italic" }, // #871094
+  { token: "enumMember", foreground: "85358C", fontStyle: "italic" }, // #85358C
   { token: "class", foreground: "000000" }, // #000000
   { token: "interface", foreground: "000000" }, // #000000
-  { token: "property", foreground: "871094" }, // #871094
+  { token: "property", foreground: "85358C" }, // #85358C
   { token: "enum", foreground: "000000" }, // #000000
   { token: "namespace", foreground: "000000" }, // #000000
   { token: "typeParameter", foreground: "007E8A" }, // #007E8A
   { token: "parameter", foreground: "1E1F22" }, // #1E1F22
   { token: "variable", foreground: "1E1F22" }, // #1E1F22
   { token: "variable.readonly.local", foreground: "1E1F22" }, // #1E1F22
-  { token: "variable.readonly", foreground: "871094" }, // #871094
-  { token: "delimiter.html", foreground: "0033B3" }, // #0033B3
+  { token: "variable.readonly", foreground: "85358C" }, // #85358C
+  { token: "delimiter.html", foreground: "1F3A93" }, // #1F3A93
 ];
 
 /**
@@ -105,8 +106,8 @@ const LIGHT_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
 const LIGHT_CHROME_COLORS: Record<string, string> = {
   "editor.lineHighlightBorder": "#00000000",
   "editor.inactiveSelectionBackground": "#BCD6F7",
-  "editor.selectionHighlightBackground": "#8B7BE514",
-  "editor.selectionHighlightBorder": "#00000000",
+  "editor.selectionHighlightBackground": "#8B7BE524",
+  "editor.selectionHighlightBorder": "#8B7BE599",
   "editor.wordHighlightBackground": "#8B7BE52E",
   "editor.wordHighlightStrongBackground": "#8B7BE51A",
   "editor.wordHighlightTextBackground": "#8B7BE52E",
@@ -116,19 +117,19 @@ const LIGHT_CHROME_COLORS: Record<string, string> = {
   "editor.rangeHighlightBackground": "#EDF3FF80",
   "editor.hoverHighlightBackground": "#E4ECFB80",
   "editor.linkedEditingBackground": "#EDEBFC",
-  "editorIndentGuide.background1": "#E1E3E8",
-  "editorIndentGuide.activeBackground1": "#C5C9D1",
+  "editorIndentGuide.background1": "#C6CAD2",
+  "editorIndentGuide.activeBackground1": "#9DA2AE",
   "editorRuler.foreground": "#EBECF0",
   "editorCodeLens.foreground": "#818594",
-  "editorInlayHint.foreground": "#5E6270",
-  "editorInlayHint.background": "#EDEEF2",
-  "editorInlayHint.typeForeground": "#5E6270",
-  "editorInlayHint.typeBackground": "#EDEEF2",
-  "editorInlayHint.parameterForeground": "#5E6270",
-  "editorInlayHint.parameterBackground": "#EDEEF2",
-  "editorBracketHighlight.foreground1": "#8F6200",
-  "editorBracketHighlight.foreground2": "#A0379B",
-  "editorBracketHighlight.foreground3": "#2856C9",
+  "editorInlayHint.foreground": "#4F535E",
+  "editorInlayHint.background": "#F1F2F5",
+  "editorInlayHint.typeForeground": "#4F535E",
+  "editorInlayHint.typeBackground": "#F1F2F5",
+  "editorInlayHint.parameterForeground": "#4F535E",
+  "editorInlayHint.parameterBackground": "#F1F2F5",
+  "editorBracketHighlight.foreground1": "#6B4513",
+  "editorBracketHighlight.foreground2": "#94449A",
+  "editorBracketHighlight.foreground3": "#3A62C4",
   "editorBracketHighlight.unexpectedBracket.foreground": "#E55765",
   "editorError.foreground": "#E55765",
   "editorWarning.foreground": "#C7A450",

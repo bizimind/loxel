@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
+import { trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -164,11 +165,15 @@ interface CodeEditorPanelProps {
 }
 
 /**
- * Light also tints the caret row's gutter, JetBrains-style, which Monaco keeps while a selection
- * hides the row's own band. Dark paints no current-line band at all.
+ * Light shows the caret JetBrains-style: it tints the caret row, gutter included (`trackCaretRow`
+ * keeps the row's band while text is selected), and leaves it out of the overview ruler, which
+ * keeps to diagnostics and highlights. Dark paints no current-line band at all.
  */
-function lineHighlightFor(darkMode: boolean): "line" | "all" {
-  return darkMode ? "line" : "all";
+function caretOptionsFor(darkMode: boolean) {
+  return {
+    renderLineHighlight: darkMode ? "line" : "all",
+    hideCursorInOverviewRuler: !darkMode,
+  } satisfies monacoEditor.IEditorOptions;
 }
 
 export function CodeEditorPanel({
@@ -368,7 +373,7 @@ export function CodeEditorPanel({
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
       inlayHints: inlayHintsOption(),
-      renderLineHighlight: lineHighlightFor(darkMode),
+      ...caretOptionsFor(darkMode),
       ...codeFontOptions(),
     });
 
@@ -425,6 +430,7 @@ export function CodeEditorPanel({
         });
     }
 
+    const caretRow = trackCaretRow(editor);
     const cursorDisposable = editor.onDidChangeCursorPosition(() => {
       if (!inspectorOpenRef.current) return;
       clearTimeout(inspectTimer);
@@ -579,6 +585,7 @@ export function CodeEditorPanel({
       clearTimeout(schemaRequestTimer);
       unsubscribeSchemaConsent?.();
       clearTimeout(inspectTimer);
+      caretRow.dispose();
       cursorDisposable.dispose();
       if (inspectorWidgetRef.current) {
         editor.removeContentWidget(inspectorWidgetRef.current);
@@ -666,7 +673,7 @@ export function CodeEditorPanel({
   // Update theme
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
-    editorRef.current?.updateOptions({ renderLineHighlight: lineHighlightFor(darkMode) });
+    editorRef.current?.updateOptions(caretOptionsFor(darkMode));
   }, [darkMode]);
 
   useInlayHintsOption(editorRef);

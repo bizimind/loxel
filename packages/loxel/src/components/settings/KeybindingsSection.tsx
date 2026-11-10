@@ -8,7 +8,8 @@ import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
+import { KeyBindingDisplay, LIGHT_KEYCAP_CLASS } from "@/components/ui/key-binding-display";
+import { cn } from "@/lib/utils";
 import type { ActionCategory, ActionId } from "@/store/keybindings/action-registry";
 import { ACTIONS } from "@/store/keybindings/action-registry";
 import type { KeyBinding } from "@/store/keybindings/key-combo";
@@ -106,7 +107,7 @@ export function KeybindingsSection() {
               <h4 className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
                 {CATEGORY_LABELS[category]}
               </h4>
-              <div className="divide-border/50 divide-y rounded-md bg-[var(--surface-2)]">
+              <div className="divide-border/50 not-dark:divide-border divide-y rounded-md bg-[var(--surface-2)]">
                 {actions.map((action) => (
                   <BindingRow
                     key={action.id}
@@ -178,7 +179,10 @@ function BindingRow({
         {bindings.map((binding) => (
           <kbd
             key={binding}
-            className="bg-muted border-border text-foreground/80 dark:text-muted-foreground flex items-center rounded border px-1.5 py-0.5 text-[10px]"
+            className={cn(
+              "bg-muted border-border dark:text-muted-foreground flex items-center rounded border px-1.5 py-0.5 text-[10px]",
+              LIGHT_KEYCAP_CLASS,
+            )}
           >
             <KeyBindingDisplay binding={binding} />
           </kbd>

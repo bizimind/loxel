@@ -38,6 +38,30 @@ async function clearNotifications(): Promise<void> {
 }
 await clearNotifications();
 
+/** Every shot starts with the worktree sidebar collapsed, whatever an earlier shot persisted. */
+async function collapseSidebar(): Promise<void> {
+  const { value } = (await api("/api/stores/projects")) as { value: string | null };
+  if (!value) return;
+  const stored = JSON.parse(value) as { state: Record<string, unknown>; version: number };
+  if (stored.state.sidebarExpanded !== true) return;
+  stored.state.sidebarExpanded = false;
+  await api("/api/stores/projects", { method: "PUT", body: { value: JSON.stringify(stored) } });
+}
+await collapseSidebar();
+
+/**
+ * A server restart promotes the newest shot's window layout to the canonical "last closed window"
+ * layout, which every later fresh window would restore. Blank it so each shot starts from the
+ * default layout (an empty value is skipped on restore).
+ */
+async function resetCanonicalLayouts(): Promise<void> {
+  for (const scope of ["outer", "center"]) {
+    const key = encodeURIComponent(`layout:canonical:${scope}:${fixture}`);
+    await api(`/api/stores/${key}`, { method: "PUT", body: { value: "" } });
+  }
+}
+await resetCanonicalLayouts();
+
 const browser = await chromium.launch();
 try {
   const context = await browser.newContext({

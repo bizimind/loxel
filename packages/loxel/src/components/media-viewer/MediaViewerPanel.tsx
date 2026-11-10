@@ -74,6 +74,15 @@ interface Dimensions {
   height: number;
 }
 
+/**
+ * The media's on-screen box at zoom 1: its natural size, shrunk to fit the viewport. The frame page
+ * caps img/video/svg at 100% of its size and never upscales them.
+ */
+function fitWithin(media: Dimensions, viewport: Dimensions): Dimensions {
+  const ratio = Math.min(1, viewport.width / media.width, viewport.height / media.height);
+  return { width: media.width * ratio, height: media.height * ratio };
+}
+
 interface VideoState {
   playing: boolean;
   currentTime: number;
@@ -109,10 +118,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   const [autoFit, setAutoFit] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [videoState, setVideoState] = useState<VideoState | null>(null);
+  const [viewportSize, setViewportSize] = useState<Dimensions | null>(null);
 
   // --- Refs ---
   const viewportRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** The transparency checkerboard, sized and moved with the media (not scaled, so its squares
+   *  keep their size at any zoom). */
+  const backdropRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const isDraggingRef = useRef(false);
@@ -120,6 +133,10 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // Keep scaleRef in sync
   scaleRef.current = scale;
+
+  const mediaBox = dimensions && viewportSize ? fitWithin(dimensions, viewportSize) : null;
+  const mediaBoxRef = useRef(mediaBox);
+  mediaBoxRef.current = mediaBox;
 
   // --- URL ---
   const iframeSrc = worktreePath
@@ -140,10 +157,12 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- Apply transform ---
   const applyTransform = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
     const { x, y } = translateRef.current;
-    iframe.style.transform = `translate(${x}px, ${y}px) scale(${scaleRef.current})`;
+    const iframe = iframeRef.current;
+    if (iframe) iframe.style.transform = `translate(${x}px, ${y}px) scale(${scaleRef.current})`;
+    const backdrop = backdropRef.current;
+    const box = mediaBoxRef.current;
+    if (backdrop && box) Object.assign(backdrop.style, backdropStyle(box, scaleRef.current, x, y));
   }, []);
 
   // --- Actual-size scale: what scale shows 1 content pixel = 1 screen pixel ---
@@ -269,6 +288,17 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     });
     return unsub;
   }, [filePath]);
+
+  // --- Viewport size, for the checkerboard's box ---
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(() => {
+      setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   // --- ResizeObserver for auto-fit ---
   useEffect(() => {
@@ -415,8 +445,8 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="border-border bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
-        <span className="text-muted-foreground min-w-0 shrink-0">
+      <div className="border-border not-dark:border-input bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
+        <span className="text-foreground dark:text-muted-foreground min-w-0 shrink-0">
           {dimensions ? `${dimensions.width} \u00d7 ${dimensions.height}` : "\u2014"}
         </span>
 
@@ -425,12 +455,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
         <ToolbarButton onClick={() => applyZoom(1 / ZOOM_STEP)} title="Zoom out (-)">
           <MinusIcon className="size-3.5" />
         </ToolbarButton>
-        <span className="text-muted-foreground w-10 text-center tabular-nums">{zoomPercent}%</span>
+        <span className="text-foreground dark:text-muted-foreground w-10 text-center tabular-nums">
+          {zoomPercent}%
+        </span>
         <ToolbarButton onClick={() => applyZoom(ZOOM_STEP)} title="Zoom in (+)">
           <PlusIcon className="size-3.5" />
         </ToolbarButton>
 
-        <div className="bg-border mx-1 h-3.5 w-px" />
+        <ToolbarSeparator />
 
         <ToolbarButton
           onClick={() => {
@@ -453,7 +485,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           <span>1:1</span>
         </ToolbarButton>
 
-        <div className="bg-border mx-1 h-3.5 w-px" />
+        <ToolbarSeparator />
 
         <ToolbarButton
           onClick={() => {
@@ -477,21 +509,29 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       <div
         ref={viewportRef}
         className={cn(
-          "relative flex-1 overflow-hidden",
-          "[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] [background-size:16px_16px]",
+          "relative flex-1 overflow-hidden bg-[var(--editor-surface)]",
+          // Light: a chrome-grey canvas, so the media's white-and-grey checkerboard and edge stand out
+          "not-dark:bg-card",
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
-        style={
-          {
-            "--checker-a": "var(--color-muted, #f0f0f0)",
-            "--checker-b": "var(--color-background, #ffffff)",
-          } as React.CSSProperties
-        }
         tabIndex={0}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
       >
+        {/* Checkerboard behind the media only, so its edges show where the image ends */}
+        {mediaBox && (
+          <div
+            ref={backdropRef}
+            className={cn(
+              "border-border pointer-events-none absolute top-1/2 left-1/2 box-content border not-dark:border-[#b4b8c2] not-dark:shadow-sm",
+              "[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] [background-size:16px_16px]",
+              // Light: a grey a step darker than the chrome so transparency reads at a glance.
+              "[--checker-a:#dadce1] [--checker-b:var(--color-background)] dark:[--checker-a:var(--color-muted)]",
+            )}
+            style={backdropStyle(mediaBox, scale, translateRef.current.x, translateRef.current.y)}
+          />
+        )}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           {iframeSrc && (
             <iframe
@@ -516,6 +556,20 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       {isVideo && videoState && <VideoControls state={videoState} onCommand={sendCommand} />}
     </div>
   );
+}
+
+/** Size and place the checkerboard over the media's zoomed, panned box (border outside it). */
+function backdropStyle(
+  box: Dimensions,
+  scale: number,
+  x: number,
+  y: number,
+): Pick<React.CSSProperties, "width" | "height" | "transform"> {
+  return {
+    width: `${box.width * scale}px`,
+    height: `${box.height * scale}px`,
+    transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -741,11 +795,18 @@ function ToolbarButton({
       title={title}
       className={cn(
         "hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-        active && "bg-primary text-foreground",
-        !active && "text-muted-foreground",
+        // Light: on toggles take the accent text, idle buttons the full text color (their thin icons
+        // read as grey at toolbar size).
+        active && "bg-primary text-link dark:text-foreground",
+        !active && "text-foreground dark:text-muted-foreground",
       )}
     >
       {children}
     </button>
   );
+}
+
+/** Divider between toolbar groups (a step darker than the border in light). */
+function ToolbarSeparator() {
+  return <div className="bg-muted-foreground/80 dark:bg-border mx-1 h-3.5 w-px" />;
 }

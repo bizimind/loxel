@@ -218,7 +218,9 @@ export function LineNumbersColumn({
     if (isSelected) {
       bgClass = "bg-primary";
     } else if (hasComment) {
-      bgClass = isResolved ? "bg-[var(--comment-bg-resolved)]" : "bg-[var(--comment-bg)]";
+      // Light marks an open thread's lines with the code's amber edge and the marker only: an amber
+      // tint under the diff connector turns muddy.
+      bgClass = isResolved ? "bg-[var(--comment-bg-resolved)]" : "dark:bg-[var(--comment-bg)]";
     }
 
     // Main line element (numbers, backgrounds, interaction handlers)
@@ -262,7 +264,8 @@ export function LineNumbersColumn({
         {isCommentFirst && (
           <div
             className={cn(
-              "absolute top-1/2 mx-px flex size-5 -translate-y-1/2 items-center justify-center",
+              // Light sets the marker on a white chip so it stays clear over the diff tints.
+              "bg-background/90 absolute top-1/2 mx-px flex size-5 -translate-y-1/2 items-center justify-center rounded-sm dark:bg-transparent",
               align === "right" ? "right-0" : "left-0",
             )}
           >
@@ -317,7 +320,8 @@ export function LineNumbersColumn({
         ref={outerRef}
         data-diff-side={side === "left" ? "old" : "new"}
         className={cn(
-          "bg-editor-surface shrink-0 overflow-hidden",
+          // Light sets the gutter on the chrome grey so it reads apart from the white code panes.
+          "bg-card dark:bg-editor-surface shrink-0 overflow-hidden",
           align === "right" ? "border-l" : "border-r",
         )}
         style={{ width: 64, borderColor: "var(--diff-gutter-border)" }}

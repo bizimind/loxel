@@ -11,12 +11,23 @@ const shot: PanelShot = {
     await word.waitFor({ state: "visible" });
     // Wait for the TypeScript server's inlay hints (`PORT: number`) so semantic colors, hints and
     // diagnostics are in. The server attaches to one window per worktree, so a concurrent shot can
-    // hold it ("TypeScript in another window"); shoot without it then rather than fail.
-    await editor
-      .locator(".view-line", { hasText: /PORT\W*number/ })
-      .first()
-      .waitFor({ state: "visible", timeout: 15_000 })
-      .catch(() => {});
+    // hold it ("TypeScript in another window"): take it back through the status bar item (a click
+    // restarts it here) and wait again, a few times; shoot without it rather than fail.
+    const hints = editor.locator(".view-line", { hasText: /PORT\W*number/ }).first();
+    const stolen = ctx.page.getByRole("button", { name: /in another window/ });
+    const attachTypeScript = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await Promise.race([
+          hints.waitFor({ state: "visible", timeout: 20_000 }),
+          stolen.waitFor({ state: "visible", timeout: 20_000 }),
+        ]).catch(() => {});
+        if (await hints.isVisible()) return;
+        if (!(await stolen.isVisible())) continue;
+        await stolen.click();
+        await stolen.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
+      }
+    };
+    await attachTypeScript();
     // Double-click `findProduct` so the selection and its occurrence highlights show.
     await word
       .getByText("findProduct")
@@ -28,9 +39,15 @@ const shot: PanelShot = {
     await editor.locator(".selected-text").first().waitFor({ state: "attached" });
     await ctx.settle();
     // Late async work (language server, notifications) can take focus; keep the editor focused so
-    // the selection shows in its focused color.
-    await editor.locator("textarea").first().focus();
-    await editor.locator(".monaco-editor.focused, .focused").first().waitFor({ state: "attached" });
+    // the selection shows in its focused color. Monaco takes input through its EditContext element
+    // (the textarea is only for IME), and marks the editor root `.focused` once that has focus.
+    await editor.locator(".native-edit-context").first().focus();
+    await ctx.page.locator(".monaco-editor.focused").first().waitFor({ state: "attached" });
+    // A shot that opened meanwhile can have taken the server again.
+    if (!(await hints.isVisible())) {
+      await attachTypeScript();
+      await editor.locator(".native-edit-context").first().focus();
+    }
   },
 };
 export default shot;
