@@ -18,7 +18,7 @@ import {
 import { z } from "zod";
 
 import { demoPort } from "../demo-instance";
-import { loadOrCreateDek } from "./dek";
+import { getDek, initDek } from "./dek";
 import {
   DEMO_INSTANCE,
   DEMO_WINDOW_SIZE,
@@ -140,7 +140,7 @@ function startServer(): void {
   serverProcess = child;
 
   // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
-  const dekBase64 = IS_DEMO ? null : loadOrCreateDek();
+  const dekBase64 = IS_DEMO ? null : getDek();
   child.stdin.on("error", () => {});
   // Closing stdin without a key tells the server that secret storage is unavailable.
   if (dekBase64) child.stdin.write(dekBase64 + "\n");
@@ -804,9 +804,11 @@ async function promptForAccount(
 
 // One Electron process per installed app: it owns the server, and Squirrel can replace only a bundle
 // no other process runs from. A second launch (`open -n`, or the binary run directly) hands over and
-// exits. Packaged builds only: dev builds have the installed app's name and data directory, so a
-// lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a
-// rebuilt Electron before the old one has exited.
+// exits. Packaged builds only: vite-plugin-electron starts a rebuilt dev Electron before the old
+// one has exited, which a lock would turn into a quit.
+// A dev run keeps its own data directory (Chromium profile and cookies): sharing the installed
+// app's while both run makes their databases lock each other and breaks sites in browser panels.
+if (IS_DEV) app.setPath("userData", `${app.getPath("userData")}-dev`);
 // A demo keeps its data directory apart, so its lock, cookies and settings don't meet the app's.
 if (IS_DEMO)
   app.setPath(
@@ -852,6 +854,8 @@ app.whenReady().then(async () => {
   if (!isPrimaryInstance) return;
   try {
     if (await offerMoveToApplications()) return;
+    // Every server spawn reads the key synchronously, so load it before the first one.
+    if (!IS_DEMO) await initDek();
     await startAppServer();
 
     // After `ready`: with a prompt reason, configureWebAuthn writes to Chromium's

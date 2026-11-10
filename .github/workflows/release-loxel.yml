@@ -172,11 +172,22 @@ jobs:
         env:
           LOXEL_PROVISIONING_PROFILE_BASE64: ${{ secrets.LOXEL_PROVISIONING_PROFILE }}
 
+      # Loxel ships a patched Electron (packages/loxel/electron/), built on a Mac and uploaded to R2
+      # ahead of time; this fails when the pinned build was never uploaded, rather than packaging
+      # stock Electron. See packages/loxel/docs/PATCHED_ELECTRON.md.
+      - name: Fetch patched Electron
+        run: bun packages/loxel/scripts/fetch-electron.ts ${{ matrix.arch }}
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Build Electron app
         run: |
           cd packages/loxel
           ELECTRON=1 pnpm exec vite build
           pnpm exec electron-builder --mac --${{ matrix.arch }} \
+            --config.electronDist=build/electron-dist \
             --config.mac.provisioningProfile=/tmp/loxel.provisionprofile
         env:
           CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}
