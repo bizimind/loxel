@@ -178,7 +178,7 @@ function BindingRow({
         {bindings.map((binding) => (
           <kbd
             key={binding}
-            className="bg-muted border-border text-muted-foreground flex items-center rounded border px-1.5 py-0.5 text-[10px]"
+            className="bg-muted border-border text-foreground/80 dark:text-muted-foreground flex items-center rounded border px-1.5 py-0.5 text-[10px]"
           >
             <KeyBindingDisplay binding={binding} />
           </kbd>

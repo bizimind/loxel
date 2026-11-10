@@ -214,7 +214,7 @@ function ThreadRow({
     <div
       className={cn(
         "flex w-full cursor-pointer flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors",
-        isActive ? "bg-muted/50" : "hover:bg-muted/20",
+        isActive ? "bg-accent dark:bg-muted/50" : "hover:bg-muted/20",
       )}
       onClick={onClick}
     >
@@ -370,7 +370,7 @@ function ThreadDetail({ thread }: { thread: PlacedThread }) {
           disabled={submitting}
         />
         <div className="mt-1.5 flex items-center justify-between">
-          <span className="text-muted-foreground/60 text-[10px]">
+          <span className="text-muted-foreground dark:text-muted-foreground/60 text-[10px]">
             {/Mac|iPhone/.test(navigator.userAgent) ? "Cmd" : "Ctrl"}+Enter
           </span>
           <Button

@@ -315,11 +315,12 @@ export function LineNumbersColumn({
     <>
       <div
         ref={outerRef}
+        data-diff-side={side === "left" ? "old" : "new"}
         className={cn(
           "bg-editor-surface shrink-0 overflow-hidden",
           align === "right" ? "border-l" : "border-r",
         )}
-        style={{ width: 64, borderColor: "#303438" }}
+        style={{ width: 64, borderColor: "var(--diff-gutter-border)" }}
       >
         <div ref={innerRef} className="will-change-transform">
           {lineElements}

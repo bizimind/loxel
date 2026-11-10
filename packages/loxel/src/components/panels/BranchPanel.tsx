@@ -256,7 +256,7 @@ export function BranchPanel({ hideHeader }: { hideHeader?: boolean }) {
         {headBranch && (
           <>
             <SectionHeader
-              icon={<CheckIcon className="text-primary size-3.5" />}
+              icon={<CheckIcon className="text-link size-3.5" />}
               title="HEAD"
               count={1}
               expanded={expandedSections.has("head")}
@@ -600,7 +600,7 @@ function BranchItem({
       </button>
 
       {branch.isHead ? (
-        <CheckIcon className="text-primary size-3 shrink-0" />
+        <CheckIcon className="text-link size-3 shrink-0" />
       ) : (
         <GitBranchIcon className="text-muted-foreground size-3 shrink-0" />
       )}

@@ -1,6 +1,6 @@
 import { SearchIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
@@ -57,6 +57,8 @@ export function PickerDialog<T>({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // While the input has focus, Enter accepts the first item, so that item shows as the active row.
+  const [inputFocused, setInputFocused] = useState(false);
 
   // Set while the dialog closes because `isOpen` turned false, so the `close` event that follows a
   // task later is not taken for a dismissal: by then the owner may have opened a follow-up request
@@ -159,7 +161,7 @@ export function PickerDialog<T>({
     <ModalErrorBoundary name={name} onClose={onClose}>
       <dialog
         ref={dialogRef}
-        className="bg-popover text-popover-foreground border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-2xl backdrop:bg-black/50"
+        className="bg-popover text-popover-foreground border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/50"
         onClose={handleDialogClose}
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
@@ -176,20 +178,23 @@ export function PickerDialog<T>({
               placeholder={placeholder}
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
             />
             {inputAdornment}
           </div>
 
           <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
             {items.length === 0 && emptyState}
-            {items.map((item) => (
+            {items.map((item, index) => (
               <button
                 type="button"
                 key={getKey(item)}
                 data-picker-option
+                data-active={inputFocused && index === 0 ? "" : undefined}
                 className={cn(
                   "border-border/50 w-full border-b px-3 text-left transition-colors outline-none last:border-b-0",
-                  "hover:bg-primary/50 focus:bg-primary",
+                  "hover:bg-primary/50 focus:bg-primary data-active:bg-primary",
                   itemClassName,
                 )}
                 onClick={() => onAccept(item)}

@@ -4,6 +4,7 @@ import {
   FileJson2Icon,
   FileTypeIcon,
   KeyboardIcon,
+  PaletteIcon,
   PanelsLeftBottomIcon,
   SettingsIcon,
   ShieldIcon,
@@ -20,6 +21,7 @@ import { syncSchemas } from "@/lib/schema-sync";
 import type { SettingsState } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 
+import { AppearanceSection } from "./AppearanceSection";
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
 import { FontsSection } from "./FontsSection";
@@ -38,6 +40,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: "general", label: "General", icon: SettingsIcon },
+  { key: "appearance", label: "Appearance", icon: PaletteIcon },
   { key: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
@@ -54,6 +57,7 @@ export function SettingsModal() {
   const closeSettings = useSettingsStore((s) => s.closeSettings);
 
   // Live state for dirty tracking
+  const theme = useSettingsStore((s) => s.theme);
   const layout = useSettingsStore((s) => s.layout);
   const terminal = useSettingsStore((s) => s.terminal);
   const editor = useSettingsStore((s) => s.editor);
@@ -66,9 +70,10 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (isOpen) {
-      const { layout, terminal, editor, fonts, schemas, fileAssociations } =
+      const { theme, layout, terminal, editor, fonts, schemas, fileAssociations } =
         useSettingsStore.getState();
       snapshotRef.current = JSON.stringify({
+        theme,
         layout,
         terminal,
         editor,
@@ -84,10 +89,10 @@ export function SettingsModal() {
   const isSettingsDirty = useMemo(() => {
     if (!snapshotRef.current) return false;
     return (
-      JSON.stringify({ layout, terminal, editor, fonts, schemas, fileAssociations }) !==
+      JSON.stringify({ theme, layout, terminal, editor, fonts, schemas, fileAssociations }) !==
       snapshotRef.current
     );
-  }, [layout, terminal, editor, fonts, schemas, fileAssociations]);
+  }, [theme, layout, terminal, editor, fonts, schemas, fileAssociations]);
 
   const saveDisabled = !isSettingsDirty;
 
@@ -106,7 +111,7 @@ export function SettingsModal() {
         useSettingsStore.setState(
           parsed as Pick<
             SettingsState,
-            "layout" | "terminal" | "editor" | "fonts" | "schemas" | "fileAssociations"
+            "theme" | "layout" | "terminal" | "editor" | "fonts" | "schemas" | "fileAssociations"
           >,
         );
       }
@@ -151,7 +156,7 @@ export function SettingsModal() {
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
         onClick={handleBackdropClick}
       >
-        <div className="bg-popover border-border flex max-h-[85vh] w-full max-w-[min(calc(100%-2rem),960px)] flex-col overflow-hidden rounded-lg border shadow-2xl">
+        <div className="bg-popover border-border flex max-h-[85vh] w-full max-w-[min(calc(100%-2rem),960px)] flex-col overflow-hidden rounded-lg border shadow-(--shadow-dialog)">
           {/* Full-width header */}
           <div className="border-border flex shrink-0 items-center justify-between border-b px-5 py-2">
             <span className="text-foreground text-sm font-semibold">Settings</span>
@@ -183,6 +188,10 @@ export function SettingsModal() {
             <div className="flex-1 overflow-y-auto scroll-smooth p-5">
               <div id="settings-general">
                 <GeneralSection />
+              </div>
+
+              <div id="settings-appearance" className="border-border mt-8 border-t pt-8">
+                <AppearanceSection />
               </div>
 
               <div id="settings-keybindings" className="border-border mt-8 border-t pt-8">

@@ -143,3 +143,169 @@ export const loxelDark: ThemeRegistrationRaw = {
     { scope: "markup.inline.raw", settings: { foreground: "#F68383" } },
   ],
 };
+
+/**
+ * Light counterpart of `loxelDark`, in the JetBrains New UI Light (IntelliJ Light) palette. It
+ * follows loxelDark's scope groups, splitting a few where the light palette tells them apart.
+ */
+export const loxelLight: ThemeRegistrationRaw = {
+  name: "loxel-light",
+  type: "light",
+  semanticHighlighting: true,
+  colors: {
+    "editor.foreground": "#1E1F22",
+    "editor.selectionBackground": "#A6D2FF",
+    "editorCursor.foreground": "#000000",
+    "editorIndentGuide.background": "#E1E3E8",
+    "editorIndentGuide.activeBackground": "#C5C9D1",
+    "editorBracketMatch.background": "#93D9D980",
+    "editorBracketMatch.border": "#00000000",
+    "editorWhitespace.foreground": "#1E1F2233",
+  },
+  settings: [
+    { settings: { foreground: "#1E1F22" } },
+
+    // Comments
+    {
+      scope: ["comment", "punctuation.definition.comment"],
+      settings: { foreground: "#808080", fontStyle: "italic" },
+    },
+    {
+      scope: "comment.block.documentation",
+      settings: { foreground: "#808080", fontStyle: "italic" },
+    },
+
+    // Keywords & storage
+    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#0033B3" } },
+
+    // Strings
+    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#067D17" } },
+    { scope: ["keyword.operator"], settings: { foreground: "#1E1F22" } },
+    // Word operators read as keywords
+    {
+      scope: ["keyword.operator.new", "keyword.operator.expression"],
+      settings: { foreground: "#0033B3" },
+    },
+    {
+      scope: [
+        "constant.character.escape",
+        "punctuation.definition.template-expression.begin.tsx",
+        "punctuation.definition.template-expression.end.tsx",
+      ],
+      settings: { foreground: "#0037A6" },
+    },
+
+    // Regex
+    { scope: ["string.regexp", "source.regexp"], settings: { foreground: "#0037A6" } },
+    {
+      scope: [
+        "constant.other.character-class.regexp",
+        "constant.other.character-class.set.regexp",
+        "keyword.operator.quantifier.regexp",
+        "keyword.operator.negation.regexp",
+      ],
+      settings: { foreground: "#0037A6", fontStyle: "" },
+    },
+
+    // Types
+    {
+      scope: ["meta.objectliteral.tsx", "entity.name.type", "support.type", "support.class"],
+      settings: { foreground: "#000000" },
+    },
+
+    // Properties & attributes
+    {
+      scope: [
+        "variable.other.property",
+        "variable.other.object.property",
+        "support.variable",
+        "meta.object-literal.key",
+      ],
+      settings: { foreground: "#871094" },
+    },
+
+    // Variable language (this, super); Python's self/cls take the semantic self/cls color
+    { scope: "variable.language", settings: { foreground: "#0033B3" } },
+    {
+      scope: [
+        "variable.language.special.self.python",
+        "variable.parameter.function.language.special.self.python",
+        "variable.language.special.cls.python",
+        "variable.parameter.function.language.special.cls.python",
+      ],
+      settings: { foreground: "#94558D" },
+    },
+
+    { scope: ["keyword.operator.expression.instanceof.tsx"], settings: { foreground: "#0033B3" } },
+
+    // Constants
+    { scope: ["constant", "constant.numeric"], settings: { foreground: "#1750EB" } },
+    { scope: "constant.language", settings: { foreground: "#0033B3" } },
+    { scope: "constant.other", settings: { foreground: "#871094" } },
+    {
+      scope: "variable.other.enummember",
+      settings: { foreground: "#871094", fontStyle: "italic" },
+    },
+
+    // Tags (HTML/JSX)
+    {
+      scope: [
+        "entity.name.tag",
+        "punctuation.definition.tag",
+        "punctuation.definition.tag.begin",
+        "punctuation.definition.tag.end",
+      ],
+      settings: { foreground: "#0033B3" },
+    },
+
+    // Punctuation & delimiters
+    {
+      scope: [
+        "punctuation.separator",
+        "punctuation.terminator",
+        "meta.brace",
+        "punctuation.section",
+      ],
+      settings: { foreground: "#1E1F22" },
+    },
+
+    // Attributes
+    { scope: ["entity.other.attribute-name"], settings: { foreground: "#174AD4" } },
+
+    // Meta tags
+    { scope: ["meta.embedded.line", "meta.tag"], settings: { foreground: "#1E1F22" } },
+    { scope: ["string.quoted.double.html"], settings: { foreground: "#067D17" } },
+
+    // Import/export
+    {
+      scope: ["keyword.control.import", "keyword.control.export", "keyword.control.from"],
+      settings: { foreground: "#0033B3" },
+    },
+
+    {
+      scope: ["entity.name.function", "support.function", "support.class.component"],
+      settings: { foreground: "#00627A" },
+    },
+    {
+      scope: ["entity.name.type.enum", "entity.name.namespace", "entity.name.module"],
+      settings: { foreground: "#000000" },
+    },
+    { scope: "entity.name.type.parameter", settings: { foreground: "#007E8A" } },
+
+    // Decorators and annotations
+    {
+      scope: ["meta.decorator", "entity.name.function.decorator", "storage.type.annotation"],
+      settings: { foreground: "#9E880D" },
+    },
+
+    // Markdown
+    {
+      scope: ["markup.heading", "markup.heading entity.name"],
+      settings: { foreground: "#0033B3", fontStyle: "bold" },
+    },
+    { scope: "markup.italic", settings: { fontStyle: "italic" } },
+    { scope: "markup.bold", settings: { fontStyle: "bold" } },
+    { scope: "markup.inline.raw", settings: { foreground: "#067D17" } },
+    { scope: "markup.underline.link", settings: { foreground: "#2A5DD8" } },
+  ],
+};

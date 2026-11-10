@@ -23,7 +23,7 @@ import { stringify as yamlStringify } from "yaml";
 import type { LogEntry, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES } from "@/api/log-entry-model";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
-import { highlightCode } from "@/lib/highlighter";
+import { highlightCode, readOnlyCodeTheme } from "@/lib/highlighter";
 import { lazyLspClients } from "@/lib/lsp-clients";
 import { cn } from "@/lib/utils";
 import { useLogStore } from "@/store/logs";
@@ -33,9 +33,9 @@ const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
   debug: "text-muted-foreground",
-  info: "text-blue-400",
-  warn: "text-amber-400",
-  error: "text-red-400",
+  info: "text-blue-600 dark:text-blue-400",
+  warn: "text-amber-700 dark:text-amber-400",
+  error: "text-red-600 dark:text-red-400",
 };
 
 /** The fixed categories, then the language servers that are not among them. */
@@ -77,7 +77,7 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
   }, [entry]);
 
   return (
-    <div className="group hover:bg-muted/50 relative px-3 py-0.5 font-mono text-xs leading-5">
+    <div className="group hover:bg-muted dark:hover:bg-muted/50 relative px-3 py-0.5 font-mono text-xs leading-5">
       <div className="whitespace-pre">
         {
           <button
@@ -127,10 +127,11 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
 function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
   const [html, setHtml] = useState<string | null>(null);
   const yaml = useMemo(() => yamlStringify(ctx, { lineWidth: 0 }).trimEnd(), [ctx]);
+  const darkMode = useUIStore((s) => s.darkMode);
 
   useEffect(() => {
     let cancelled = false;
-    highlightCode(yaml, "yaml", "github-dark")
+    highlightCode(yaml, "yaml", readOnlyCodeTheme(darkMode))
       .then((lines) => {
         if (!cancelled) setHtml(lines.map((l) => l.html).join("\n"));
       })
@@ -138,7 +139,7 @@ function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
     return () => {
       cancelled = true;
     };
-  }, [yaml]);
+  }, [yaml, darkMode]);
 
   return (
     <pre
@@ -184,9 +185,9 @@ function FilterToggle({
 
 const LEVEL_DOT_COLORS: Record<LogLevel, string> = {
   debug: "bg-gray-400",
-  info: "bg-blue-400",
-  warn: "bg-amber-400",
-  error: "bg-red-400",
+  info: "bg-blue-500 dark:bg-blue-400",
+  warn: "bg-amber-500 dark:bg-amber-400",
+  error: "bg-red-500 dark:bg-red-400",
 };
 
 function FilterSidebar() {

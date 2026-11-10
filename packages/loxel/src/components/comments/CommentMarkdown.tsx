@@ -29,7 +29,7 @@ export function CommentMarkdown({ content }: { content: string }) {
             return (
               <a
                 href={href}
-                className="text-primary hover:underline"
+                className="text-link hover:underline"
                 target="_blank"
                 rel="noopener noreferrer"
               >

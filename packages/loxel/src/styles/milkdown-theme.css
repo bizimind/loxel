@@ -831,3 +831,26 @@
   display: block;
   margin: 16px 0;
 }
+
+/* ── Light theme accents (dark keeps the rules above) ── */
+
+.milkdown:not(.dark) {
+  --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.milkdown:not(.dark) .ProseMirror a {
+  color: var(--link);
+}
+
+.milkdown:not(.dark) .ProseMirror blockquote::before {
+  background: var(--input);
+  opacity: 1;
+}
+
+.milkdown:not(.dark) .milkdown-code-block .tools .language-button {
+  opacity: 1;
+}
+
+.milkdown:not(.dark) .milkdown-list-item-block li .label-wrapper .checked svg {
+  fill: var(--button-primary);
+}

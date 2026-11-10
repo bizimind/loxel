@@ -33,6 +33,21 @@ const XTERM_WEBGL_PIXEL_GRID_PATCHES = [
   },
 ];
 
+/**
+ * With a minimum contrast ratio set (the light theme's `--term-min-contrast`; dark keeps 1, which
+ * skips this code), hold dim (SGR 2) text to it as drawn. Stock xterm checks the undimmed color
+ * against half the ratio and then draws it at 50% opacity, so dim text on white ends up near 2:1.
+ * Here the check blends the color 50% over the background first, the way it is drawn, against the
+ * full ratio; colors that fail are drawn opaque at the ratio, which keeps them lighter than normal.
+ */
+const XTERM_WEBGL_DIM_CONTRAST_PATCHES = [
+  {
+    find: "I=this._resolveForegroundRgba(o,r,a,l),L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio/(u?2:1))",
+    replace:
+      "I=this._resolveForegroundRgba(o,r,a,l);u&&(I=((f>>>24)+(I>>>24)>>1<<24|((f>>16&255)+(I>>16&255)>>1)<<16|((f>>8&255)+(I>>8&255)>>1)<<8|255)>>>0);let L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio)",
+  },
+];
+
 function xtermWebglPixelGrid(): Plugin {
   let isBuild = false;
   let patched = false;
@@ -50,7 +65,10 @@ function xtermWebglPixelGrid(): Plugin {
     transform(code, id) {
       if (!id.includes(XTERM_WEBGL_MODULE)) return null;
       let source = code;
-      for (const { find, replace } of XTERM_WEBGL_PIXEL_GRID_PATCHES) {
+      for (const { find, replace } of [
+        ...XTERM_WEBGL_PIXEL_GRID_PATCHES,
+        ...XTERM_WEBGL_DIM_CONTRAST_PATCHES,
+      ]) {
         if (source.split(find).length !== 2) {
           throw new Error(`xterm-webgl-pixel-grid: expected one match in ${id} for: ${find}`);
         }

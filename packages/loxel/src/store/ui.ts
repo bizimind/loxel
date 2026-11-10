@@ -10,9 +10,8 @@ import { serverUiStorage } from "./server-storage";
 export type DiffViewMode = "split" | "unified";
 
 interface UIState {
-  // Theme
+  /** Resolved theme (from the theme setting and, for "system", the OS); set by useThemeSync. */
   darkMode: boolean;
-  toggleDarkMode: () => void;
 
   // Diff view settings
   diffViewMode: DiffViewMode;
@@ -49,7 +48,6 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       darkMode: true,
-      toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
 
       diffViewMode: "split",
       setDiffViewMode: (mode) => set({ diffViewMode: mode }),
@@ -80,7 +78,6 @@ export const useUIStore = create<UIState>()(
       name: `${STORAGE_PREFIX}-ui`,
       storage: createJSONStorage(() => serverUiStorage),
       partialize: (state) => ({
-        darkMode: state.darkMode,
         diffViewMode: state.diffViewMode,
         showAllBranches: state.showAllBranches,
         diffFileTreeExpanded: state.diffFileTreeExpanded,
@@ -93,6 +90,8 @@ export const useUIStore = create<UIState>()(
       merge: (persisted, current) => ({
         ...current,
         ...(persisted as object),
+        // Older versions persisted darkMode; it is now derived from the theme setting.
+        darkMode: current.darkMode,
         favoriteBranches: new Set(
           (persisted as { favoriteBranches?: string[] })?.favoriteBranches ?? [],
         ),

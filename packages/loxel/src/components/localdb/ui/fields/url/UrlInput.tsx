@@ -6,7 +6,7 @@ import { registerField } from "../registry.ts";
 export function UrlView({ value }: FieldViewProps<string>) {
   if (!value) return <EmptyValue />;
   return (
-    <a href={value} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+    <a href={value} target="_blank" rel="noopener noreferrer" className="text-link underline">
       {value}
     </a>
   );

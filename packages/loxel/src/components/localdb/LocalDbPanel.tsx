@@ -260,7 +260,7 @@ function TableListItem({
       className={[
         "w-full text-left px-3 py-2 flex flex-col border-l-2 transition-colors",
         selected
-          ? "bg-primary/15 text-primary border-l-primary"
+          ? "bg-primary/15 text-link border-l-link"
           : "hover:bg-muted text-foreground border-l-transparent",
       ].join(" ")}
     >

@@ -1,0 +1,59 @@
+import type { LucideIcon } from "lucide-react";
+import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import type { ThemePreference } from "@/store/settings-store";
+import { useSettingsStore } from "@/store/settings-store";
+
+const THEME_OPTIONS: readonly { value: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { value: "dark", label: "Dark", icon: MoonIcon },
+  { value: "light", label: "Light", icon: SunIcon },
+  { value: "system", label: "System", icon: MonitorIcon },
+];
+
+export function AppearanceSection() {
+  const theme = useSettingsStore((s) => s.theme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-foreground text-sm font-medium">Appearance</h3>
+        <p className="text-muted-foreground mt-1 text-xs">Choose how Loxel looks.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label id="settings-theme-label" className="text-muted-foreground text-xs">
+          Theme
+        </label>
+        <p className="text-muted-foreground text-[10px]">
+          System follows your operating system&apos;s light or dark appearance.
+        </p>
+        <div
+          role="radiogroup"
+          aria-labelledby="settings-theme-label"
+          className="border-input inline-flex rounded-md border p-0.5"
+        >
+          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={theme === value}
+              onClick={() => setTheme(value)}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1 text-xs transition-colors",
+                theme === value
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

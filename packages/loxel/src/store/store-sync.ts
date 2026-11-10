@@ -68,7 +68,6 @@ const syncTargets: Record<string, SyncTarget> = {
     getState: () => {
       const s = useUIStore.getState();
       return {
-        darkMode: s.darkMode,
         diffViewMode: s.diffViewMode,
         showAllBranches: s.showAllBranches,
         diffFileTreeExpanded: s.diffFileTreeExpanded,

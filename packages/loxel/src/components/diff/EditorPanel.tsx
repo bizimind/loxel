@@ -327,5 +327,5 @@ export function EditorPanel({
     });
   }, [viewZones]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return <div ref={containerRef} data-diff-side={side} className="h-full w-full" />;
 }

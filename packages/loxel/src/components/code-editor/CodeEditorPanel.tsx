@@ -163,6 +163,14 @@ interface CodeEditorPanelProps {
   panelApi: DockviewPanelApi;
 }
 
+/**
+ * Light also tints the caret row's gutter, JetBrains-style, which Monaco keeps while a selection
+ * hides the row's own band. Dark paints no current-line band at all.
+ */
+function lineHighlightFor(darkMode: boolean): "line" | "all" {
+  return darkMode ? "line" : "all";
+}
+
 export function CodeEditorPanel({
   filePath,
   line,
@@ -360,6 +368,7 @@ export function CodeEditorPanel({
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
       inlayHints: inlayHintsOption(),
+      renderLineHighlight: lineHighlightFor(darkMode),
       ...codeFontOptions(),
     });
 
@@ -394,7 +403,7 @@ export function CodeEditorPanel({
         editor.layoutContentWidget(widget);
         return;
       }
-      const themeName = "loxel-dark";
+      const themeName = getMonacoThemeName(useUIStore.getState().darkMode);
       inspectTokenAtPosition(lineText, pos.column, lang, themeName)
         .then((data) => {
           if (data) {
@@ -657,6 +666,7 @@ export function CodeEditorPanel({
   // Update theme
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
+    editorRef.current?.updateOptions({ renderLineHighlight: lineHighlightFor(darkMode) });
   }, [darkMode]);
 
   useInlayHintsOption(editorRef);

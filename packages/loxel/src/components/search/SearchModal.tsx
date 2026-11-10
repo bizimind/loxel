@@ -178,7 +178,7 @@ export function SearchModal() {
     <ModalErrorBoundary name="Search" onClose={close}>
       <dialog
         ref={dialogRef}
-        className="bg-popover border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-2xl backdrop:bg-black/50"
+        className="bg-popover border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/50"
         onClose={close}
         onClick={(e) => {
           if (e.target === e.currentTarget) close();
@@ -260,7 +260,7 @@ export function SearchModal() {
                 key={`${match.filePath}:${match.line}:${match.column}:${i}`}
                 className={cn(
                   "border-border/50 w-full border-b px-3 py-1.5 text-left transition-colors last:border-b-0",
-                  i === selectedIndex ? "bg-primary/10" : "hover:bg-muted/50",
+                  i === selectedIndex ? "bg-primary dark:bg-primary/10" : "hover:bg-muted/50",
                 )}
                 onClick={() => openResult(i)}
                 onMouseEnter={() => useSearchStore.getState().setSelectedIndex(i)}

@@ -69,6 +69,14 @@ function getTerminalTheme() {
   };
 }
 
+/**
+ * The theme's minimum foreground/background contrast (`--term-min-contrast`). Light themes raise
+ * it so colors meant for dark backgrounds (white, bright white, dim) stay readable on white.
+ */
+function getTerminalMinimumContrast(): number {
+  return Number(cssVar("--term-min-contrast")) || 1;
+}
+
 const RESIZE_DEBOUNCE_MS = 100;
 
 /** The bundled font's weights; a font the user picks gets the regular and bold it ships with. */
@@ -333,6 +341,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
       theme: getTerminalTheme(),
+      minimumContrastRatio: getTerminalMinimumContrast(),
     });
 
     const fitAddon = new FitAddon();
@@ -617,6 +626,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const id = requestAnimationFrame(() => {
       if (xtermRef.current) {
         xtermRef.current.options.theme = getTerminalTheme();
+        xtermRef.current.options.minimumContrastRatio = getTerminalMinimumContrast();
       }
     });
     return () => cancelAnimationFrame(id);
