@@ -76,6 +76,7 @@ import {
   installJavaScriptDialogs,
   trackWebviewDialogs,
 } from "./javascript-dialogs";
+import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
@@ -864,6 +865,11 @@ app.whenReady().then(async () => {
     });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
     installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
+    // Installed fonts are for Loxel's own window (the font pickers), never for browser panels.
+    session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
+    session
+      .fromPartition(BROWSER_PARTITION)
+      .setPermissionCheckHandler(localFontsCheckHandler(() => false));
 
     buildAppMenu();
     await createWindow();
