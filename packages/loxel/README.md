@@ -65,19 +65,22 @@ pnpm run typecheck
 
 Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
 
+To run a second web dev instance beside one already on the default ports (for example from another worktree), give it its own ports and state directory: `LOXEL_SERVE_PORT=7444 LOXEL_VITE_PORT=5183 LOXEL_STATE_DIR=~/.local/state/loxel/loxel-dev-2 pnpm run dev`, then open `http://127.0.0.1:5183`.
+
 Demo mode (`LOXEL_DEMO=1`, set by the demo scripts) runs beside the installed app with its own port, state and data directories, and shows no badge; it stages the site's screenshots from generated demo projects. See [scripts/demo/shots.md](scripts/demo/shots.md) for the shot list and [docs/ELECTRON.md](docs/ELECTRON.md#demo-mode) for how it differs from dev mode.
 
 ### Environment variables
 
-| Variable              | Purpose                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------- |
-| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                 |
-| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                |
-| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state |
-| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                         |
-| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                    |
-| `LOXEL_SERVE_PORT`    | Override the server port (standalone server only; the app uses 7433/7434/7435 + n)  |
-| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`)            |
+| Variable              | Purpose                                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                                 |
+| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                                |
+| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state                 |
+| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                                         |
+| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                                    |
+| `LOXEL_SERVE_PORT`    | Override the server port (standalone server and Vite's proxy only; the app uses 7433/7434/7435 + n) |
+| `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                            |
+| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`)                            |
 
 Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the renderer inside the installed app. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_PORT`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 

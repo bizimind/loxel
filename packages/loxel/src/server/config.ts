@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
+import { DEFAULT_DEV_SERVER_PORT, parsePortEnv, vitePort } from "../dev-ports";
 
 const isDev = process.env.LOXEL_DEV === "1";
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
@@ -14,13 +15,9 @@ const stateBase = join(homedir(), ".local", "state", "loxel");
 const stateDir =
   process.env.LOXEL_STATE_DIR ??
   join(stateBase, isDemo ? demoStateName(demoInstance) : isDev ? "loxel-dev" : "loxel");
-const port = process.env.LOXEL_SERVE_PORT
-  ? parseInt(process.env.LOXEL_SERVE_PORT, 10)
-  : isDemo
-    ? demoPort(demoInstance)
-    : isDev
-      ? 7434
-      : 7433;
+const port =
+  parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
+  (isDemo ? demoPort(demoInstance) : isDev ? DEFAULT_DEV_SERVER_PORT : 7433);
 
 /** A positive integer process ID from an environment variable, or null. */
 function parsePid(value: string | undefined): number | null {
@@ -57,6 +54,8 @@ export const config = {
   /** LemMinX's `xml.server.workDir`; see `SchemaDownloads`. */
   lemminxWorkDir: join(stateDir, "schema-cache", "lemminx"),
   port,
+  /** The Vite dev server's port, whose origin a dev server also admits; null outside dev mode. */
+  viteDevPort: isDev ? vitePort(process.env) : null,
   /**
    * The desktop app's process ID when the app started this server (`LOXEL_PARENT_PID`). The
    * server then lives as long as the app does; a server started on its own shuts down when idle.
