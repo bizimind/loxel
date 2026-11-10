@@ -66,7 +66,7 @@ export function DiffBlockView({ diff }: { diff: DiffInfo }) {
   const deletions = diff.files.reduce((sum, file) => sum + file.deletions, 0);
   const fileCount = diff.files.filter((file) => fileDiffPath(file) !== "").length;
   return (
-    <div className="loxel-diff-block flex flex-col gap-2 font-mono text-xs">
+    <div className="loxel-diff-block flex flex-col gap-2 font-(family-name:--loxel-font-code) text-xs">
       <div className="flex items-center gap-2 font-sans text-[10px]">
         {fileCount > 1 && <span className="text-muted-foreground">{fileCount} files</span>}
         {additions > 0 && <span className="text-diff-add-text">+{additions}</span>}
