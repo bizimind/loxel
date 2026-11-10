@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
+import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 
 import {
   type BackendMode,
@@ -119,7 +119,7 @@ export class FormatService {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
-    settings: FormattingSettings,
+    settings: FormatOnSaveSettings,
   ): Promise<FormatResult> {
     if (!settings.enabled) return UNFORMATTED;
     if (content.length > MAX_FORMAT_SIZE) return UNFORMATTED;
