@@ -1,6 +1,6 @@
 # Side-by-Side Diff View Specification
 
-How the diff views are put together for git diffs and file comparisons, and how the side-by-side view keeps its two panels aligned while scrolling, highlights intra-line changes, and draws the gutter between the panels.
+How the diff views are put together for git diffs, file comparisons and patches, and how the side-by-side view keeps its two panels aligned while scrolling, highlights intra-line changes, and draws the gutter between the panels.
 
 ## Components and Data Sources
 
