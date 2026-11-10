@@ -9,6 +9,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
@@ -17,6 +18,7 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
@@ -69,17 +71,23 @@ function getTerminalTheme() {
 
 const RESIZE_DEBOUNCE_MS = 100;
 
-const TERMINAL_FONT = {
-  family: "JetBrains Mono NL",
-  size: 13,
-  weight: "400",
-  weightBold: "500",
-} as const;
+/** The bundled font's weights; a font the user picks gets the regular and bold it ships with. */
+const BUNDLED_FONT_WEIGHTS = { fontWeight: "400", fontWeightBold: "500" } as const;
+const PICKED_FONT_WEIGHTS = { fontWeight: "normal", fontWeightBold: "bold" } as const;
+
+function terminalFontOptions(font: ResolvedFont) {
+  return {
+    fontFamily: font.stack,
+    fontSize: font.size,
+    ...(font.family === null ? BUNDLED_FONT_WEIGHTS : PICKED_FONT_WEIGHTS),
+  };
+}
 
 const TERMINAL_FONT_TIMEOUT_MS = 2000;
 
 /**
- * Resolve once the terminal's font faces are loaded, failed, or timed out. xterm measures the cell
+ * Resolve once the bundled terminal font's faces are loaded, failed, or timed out. They back a font
+ * the user picks too, which is installed and needs no loading. xterm measures the cell
  * grid and the WebGL renderer rasterizes glyphs on open, and neither re-checks when a web font
  * swaps in, so opening earlier would bake the fallback font into the grid and the glyph atlas.
  */
@@ -88,7 +96,7 @@ function loadTerminalFont(): Promise<unknown> {
   // for this family (its local() fallback face for U+23FA in index.css breaks matching) and
   // resolves without loading anything.
   const faces = [...document.fonts].filter(
-    (face) => face.family.replaceAll('"', "") === TERMINAL_FONT.family,
+    (face) => face.family.replaceAll('"', "") === BUNDLED_FONT_FAMILY.terminal,
   );
   const loaded = Promise.allSettled(faces.map((face) => face.load()));
   const timeout = new Promise((resolve) => {
@@ -267,6 +275,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
+  const font = useSettingsStore(useShallow((s) => resolveFont(s.fonts, "terminal")));
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
 
@@ -314,10 +323,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
 
     const terminal = new XTerm({
       cursorBlink: true,
-      fontFamily: `"${TERMINAL_FONT.family}", monospace`,
-      fontSize: TERMINAL_FONT.size,
-      fontWeight: TERMINAL_FONT.weight,
-      fontWeightBold: TERMINAL_FONT.weightBold,
+      ...terminalFontOptions(resolveFont(useSettingsStore.getState().fonts, "terminal")),
       letterSpacing: 0,
       lineHeight: 1.1,
       linkHandler: { activate: (event, text) => openUrl(event, text) },
@@ -626,6 +632,16 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     });
     return () => cancelAnimationFrame(id);
   }, [scrollbackLines]);
+
+  // Apply font changes. xterm re-measures its cells and the WebGL renderer redraws its glyphs; the
+  // cell size changes, so refit. A terminal off screen refits when it is shown.
+  useEffect(() => {
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    Object.assign(terminal.options, terminalFontOptions(font));
+    if (!fitAddonRef.current || !attachedRef.current || !isOnScreen(panelApi)) return;
+    fitAndSendResize(terminalId, terminal, fitAddonRef.current);
+  }, [font, terminalId, panelApi]);
 
   // Focus terminal on click
   const handleClick = useCallback(() => {

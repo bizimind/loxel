@@ -19,7 +19,7 @@ import {
 } from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
-import { useSettingsStore } from "./settings-store";
+import { persistedSettings, useSettingsStore } from "./settings-store";
 import { useUIStore } from "./ui";
 import { mergePersistedProjectStates, persistedProjectStates, useWorktreeStore } from "./worktrees";
 
@@ -42,18 +42,7 @@ interface SyncTarget {
 
 const syncTargets: Record<string, SyncTarget> = {
   settings: {
-    getState: () => {
-      const s = useSettingsStore.getState();
-      return {
-        layout: s.layout,
-        terminal: s.terminal,
-        editor: s.editor,
-        schemas: s.schemas,
-        fileAssociations: s.fileAssociations,
-        autoRevealInExplorer: s.autoRevealInExplorer,
-        autoCheckForUpdates: s.autoCheckForUpdates,
-      };
-    },
+    getState: () => persistedSettings(useSettingsStore.getState()),
     setState: (partial) => useSettingsStore.setState(partial),
   },
 
