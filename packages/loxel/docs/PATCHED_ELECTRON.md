@@ -31,6 +31,6 @@ Local packaged builds (`build:app`, `build:app:local`) use the patched zip when 
 
 ## Updating
 
-- **A new Electron patch release** carries Chromium security fixes, and browser panels load arbitrary sites, so take each one promptly: bump the exact version in `package.json`, rebase the patches onto the new tag (they touch only `shell/browser/webauthn/`, the spec and the docs, so they usually apply unchanged), build and upload, then merge.
+- **A new Electron patch release** carries Chromium security fixes, and browser panels load arbitrary sites, so take each one promptly. Dependabot ignores `electron`, so nobody gets a bump that skips these steps: bump the exact version in `package.json`, rebase the patches onto the new tag (they touch only `shell/browser/webauthn/`, the spec and the docs, so they usually apply unchanged), build and upload, then merge.
 - **A patch that no longer applies**: rebase it in an Electron checkout on the new tag and regenerate it with `git format-patch --zero-commit --no-signature`.
 - **Upstream ships the feature**: delete the patches it covers. With none left, remove the fetch step and `electronDist` flag from the release workflow and this pipeline.
