@@ -20,6 +20,23 @@
   src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
 }
 
+/* Literata - markdown font. Variable weight and optical size, Latin subset; OFL-1.1 in public/fonts/LICENSE-Literata.txt */
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable-Italic.woff2") format("woff2");
+}
+
 /* JetBrains Mono - code font */
 @font-face {
   font-family: "JetBrains Mono";

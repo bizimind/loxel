@@ -24,7 +24,9 @@ describe("resolveFont", () => {
       stack: '"JetBrains Mono NL", monospace',
       size: 13,
     });
-    expect(resolveFont(DEFAULT_FONT_SETTINGS, "prose").stack).toStartWith('"Inter", system-ui');
+    expect(resolveFont(DEFAULT_FONT_SETTINGS, "prose").stack).toStartWith(
+      '"Literata", "Iowan Old Style"',
+    );
   });
 
   test("puts the chosen family in front of the bundled stack", () => {
@@ -64,6 +66,6 @@ test("quoteFontFamily escapes quotes and backslashes", () => {
 test("fontCssVariables exposes the code and prose fonts", () => {
   const vars = fontCssVariables(fonts({ prose: { family: "Georgia", size: 17 } }));
   expect(vars["--loxel-font-code-size"]).toBe("13px");
-  expect(vars["--loxel-font-prose"]).toStartWith('"Georgia", "Inter"');
+  expect(vars["--loxel-font-prose"]).toStartWith('"Georgia", "Literata"');
   expect(vars["--loxel-font-prose-size"]).toBe("17px");
 });
