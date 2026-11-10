@@ -161,6 +161,8 @@ export class TerminalSession {
   private attachGeneration = 0;
   private unacked = 0;
   private paused = false;
+  /** The snapshot sync in flight, if any: the exit waits for it, so it reaches the client last. */
+  private snapshotSync: Promise<void> | null = null;
   private disposed = false;
   private emulatorOverflowed = false;
 
@@ -243,7 +245,11 @@ export class TerminalSession {
       }
     }
 
-    await this.syncWithSnapshot(sink, generation);
+    const sync = this.syncWithSnapshot(sink, generation).finally(() => {
+      if (this.snapshotSync === sync) this.snapshotSync = null;
+    });
+    this.snapshotSync = sync;
+    await sync;
   }
 
   /** Stop streaming to the attached client. The shell keeps running. */
@@ -421,6 +427,9 @@ export class TerminalSession {
 
   private async onExited(exitCode: number): Promise<void> {
     log.info(`Terminal ${this.shortId} exited with code ${exitCode}`);
+    // A shell that exits while a snapshot is being produced (a short command, or a resync) would
+    // otherwise get its exit to the client before that snapshot and the output after it.
+    while (this.snapshotSync) await this.snapshotSync.catch(() => {});
     // A paused client is still behind; without this final snapshot the tail of the output would
     // be lost, since the manager destroys the session (ring and emulator) right after onExit.
     if (this.sink && this.paused) await this.attach(this.sink);
