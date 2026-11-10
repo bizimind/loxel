@@ -54,7 +54,10 @@ import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { useEditorStateStore } from "@/store/editor-state";
+import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
+
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
 
@@ -330,6 +333,9 @@ export function MarkdownEditor({
 
   // Keep save option refs in sync with formatting settings.
   useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
+  const markdownOutput = useSettingsStore((s) => s.editor.formatting.markdownOutput);
+  // Value key so async settings hydration (same values, new object) doesn't remount the editor.
+  const markdownOutputKey = JSON.stringify(markdownOutput);
 
   // Frontmatter state — kept as React state so FrontmatterEditor re-renders on change.
   // The ref mirrors the state for synchronous reads inside Crepe callbacks.
@@ -431,13 +437,13 @@ export function MarkdownEditor({
 
     installSoftLineBreaks(crepe.editor);
 
-    // Align remark-stringify output with oxfmt/Prettier markdown defaults.
+    // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
+    // remark-stringify at init, so changes recreate the editor via the effect deps below.
     crepe.editor.config((ctx) => {
-      ctx.set(remarkStringifyOptionsCtx, {
-        ...ctx.get(remarkStringifyOptionsCtx),
-        bullet: "-",
-        rule: "-",
-      });
+      ctx.set(
+        remarkStringifyOptionsCtx,
+        buildRemarkStringifyOptions(ctx.get(remarkStringifyOptionsCtx), markdownOutput),
+      );
     });
 
     // On every change: merge with frontmatter, update cache + trigger autosave
@@ -663,9 +669,10 @@ export function MarkdownEditor({
       crepeRef.current = null;
     };
     // Re-create when crepeKey changes (accept disk version), content first loads,
-    // or cache key changes (project/worktree switch)
+    // cache key changes (project/worktree switch), or markdown output settings change.
+    // Pending edits survive the remount via editorContentCache (written in cleanup).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crepeKey, diskContent !== null, cacheKey]);
+  }, [crepeKey, diskContent !== null, cacheKey, markdownOutputKey]);
 
   // Navigate to line:column when props change (e.g. clicking a different search result for
   // the same file). Skips the initial render — mount-time navigation is handled above.
