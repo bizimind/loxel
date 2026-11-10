@@ -18,6 +18,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     copyWebviewImage: () => {},
     onJavaScriptDialog: () => () => {},
     respondToJavaScriptDialog: () => {},
+    onPasskeyQrCode: () => () => {},
     getUpdateStatus: async () => ({ state: "idle" }),
     checkForUpdates: async () => {},
     downloadUpdate: async () => {},

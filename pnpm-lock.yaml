@@ -358,6 +358,9 @@ importers:
       unist-util-visit:
         specifier: ^5.1.0
         version: 5.1.0
+      uqr:
+        specifier: 0.1.3
+        version: 0.1.3
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -6135,6 +6138,9 @@ packages:
 
   unzipper@0.12.5:
     resolution: {integrity: sha512-tXYOi9R57Uj/2Z25SOs5RRSzq886MBQj2gY8dPL+xl/kv6s6SvByoKfAtvfVeEuhntWDgjd2o9p2lb4TVPAz0A==}
+
+  uqr@0.1.3:
+    resolution: {integrity: sha512-0rjE8iEJe4YmT9TOhwsZtqCMRLc5DXZUI2UEYUUg63ikBkqqE5EYWaI0etFe/5KUcmcYwLih2RND1kq+hrUJXA==}
 
   url-join@4.0.1:
     resolution: {integrity: sha512-jk1+QP6ZJqyOiuEI9AEWQfju/nB2Pw466kbA0LEZljHwKeMgd9WrAEgEGxjPDD2+TNbbb37rTyhEfrCXfuKXnA==}
@@ -12768,6 +12774,8 @@ snapshots:
       fs-extra: 11.3.1
       graceful-fs: 4.2.11
       node-int64: 0.4.0
+
+  uqr@0.1.3: {}
 
   url-join@4.0.1: {}
 

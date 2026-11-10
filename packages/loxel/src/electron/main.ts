@@ -78,7 +78,12 @@ import {
 } from "./javascript-dialogs";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
-import { configurePasskeys, installAccountChooser } from "./webauthn";
+import {
+  type BrowserPanelFrame,
+  configurePasskeys,
+  installAccountChooser,
+  installHybridQrCode,
+} from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
 import { handleWebviewWindowOpens } from "./webview-new-tabs";
@@ -782,6 +787,21 @@ function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
   );
 }
 
+/** The browser panel showing a frame: its webview and the window renderer hosting it. */
+function browserPanelFrame(frame: WebFrameMain): BrowserPanelFrame | null {
+  const contents = webContents.fromFrame(frame);
+  const host = contents?.hostWebContents;
+  if (!contents || !host) return null;
+  return {
+    webContentsId: contents.id,
+    send: (channel, payload) => {
+      if (!host.isDestroyed()) host.send(channel, payload);
+    },
+    isGone: () => contents.isDestroyed(),
+    onGone: (callback) => contents.once("destroyed", callback),
+  };
+}
+
 /** Ask which passkey to use when a site matches several. */
 async function promptForAccount(
   frame: WebFrameMain | null,
@@ -868,12 +888,12 @@ app.whenReady().then(async () => {
       configureWebAuthn: (options) => app.configureWebAuthn(options),
     });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
-    installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
+    const browserSession = session.fromPartition(BROWSER_PARTITION);
+    installAccountChooser(browserSession, promptForAccount);
+    installHybridQrCode(browserSession, browserPanelFrame);
     // Installed fonts are for Loxel's own window (the font pickers), never for browser panels.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    session
-      .fromPartition(BROWSER_PARTITION)
-      .setPermissionCheckHandler(localFontsCheckHandler(() => false));
+    browserSession.setPermissionCheckHandler(localFontsCheckHandler(() => false));
 
     buildAppMenu();
     await createWindow();

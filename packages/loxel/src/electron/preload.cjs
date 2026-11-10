@@ -18,6 +18,8 @@ const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
 const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
 const UPDATE_GET_STATUS = "update:get-status";
+const PASSKEY_QR_SHOW = "passkey:qr-show";
+const PASSKEY_QR_HIDE = "passkey:qr-hide";
 const UPDATE_CHECK = "update:check";
 const UPDATE_DOWNLOAD = "update:download";
 const UPDATE_INSTALL = "update:install";
@@ -87,6 +89,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     };
   },
   respondToJavaScriptDialog: (response) => ipcRenderer.send(JAVASCRIPT_DIALOG_RESPOND, response),
+  onPasskeyQrCode: (onShow, onHide) => {
+    const show = (_event, request) => onShow(request);
+    const hide = (_event, webContentsId) => onHide(webContentsId);
+    ipcRenderer.on(PASSKEY_QR_SHOW, show);
+    ipcRenderer.on(PASSKEY_QR_HIDE, hide);
+    return () => {
+      ipcRenderer.removeListener(PASSKEY_QR_SHOW, show);
+      ipcRenderer.removeListener(PASSKEY_QR_HIDE, hide);
+    };
+  },
   getUpdateStatus: () => ipcRenderer.invoke(UPDATE_GET_STATUS),
   checkForUpdates: () => ipcRenderer.invoke(UPDATE_CHECK),
   downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD),

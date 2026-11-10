@@ -3,6 +3,9 @@ import path from "node:path";
 
 import type { Session, WebAuthnAccount, WebFrameMain } from "electron";
 
+import { PASSKEY_QR_HIDE, PASSKEY_QR_SHOW } from "./ipc-channels";
+import { FIDO_QR_PREFIX, type PasskeyQrCode, isRecord } from "./passkey-qr-code";
+
 /**
  * Passkeys in the browser panels.
  *
@@ -121,5 +124,107 @@ export function installAccountChooser(
     } finally {
       callback(credentialId);
     }
+  });
+}
+
+/**
+ * Cross-device passkeys: sign in with a passkey stored on a phone by scanning a QR code
+ * (FIDO hybrid transport). Electron offers it through the `webauthn-hybrid-request` session
+ * event (electron/electron#55427) and draws no UI, so the browser panel that made the request
+ * shows the code. On an Electron without the event the listeners never fire.
+ */
+
+/** A browser panel's webview, as seen by the hybrid QR code listeners. */
+export interface BrowserPanelFrame {
+  webContentsId: number;
+  /** Send to the renderer of the window hosting the webview. */
+  send: (channel: string, payload: unknown) => void;
+  /** True once the webview is destroyed. */
+  isGone: () => boolean;
+  /** Run `callback` once when the webview is destroyed. */
+  onGone: (callback: () => void) => void;
+}
+
+/**
+ * The requesting frame of a hybrid event. Electron documents it as `WebFrameMain | null`; the
+ * runtime check only guards against a malformed payload.
+ */
+function eventFrame(details: Record<string, unknown>): WebFrameMain | null {
+  const { frame } = details;
+  if (!isRecord(frame) || typeof frame.origin !== "string") return null;
+  return frame as unknown as WebFrameMain;
+}
+
+interface PendingRequest {
+  relyingPartyId: string;
+  frame: WebFrameMain;
+  panel: BrowserPanelFrame;
+}
+
+/** Requests a completion event without a frame belongs to: those whose frame has gone, or the lone match. */
+function endedWithoutFrame(candidates: PendingRequest[]): PendingRequest[] {
+  const gone = candidates.filter(({ frame, panel }) => frame.detached || panel.isGone());
+  if (gone.length > 0) return gone;
+  return candidates.length === 1 ? candidates : [];
+}
+
+/**
+ * Show each hybrid request's QR code in the browser panel that made it. `locate` maps the
+ * requesting frame to its panel, or null for a frame outside the browser panels, whose request
+ * then gets no QR code and carries on with the other authenticators.
+ *
+ * The listeners only forward the request: Electron emits from inside Chromium's request setup,
+ * so they must not block or tear down the frame.
+ */
+export function installHybridQrCode(
+  browserSession: NodeJS.EventEmitter,
+  locate: (frame: WebFrameMain) => BrowserPanelFrame | null,
+): void {
+  // Requests showing a QR code, by webContents ID (one WebAuthn request per page at a time).
+  const pending = new Map<number, PendingRequest>();
+
+  function end(request: PendingRequest): void {
+    const { webContentsId } = request.panel;
+    if (pending.get(webContentsId) !== request) return;
+    pending.delete(webContentsId);
+    request.panel.send(PASSKEY_QR_HIDE, webContentsId);
+  }
+
+  browserSession.on("webauthn-hybrid-request", (_event: unknown, details: unknown) => {
+    if (!isRecord(details)) return;
+    const { relyingPartyId, requestType, qrCode } = details;
+    if (typeof relyingPartyId !== "string") return;
+    if (requestType !== "create" && requestType !== "get") return;
+    if (typeof qrCode !== "string" || !qrCode.startsWith(FIDO_QR_PREFIX)) return;
+    const frame = eventFrame(details);
+    const panel = frame && locate(frame);
+    if (!frame || !panel) return;
+
+    const request: PendingRequest = { relyingPartyId, frame, panel };
+    pending.set(panel.webContentsId, request);
+    panel.onGone(() => end(request));
+    const qr: PasskeyQrCode = {
+      webContentsId: panel.webContentsId,
+      relyingPartyId,
+      requestType,
+      qrCode,
+    };
+    panel.send(PASSKEY_QR_SHOW, qr);
+  });
+
+  browserSession.on("webauthn-hybrid-request-completed", (_event: unknown, details: unknown) => {
+    if (!isRecord(details)) return;
+    const frame = eventFrame(details);
+    const panel = frame && locate(frame);
+    if (panel) {
+      const request = pending.get(panel.webContentsId);
+      if (request) end(request);
+      return;
+    }
+    // The frame is usually gone when a navigation ended the request.
+    const candidates = [...pending.values()].filter(
+      (request) => request.relyingPartyId === details.relyingPartyId,
+    );
+    for (const request of endedWithoutFrame(candidates)) end(request);
   });
 }
