@@ -141,8 +141,8 @@ export interface BrowserPanelFrame {
   send: (channel: string, payload: unknown) => void;
   /** True once the webview is destroyed. */
   isGone: () => boolean;
-  /** Run `callback` once when the webview is destroyed. */
-  onGone: (callback: () => void) => void;
+  /** Run `callback` once when the webview is destroyed; returns a function that stops that. */
+  onGone: (callback: () => void) => () => void;
 }
 
 /**
@@ -159,6 +159,7 @@ interface PendingRequest {
   relyingPartyId: string;
   frame: WebFrameMain;
   panel: BrowserPanelFrame;
+  stopWatchingPanel: () => void;
 }
 
 /** Requests a completion event without a frame belongs to: those whose frame has gone, or the lone match. */
@@ -187,6 +188,7 @@ export function installHybridQrCode(
     const { webContentsId } = request.panel;
     if (pending.get(webContentsId) !== request) return;
     pending.delete(webContentsId);
+    request.stopWatchingPanel();
     request.panel.send(PASSKEY_QR_HIDE, webContentsId);
   }
 
@@ -200,9 +202,14 @@ export function installHybridQrCode(
     const panel = frame && locate(frame);
     if (!frame || !panel) return;
 
-    const request: PendingRequest = { relyingPartyId, frame, panel };
+    pending.get(panel.webContentsId)?.stopWatchingPanel();
+    const request: PendingRequest = {
+      relyingPartyId,
+      frame,
+      panel,
+      stopWatchingPanel: panel.onGone(() => end(request)),
+    };
     pending.set(panel.webContentsId, request);
-    panel.onGone(() => end(request));
     const qr: PasskeyQrCode = {
       webContentsId: panel.webContentsId,
       relyingPartyId,
@@ -215,10 +222,12 @@ export function installHybridQrCode(
   browserSession.on("webauthn-hybrid-request-completed", (_event: unknown, details: unknown) => {
     if (!isRecord(details)) return;
     const frame = eventFrame(details);
-    const panel = frame && locate(frame);
-    if (panel) {
-      const request = pending.get(panel.webContentsId);
-      if (request) end(request);
+    if (frame) {
+      // Only the request that frame made: not one outside the panels (a sign-in popup on the
+      // same session), and not a newer request from the same webview.
+      const panel = locate(frame);
+      const request = panel && pending.get(panel.webContentsId);
+      if (request?.frame === frame) end(request);
       return;
     }
     // The frame is usually gone when a navigation ended the request.

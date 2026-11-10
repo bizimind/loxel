@@ -74,6 +74,14 @@ export function distZipName(version: string, arch: ElectronArch): string {
   return `electron-v${version}-darwin-${arch}.zip`;
 }
 
+/**
+ * Next to a zip in DIST_DIR, the ID of the build it came from, so a zip left from before a patch
+ * change is never packaged as the current build.
+ */
+export function buildIdMarker(zipPath: string): string {
+  return `${zipPath}.build-id`;
+}
+
 /** Object key in the R2 bucket for a file of a build. */
 export function objectKey(id: string, file: string): string {
   return `loxel/electron/${id}/${file}`;
@@ -117,4 +125,21 @@ export async function sha256File(file: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of Bun.file(file).stream()) hash.update(chunk);
   return hash.digest("hex");
+}
+
+/**
+ * Whether a build's zip for `arch` is fully in R2. Its checksum is uploaded after the zip, so a
+ * zip without one is an interrupted upload, not a build.
+ */
+export async function isUploaded(
+  client: S3Client,
+  id: string,
+  version: string,
+  arch: ElectronArch,
+): Promise<boolean> {
+  const zipName = distZipName(version, arch);
+  return (
+    (await client.file(objectKey(id, `${zipName}.sha256`)).exists()) &&
+    (await client.file(objectKey(id, zipName)).exists())
+  );
 }

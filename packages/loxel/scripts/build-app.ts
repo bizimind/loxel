@@ -10,15 +10,16 @@
  * workflow passes --config.mac.provisioningProfile explicitly instead.
  *
  * Releases ship a patched Electron (docs/PATCHED_ELECTRON.md). When `fetch-electron.ts` or
- * `build-electron.ts` has put the zip for the target architecture in build/electron-dist, it is
- * packaged; otherwise the app gets stock Electron from node_modules, without the patches.
+ * `build-electron.ts` has put the zip for the target architecture in build/electron-dist, and its
+ * marker names the current build ID, it is packaged; with no zip the app gets stock Electron from
+ * node_modules, without the patches, and a zip from another build stops the build.
  */
 import fs from "node:fs";
 import path from "node:path";
 
 import { $ } from "bun";
 
-import { DIST_DIR, currentBuild, distZipName, parseArch } from "./electron-dist";
+import { DIST_DIR, buildIdMarker, currentBuild, distZipName, parseArch } from "./electron-dist";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const profile = path.join(packageRoot, "build", "embedded.provisionprofile");
@@ -37,12 +38,20 @@ if (args.some((arg) => arg.startsWith("--config.mac.provisioningProfile"))) {
 const arch = parseArch(
   args.includes("--x64") ? "x64" : args.includes("--arm64") ? "arm64" : process.arch,
 );
-const patchedZip = path.join(DIST_DIR, distZipName(currentBuild().version, arch));
+const build = currentBuild();
+const patchedZip = path.join(DIST_DIR, distZipName(build.version, arch));
+const marker = buildIdMarker(patchedZip);
+const patchedBuildId = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").trim() : undefined;
 if (args.some((arg) => arg.startsWith("--config.electronDist"))) {
   console.log("[build-app] using the Electron given on the command line");
-} else if (fs.existsSync(patchedZip)) {
-  console.log(`[build-app] packaging patched Electron ${patchedZip}`);
+} else if (fs.existsSync(patchedZip) && patchedBuildId === build.id) {
+  console.log(`[build-app] packaging patched Electron ${build.id} (${patchedZip})`);
   args.push(`--config.electronDist=${DIST_DIR}`);
+} else if (fs.existsSync(patchedZip)) {
+  throw new Error(
+    `${patchedZip} is from build ${patchedBuildId ?? "unknown"}, not ${build.id}: ` +
+      "fetch or build the current one (docs/PATCHED_ELECTRON.md), or delete it to package stock Electron",
+  );
 } else {
   console.log("[build-app] no patched Electron in build/electron-dist; packaging stock Electron");
 }

@@ -798,7 +798,10 @@ function browserPanelFrame(frame: WebFrameMain): BrowserPanelFrame | null {
       if (!host.isDestroyed()) host.send(channel, payload);
     },
     isGone: () => contents.isDestroyed(),
-    onGone: (callback) => contents.once("destroyed", callback),
+    onGone: (callback) => {
+      contents.once("destroyed", callback);
+      return () => contents.removeListener("destroyed", callback);
+    },
   };
 }
 

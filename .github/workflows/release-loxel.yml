@@ -38,6 +38,15 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      # Before anything is bumped, committed or tagged: a release whose patched Electron isn't in
+      # R2 for both architectures would fail later and leave an orphaned release commit and tag.
+      - name: Check patched Electron is uploaded
+        run: bun packages/loxel/scripts/fetch-electron.ts --check
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Bump patch version
         id: bump
         run: |

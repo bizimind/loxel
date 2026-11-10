@@ -5,8 +5,9 @@
  *
  * Checks out the Electron release package.json pins, applies `electron/patches/`, and builds
  * Electron's release configuration for each architecture (x64 is cross-compiled on Apple silicon).
- * Each zip is checked for the right version and architecture before it is uploaded. A build already
- * in R2 is skipped unless --force. Needs Electron's build tools (`npm i -g @electron/build-tools`),
+ * Each zip is checked for the right version and architecture, kept under its build ID, copied to
+ * build/electron-dist for local packaging, and uploaded. A build already in R2 is skipped, and one
+ * already built for this ID (e.g. by a --no-upload run) is only uploaded, unless --force. Needs Electron's build tools (`npm i -g @electron/build-tools`),
  * Xcode with its Metal toolchain, about 150 GB of disk, and the R2 credentials fetch-electron.ts
  * uses. See docs/PATCHED_ELECTRON.md.
  */
@@ -19,11 +20,14 @@ import { parseArgs } from "node:util";
 import { $ } from "bun";
 
 import {
+  DIST_DIR,
   ELECTRON_ARCHES,
   type ElectronArch,
   PATCHES_DIR,
+  buildIdMarker,
   currentBuild,
   distZipName,
+  isUploaded,
   objectKey,
   parseArch,
   r2Client,
@@ -69,29 +73,44 @@ async function checkPrerequisites(): Promise<void> {
   }
 }
 
-/** Create the arch's build-tools config on first use. */
+/**
+ * Create the arch's build-tools config on first use. An existing one must build the checkout under
+ * `root`: one made for another root would build there while the patches go here, and the zip read
+ * back from here would be an older build.
+ */
 async function ensureConfig(arch: ElectronArch): Promise<void> {
   const configs = await $`e show configs`.nothrow().quiet().text();
-  if (configs.split(/\s+/).includes(configName(arch))) return;
-  log(`creating build config ${configName(arch)} in ${root}`);
-  await $`e init ${configName(arch)} --root ${root} --import release --out ${outDir(arch)} --target-cpu ${arch} --remote-build none --use-https`;
+  if (!configs.split(/\s+/).includes(configName(arch))) {
+    log(`creating build config ${configName(arch)} in ${root}`);
+    await $`e init ${configName(arch)} --root ${root} --import release --out ${outDir(arch)} --target-cpu ${arch} --remote-build none --use-https`;
+    return;
+  }
+  await $`e use ${configName(arch)}`.quiet();
+  const configRoot = path.resolve((await $`e show root`.text()).trim());
+  if (configRoot !== root) {
+    throw new Error(
+      `Build config ${configName(arch)} builds ${configRoot}, not ${root}. ` +
+        `Run with --root ${configRoot}, or remove it with \`e remove ${configName(arch)}\`.`,
+    );
+  }
 }
 
 /** Check out the pinned release with the patches on top, and sync its dependencies. */
-async function prepareSource(): Promise<void> {
+async function prepareSource(arch: ElectronArch): Promise<void> {
   const electronSrc = path.join(root, "src", "electron");
-  await $`e use ${configName(arches[0]!)}`;
+  await $`e use ${configName(arch)}`;
   if (!existsSync(electronSrc)) {
     log("first sync: cloning Electron and Chromium (about 30 GB)");
     await $`e sync`;
   }
-  const git = $.cwd(electronSrc);
-  await git`git am --abort`.nothrow().quiet();
-  await git`git fetch --no-tags origin refs/tags/${tag}:refs/tags/${tag}`;
-  await git`git checkout --detach --force ${tag}`;
+  await $`git am --abort`.cwd(electronSrc).nothrow().quiet();
+  await $`git fetch --no-tags origin refs/tags/${tag}:refs/tags/${tag}`.cwd(electronSrc);
+  await $`git checkout --detach --force ${tag}`.cwd(electronSrc);
   log(`applying patches from ${PATCHES_DIR}`);
   const patchFiles = readPatches().map((patch) => path.join(PATCHES_DIR, patch.name));
-  await git`git -c user.name=loxel-build -c user.email=loxel-build@invalid am --3way ${patchFiles}`;
+  await $`git -c user.name=loxel-build -c user.email=loxel-build@invalid am --3way ${patchFiles}`.cwd(
+    electronSrc,
+  );
   log(`syncing dependencies for ${tag}`);
   await $`e sync`;
 }
@@ -120,35 +139,51 @@ async function buildArch(arch: ElectronArch): Promise<string> {
   return zip;
 }
 
+/** Where a checked zip of this build is kept, under its build ID. */
+const keptZip = (arch: ElectronArch) =>
+  path.join(root, "loxel-dist", id, distZipName(version, arch));
+
 await checkPrerequisites();
 const client = upload ? r2Client() : undefined;
-const pending: ElectronArch[] = [];
+const toUpload: ElectronArch[] = [];
+const toBuild: ElectronArch[] = [];
 for (const arch of arches) {
-  const zipName = distZipName(version, arch);
-  if (client && !values.force && (await client.file(objectKey(id, zipName)).exists())) {
+  if (client && !values.force && (await isUploaded(client, id, version, arch))) {
     log(`${id} darwin-${arch} is already in R2; skipping (--force rebuilds it)`);
     continue;
   }
-  pending.push(arch);
+  toUpload.push(arch);
+  // A zip this build ID already produced, e.g. by a --no-upload run, only needs uploading.
+  if (values.force || !existsSync(`${keptZip(arch)}.sha256`)) toBuild.push(arch);
+  else log(`${id} darwin-${arch} was already built; reusing ${keptZip(arch)}`);
 }
 
-if (pending.length > 0) {
-  for (const arch of pending) await ensureConfig(arch);
-  await prepareSource();
+if (toBuild.length > 0) {
+  for (const arch of toBuild) await ensureConfig(arch);
+  await prepareSource(toBuild[0]!);
 }
 
-for (const arch of pending) {
-  const zip = await buildArch(arch);
-  const zipName = distZipName(version, arch);
-  const kept = path.join(root, "loxel-dist", id, zipName);
-  mkdirSync(path.dirname(kept), { recursive: true });
-  cpSync(zip, kept);
-  const checksum = await sha256File(kept);
-  await Bun.write(`${kept}.sha256`, `${checksum}\n`);
-  log(`${zipName} sha256 ${checksum} -> ${kept}`);
+for (const arch of toUpload) {
+  const kept = keptZip(arch);
+  if (toBuild.includes(arch)) {
+    const zip = await buildArch(arch);
+    mkdirSync(path.dirname(kept), { recursive: true });
+    cpSync(zip, kept);
+    await Bun.write(`${kept}.sha256`, `${await sha256File(kept)}\n`);
+  }
+  const checksum = (await Bun.file(`${kept}.sha256`).text()).trim();
+  log(`${path.basename(kept)} sha256 ${checksum} -> ${kept}`);
+
+  // Also where build-app.ts packages it from, marked with its build ID.
+  const local = path.join(DIST_DIR, path.basename(kept));
+  mkdirSync(DIST_DIR, { recursive: true });
+  cpSync(kept, local);
+  await Bun.write(buildIdMarker(local), `${id}\n`);
+
   if (!client) continue;
+  const zipName = path.basename(kept);
   await client.file(objectKey(id, zipName)).write(Bun.file(kept));
-  // The checksum goes last: fetch-electron.ts treats a build as present only when both exist.
+  // The checksum goes last: a build counts as uploaded only once both exist (isUploaded).
   await client.file(objectKey(id, `${zipName}.sha256`)).write(`${checksum}\n`);
   log(`uploaded ${objectKey(id, zipName)}`);
 }

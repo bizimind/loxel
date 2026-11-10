@@ -256,19 +256,19 @@ describe("installHybridQrCode", () => {
   function setup() {
     const browserSession = new EventEmitter();
     const sent: { channel: string; payload: unknown }[] = [];
-    const panels = new Map<
-      FakeFrame,
-      { webContentsId: number; gone: boolean; onGone: () => void }
-    >();
+    const panels = new Map<FakeFrame, { webContentsId: number; gone: boolean }>();
+    // `destroyed` listeners per webContents ID, as the real webviews would hold them.
+    const goneListeners = new Map<number, Set<() => void>>();
+    /** A frame of the webview with this webContents ID; call twice for two frames of one webview. */
     const frame = (webContentsId: number): FakeFrame => {
       const f = { origin: "https://example.com", detached: false };
-      panels.set(f, { webContentsId, gone: false, onGone: () => {} });
+      panels.set(f, { webContentsId, gone: false });
       return f;
     };
     const destroy = (f: FakeFrame) => {
       const panel = panels.get(f)!;
       panel.gone = true;
-      panel.onGone();
+      for (const listener of goneListeners.get(panel.webContentsId) ?? []) listener();
     };
     const locate = (f: WebFrameMain): BrowserPanelFrame | null => {
       const panel = panels.get(f as unknown as FakeFrame);
@@ -278,7 +278,10 @@ describe("installHybridQrCode", () => {
         send: (channel, payload) => sent.push({ channel, payload }),
         isGone: () => panel.gone,
         onGone: (callback) => {
-          panel.onGone = callback;
+          const listeners = goneListeners.get(panel.webContentsId) ?? new Set();
+          goneListeners.set(panel.webContentsId, listeners);
+          listeners.add(callback);
+          return () => listeners.delete(callback);
         },
       };
     };
@@ -290,7 +293,8 @@ describe("installHybridQrCode", () => {
     const completed = (f: FakeFrame | null, relyingPartyId = "example.com") =>
       browserSession.emit("webauthn-hybrid-request-completed", {}, { relyingPartyId, frame: f });
     const hidden = () => sent.filter((m) => m.channel === PASSKEY_QR_HIDE).map((m) => m.payload);
-    return { sent, frame, destroy, request, get, completed, hidden };
+    const watchers = (webContentsId: number) => goneListeners.get(webContentsId)?.size ?? 0;
+    return { sent, frame, destroy, request, get, completed, hidden, watchers };
   }
 
   test("shows the QR code in the panel that made the request", () => {
@@ -362,5 +366,35 @@ describe("installHybridQrCode", () => {
     // The late completion finds nothing left to hide.
     completed(null);
     expect(hidden()).toEqual([7]);
+  });
+
+  test("a completion from a frame outside the panels hides nothing", () => {
+    const { frame, get, completed, hidden } = setup();
+    get(frame(7));
+    // E.g. a sign-in popup on the same session, finishing its own request for the same site.
+    completed({ origin: "https://example.com", detached: false });
+    expect(hidden()).toEqual([]);
+  });
+
+  test("a late completion of an older request keeps the newer code", () => {
+    const { frame, get, completed, hidden, watchers } = setup();
+    const older = frame(7);
+    const newer = frame(7);
+    get(older);
+    get(newer);
+    expect(watchers(7)).toBe(1);
+    completed(older);
+    expect(hidden()).toEqual([]);
+    completed(newer);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("stops watching the webview once its request ends", () => {
+    const { frame, get, completed, watchers } = setup();
+    const a = frame(7);
+    get(a);
+    expect(watchers(7)).toBe(1);
+    completed(a);
+    expect(watchers(7)).toBe(0);
   });
 });
