@@ -80,8 +80,11 @@ export type LoadContextLines = (startLine: number, endLine: number) => Promise<s
 interface HunkBasedDiffViewProps {
   file: FileDiff;
   viewMode: "split" | "unified";
-  /** Loads the unchanged lines of a hidden gap; expanded gaps reset when it changes identity. */
-  loadContextLines: LoadContextLines;
+  /**
+   * Loads the unchanged lines of a hidden gap; expanded gaps reset when it changes identity.
+   * Without it (a patch, which has no file to read) gaps are not offered.
+   */
+  loadContextLines?: LoadContextLines;
   /** Labels above the two columns of the split view */
   splitLabels?: { old: ReactNode; new: ReactNode };
   /** Header title; the file's path by default */
@@ -110,7 +113,10 @@ export function HunkBasedDiffView({
     setLoadingGaps(new Set());
   }, [loadContextLines]);
 
-  const gaps = useMemo(() => calculateHunkGaps(file.hunks), [file.hunks]);
+  const gaps = useMemo(
+    () => (loadContextLines ? calculateHunkGaps(file.hunks) : []),
+    [file.hunks, loadContextLines],
+  );
   const inlineSegments = useFileInlineSegments(file.hunks);
   const gapsByAfterIndex = useMemo(() => {
     const map = new Map<number, HunkGap>();
@@ -133,7 +139,7 @@ export function HunkBasedDiffView({
         return;
       }
 
-      if (loadingGaps.has(gapKey)) return;
+      if (loadingGaps.has(gapKey) || !loadContextLines) return;
 
       setLoadingGaps((prev) => new Set(prev).add(gapKey));
 

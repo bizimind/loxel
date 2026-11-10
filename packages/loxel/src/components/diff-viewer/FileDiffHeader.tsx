@@ -4,6 +4,13 @@ import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
 import { FileTypeIcon } from "@/lib/file-icons";
 
+/** Header title naming both paths of a renamed or copied file; undefined for the plain path. */
+export function fileDiffTitle(file: FileDiff): string | undefined {
+  return file.status === "renamed" || file.status === "copied"
+    ? `${file.oldPath} → ${file.newPath}`
+    : undefined;
+}
+
 /** The sticky row above a file diff: file icon, title and added/deleted line counts. */
 export function FileDiffHeader({ file, title }: { file: FileDiff; title?: ReactNode }) {
   const path = fileDiffPath(file);

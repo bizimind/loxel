@@ -15,6 +15,7 @@ import type {
 } from "dockview-react";
 
 import * as api from "@/api/client";
+import { fileDiffPath } from "@/api/diff-model";
 import type {
   PanelOpenOptions,
   PanelPlacement,
@@ -30,6 +31,7 @@ import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { filePanelType } from "@/lib/open-file";
 import type { FilePanelType } from "@/lib/open-file";
+import { parseUnifiedDiff } from "@/lib/parse-unified-diff";
 import { isWithin } from "@/lib/project-file-helpers";
 import { saveEditorContent } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
@@ -788,6 +790,76 @@ export function openDiff(): void {
     title: "Diff",
     position: ref ? { referencePanel: ref.id, direction: "within" } : undefined,
   });
+}
+
+/** Dockview params of a patch's diff panel: the unified diff text and the file it came from. */
+export interface PatchDiffParams {
+  patch: string;
+  sourcePath: string;
+}
+
+/**
+ * Tab title of a patch's diff panel: the file name when the patch changes one named file, and
+ * otherwise (several files, or a snippet without file headers) the source file's name.
+ */
+export function patchDiffTitle({ patch, sourcePath }: PatchDiffParams): string {
+  const paths = new Set(parseUnifiedDiff(patch)?.files.map(fileDiffPath));
+  const [only] = paths;
+  const name = paths.size === 1 && only ? only : sourcePath;
+  return `${getDisplayFilename(name)} patch`;
+}
+
+/**
+ * Open a patch's diff in its own panel, or focus the panel already showing that text from that
+ * file. The panel keeps the text it opened with.
+ */
+export function openPatchDiff(params: PatchDiffParams): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const existing = cApi.panels.find((panel) => {
+    const open: Partial<Record<keyof PatchDiffParams, unknown>> = panel.params ?? {};
+    return (
+      getCenterPanelDef(panel.id)?.type === "patchDiff" &&
+      open.patch === params.patch &&
+      open.sourcePath === params.sourcePath
+    );
+  });
+  if (existing) {
+    activatePanel(cApi, existing);
+    return;
+  }
+  addPatchDiffPanel(cApi, params);
+}
+
+/**
+ * Split or new-tab actions on a patch's diff panel carry no patch: open the same patch again next
+ * to the panel the placement is relative to (the active one by default).
+ */
+export function duplicatePatchDiff(placement?: PanelPlacement): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const params: Partial<Record<keyof PatchDiffParams, unknown>> =
+    placementReference(cApi, placement)?.params ?? {};
+  const { patch, sourcePath } = params;
+  if (typeof patch !== "string" || typeof sourcePath !== "string") return;
+  addPatchDiffPanel(cApi, { patch, sourcePath }, placement);
+}
+
+function addPatchDiffPanel(
+  cApi: DockviewApi,
+  params: PatchDiffParams,
+  placement?: PanelPlacement,
+): void {
+  const def = getCenterPanelDefByType("patchDiff")!;
+  const panelId = `${def.idPrefix}${crypto.randomUUID()}`;
+  addPlacedPanel(cApi, placement, {
+    id: panelId,
+    component: def.component,
+    tabComponent: def.tabComponent,
+    title: patchDiffTitle(params),
+    params: { patch: params.patch, sourcePath: params.sourcePath } satisfies PatchDiffParams,
+  });
+  uiLog.info("Panel created", { panelType: def.type, panelId });
 }
 
 /** Open a panel comparing two files; every comparison gets its own panel. */

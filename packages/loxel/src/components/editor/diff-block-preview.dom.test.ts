@@ -23,7 +23,7 @@ class ImmediateIntersectionObserver {
 globalThis.IntersectionObserver = ImmediateIntersectionObserver as never;
 
 const { renderCodeBlockPreview } = await import("./code-block-preview");
-const { handleDiffBlockClick } = await import("./diff-block-preview");
+const { codeBlockText, handleDiffBlockClick } = await import("./diff-block-preview");
 const { serializeBody, setSourceBaseline } = await import("./MarkdownEditor");
 
 const GIT_DIFF = [
@@ -158,7 +158,8 @@ describe("diff fences in the editor", () => {
   test("the Unified/Split buttons survive the panel's sanitizer and set the view mode", async () => {
     await mount(`Intro\n\n\`\`\`diff\n${GIT_DIFF}\n\`\`\`\n`);
     // The component delegates clicks from the editor container to handleDiffBlockClick.
-    root.addEventListener("click", handleDiffBlockClick);
+    const opened: Element[] = [];
+    root.addEventListener("click", (event) => handleDiffBlockClick(event, (b) => opened.push(b)));
 
     const splitButton = '.preview [data-diff-view-mode-option="split"]';
     await waitFor(root, () => root.querySelector(splitButton) !== null);
@@ -171,6 +172,36 @@ describe("diff fences in the editor", () => {
     // A click elsewhere in the block leaves the setting alone.
     root.querySelector<HTMLElement>(".preview tr")!.click();
     expect(useUIStore.getState().diffViewMode).toBe("unified");
+    expect(opened).toHaveLength(0);
+  });
+
+  test("Open in diff panel reads the clicked block's current text from the document", async () => {
+    await mount(`\`\`\`diff\n-a\n+b\n\`\`\`\n\n\`\`\`patch\n${GIT_DIFF}\n\`\`\`\n`);
+    const patches: (string | null)[] = [];
+    root.addEventListener("click", (event) =>
+      handleDiffBlockClick(event, (codeBlock) =>
+        patches.push(
+          crepe.editor.action((ctx) => codeBlockText(ctx.get(editorViewCtx), codeBlock)),
+        ),
+      ),
+    );
+    const openButtons = ".preview [data-diff-block-open]";
+    await waitFor(root, () => root.querySelectorAll(openButtons).length === 2);
+
+    root.querySelectorAll<HTMLElement>(openButtons)[1]!.click();
+    expect(patches).toEqual([GIT_DIFF]);
+
+    // An edit made after the preview rendered is in the text the button reads.
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(view.state.tr.insertText("\n+c", view.state.doc.firstChild!.nodeSize - 1));
+    });
+    root.querySelectorAll<HTMLElement>(openButtons)[0]!.click();
+    expect(patches[1]).toBe("-a\n+b\n+c");
+
+    // Not a code block of this editor.
+    const stray = document.createElement("div");
+    expect(crepe.editor.action((ctx) => codeBlockText(ctx.get(editorViewCtx), stray))).toBeNull();
   });
 
   test("untouched diff fences save byte-identically with their previews rendered", async () => {

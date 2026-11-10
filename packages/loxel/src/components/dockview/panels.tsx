@@ -12,13 +12,13 @@
 import type { IDockviewPanelProps, IWatermarkPanelProps } from "dockview-react";
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
 import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
-import { DiffViewerPanel } from "@/components/diff-viewer/DiffViewerPanel";
+import { DiffViewerPanel, type DiffViewerSource } from "@/components/diff-viewer/DiffViewerPanel";
 import { MarkdownEditorPanelComponent } from "@/components/editor/MarkdownEditorPanel";
 import { ExcalidrawEditor } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { GraphPanel } from "@/components/graph/GraphPanel";
@@ -30,6 +30,7 @@ import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
+import type { PatchDiffParams } from "@/lib/panel-creators";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
@@ -38,7 +39,7 @@ import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
 import { CodeEditorTab } from "./code-editor-tab";
 import { CompareTab } from "./compare-tab";
-import { DiffTab } from "./diff-tab";
+import { DiffTab, PatchDiffTab } from "./diff-tab";
 import { ExcalidrawEditorTab } from "./excalidraw-editor-tab";
 import { LocalDbTab } from "./localdb-tab";
 import { MarkdownEditorTab } from "./markdown-editor-tab";
@@ -101,8 +102,20 @@ function GraphPanelComponent(_props: IDockviewPanelProps) {
   return <GraphPanel />;
 }
 
+const GIT_DIFF_SOURCE: DiffViewerSource = { type: "git" };
+
 function DiffViewerComponent(_props: IDockviewPanelProps) {
-  return <DiffViewerPanel />;
+  return <DiffViewerPanel source={GIT_DIFF_SOURCE} />;
+}
+
+/** A patch's diff, such as a markdown diff fence's, from the text captured when it opened. */
+function PatchDiffComponent(props: IDockviewPanelProps<PatchDiffParams>) {
+  const { patch, sourcePath } = props.params;
+  const source = useMemo<DiffViewerSource>(
+    () => ({ type: "patch", patch, sourcePath }),
+    [patch, sourcePath],
+  );
+  return <DiffViewerPanel source={source} />;
 }
 
 /** Two files compared side by side, both editable. */
@@ -313,6 +326,7 @@ export const outerComponents = wrapPanelComponents(
 export const centerComponents = wrapPanelComponents(
   {
     diff: DiffViewerComponent,
+    patchDiff: PatchDiffComponent,
     compare: CompareFilesPanelComponent,
     terminal: TerminalPanelComponent,
     editor: MarkdownEditorPanelComponent,
@@ -332,6 +346,7 @@ export const centerTabComponents = {
   codeEditorTab: CodeEditorTab,
   compareTab: CompareTab,
   diffTab: DiffTab,
+  patchDiffTab: PatchDiffTab,
   markdownEditorTab: MarkdownEditorTab,
   excalidrawEditorTab: ExcalidrawEditorTab,
   mediaTab: MediaTab,

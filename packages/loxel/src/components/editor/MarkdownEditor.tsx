@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
-import { handleDiffBlockClick } from "@/components/editor/diff-block-preview";
+import { codeBlockText, handleDiffBlockClick } from "@/components/editor/diff-block-preview";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
@@ -42,6 +42,7 @@ import {
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import {
   type MarkdownBlockCodec,
   type SourceBaseline,
@@ -884,6 +885,18 @@ export function MarkdownEditor({
     });
   }, [cacheKey]);
 
+  // Diff fence previews are static markup; their buttons work through this delegated handler.
+  const handleContainerClick = useCallback(
+    (event: React.MouseEvent) =>
+      handleDiffBlockClick(event, (codeBlock) => {
+        const patch = crepeRef.current?.editor.action((ctx) =>
+          codeBlockText(ctx.get(editorViewCtx), codeBlock),
+        );
+        if (patch) dispatchLoxelEvent("loxel-open-patch-diff", { patch, sourcePath: filePath });
+      }),
+    [filePath],
+  );
+
   // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
   // be re-created; only a file that never loaded has nothing to show.
   if (isError && diskContent === null) {
@@ -919,7 +932,7 @@ export function MarkdownEditor({
         key={crepeKey}
         className="flex-1 overflow-hidden"
         data-diff-view-mode={diffViewMode}
-        onClick={handleDiffBlockClick}
+        onClick={handleContainerClick}
       />
       <button
         onClick={handleCopy}

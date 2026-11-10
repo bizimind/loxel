@@ -5,7 +5,7 @@
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
 import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
-import type { CreateTerminalOptions } from "@/lib/panel-creators";
+import type { CreateTerminalOptions, PatchDiffParams } from "@/lib/panel-creators";
 
 /** A file to open in its panel; `placement` moves an already open tab there too. */
 type OpenFileDetail = { filePath: string } & PanelOpenOptions;
@@ -24,6 +24,8 @@ export interface LoxelEventMap {
   "loxel-open-drawing-editor": OpenFileDetail;
   "loxel-open-media-viewer": OpenFileDetail;
   "loxel-open-diff": undefined;
+  /** Splitting a patch's diff panel sends no patch: the panel it starts from is duplicated. */
+  "loxel-open-patch-diff": PatchDiffParams | { placement?: PanelPlacement };
   /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
   "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;

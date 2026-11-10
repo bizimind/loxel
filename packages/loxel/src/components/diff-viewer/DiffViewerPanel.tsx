@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import type { DiffInfo, FileDiff } from "@/api/diff-model";
@@ -6,6 +6,7 @@ import { fileDiffPath } from "@/api/diff-model";
 import type { DiffFileContext } from "@/api/review-model";
 import { useDiffFileSelection } from "@/hooks/useDiffFileSelection";
 import { useReviewContext } from "@/hooks/useReviewContext";
+import { parseUnifiedDiff } from "@/lib/parse-unified-diff";
 import { cn } from "@/lib/utils";
 import { useDiffQuery } from "@/queries/use-repo-queries";
 import { useCommentStore } from "@/store/comments";
@@ -15,17 +16,39 @@ import { useReviewStore } from "@/store/worktree-reviews";
 import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { DiffToolbar } from "./DiffToolbar";
-import { FileDiffHeader } from "./FileDiffHeader";
+import { type DiffFileNavigation, DiffToolbar } from "./DiffToolbar";
+import { FileDiffHeader, fileDiffTitle } from "./FileDiffHeader";
 import { GitSideBySideDiffView } from "./GitSideBySideDiffView";
 import { HunkBasedDiffView } from "./HunkBasedDiffView";
 
+/** What a diff viewer panel shows. */
+export type DiffViewerSource =
+  /** The worktree's selected changes, computed by git from the repository store's `diffSource` */
+  | { type: "git" }
+  /**
+   * Unified diff text, such as a markdown diff fence, captured when the panel opened. Rendered
+   * from its hunks alone: no git refs, so no full-file side-by-side, context expansion or review
+   * comments. `sourcePath` is the file the text came from.
+   */
+  | { type: "patch"; patch: string; sourcePath: string };
+
 /**
- * Standalone diff viewer panel for the center zone.
- * Reads diffSource from the repository store and renders the diff content
- * with file navigation toolbar and view mode toggle.
+ * Diff viewer panel for the center zone: one file of the diff at a time, with a file navigation
+ * toolbar and the Unified/Split toggle.
  */
-export function DiffViewerPanel() {
+export function DiffViewerPanel({ source }: { source: DiffViewerSource }) {
+  switch (source.type) {
+    case "git":
+      return <GitDiffViewer />;
+    case "patch":
+      return <PatchDiffViewer patch={source.patch} />;
+    default:
+      return source satisfies never;
+  }
+}
+
+/** The worktree's selected changes, fetched from the server, with review comments placed. */
+function GitDiffViewer() {
   const diffSource = useRepositoryStore((s) => s.diffSource);
   const { data: diff, isLoading } = useDiffQuery(diffSource);
   const diffViewMode = useUIStore((s) => s.diffViewMode);
@@ -46,7 +69,7 @@ export function DiffViewerPanel() {
           No changes
         </div>
       ) : (
-        <DiffContent
+        <GitDiffContent
           diff={diff}
           viewMode={diffViewMode}
           commitHash={commitHash}
@@ -61,7 +84,7 @@ export function DiffViewerPanel() {
   );
 }
 
-function DiffContent({
+function GitDiffContent({
   diff,
   viewMode,
   commitHash,
@@ -138,36 +161,101 @@ function DiffContent({
   };
 
   return (
+    <DiffLayout
+      fileNavigation={{
+        index: currentFileIndex,
+        count: orderedFiles.length,
+        onPrevious: goToPrevFile,
+        onNext: goToNextFile,
+      }}
+      // The side-by-side view scrolls its own editors; match FileDiffView's choice of it.
+      scrollsItself={viewMode === "split" && !!(commitHash || worktreePath)}
+    >
+      {currentFile && (
+        <FileDiffView
+          file={currentFile}
+          viewMode={viewMode}
+          commitHash={commitHash}
+          baseRef={baseRef}
+          worktreePath={worktreePath}
+          onWorkingTreeFileChange={onWorkingTreeFileChange}
+        />
+      )}
+    </DiffLayout>
+  );
+}
+
+/** The panel's toolbar over the scroll area of the shown file. */
+function DiffLayout({
+  fileNavigation,
+  scrollsItself,
+  children,
+}: {
+  fileNavigation: DiffFileNavigation;
+  /** Whether the content scrolls on its own, so the area must not */
+  scrollsItself: boolean;
+  children: ReactNode;
+}) {
+  return (
     <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-(family-name:--loxel-font-code) text-xs">
-      <DiffToolbar
-        fileNavigation={{
-          index: currentFileIndex,
-          count: orderedFiles.length,
-          onPrevious: goToPrevFile,
-          onNext: goToNextFile,
-        }}
-      />
+      <DiffToolbar fileNavigation={fileNavigation} />
       <div
-        className={cn(
-          "flex-1",
-          // The side-by-side view scrolls its own editors; match FileDiffView's choice of it.
-          viewMode === "split" && (commitHash || worktreePath)
-            ? "overflow-hidden"
-            : "scrollbar-thin overflow-auto",
-        )}
+        className={cn("flex-1", scrollsItself ? "overflow-hidden" : "scrollbar-thin overflow-auto")}
       >
-        {currentFile && (
-          <FileDiffView
-            file={currentFile}
-            viewMode={viewMode}
-            commitHash={commitHash}
-            baseRef={baseRef}
-            worktreePath={worktreePath}
-            onWorkingTreeFileChange={onWorkingTreeFileChange}
-          />
-        )}
+        {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * A patch's files in the order the patch lists them, rendered from its hunks. The patch is parsed
+ * once; the panel shows the text it was opened with.
+ */
+function PatchDiffViewer({ patch }: { patch: string }) {
+  const diff = useMemo(() => parseUnifiedDiff(patch), [patch]);
+  const viewMode = useUIStore((s) => s.diffViewMode);
+  const [fileIndex, setFileIndex] = useState(0);
+  const files = diff?.files ?? [];
+  const file = files[fileIndex];
+
+  if (!file) {
+    return (
+      <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
+        No changes
+      </div>
+    );
+  }
+
+  return (
+    <DiffLayout
+      fileNavigation={{
+        index: fileIndex,
+        count: files.length,
+        onPrevious: () => setFileIndex((i) => Math.max(i - 1, 0)),
+        onNext: () => setFileIndex((i) => Math.min(i + 1, files.length - 1)),
+      }}
+      scrollsItself={false}
+    >
+      {file.isBinary ? (
+        <BinaryFile />
+      ) : (
+        <HunkBasedDiffView
+          // Files of a patch can share a path; highlighting state belongs to one of them.
+          key={fileIndex}
+          file={file}
+          viewMode={viewMode}
+          // A headerless snippet has no path.
+          title={fileDiffTitle(file) ?? (fileDiffPath(file) || "Patch")}
+        />
+      )}
+    </DiffLayout>
+  );
+}
+
+function BinaryFile() {
+  return (
+    <div className="text-muted-foreground flex h-full items-center justify-center">Binary file</div>
   );
 }
 
@@ -218,13 +306,7 @@ function FileDiffView({
     [filePath, commitHash],
   );
 
-  if (file.isBinary) {
-    return (
-      <div className="text-muted-foreground flex h-full items-center justify-center">
-        Binary file
-      </div>
-    );
-  }
+  if (file.isBinary) return <BinaryFile />;
 
   if (useTrueSideBySide) {
     return (
