@@ -27,6 +27,7 @@ import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
 import { ConfirmDialogHost } from "./components/ui/confirm-dialog-host";
 import { ToastContainer } from "./components/ui/toast";
 import { useDiffSource } from "./hooks/useDiffSource";
+import { useFontSettingsSync } from "./hooks/useFontSettingsSync";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
@@ -48,6 +49,7 @@ export default function App() {
   useKeybindings();
   useLoxelEventListeners();
   useThemeSync();
+  useFontSettingsSync();
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeLeftPanel = useWorktreeToolsBar((s) => s.activeLeftPanel);

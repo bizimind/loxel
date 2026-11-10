@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EditorBanner } from "@/components/editor/EditorBanner";
 import { showToast } from "@/components/ui/toast";
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
@@ -82,6 +83,7 @@ export function VirtualDocumentPanel({
   const darkMode = useUIStore((s) => s.darkMode);
 
   useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
   usePanelActivationFocus(
     panelApi,
     useCallback(() => editorRef.current?.focus(), []),
@@ -123,6 +125,7 @@ export function VirtualDocumentPanel({
         editor = monaco.editor.create(container, {
           ...CODE_EDITOR_OPTIONS,
           inlayHints: inlayHintsOption(),
+          ...codeFontOptions(),
           model,
           theme: getMonacoThemeName(useUIStore.getState().darkMode),
           readOnly: true,

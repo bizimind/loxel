@@ -126,7 +126,7 @@ export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPan
     <div className="flex h-full w-full flex-col overflow-hidden">
       <EditableSideBanners side={oldSide} />
       <EditableSideBanners side={newSide} />
-      <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-mono text-xs">
+      <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-(family-name:--loxel-font-code) text-xs">
         <DiffToolbar />
         <div
           className={cn(

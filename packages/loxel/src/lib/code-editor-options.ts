@@ -8,9 +8,8 @@ export const CODE_EDITOR_OPTIONS = {
   detectIndentation: false,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
+  // Fixed whatever the font size; the code font's size bounds keep text within it.
   lineHeight: 22,
-  fontSize: 13,
-  fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
   automaticLayout: true,
   contextmenu: false,
   lineNumbers: "on",

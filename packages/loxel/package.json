@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.325",
+  "version": "0.1.326",
   "description": "The professional workspace for AI-powered development",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -73,6 +73,7 @@
     "jsonc-parser": "^3.3.1",
     "lucide-react": "^1.48.0",
     "mdast-util-directive": "^3.1.0",
+    "mermaid": "^11.16.1",
     "micromark-extension-directive": "^4.0.0",
     "monaco-editor": "0.57.0",
     "picomatch": "^4.0.7",

@@ -101,7 +101,7 @@ Two details matter when changing this:
 ### Versioning and migrations
 
 - `stores.db` has no schema migrations; its schema is one key/value table.
-- Persisted store shapes are versioned by zustand: `settings-store.ts` is at `version: 14` with a stepwise `migrate` (each `version <= n` block upgrades one step), and `keybinding-store.ts` is at `version: 1`. Stores without `version` rely on `merge` or default spreading to tolerate missing fields.
+- Persisted store shapes are versioned by zustand: `settings-store.ts` is at `version: 16` with a stepwise `migrate` (each `version <= n` block upgrades one step), and `keybinding-store.ts` is at `version: 1`. Stores without `version` rely on `merge` or default spreading to tolerate missing fields.
 - Layouts carry their own `layoutVersion`; a mismatch discards the saved layout instead of migrating it (see below).
 - `projects.db` creates its table if missing and imports a legacy `projects.json` once, renaming it to `projects.json.bak`.
 - Review databases use `PRAGMA user_version` (currently 2).
@@ -138,7 +138,7 @@ All SQLite files are opened with `PRAGMA journal_mode = WAL` and `busy_timeout =
 
 ## Settings
 
-[settings-store.ts](../src/store/settings-store.ts) is the single settings store. A setting is a typed field on `SettingsState` with a default in the state creator, a setter action, and an entry in `partialize`. The persisted slice is `layout`, `terminal`, `editor`, `schemas`, `fileAssociations`, `autoRevealInExplorer` and `autoCheckForUpdates`; `isOpen` and `activeSection` (the modal's UI state) are not persisted.
+[settings-store.ts](../src/store/settings-store.ts) is the single settings store. A setting is a typed field on `SettingsState` with a default in the state creator, a setter action, and an entry in `persistedSettings`, the store's `partialize` and its cross-window sync slice. The persisted slice is `layout`, `terminal`, `editor`, `fonts`, `schemas`, `fileAssociations`, `autoRevealInExplorer` and `autoCheckForUpdates`; `isOpen` and `activeSection` (the modal's UI state) are not persisted.
 
 - **UI.** [SettingsModal.tsx](../src/components/settings/SettingsModal.tsx) renders all sections in one scroll container; each `*Section.tsx` in [src/components/settings/](../src/components/settings/) reads fields with `useSettingsStore(selector)` and calls the store's setters. Security is the exception: its parts show server-side state and change it through the API, such as repository trust ([LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md#repository-trust)).
 - **Validation.** There is no schema validation of the persisted object. Shape changes go through the versioned `migrate`, which checks each field structurally before rewriting it. Builtin defaults for schemas and file associations stay in code (`BUILTIN_SCHEMA_DEFAULTS`, `BUILTIN_FILE_ASSOCIATIONS`); the persisted arrays hold only user entries and toggled builtins, merged at read time by `selectEffectiveSchemas` / `selectEffectiveFileAssociations`.
@@ -173,7 +173,7 @@ The renderer uses browser storage only where state is per window or must exist b
 ### Adding a persisted field
 
 1. Add the field and its default to the store, and add it to `partialize`.
-2. Add it to the store's `SyncTarget.getState` in [store-sync.ts](../src/store/store-sync.ts) with the same shape, plus `deserialize` if it is not plain JSON.
+2. Add it to the store's `SyncTarget.getState` in [store-sync.ts](../src/store/store-sync.ts) with the same shape, plus `deserialize` if it is not plain JSON. Settings needs no step here: its `partialize` and sync target share `persistedSettings`.
 3. If older persisted data lacks the field and the default spread is not enough, bump `version` and add a `migrate` step (settings) or handle it in `merge`. If the change moves a field the server reads (`terminal.notificationSequences`, `autoCheckForUpdates`), update its reader ([terminal-settings.ts](../src/server/terminal-settings.ts), `isAutoCheckEnabled` in [persisted-settings.ts](../src/server/persisted-settings.ts)) with it.
 4. For a new persisted store, add a `createServerStorage("<key>")` instance in [server-storage.ts](../src/store/server-storage.ts) and a `SyncTarget` for the key.
 5. If the field contains a secret, make sure the server encrypts it with [secret storage](#secrets) before it reaches `stores.db`.

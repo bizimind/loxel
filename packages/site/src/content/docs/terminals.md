@@ -69,9 +69,11 @@ Your shell's startup runs after that, so it can still change what you get. A `JA
 
 ---
 
-## Theme
+## Theme and font
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.
+
+Terminals use the code font until you pick a terminal font of their own in **Settings > Fonts**, and open terminals switch to a new font at once. See [Fonts](/docs/editor#fonts).
 
 ---
 
