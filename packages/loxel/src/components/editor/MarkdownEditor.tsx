@@ -25,6 +25,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
@@ -403,7 +404,10 @@ export function MarkdownEditor({
       features: { [Crepe.Feature.ImageBlock]: false, [Crepe.Feature.Latex]: false },
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
-        [Crepe.Feature.CodeMirror]: { theme: [codeTheme, syntaxHighlighting(codeHighlight)] },
+        [Crepe.Feature.CodeMirror]: {
+          theme: [codeTheme, syntaxHighlighting(codeHighlight)],
+          renderPreview: renderCodeBlockPreview,
+        },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {
             const dataGroup = builder.addGroup("data", "Data");

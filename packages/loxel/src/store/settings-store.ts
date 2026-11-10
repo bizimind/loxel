@@ -52,6 +52,8 @@ export interface IndentationOverride {
 // Formatting
 // ---------------------------------------------------------------------------
 
+import type { FontKind, FontSettings } from "@/lib/font-settings";
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
 import type {
   FormatterOverride,
   FormattingSettings,
@@ -499,6 +501,7 @@ type SettingsSection =
   | "layout"
   | "terminal"
   | "editor"
+  | "fonts"
   | "schemas"
   | "fileAssociations"
   | "security"
@@ -508,6 +511,7 @@ export interface SettingsState {
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
+  fonts: FontSettings;
   /** User-added schemas + builtin overrides (disabled builtins). */
   schemas: SchemaMapping[];
   /** User file association overrides (language per glob). */
@@ -544,6 +548,9 @@ export interface SettingsState {
   addFormatterOverride: (extensions: string, command: string, args: string) => void;
   updateFormatterOverride: (id: string, updates: Partial<Omit<FormatterOverride, "id">>) => void;
   removeFormatterOverride: (id: string) => void;
+
+  // Font actions
+  updateFont: <K extends FontKind>(kind: K, partial: Partial<FontSettings[K]>) => void;
 
   // Schema actions
   addSchema: (glob: string, url: string) => void;
@@ -622,6 +629,20 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
   }
 }
 
+/** The persisted slice of the settings store; cross-window sync applies the same slice. */
+export function persistedSettings(state: SettingsState) {
+  return {
+    layout: state.layout,
+    terminal: state.terminal,
+    editor: state.editor,
+    fonts: state.fonts,
+    schemas: state.schemas,
+    fileAssociations: state.fileAssociations,
+    autoRevealInExplorer: state.autoRevealInExplorer,
+    autoCheckForUpdates: state.autoCheckForUpdates,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -636,6 +657,7 @@ export const useSettingsStore = create<SettingsState>()(
         activatePythonEnv: true,
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
+      fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
@@ -789,6 +811,11 @@ export const useSettingsStore = create<SettingsState>()(
           },
         })),
 
+      // -- Fonts --
+
+      updateFont: (kind, partial) =>
+        set((s) => ({ fonts: { ...s.fonts, [kind]: { ...s.fonts[kind], ...partial } } })),
+
       // -- Schemas --
 
       addSchema: (glob, url) =>
@@ -871,16 +898,8 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
-      partialize: (state) => ({
-        layout: state.layout,
-        terminal: state.terminal,
-        editor: state.editor,
-        schemas: state.schemas,
-        fileAssociations: state.fileAssociations,
-        autoRevealInExplorer: state.autoRevealInExplorer,
-        autoCheckForUpdates: state.autoCheckForUpdates,
-      }),
-      version: 15,
+      partialize: persistedSettings,
+      version: 17,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -1017,8 +1036,15 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
-        if (version <= 14) {
-          // v14 → v15: add markdown output markers to formatting settings
+        if (version <= 15) {
+          // v15 → v16: add font settings
+          if (typeof state.fonts !== "object" || state.fonts === null) {
+            state.fonts = structuredClone(DEFAULT_FONT_SETTINGS);
+          }
+        }
+
+        if (version <= 16) {
+          // v16 → v17: add markdown output markers to formatting settings
           const editor =
             typeof state.editor === "object" && state.editor !== null
               ? (state.editor as Record<string, unknown>)

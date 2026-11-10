@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
 import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 import { classifySchemaGlob } from "@/lib/schema-glob";
 
@@ -368,12 +369,40 @@ describe("settings migration v13: the built-in coding agent is gone", () => {
   });
 });
 
-describe("settings migration v15: markdown output markers", () => {
+describe("settings migration v16: font settings", () => {
   const migrate = useSettingsStore.persist.getOptions().migrate;
 
-  test("v14 formatting settings get the markdownOutput defaults, and keep the rest", async () => {
+  test("adds the default fonts", async () => {
+    const migrated = (await migrate?.({ autoCheckForUpdates: false }, 15)) as SettingsState;
+    expect(migrated.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+  });
+
+  test("chains after the older steps, and keeps fonts a row already has", async () => {
+    const fromOld = (await migrate?.({ editor: {} }, 13)) as SettingsState;
+    expect(fromOld.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+    expect(fromOld.editor.inlayHints).toBe("on");
+    const fonts = { ...DEFAULT_FONT_SETTINGS, prose: { family: "Georgia", size: 17 } };
+    const kept = (await migrate?.({ fonts }, 15)) as SettingsState;
+    expect(kept.fonts).toEqual(fonts);
+  });
+
+  test("updating one font keeps the others", () => {
+    const { updateFont } = useSettingsStore.getState();
+    updateFont("terminal", { family: "Menlo" });
+    expect(useSettingsStore.getState().fonts).toEqual({
+      ...DEFAULT_FONT_SETTINGS,
+      terminal: { family: "Menlo", size: null },
+    });
+    useSettingsStore.setState({ fonts: structuredClone(DEFAULT_FONT_SETTINGS) });
+  });
+});
+
+describe("settings migration v17: markdown output markers", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("v16 formatting settings get the markdownOutput defaults, and keep the rest", async () => {
     const formatting = { enabled: true, formatOnAutoSave: false, autoDetect: true, overrides: [] };
-    const migrated = (await migrate?.({ editor: { formatting } }, 14)) as SettingsState;
+    const migrated = (await migrate?.({ editor: { formatting } }, 16)) as SettingsState;
     expect(migrated.editor.formatting).toEqual({
       ...formatting,
       markdownOutput: DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
@@ -383,7 +412,7 @@ describe("settings migration v15: markdown output markers", () => {
   test("valid pre-existing markdownOutput values survive migration", async () => {
     const migrated = (await migrate?.(
       { editor: { formatting: { enabled: true, markdownOutput: { bullet: "*", setext: true } } } },
-      14,
+      16,
     )) as SettingsState;
     expect(migrated.editor.formatting.markdownOutput).toEqual({
       ...DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
