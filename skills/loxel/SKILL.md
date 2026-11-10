@@ -61,7 +61,7 @@ Files, folders and URLs can be mixed in one command, and shell patterns work. Th
 
 - Relative paths resolve against your current directory. The path must exist, and it takes no `:line` suffix: `loxel src/app.ts:42` fails with `File not found`.
 - The file or folder opens in your terminal's window, in the worktree that contains it. A path outside every project opens in the Others section of the file tree.
-- Folders are revealed in the file tree, which needs `--focus`: without it nothing opens and the CLI prints a warning. Files open as tabs: `.md` in a live-preview markdown editor, `.excalidraw` in a drawing canvas, images, videos and SVGs in a media viewer, and everything else in a code editor.
+- Folders are revealed in the file tree, which needs `--focus`: without it nothing opens and the CLI prints a warning. Files open as tabs: `.md` in a live-preview markdown editor (` ```mermaid ` blocks render as diagrams), `.excalidraw` in a drawing canvas, images, videos and SVGs in a media viewer, and everything else in a code editor.
 
 ### URLs
 

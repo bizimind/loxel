@@ -1,0 +1,26 @@
+/*
+ * Mermaid diagram previews in markdown code blocks. Each diagram is rendered once per theme;
+ * the editor's `dark` class picks which variant shows.
+ */
+
+.milkdown .loxel-mermaid-dark,
+.milkdown.dark .loxel-mermaid-light {
+  display: none;
+}
+
+.milkdown.dark .loxel-mermaid-dark {
+  display: block;
+}
+
+/* Preflight makes SVGs block-level, so the panel's `text-align: center` does not reach them. */
+.milkdown .loxel-mermaid svg {
+  margin-inline: auto;
+}
+
+.milkdown .loxel-mermaid-error {
+  text-align: start;
+  white-space: pre-wrap;
+  font-family: var(--crepe-font-code);
+  font-size: calc(var(--crepe-base-font-size, 16px) * 0.8125);
+  color: var(--destructive);
+}
