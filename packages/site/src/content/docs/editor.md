@@ -179,6 +179,8 @@ Markdown files open in a live-preview markdown editor. Saving rewrites only the 
 
 Code blocks fenced as ` ```mermaid ` show the rendered [Mermaid](https://mermaid.js.org) diagram below their code, and it updates as you edit. Click **Hide** to show only the diagram and **Edit** to bring the code back. Diagrams follow the light or dark theme, a diagram with a syntax error shows the error instead, and the block is saved exactly as written unless you edit it. Diagrams render in Mermaid's strict mode: labels are sanitized and a diagram can't run scripts.
 
+Code blocks fenced as ` ```diff ` or ` ```patch ` show the change as a diff below their code: added and removed lines in color with the changed characters highlighted, line numbers when the hunk headers give them, and a header per file for patches that touch several files. **Unified** and **Split** switch the layout, and the choice is the same one the [diff viewer](/docs/diff-viewer) uses. Click **Hide** to show only the diff and **Edit** to bring the code back. Diffs written by hand or by an agent don't need to be valid patches: bare `+` and `-` lines render too, without line numbers, and a block with no diff in it stays a plain code block. The diff follows the light or dark theme, and the block is saved exactly as written unless you edit it.
+
 ### Data widgets
 
 A `:::localdb` block puts a database view inside the document: a Table, Kanban, Calendar, Gantt, Graph or Form, for task boards, decision logs or anything else you want to track next to your notes. Add one from the block menu: **Data > Database Widget**. Widget data is stored per project and updates live in every open editor that shows it.
