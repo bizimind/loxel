@@ -8,6 +8,7 @@ import {
   SettingsIcon,
   ShieldIcon,
   TerminalSquareIcon,
+  TypeIcon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -21,6 +22,7 @@ import { useSettingsStore } from "@/store/settings-store";
 
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
+import { FontsSection } from "./FontsSection";
 import { GeneralSection } from "./GeneralSection";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { LayoutSection } from "./LayoutSection";
@@ -40,6 +42,7 @@ const SECTIONS: SectionDef[] = [
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
   { key: "editor", label: "Editor", icon: CodeIcon },
+  { key: "fonts", label: "Fonts", icon: TypeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
   { key: "security", label: "Security", icon: ShieldIcon },
@@ -54,6 +57,7 @@ export function SettingsModal() {
   const layout = useSettingsStore((s) => s.layout);
   const terminal = useSettingsStore((s) => s.terminal);
   const editor = useSettingsStore((s) => s.editor);
+  const fonts = useSettingsStore((s) => s.fonts);
   const schemas = useSettingsStore((s) => s.schemas);
   const fileAssociations = useSettingsStore((s) => s.fileAssociations);
 
@@ -62,8 +66,16 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (isOpen) {
-      const { layout, terminal, editor, schemas, fileAssociations } = useSettingsStore.getState();
-      snapshotRef.current = JSON.stringify({ layout, terminal, editor, schemas, fileAssociations });
+      const { layout, terminal, editor, fonts, schemas, fileAssociations } =
+        useSettingsStore.getState();
+      snapshotRef.current = JSON.stringify({
+        layout,
+        terminal,
+        editor,
+        fonts,
+        schemas,
+        fileAssociations,
+      });
     } else {
       snapshotRef.current = null;
     }
@@ -72,10 +84,10 @@ export function SettingsModal() {
   const isSettingsDirty = useMemo(() => {
     if (!snapshotRef.current) return false;
     return (
-      JSON.stringify({ layout, terminal, editor, schemas, fileAssociations }) !==
+      JSON.stringify({ layout, terminal, editor, fonts, schemas, fileAssociations }) !==
       snapshotRef.current
     );
-  }, [layout, terminal, editor, schemas, fileAssociations]);
+  }, [layout, terminal, editor, fonts, schemas, fileAssociations]);
 
   const saveDisabled = !isSettingsDirty;
 
@@ -94,7 +106,7 @@ export function SettingsModal() {
         useSettingsStore.setState(
           parsed as Pick<
             SettingsState,
-            "layout" | "terminal" | "editor" | "schemas" | "fileAssociations"
+            "layout" | "terminal" | "editor" | "fonts" | "schemas" | "fileAssociations"
           >,
         );
       }
@@ -187,6 +199,10 @@ export function SettingsModal() {
 
               <div id="settings-editor" className="border-border mt-8 border-t pt-8">
                 <EditorSection />
+              </div>
+
+              <div id="settings-fonts" className="border-border mt-8 border-t pt-8">
+                <FontsSection />
               </div>
 
               <div id="settings-schemas" className="border-border mt-8 border-t pt-8">

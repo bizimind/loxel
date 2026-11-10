@@ -5,6 +5,7 @@
 import type { CodeBlockConfig } from "@milkdown/kit/component/code-block";
 
 import { renderDiffPreview } from "@/components/editor/diff-block-preview";
+import { renderMermaidPreview } from "@/components/editor/mermaid-preview";
 
 /**
  * Returns the preview (an HTML string or element, sanitized by the panel), `null` for no preview
@@ -13,9 +14,10 @@ import { renderDiffPreview } from "@/components/editor/diff-block-preview";
 export type RenderPreview = CodeBlockConfig["renderPreview"];
 export type PreviewValue = Exclude<ReturnType<RenderPreview>, void>;
 
-/** Preview renderers by lowercase fence language. */
+/** Preview renderers by lowercase fence language (a Map, so `constructor` or `__proto__` fences miss). */
 const previewRenderers = new Map<string, RenderPreview>([
   ["diff", renderDiffPreview],
+  ["mermaid", renderMermaidPreview],
   ["patch", renderDiffPreview],
 ]);
 

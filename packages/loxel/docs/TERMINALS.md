@@ -94,11 +94,11 @@ On the client, [client.ts](../src/api/client.ts) routes binary output to at most
 6. On WebSocket reconnect (same server version; a changed version reloads the page instead), it sends `terminal_attach` again with the epoch and offset it is current to, without resetting. Against the same server process this resumes from the ring, or snapshots if the gap was evicted; against a restarted server the ID is unknown, so a fresh shell with a new epoch is spawned and the snapshot branch clears the old screen.
 7. Unmount sends `terminal_detach` and disposes the xterm instance and handlers. The shell keeps running and the server stops streaming to nobody.
 
-Sizing: a `ResizeObserver` and a device-pixel-ratio media query schedule a 100 ms debounced `fit()`; `terminal_resize` is sent only when cols or rows actually changed. Theme and scrollback options are updated in place when dark mode or the setting changes; the server-side emulator picks the scrollback setting up at the next attach.
+Sizing: a `ResizeObserver` and a device-pixel-ratio media query schedule a 100 ms debounced `fit()`; `terminal_resize` is sent only when cols or rows actually changed. Theme, scrollback and font options are updated in place when dark mode or the setting changes; the server-side emulator picks the scrollback setting up at the next attach. A font change refits a terminal that is on screen; one that is hidden refits when shown.
 
 ### Font loading
 
-xterm measures the cell grid and the WebGL renderer rasterizes its glyph atlas at `open()`, and neither re-measures when a web font arrives. `loadTerminalFont()` therefore loads the `JetBrains Mono NL` `FontFace` objects directly (Chromium's `document.fonts.load()` matches nothing for this family because of a `local()` fallback face in [index.css](../src/index.css)) and races them against a 2 second timeout before opening.
+xterm measures the cell grid and the WebGL renderer rasterizes its glyph atlas at `open()`, and neither re-measures when a web font arrives. `loadTerminalFont()` therefore loads the `JetBrains Mono NL` `FontFace` objects directly (Chromium's `document.fonts.load()` matches nothing for this family because of a `local()` fallback face in [index.css](../src/index.css)) and races them against a 2 second timeout before opening. A terminal font from Settings (`resolveFont` in [font-settings.ts](../src/lib/font-settings.ts)) is put in front of `JetBrains Mono NL` in the stack: it is installed and needs no loading, and the bundled faces still back the glyphs it lacks.
 
 ### WebGL renderer and fallback
 

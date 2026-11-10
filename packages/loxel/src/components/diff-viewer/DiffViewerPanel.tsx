@@ -197,7 +197,7 @@ function DiffLayout({
   children: ReactNode;
 }) {
   return (
-    <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-mono text-xs">
+    <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-(family-name:--loxel-font-code) text-xs">
       <DiffToolbar fileNavigation={fileNavigation} />
       <div
         className={cn("flex-1", scrollsItself ? "overflow-hidden" : "scrollbar-thin overflow-auto")}

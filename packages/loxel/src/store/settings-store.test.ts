@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
 import { classifySchemaGlob } from "@/lib/schema-glob";
 
 import {
@@ -364,5 +365,33 @@ describe("settings migration v13: the built-in coding agent is gone", () => {
 
   test("tolerates a row without a layout", async () => {
     expect(await run({ models: [] })).toEqual(expect.not.objectContaining({ models: [] }));
+  });
+});
+
+describe("settings migration v16: font settings", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("adds the default fonts", async () => {
+    const migrated = (await migrate?.({ autoCheckForUpdates: false }, 15)) as SettingsState;
+    expect(migrated.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+  });
+
+  test("chains after the older steps, and keeps fonts a row already has", async () => {
+    const fromOld = (await migrate?.({ editor: {} }, 13)) as SettingsState;
+    expect(fromOld.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+    expect(fromOld.editor.inlayHints).toBe("on");
+    const fonts = { ...DEFAULT_FONT_SETTINGS, prose: { family: "Georgia", size: 17 } };
+    const kept = (await migrate?.({ fonts }, 15)) as SettingsState;
+    expect(kept.fonts).toEqual(fonts);
+  });
+
+  test("updating one font keeps the others", () => {
+    const { updateFont } = useSettingsStore.getState();
+    updateFont("terminal", { family: "Menlo" });
+    expect(useSettingsStore.getState().fonts).toEqual({
+      ...DEFAULT_FONT_SETTINGS,
+      terminal: { family: "Menlo", size: null },
+    });
+    useSettingsStore.setState({ fonts: structuredClone(DEFAULT_FONT_SETTINGS) });
   });
 });

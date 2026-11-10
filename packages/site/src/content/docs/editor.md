@@ -115,6 +115,24 @@ Diff views show the code as it is, without hints.
 
 ---
 
+## Fonts
+
+Choose the fonts Loxel uses in **Settings > Fonts**, from the fonts installed on your Mac. Each has a family and a size, and changes apply at once to open editors and terminals:
+
+| Font          | Used for                                         | Default                                                                                |
+| ------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Code font     | Code editors, diffs, and code blocks in markdown | JetBrains Mono, 13 px (10–16 px)                                                       |
+| Terminal font | Terminals                                        | The code font's family and size (8–32 px), without ligatures while it's JetBrains Mono |
+| Markdown font | Text and headings in markdown files              | Inter, 15 px (12–24 px); headings and tables scale with it                             |
+
+Click a font to pick from a searchable list that shows each font in its own typeface. The code and terminal lists show monospace fonts; turn on **Show all fonts** to list the others after them. You can also type the name of a font the list doesn't show.
+
+Settings keep only the font's name. If it isn't installed, for example after you move your settings to another computer, Settings says so and Loxel shows its bundled font in its place.
+
+The list of installed fonts stays on your computer: Loxel reads it only to show it in Settings, and saves only the font you pick. Pages in browser panels can't read it.
+
+---
+
 ## EditorConfig
 
 Loxel follows your project's [`.editorconfig`](https://editorconfig.org) files. For each file it reads the `.editorconfig` in the file's folder and in every folder above it, up to the worktree root (or the root of an [other folder](#other-folders)), and stops early at one that sets `root = true`. When several set the same property, the closest file wins.
@@ -158,6 +176,8 @@ In the file tree, Gradle build and settings files, `gradle.properties`, `libs.ve
 ## Markdown files
 
 Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `Shift+Enter` starts a new line within a paragraph and saves it as a plain line break, and line breaks already in the file show as new lines; pressing it twice starts a new paragraph. GitHub and most markdown renderers display a plain line break as a space. A trailing `\` or two trailing spaces keep the break visible everywhere, and Loxel keeps such breaks (writing them as `\` when you edit their paragraph). An empty line inside a paragraph can only be written as a `\` line, so Loxel saves it that way. `:::localdb` blocks render as [database widgets](#data-widgets); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+
+Code blocks fenced as ` ```mermaid ` show the rendered [Mermaid](https://mermaid.js.org) diagram below their code, and it updates as you edit. Click **Hide** to show only the diagram and **Edit** to bring the code back. Diagrams follow the light or dark theme, a diagram with a syntax error shows the error instead, and the block is saved exactly as written unless you edit it. Diagrams render in Mermaid's strict mode: labels are sanitized and a diagram can't run scripts.
 
 Code blocks fenced as ` ```diff ` or ` ```patch ` show the change as a diff below their code: added and removed lines in color with the changed characters highlighted, line numbers when the hunk headers give them, and a header per file for patches that touch several files. **Unified** and **Split** switch the layout, and the choice is the same one the [diff viewer](/docs/diff-viewer) uses. Click **Hide** to show only the diff and **Edit** to bring the code back. **Open in diff panel** opens the diff in its own [diff viewer](/docs/diff-viewer#patches-from-markdown) tab, with room for long changes. Diffs written by hand or by an agent don't need to be valid patches: bare `+` and `-` lines render too, without line numbers, and a block with no diff in it stays a plain code block. The diff follows the light or dark theme, and the block is saved exactly as written unless you edit it.
 
