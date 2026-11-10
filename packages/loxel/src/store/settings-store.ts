@@ -54,8 +54,12 @@ export interface IndentationOverride {
 
 import type { FontKind, FontSettings } from "@/lib/font-settings";
 import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
-import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import type {
+  FormatterOverride,
+  FormattingSettings,
+  MarkdownOutputSettings,
+} from "@/lib/formatting-model";
+import { DEFAULT_FORMATTING_SETTINGS, parseMarkdownOutputSettings } from "@/lib/formatting-model";
 
 /** When an editor shows inlay hints; the values of Monaco's `inlayHints.enabled`. */
 export type InlayHintsMode = "on" | "off" | "onUnlessPressed" | "offUnlessPressed";
@@ -537,7 +541,10 @@ export interface SettingsState {
   removeEditorOverride: (id: string) => void;
 
   // Formatting actions
-  updateFormatting: (partial: Partial<Omit<FormattingSettings, "overrides">>) => void;
+  updateFormatting: (
+    partial: Partial<Omit<FormattingSettings, "overrides" | "markdownOutput">>,
+  ) => void;
+  updateMarkdownOutput: (partial: Partial<MarkdownOutputSettings>) => void;
   addFormatterOverride: (extensions: string, command: string, args: string) => void;
   updateFormatterOverride: (id: string, updates: Partial<Omit<FormatterOverride, "id">>) => void;
   removeFormatterOverride: (id: string) => void;
@@ -755,6 +762,17 @@ export const useSettingsStore = create<SettingsState>()(
           editor: { ...s.editor, formatting: { ...s.editor.formatting, ...partial } },
         })),
 
+      updateMarkdownOutput: (partial) =>
+        set((s) => ({
+          editor: {
+            ...s.editor,
+            formatting: {
+              ...s.editor.formatting,
+              markdownOutput: { ...s.editor.formatting.markdownOutput, ...partial },
+            },
+          },
+        })),
+
       addFormatterOverride: (extensions, command, args) =>
         set((s) => ({
           editor: {
@@ -881,7 +899,7 @@ export const useSettingsStore = create<SettingsState>()(
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
       partialize: persistedSettings,
-      version: 16,
+      version: 17,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -1022,6 +1040,21 @@ export const useSettingsStore = create<SettingsState>()(
           // v15 → v16: add font settings
           if (typeof state.fonts !== "object" || state.fonts === null) {
             state.fonts = structuredClone(DEFAULT_FONT_SETTINGS);
+          }
+        }
+
+        if (version <= 16) {
+          // v16 → v17: add markdown output markers to formatting settings
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
+              : undefined;
+          const formatting =
+            editor && typeof editor.formatting === "object" && editor.formatting !== null
+              ? (editor.formatting as Record<string, unknown>)
+              : undefined;
+          if (formatting) {
+            formatting.markdownOutput = parseMarkdownOutputSettings(formatting.markdownOutput);
           }
         }
 
