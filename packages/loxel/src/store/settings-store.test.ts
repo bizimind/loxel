@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
+import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 import { classifySchemaGlob } from "@/lib/schema-glob";
 
 import {
@@ -393,5 +394,48 @@ describe("settings migration v16: font settings", () => {
       terminal: { family: "Menlo", size: null },
     });
     useSettingsStore.setState({ fonts: structuredClone(DEFAULT_FONT_SETTINGS) });
+  });
+});
+
+describe("settings migration v17: markdown output markers", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("v16 formatting settings get the markdownOutput defaults, and keep the rest", async () => {
+    const formatting = { enabled: true, formatOnAutoSave: false, autoDetect: true, overrides: [] };
+    const migrated = (await migrate?.({ editor: { formatting } }, 16)) as SettingsState;
+    expect(migrated.editor.formatting).toEqual({
+      ...formatting,
+      markdownOutput: DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+    });
+  });
+
+  test("valid pre-existing markdownOutput values survive migration", async () => {
+    const migrated = (await migrate?.(
+      { editor: { formatting: { enabled: true, markdownOutput: { bullet: "*", setext: true } } } },
+      16,
+    )) as SettingsState;
+    expect(migrated.editor.formatting.markdownOutput).toEqual({
+      ...DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+      bullet: "*",
+      setext: true,
+    });
+  });
+
+  test("a v7 row gets formatting including markdownOutput", async () => {
+    const migrated = (await migrate?.(
+      { editor: { indentation: { tabSize: 2, insertSpaces: true } } },
+      7,
+    )) as SettingsState;
+    expect(migrated.editor.formatting.markdownOutput).toEqual(DEFAULT_MARKDOWN_OUTPUT_SETTINGS);
+  });
+});
+
+describe("updateMarkdownOutput", () => {
+  test("merges partial updates", () => {
+    const before = useSettingsStore.getState().editor.formatting.markdownOutput;
+    useSettingsStore.getState().updateMarkdownOutput({ fence: "~" });
+    const { markdownOutput } = useSettingsStore.getState().editor.formatting;
+    expect(markdownOutput).toEqual({ ...before, fence: "~" });
+    useSettingsStore.getState().updateMarkdownOutput(before);
   });
 });
