@@ -168,8 +168,9 @@ function startResolution(wtPath: string, entry: WorktreeGoEnv): Promise<GoEnv | 
 
 /**
  * Watch what `env` calls for, if that differs from what is watched: a watch is not fully armed when
- * it returns, so one that stays cannot miss a change. Keeps the old watch until the new one is armed,
- * and hands a change it saw during resolution to the new one's debounce.
+ * it returns, so keeping one that stays leaves no moment in which a change is missed. Opens the new
+ * watch before closing the old one, and hands a change the old one saw during resolution to the new
+ * one's debounce.
  */
 function rewatch(
   wtPath: string,

@@ -46,7 +46,8 @@ export async function createTestDirectory(): Promise<TestDirectory> {
 
 /**
  * The `seed` repo and its `bare.git` clone that every test repo copies: a copy costs less than the
- * git commands that build one, and nearly every test makes a repo.
+ * git commands that build one, and nearly every test makes a repo. In a serial run one template
+ * serves every file, so it must not depend on a file's own mocks or environment.
  */
 let template: Promise<TestDirectory> | undefined;
 
@@ -83,18 +84,22 @@ export async function removeTestRepoTemplate(): Promise<void> {
  * @param options.bare - Produce a bare repo (a clone of a seed working tree)
  */
 export async function createTestRepo(options: { bare?: boolean } = {}): Promise<TestRepo> {
-  template ??= buildTemplate();
+  // A failed build is not kept, so one git failure does not fail every later test.
+  template ??= buildTemplate().catch((error: unknown) => {
+    template = undefined;
+    throw error;
+  });
   const source = (await template).root;
   const directory = await createTestDirectory();
   const cleanup = () => directory.cleanup();
 
   try {
     const seed = join(directory.root, "seed");
-    await cp(join(source, "seed"), seed, { recursive: true });
+    await cp(join(source, "seed"), seed, { recursive: true, verbatimSymlinks: true });
     if (!options.bare) return { root: seed, cleanup };
 
     const bare = join(directory.root, "bare.git");
-    await cp(join(source, "bare.git"), bare, { recursive: true });
+    await cp(join(source, "bare.git"), bare, { recursive: true, verbatimSymlinks: true });
     // The clone's `origin` is the seed it was made from: this copy's, not the template's.
     const config = join(bare, "config");
     const templateUrl = `url = ${join(source, "seed")}\n`;

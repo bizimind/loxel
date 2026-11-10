@@ -320,7 +320,7 @@ exec /bin/cat > /dev/null
     );
 
     test(
-      "gives a clangd without headers none",
+      "passes no --resource-dir to a clangd without headers",
       async () => {
         const { args } = await launch({ developerTools: true, resourceDir: false });
         expect(args.filter((arg) => arg.startsWith("--resource-dir"))).toEqual([]);
