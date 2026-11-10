@@ -278,12 +278,28 @@ describe("a toolchain in the module cache", () => {
   }, 60_000);
 
   test("restarts what follows the toolchain when a terminal downloads it", async () => {
-    const { wt, cacheToolchain } = await setup();
+    const { wt, modcache, cacheToolchain } = await setup();
     await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
     const found = untilUpdate(wt, (env) => (env?.source === "module-cache" ? env : undefined));
     await getGoEnv(wt);
-    // Each resolution rewatches, so keep writing until a watch armed in time sees the new directory.
+    // What is watched is the cache's `golang.org`, still missing. It appears anew each time, for a
+    // watch armed too late to see it appear once.
     const env = await repeatUntil(found, async () => {
+      await rm(join(modcache, "golang.org"), { recursive: true, force: true });
+      await cacheToolchain("1.26.3");
+    });
+    expect(env.version).toBe("1.26.3");
+  }, 60_000);
+
+  test("is picked up when go unpacks its binaries after a resolution saw the directory", async () => {
+    const { wt, cacheToolchain } = await setup();
+    const dir = await cacheToolchain("1.26.3");
+    await rm(join(dir, "bin"), { recursive: true });
+    await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
+    const found = untilUpdate(wt, (env) => (env?.source === "module-cache" ? env : undefined));
+    expect((await getGoEnv(wt))?.source).toBe("path");
+    const env = await repeatUntil(found, async () => {
+      await rm(join(dir, "bin"), { recursive: true, force: true });
       await cacheToolchain("1.26.3");
     });
     expect(env.version).toBe("1.26.3");

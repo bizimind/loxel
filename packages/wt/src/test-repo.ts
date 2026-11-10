@@ -4,7 +4,7 @@
  * wt has no state of its own — git is the database — so the tests exercise
  * real repositories rather than mocking git.
  */
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { cp, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 
@@ -45,14 +45,14 @@ export async function createTestDirectory(): Promise<TestDirectory> {
 }
 
 /**
- * Create a repository with one commit on `main`.
- *
- * @param options.bare - Produce a bare repo (a clone of a seed working tree)
+ * The `seed` repo and its `bare.git` clone that every test repo copies: a copy costs less than the
+ * git commands that build one, and nearly every test makes a repo. In a serial run one template
+ * serves every file, so it must not depend on a file's own mocks or environment.
  */
-export async function createTestRepo(options: { bare?: boolean } = {}): Promise<TestRepo> {
-  const directory = await createTestDirectory();
-  const cleanup = () => directory.cleanup();
+let template: Promise<TestDirectory> | undefined;
 
+async function buildTemplate(): Promise<TestDirectory> {
+  const directory = await createTestDirectory();
   try {
     // Always pass a cwd: the safety preload rejects git calls that would inherit
     // the test process's cwd inside this checkout.
@@ -63,11 +63,49 @@ export async function createTestRepo(options: { bare?: boolean } = {}): Promise<
     await Bun.write(join(seed, "README.md"), "# seed\n");
     await git(["add", "."], seed);
     await git(["commit", "-m", "initial"], seed);
+    await git(["clone", "--bare", seed, join(directory.root, "bare.git")], directory.root);
+    return directory;
+  } catch (error) {
+    await directory.cleanup();
+    throw error;
+  }
+}
 
+/** Remove the template; the safety preload does this once no test in the file can need it. */
+export async function removeTestRepoTemplate(): Promise<void> {
+  const built = template;
+  template = undefined;
+  await (await built?.catch(() => null))?.cleanup();
+}
+
+/**
+ * Create a repository with one commit on `main`.
+ *
+ * @param options.bare - Produce a bare repo (a clone of a seed working tree)
+ */
+export async function createTestRepo(options: { bare?: boolean } = {}): Promise<TestRepo> {
+  // A failed build is not kept, so one git failure does not fail every later test.
+  template ??= buildTemplate().catch((error: unknown) => {
+    template = undefined;
+    throw error;
+  });
+  const source = (await template).root;
+  const directory = await createTestDirectory();
+  const cleanup = () => directory.cleanup();
+
+  try {
+    const seed = join(directory.root, "seed");
+    await cp(join(source, "seed"), seed, { recursive: true, verbatimSymlinks: true });
     if (!options.bare) return { root: seed, cleanup };
 
     const bare = join(directory.root, "bare.git");
-    await git(["clone", "--bare", seed, bare], directory.root);
+    await cp(join(source, "bare.git"), bare, { recursive: true, verbatimSymlinks: true });
+    // The clone's `origin` is the seed it was made from: this copy's, not the template's.
+    const config = join(bare, "config");
+    const templateUrl = `url = ${join(source, "seed")}\n`;
+    const text = await Bun.file(config).text();
+    if (!text.includes(templateUrl)) throw new Error(`No template origin in ${config}`);
+    await Bun.write(config, text.replace(templateUrl, `url = ${seed}\n`));
     return { root: bare, cleanup };
   } catch (error) {
     await directory.cleanup();

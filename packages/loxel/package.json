@@ -26,7 +26,7 @@
     "build:server:standalone": "bun build src/server/index.ts src/server/git-exec-worker.ts --compile --outfile build/loxel-server && pnpm run build:language-servers",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "bun test src scripts --isolate --preload ./src/test/dom-preload.ts --preload ./src/test/jest-dom-preload.ts",
+    "test": "bun test src scripts --parallel=2 --preload ./src/test/dom-preload.ts --preload ./src/test/jest-dom-preload.ts",
     "demo": "bun scripts/demo/launch.ts",
     "demo:shots": "bun scripts/demo/capture-shots.ts",
     "e2e": "bun --bun node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts",
