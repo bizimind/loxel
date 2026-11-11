@@ -299,7 +299,8 @@
 .milkdown .label.bullet::before {
   content: "";
   position: absolute;
-  /* A little below the line's middle (about 2px at 18px), where it reads as centered on the text. */
+  /* A little below the line's middle (0.11 of the font size), where it reads as centered on the
+     text. */
   top: calc((var(--list-line) - var(--bullet-size)) / 2 + var(--loxel-font-prose-size) * 0.11);
   right: 0;
   box-sizing: border-box;

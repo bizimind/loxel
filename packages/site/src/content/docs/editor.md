@@ -123,7 +123,7 @@ Choose the fonts Loxel uses in **Settings > Appearance**, from the fonts install
 | ------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | Code font     | Code editors, diffs, and code blocks in markdown | JetBrains Mono, 13 px (10–16 px)                                                       |
 | Terminal font | Terminals                                        | The code font's family and size (8–32 px), without ligatures while it's JetBrains Mono |
-| Markdown font | Text and headings in markdown files              | Literata, 18 px (12–24 px); headings and tables scale with it                          |
+| Markdown font | Text and headings in markdown files              | Literata, 16 px (12–24 px); headings and tables scale with it                          |
 
 Click a font to pick from a searchable list that shows each font in its own typeface. The code and terminal lists show monospace fonts; turn on **Show all fonts** to list the others after them. You can also type the name of a font the list doesn't show.
 

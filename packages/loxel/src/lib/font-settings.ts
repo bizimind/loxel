@@ -24,7 +24,7 @@ export type FontKind = keyof FontSettings;
 export const DEFAULT_FONT_SETTINGS: FontSettings = {
   code: { family: null, size: 13 },
   terminal: { family: null, size: null },
-  prose: { family: null, size: 18 },
+  prose: { family: null, size: 16 },
 };
 
 /**
