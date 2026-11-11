@@ -16,6 +16,12 @@ import { isFocusInCenter } from "@/lib/focus-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
+import type { ThemePreference } from "@/store/settings-store";
+import {
+  THEME_PREFERENCE_LABELS,
+  THEME_PREFERENCES,
+  useSettingsStore,
+} from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -106,7 +112,18 @@ export type ActionId =
   | EditorCodeActionId
   | "language.restartServers"
   | "worktree.manageRepoTrust"
-  | "app.settings";
+  | "app.settings"
+  | ThemeActionId;
+
+/** The action that switches Settings > Appearance > Theme to one choice. */
+export type ThemeActionId = `theme.${ThemePreference}`;
+
+/** The theme a theme action switches to. */
+export function themeOfAction(id: ThemeActionId): ThemePreference {
+  const theme = THEME_PREFERENCES.find((t) => id === `theme.${t}`);
+  if (!theme) throw new Error(`Unknown theme action: ${id}`);
+  return theme;
+}
 
 /**
  * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`
@@ -143,6 +160,8 @@ export interface ActionDef {
   label: string;
   /** What the command palette calls the action now, when that depends on the state it would change. */
   contextLabel?: () => string;
+  /** Whether the state this action sets is the one in effect now; the palette marks it with a check. */
+  isCurrent?: () => boolean;
   category: ActionCategory;
   hidden?: boolean;
   /**
@@ -393,6 +412,12 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
+  ...THEME_PREFERENCES.map((theme): ActionDef => ({
+    id: `theme.${theme}`,
+    label: `Theme: ${THEME_PREFERENCE_LABELS[theme]}`,
+    category: "app",
+    isCurrent: () => useSettingsStore.getState().theme === theme,
+  })),
 ];
 
 // --- Derived lookups ---

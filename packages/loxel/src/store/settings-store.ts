@@ -23,6 +23,12 @@ export type SidebarZone = "left" | "bottom" | "right";
 /** Color theme choice; "system" follows the OS appearance. */
 export type ThemePreference = "dark" | "light" | "system";
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
+/** How Settings and the command palette name each theme choice. */
+export const THEME_PREFERENCE_LABELS: Record<ThemePreference, string> = {
+  dark: "Dark",
+  light: "Light",
+  system: "System",
+};
 
 /**
  * A stored or synced settings slice with its `theme`, when it has one, checked: an unknown value
