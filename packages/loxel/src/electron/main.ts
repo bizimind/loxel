@@ -17,6 +17,7 @@ import {
 } from "electron";
 import { z } from "zod";
 
+import { DEFAULT_SERVER_PORT } from "../app-ports";
 import { demoPort } from "../demo-instance";
 import { getDek, initDek } from "./dek";
 import {
@@ -27,7 +28,11 @@ import {
   IS_DEMO_HIDDEN,
   IS_DEV,
 } from "./env";
-const SERVER_PORT = IS_DEMO ? demoPort(DEMO_INSTANCE) : IS_DEV ? 7434 : 7433;
+const SERVER_PORT = IS_DEMO
+  ? demoPort(DEMO_INSTANCE)
+  : IS_DEV
+    ? DEFAULT_SERVER_PORT.dev
+    : DEFAULT_SERVER_PORT.production;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
 /**

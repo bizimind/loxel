@@ -6,6 +6,8 @@ import react from "@vitejs/plugin-react";
 import { type Plugin, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 
+import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
+
 const isElectron = !!process.env.ELECTRON;
 
 const XTERM_WEBGL_MODULE = "@xterm/addon-webgl/lib/addon-webgl.mjs";
@@ -89,7 +91,9 @@ function xtermWebglPixelGrid(): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
-  const serverPort = mode === "development" ? 7434 : 7433;
+  const serverPort =
+    parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
+    (mode === "development" ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
 
   return {
     plugins: [
@@ -152,7 +156,7 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       // The server only admits this origin in dev (src/server/request-origin.ts), so fail
       // loudly instead of silently moving to another port.
-      port: 5173,
+      port: vitePort(process.env),
       strictPort: true,
       proxy: {
         "/api": { target: `http://127.0.0.1:${serverPort}`, changeOrigin: true },

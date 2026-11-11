@@ -26,8 +26,8 @@
   --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 7%, transparent);
   --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
   --crepe-color-selected: var(--primary);
-  /* The fonts and sizes from Settings > Fonts (font-settings.ts). Prose sizes below are a 15px
-     design scaled to the prose size. */
+  /* The fonts and sizes from Settings > Fonts (font-settings.ts). Sizes and spacing below are
+     multiples of the prose size, so the layout keeps its proportions at any size. */
   --crepe-font-default: var(--loxel-font-prose);
   --crepe-font-code: var(--loxel-font-code);
   --crepe-font-title: var(--loxel-font-prose);
@@ -104,7 +104,14 @@
   color: #56a8f5;
 }
 
-/* ── Headings — tighter spacing, bolder weight ── */
+/* ── Headings ──
+   Sizes and spacing scale with the prose size (--u below). Space above a heading is several times
+   the space below it, so each heading binds to the section it opens rather than floating between
+   sections; a heading straight after another heading sits close to it. */
+
+.milkdown .ProseMirror {
+  --u: var(--loxel-font-prose-size);
+}
 
 .milkdown .ProseMirror h1,
 .milkdown .ProseMirror h2,
@@ -117,49 +124,63 @@
 }
 
 .milkdown .ProseMirror h1 {
-  font-size: calc(var(--loxel-font-prose-size) * 28 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 36 / 15);
-  margin-top: 16px;
-  margin-bottom: 12px;
+  font-size: calc(var(--u) * 2);
+  line-height: 1.2;
+  margin-top: calc(var(--u) * 2.4);
+  margin-bottom: calc(var(--u) * 0.85);
 }
 
 .milkdown .ProseMirror h2 {
-  font-size: calc(var(--loxel-font-prose-size) * 24 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 32 / 15);
-  margin-top: 14px;
-  margin-bottom: 10px;
+  font-size: calc(var(--u) * 1.6);
+  line-height: 1.25;
+  margin-top: calc(var(--u) * 2.2);
+  margin-bottom: calc(var(--u) * 0.75);
 }
 
 .milkdown .ProseMirror h3 {
-  font-size: calc(var(--loxel-font-prose-size) * 20 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 28 / 15);
-  margin-top: 12px;
-  margin-bottom: 8px;
+  font-size: calc(var(--u) * 1.3);
+  line-height: 1.3;
+  margin-top: calc(var(--u) * 1.8);
+  margin-bottom: calc(var(--u) * 0.65);
 }
 
 .milkdown .ProseMirror h4 {
-  font-size: calc(var(--loxel-font-prose-size) * 17 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 24 / 15);
-  margin-top: 10px;
-  margin-bottom: 6px;
+  font-size: calc(var(--u) * 1.1);
+  line-height: 1.35;
+  margin-top: calc(var(--u) * 1.5);
+  margin-bottom: calc(var(--u) * 0.55);
   font-weight: 700;
 }
 
 .milkdown .ProseMirror h5 {
-  font-size: calc(var(--loxel-font-prose-size) * 15 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 22 / 15);
-  margin-top: 8px;
-  margin-bottom: 6px;
+  font-size: var(--u);
+  line-height: 1.4;
+  margin-top: calc(var(--u) * 1.3);
+  margin-bottom: calc(var(--u) * 0.45);
   font-weight: 700;
 }
 
 .milkdown .ProseMirror h6 {
-  font-size: calc(var(--loxel-font-prose-size) * 14 / 15);
-  line-height: calc(var(--loxel-font-prose-size) * 20 / 15);
-  margin-top: 8px;
-  margin-bottom: 4px;
+  font-size: calc(var(--u) * 0.9);
+  line-height: 1.4;
+  margin-top: calc(var(--u) * 1.3);
+  margin-bottom: calc(var(--u) * 0.45);
   font-weight: 700;
   color: var(--crepe-color-on-surface-variant);
+}
+
+.milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: calc(var(--u) * 0.6);
+}
+
+/* A code block right under a heading sits a little closer than its usual gap: its box needs more
+   room than a paragraph, but should still read as part of the heading's section. */
+.milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) + .milkdown-code-block {
+  margin-top: var(--u);
+}
+
+.milkdown .ProseMirror > :first-child {
+  margin-top: 0;
 }
 
 /* ── Body text ── */
@@ -171,7 +192,7 @@
 
 /* ── Inline code — neutral gray tint, sized relative to surrounding text ── */
 
-.milkdown .ProseMirror code {
+.milkdown .ProseMirror :not(pre) > code {
   color: var(--crepe-color-inline-code);
   background: var(--crepe-color-inline-area);
   font-family: var(--crepe-font-code);
@@ -180,6 +201,12 @@
   padding: 0.05em 0.35em;
   border-radius: 3px;
   vertical-align: baseline;
+  /* The vendor's inline-block lets Chromium break between a chip and adjacent punctuation, as in
+     "(" ⏎ "code". Inline, the usual line-break rules glue them; a chip that wraps keeps its
+     padding and corners on each line. */
+  display: inline;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* ── Lists — brighter glyphs ── */
@@ -192,16 +219,54 @@
   fill: var(--crepe-color-on-surface-variant);
 }
 
-/* The vendor's marker box, scaled with the prose size so markers stay on the first line. */
-.milkdown .milkdown-list-item-block li .label-wrapper,
-.milkdown .milkdown-list-item-block li .label-wrapper .label {
-  height: calc(var(--loxel-font-prose-size) * 32 / 15);
-  width: calc(var(--loxel-font-prose-size) * 24 / 15);
+/* The marker sits on the item's first line: the label has the paragraph's font, line height and
+   top padding, so a one-line item is exactly one line tall and markers share the text's baseline.
+   Markers are right-aligned against the text, a fixed gap from it. */
+.milkdown .milkdown-list-item-block li {
+  --list-line: calc(var(--loxel-font-prose-size) * 26 / 15);
+  /* The marker and the text side by side; set here, not left to the vendor's rule, since the
+     geometry below depends on it. */
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: calc(var(--loxel-font-prose-size) * 0.75);
+}
+
+.milkdown .milkdown-list-item-block li > .children {
+  flex: 1;
+  min-width: 0;
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper {
+  height: auto;
+  width: calc(var(--loxel-font-prose-size) * 1.4);
+  /* A list item's paragraph has no top padding, so neither does the label: both start at the
+     first line's top. */
+  padding-top: 0;
+  align-items: flex-start;
+  justify-content: flex-end;
 }
 
 .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  display: block;
+  width: auto;
+  height: var(--list-line);
+  padding: 0;
   font-size: var(--loxel-font-prose-size);
+  line-height: var(--list-line);
   font-family: var(--crepe-font-default);
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper :is(.label.checked, .label.unchecked) {
+  display: flex;
+  align-items: center;
+}
+
+/* Room above every item but a top-level list's first, so wrapped items don't run into the next
+   one and a nested list's first item is as far from its parent's text as its siblings are. */
+.milkdown .milkdown-list-item-block + .milkdown-list-item-block,
+.milkdown .milkdown-list-item-block .milkdown-list-item-block {
+  margin-top: calc(var(--loxel-font-prose-size) * 10 / 15);
 }
 
 /* Checkbox styling — match bullet color */
@@ -217,55 +282,62 @@
 
 /* ── Bullet nesting styles: filled ● → hollow ○ → filled ● → … ── */
 
-/* Hide default SVG bullet, replace with pseudo-element */
+/* Hide default SVG bullet, draw a disc instead, centered in the label's box: the label is exactly
+   the first line's box (same height and top as the text's first line), so the disc sits at the
+   line's middle, which reads as centered next to mixed-case text. Positioned rather than aligned
+   inline, so it doesn't depend on how the label's line box is built. */
 .milkdown .label.bullet svg {
   display: none;
 }
 
+.milkdown .milkdown-list-item-block li .label-wrapper .label.bullet {
+  --bullet-size: calc(var(--loxel-font-prose-size) * 0.4);
+  position: relative;
+  width: var(--bullet-size);
+}
+
 .milkdown .label.bullet::before {
-  content: "●";
-  font-size: 7px;
-  line-height: calc(var(--loxel-font-prose-size) * 24 / 15);
+  content: "";
+  position: absolute;
+  /* A little below the line's middle (0.11 of the font size), where it reads as centered on the
+     text. */
+  top: calc((var(--list-line) - var(--bullet-size)) / 2 + var(--loxel-font-prose-size) * 0.11);
+  right: 0;
+  box-sizing: border-box;
+  width: var(--bullet-size);
+  height: var(--bullet-size);
+  border-radius: 50%;
+  background: currentColor;
 }
 
 /* Cycle: filled ● → hollow ○, repeating via increasing specificity */
 .milkdown-list-item-block .milkdown-list-item-block .label.bullet::before {
-  content: "○";
-  font-size: 8px;
+  background: transparent;
+  border: 1.5px solid currentColor;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
   .label.bullet::before {
-  content: "●";
-  font-size: 7px;
+  background: currentColor;
+  border: none;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
   .label.bullet::before {
-  content: "○";
-  font-size: 8px;
-}
-.milkdown-list-item-block
-  .milkdown-list-item-block
-  .milkdown-list-item-block
-  .milkdown-list-item-block
-  .milkdown-list-item-block
-  .label.bullet::before {
-  content: "●";
-  font-size: 7px;
+  background: transparent;
+  border: 1.5px solid currentColor;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
-  .milkdown-list-item-block
   .label.bullet::before {
-  content: "○";
-  font-size: 8px;
+  background: currentColor;
+  border: none;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
@@ -273,10 +345,9 @@
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
-  .milkdown-list-item-block
   .label.bullet::before {
-  content: "●";
-  font-size: 7px;
+  background: transparent;
+  border: 1.5px solid currentColor;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
@@ -285,10 +356,9 @@
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
-  .milkdown-list-item-block
   .label.bullet::before {
-  content: "○";
-  font-size: 8px;
+  background: currentColor;
+  border: none;
 }
 .milkdown-list-item-block
   .milkdown-list-item-block
@@ -298,10 +368,22 @@
   .milkdown-list-item-block
   .milkdown-list-item-block
   .milkdown-list-item-block
+  .label.bullet::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
   .milkdown-list-item-block
   .label.bullet::before {
-  content: "●";
-  font-size: 7px;
+  background: currentColor;
+  border: none;
 }
 
 /* ── Ordered list nesting: 1. → a. → i. → 1. → … ── */
@@ -319,7 +401,9 @@
 .milkdown .milkdown-list-item-block li .label-wrapper .label.ordered {
   color: transparent;
   position: relative;
-  overflow: hidden;
+  /* The counter replaces the label text, so the box can't size to that text. A counter wider than
+     the marker box ("viii.", "100.") extends left into the indent instead of being clipped. */
+  width: 100%;
 }
 
 .milkdown .milkdown-list-item-block li .label-wrapper .label.ordered::before {
@@ -360,11 +444,14 @@
 /* ── Code blocks — bordered, rounded, JetBrains-like ── */
 
 .milkdown .milkdown-code-block {
-  background: var(--crepe-color-surface);
-  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 60%);
+  background: var(--surface-1);
+  border: none;
   border-radius: 6px;
-  padding: 12px 16px 16px;
-  margin: 8px 0;
+  /* The inset sits inside the code's scroller, not on this box, so a long line scrolls to the
+     box's edge and the horizontal scrollbar spans the whole box. */
+  --code-block-inset: 24px;
+  padding: 0;
+  margin: calc(var(--u) * 1.2) 0;
   overflow: visible;
 }
 
@@ -378,33 +465,44 @@
   max-height: min(400px, 50vh);
 }
 
+.milkdown .milkdown-code-block .cm-editor,
+.milkdown .milkdown-code-block .cm-scroller {
+  border-radius: inherit;
+}
+
 .milkdown .milkdown-code-block .cm-editor {
-  background: var(--crepe-color-surface);
+  background: transparent;
   font-family: var(--crepe-font-code);
   font-size: var(--loxel-font-code-size);
   line-height: 1.5;
 }
 
+/* No gutters: the vendor always includes CodeMirror's basicSetup (line numbers, folding), and
+   prose code blocks read better without them. */
 .milkdown .milkdown-code-block .cm-gutters {
-  background: var(--crepe-color-surface);
-  border-right: none;
-  padding-right: 8px;
-}
-
-.milkdown .milkdown-code-block .cm-gutters .cm-gutterElement {
-  color: var(--editor-line-number);
-  font-size: calc(var(--loxel-font-code-size) - 1px);
+  display: none;
 }
 
 .milkdown .milkdown-code-block .cm-content {
   font-family: var(--crepe-font-code);
+  padding: var(--code-block-inset);
+}
+
+.milkdown .milkdown-code-block .cm-line {
+  padding-inline: 0;
+}
+
+/* The same inset for what isn't in the scroller: the preview panel, and the plain-text
+   placeholder Crepe shows while a block is off-screen. */
+.milkdown .milkdown-code-block .preview-panel {
+  padding: 0 var(--code-block-inset) var(--code-block-inset);
+}
+
+.milkdown .milkdown-code-block .milkdown-code-block-placeholder {
+  padding: var(--code-block-inset);
 }
 
 .milkdown .milkdown-code-block .cm-activeLine {
-  background: transparent;
-}
-
-.milkdown .milkdown-code-block .cm-activeLineGutter {
   background: transparent;
 }
 
@@ -413,19 +511,65 @@
   background: var(--crepe-color-selected) !important;
 }
 
+/* Other occurrences of the selected text (basicSetup's highlightSelectionMatches): the code
+   editor's selection highlight, a faint tint that keeps the syntax colors readable, instead of
+   CodeMirror's bright green. Monaco's dark default; the light theme's in monaco-theme.ts. */
+.milkdown .milkdown-code-block .cm-selectionMatch {
+  background-color: #add6ff26;
+}
+
+.milkdown:not(.dark) .milkdown-code-block .cm-selectionMatch {
+  background-color: #8b7be524;
+  box-shadow: inset 0 0 0 1px #8b7be599;
+}
+
 /* CodeMirror cursor color */
 .milkdown .milkdown-code-block .cm-cursor {
   border-left-color: var(--crepe-color-on-surface);
 }
 
-/* Language button & tools — always visible, subtle */
+/* The language button and tools float over the top-right corner, so a block's code starts at the
+   same inset as every other side; the picker opens below them. The whole row fades, background
+   included, so while hidden it doesn't mask the code under it. It shows while the block is hovered
+   or its language list is open, and its stacking context sits above the content after the block,
+   which the open list can overlap. */
+.milkdown .milkdown-code-block .tools {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 50;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 4px;
+  /* The block's own fill (light mode gives blocks a grey one), so the row masks code seamlessly. */
+  background: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.milkdown .milkdown-code-block:is(:hover, :has(.language-picker .list-wrapper)) .tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.milkdown .milkdown-code-block .tools .language-picker {
+  top: 100%;
+  right: 0;
+}
+
+/* With the code hidden, a preview (a diagram, a diff and its header buttons) starts below the
+   floating tools instead of under them. */
+.milkdown .milkdown-code-block:has(.codemirror-host.hidden) .preview-panel {
+  padding-top: calc(var(--code-block-inset) + 24px);
+}
+
 .milkdown .milkdown-code-block .tools .language-button {
   opacity: 0.7;
   font-family: var(--crepe-font-default);
   font-size: 11px;
   background: transparent;
   color: var(--crepe-color-on-surface-variant);
-  margin-bottom: 6px;
 }
 
 .milkdown .milkdown-code-block .tools .language-button:hover {
@@ -839,7 +983,7 @@
 }
 
 /* Inline code: a hairline edge so the chip holds its shape on white */
-.milkdown:not(.dark) .ProseMirror code {
+.milkdown:not(.dark) .ProseMirror :not(pre) > code {
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
@@ -874,18 +1018,13 @@
   padding: 2px 8px;
 }
 
-/* A faint grey fill sets code blocks apart from the white page, as in JetBrains Light. */
-.milkdown:not(.dark) .milkdown-code-block,
-.milkdown:not(.dark) .milkdown-code-block .cm-editor,
-.milkdown:not(.dark) .milkdown-code-block .cm-gutters {
+/* A faint grey fill sets code blocks apart from the white page (where --surface-1 is white), as in
+   JetBrains Light. */
+.milkdown:not(.dark) .milkdown-code-block {
   background: var(--card);
 }
 
-.milkdown:not(.dark) .milkdown-code-block {
-  border-color: #d1d3d8;
-}
-
-/* Code-block outline and table row dividers: a firmer neutral grey (no blue tint) */
+/* Table row dividers: a firmer neutral grey (no blue tint) */
 .milkdown:not(.dark) .milkdown-table-block td {
   border-bottom-color: #d1d3d8;
 }
