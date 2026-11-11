@@ -1,17 +1,21 @@
 import type { LucideIcon } from "lucide-react";
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 
-import { THEME_PREFERENCES, type ThemePreference } from "@/lib/theme-preference";
+import {
+  THEME_PREFERENCE_LABELS,
+  THEME_PREFERENCES,
+  type ThemePreference,
+} from "@/lib/theme-preference";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings-store";
 
 import { FontSettings } from "./FontSettings";
 import { TerminalColorSchemes } from "./TerminalColorSchemes";
 
-const THEME_LABELS: Record<ThemePreference, { label: string; icon: LucideIcon }> = {
-  dark: { label: "Dark", icon: MoonIcon },
-  light: { label: "Light", icon: SunIcon },
-  system: { label: "System", icon: MonitorIcon },
+const THEME_ICONS: Record<ThemePreference, LucideIcon> = {
+  dark: MoonIcon,
+  light: SunIcon,
+  system: MonitorIcon,
 };
 
 export function AppearanceSection() {
@@ -43,7 +47,7 @@ export function AppearanceSection() {
           className="border-input not-dark:bg-muted inline-flex rounded-md border p-0.5 not-dark:border-transparent"
         >
           {THEME_PREFERENCES.map((value) => {
-            const { label, icon: Icon } = THEME_LABELS[value];
+            const Icon = THEME_ICONS[value];
             return (
               <button
                 key={value}
@@ -59,7 +63,7 @@ export function AppearanceSection() {
                 )}
               >
                 <Icon className="size-3.5" />
-                {label}
+                {THEME_PREFERENCE_LABELS[value]}
               </button>
             );
           })}
