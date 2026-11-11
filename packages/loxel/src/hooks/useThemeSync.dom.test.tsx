@@ -9,6 +9,7 @@ mock.module("@/api/client", () => ({
   putStore: jest.fn(async () => ({ success: true })),
 }));
 
+const { stubElectronAPI } = await import("@/test/electron-api-stub");
 const { useSettingsStore } = await import("@/store/settings-store");
 const { useUIStore } = await import("@/store/ui");
 const { useThemeSync } = await import("./useThemeSync");
@@ -41,6 +42,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
+  delete window.electronAPI;
   systemScheme.set(false);
   useSettingsStore.setState({ theme: "dark" });
 });
@@ -104,5 +106,18 @@ describe("useThemeSync", () => {
     act(() => useSettingsStore.setState({ theme: "light" }));
     expect(applied().darkClass).toBe(false);
     expect(useUIStore.getState().darkMode).toBe(false);
+  });
+
+  test("sends the setting to Electron's native theme, and each change of it", () => {
+    const setThemeSource = jest.fn();
+    window.electronAPI = stubElectronAPI({ setThemeSource });
+    useSettingsStore.setState({ theme: "light" });
+    render(<Harness />);
+    expect(setThemeSource.mock.calls).toEqual([["light"]]);
+
+    act(() => useSettingsStore.setState({ theme: "system" }));
+    // "system" goes to Electron as is: the OS decides there, not this window's resolved theme.
+    act(() => systemScheme.set(true));
+    expect(setThemeSource.mock.calls).toEqual([["light"], ["system"]]);
   });
 });

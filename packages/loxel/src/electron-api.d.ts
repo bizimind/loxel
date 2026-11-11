@@ -9,6 +9,11 @@ interface Window {
     onWindowFocusChange: (callback: (focused: boolean) => void) => () => void;
     openFolderDialog: () => Promise<string | null>;
     /**
+     * Apply the Theme setting to Electron's `nativeTheme`, so native menus and dialogs, browser
+     * panels' `prefers-color-scheme` and window backgrounds follow it ("system": the OS).
+     */
+    setThemeSource: (theme: import("@/lib/theme-preference").ThemePreference) => void;
+    /**
      * Keystrokes (KeyCombo strings) to withhold from this window's webviews and forward to it;
      * `captureAll` forwards every keystroke (a chord is in progress).
      */
