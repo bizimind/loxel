@@ -22,13 +22,20 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { getMediaType } from "@/lib/media-extensions";
 import { cn } from "@/lib/utils";
 
+import {
+  actualSizeScale,
+  clampZoom,
+  type Dimensions,
+  fitWithin,
+  type MediaSize,
+  zoomPercent,
+} from "./media-scale";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const ZOOM_STEP = 1.2;
-const ZOOM_MIN = 0.05;
-const ZOOM_MAX = 50;
 const DRAG_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
@@ -42,7 +49,7 @@ interface MediaViewerPanelProps {
 
 /** Messages posted by the media-frame iframe to this parent. Sender: `packages/loxel/src/server/routes.ts` (`/api/media-frame`). */
 type IframeMessage =
-  | { type: "media-dimensions"; width: number; height: number }
+  | { type: "media-dimensions"; width: number; height: number; scalesToFit: boolean }
   | {
       type: "media-video-state";
       playing: boolean;
@@ -69,18 +76,8 @@ function isIframeMessage(data: unknown): data is IframeMessage {
   return t === "media-dimensions" || t === "media-video-state" || t === "media-wheel";
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
-}
-
-/**
- * The media's on-screen box at zoom 1: its natural size, shrunk to fit the viewport. The frame page
- * caps img/video/svg at 100% of its size and never upscales them.
- */
-function fitWithin(media: Dimensions, viewport: Dimensions): Dimensions {
-  const ratio = Math.min(1, viewport.width / media.width, viewport.height / media.height);
-  return { width: media.width * ratio, height: media.height * ratio };
+function isPositiveSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 interface VideoState {
@@ -113,7 +110,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- State ---
   const [version, setVersion] = useState(1);
-  const [dimensions, setDimensions] = useState<Dimensions | null>(null);
+  const [dimensions, setDimensions] = useState<MediaSize | null>(null);
   const [scale, setScale] = useState(1);
   const [autoFit, setAutoFit] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -165,25 +162,10 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     if (backdrop && box) Object.assign(backdrop.style, backdropStyle(box, scaleRef.current, x, y));
   }, []);
 
-  // --- Actual-size scale: what scale shows 1 content pixel = 1 screen pixel ---
-  const calcActualSizeScale = useCallback(
-    (dims?: Dimensions | null) => {
-      const d = dims ?? dimensions;
-      const viewport = viewportRef.current;
-      if (!d || !viewport) return 1;
-      const vw = viewport.clientWidth;
-      const vh = viewport.clientHeight;
-      if (vw === 0 || vh === 0) return 1;
-      const containRatio = Math.min(vw / d.width, vh / d.height);
-      return containRatio > 0 ? 1 / containRatio : 1;
-    },
-    [dimensions],
-  );
-
   // --- Shared zoom helper ---
   const applyZoom = useCallback(
     (factor: number) => {
-      const s = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scaleRef.current * factor));
+      const s = clampZoom(scaleRef.current, scaleRef.current * factor);
       setScale(s);
       scaleRef.current = s;
       setAutoFit(false);
@@ -202,12 +184,12 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- Set 100% (actual size) ---
   const setActualSize = useCallback(() => {
-    const s = calcActualSizeScale();
+    const s = dimensions && viewportSize ? actualSizeScale(dimensions, viewportSize) : 1;
     setScale(s);
     scaleRef.current = s;
     translateRef.current = { x: 0, y: 0 };
     applyTransform();
-  }, [calcActualSizeScale, applyTransform]);
+  }, [dimensions, viewportSize, applyTransform]);
 
   // --- Listen for postMessage from iframe ---
   useEffect(() => {
@@ -217,9 +199,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       const msg = e.data;
 
       switch (msg.type) {
-        case "media-dimensions":
-          setDimensions({ width: msg.width, height: msg.height });
+        case "media-dimensions": {
+          // An SVG's own scripts share the frame's window, so this may not come from our script:
+          // keep only a usable size.
+          const { width, height } = msg;
+          if (!isPositiveSize(width) || !isPositiveSize(height)) break;
+          setDimensions({ width, height, scalesToFit: msg.scalesToFit === true });
           break;
+        }
         case "media-video-state":
           setVideoState({
             playing: msg.playing,
@@ -244,7 +231,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
             const oldScale = scaleRef.current;
             const factor = Math.pow(2, -deltaY * 0.01);
-            const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+            const newScale = clampZoom(oldScale, oldScale * factor);
 
             const cx = viewport.clientWidth / 2;
             const cy = viewport.clientHeight / 2;
@@ -330,7 +317,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
         const oldScale = scaleRef.current;
         const factor = Math.pow(2, -e.deltaY * 0.01);
-        const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+        const newScale = clampZoom(oldScale, oldScale * factor);
 
         const cx = viewport.clientWidth / 2;
         const cy = viewport.clientHeight / 2;
@@ -439,15 +426,19 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     [applyZoom, fitToContain, isVideo, sendCommand],
   );
 
-  const actualScale = calcActualSizeScale();
-  const zoomPercent = actualScale > 0 ? Math.round((scale / actualScale) * 100) : 100;
+  const zoomLabel =
+    dimensions && viewportSize
+      ? zoomPercent(scale, dimensions, viewportSize)
+      : Math.round(scale * 100);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="border-border not-dark:border-input bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
         <span className="text-foreground dark:text-muted-foreground min-w-0 shrink-0">
-          {dimensions ? `${dimensions.width} \u00d7 ${dimensions.height}` : "\u2014"}
+          {dimensions
+            ? `${Math.round(dimensions.width)} \u00d7 ${Math.round(dimensions.height)}`
+            : "\u2014"}
         </span>
 
         <div className="mx-auto" />
@@ -456,7 +447,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           <MinusIcon className="size-3.5" />
         </ToolbarButton>
         <span className="text-foreground dark:text-muted-foreground w-10 text-center tabular-nums">
-          {zoomPercent}%
+          {zoomLabel}%
         </span>
         <ToolbarButton onClick={() => applyZoom(ZOOM_STEP)} title="Zoom in (+)">
           <PlusIcon className="size-3.5" />
