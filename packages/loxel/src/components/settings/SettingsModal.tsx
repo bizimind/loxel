@@ -9,7 +9,6 @@ import {
   SettingsIcon,
   ShieldIcon,
   TerminalSquareIcon,
-  TypeIcon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -24,7 +23,6 @@ import { useSettingsStore } from "@/store/settings-store";
 import { AppearanceSection } from "./AppearanceSection";
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
-import { FontsSection } from "./FontsSection";
 import { GeneralSection } from "./GeneralSection";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { LayoutSection } from "./LayoutSection";
@@ -45,7 +43,6 @@ const SECTIONS: SectionDef[] = [
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
   { key: "editor", label: "Editor", icon: CodeIcon },
-  { key: "fonts", label: "Fonts", icon: TypeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
   { key: "security", label: "Security", icon: ShieldIcon },
@@ -214,10 +211,6 @@ export function SettingsModal() {
 
               <div id="settings-editor" className={SECTION_CLASS}>
                 <EditorSection />
-              </div>
-
-              <div id="settings-fonts" className={SECTION_CLASS}>
-                <FontsSection />
               </div>
 
               <div id="settings-schemas" className={SECTION_CLASS}>

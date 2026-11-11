@@ -8,7 +8,7 @@ mock.module("@/api/client", () => ({
   putStore: jest.fn(async () => ({ success: true })),
 }));
 
-const { FontsSection } = await import("./FontsSection");
+const { FontSettings } = await import("./FontSettings");
 const { useSettingsStore } = await import("@/store/settings-store");
 const { DEFAULT_FONT_SETTINGS } = await import("@/lib/font-settings");
 
@@ -64,10 +64,10 @@ afterEach(() => {
   withLocalFonts(null);
 });
 
-describe("FontsSection", () => {
+describe("FontSettings", () => {
   test("the code font picker lists monospace fonts unless all are shown", async () => {
     withLocalFonts(INSTALLED);
-    render(<FontsSection />);
+    render(<FontSettings />);
     const dialog = openPicker("Code Font");
     await within(dialog).findByText("Menlo");
     expect(within(dialog).getByText("Courier New")).toBeInTheDocument();
@@ -88,7 +88,7 @@ describe("FontsSection", () => {
   test("keys on the Show all switch stay on it", async () => {
     withLocalFonts(INSTALLED);
     useSettingsStore.getState().updateFont("code", { family: "Menlo" });
-    render(<FontsSection />);
+    render(<FontSettings />);
     const dialog = openPicker("Code Font");
     const toggle = await within(dialog).findByRole("switch");
     fireEvent.keyDown(toggle, { key: "Enter" });
@@ -101,7 +101,7 @@ describe("FontsSection", () => {
   test("the current font comes first, so Enter on opening keeps it", async () => {
     withLocalFonts(INSTALLED);
     useSettingsStore.getState().updateFont("code", { family: "Menlo" });
-    render(<FontsSection />);
+    render(<FontSettings />);
     const dialog = openPicker("Code Font");
     await within(dialog).findByText("Courier New");
     const names = within(dialog)
@@ -114,7 +114,7 @@ describe("FontsSection", () => {
 
   test("a typed name can be picked where fonts cannot be listed", async () => {
     withLocalFonts(null);
-    render(<FontsSection />);
+    render(<FontSettings />);
     const dialog = openPicker("Markdown Font");
     await within(dialog).findByText(/can't be listed/);
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Iowan Old Style" } });
@@ -123,7 +123,7 @@ describe("FontsSection", () => {
   });
 
   test("the terminal size follows the code size until set", () => {
-    render(<FontsSection />);
+    render(<FontSettings />);
     const terminalSize = screen.getByLabelText("Terminal Font size");
     expect(terminalSize).toHaveAttribute("placeholder", "13");
     fireEvent.change(terminalSize, { target: { value: "16" } });
@@ -137,7 +137,7 @@ describe("FontsSection", () => {
   test("a terminal font that isn't installed falls back to the bundled one", () => {
     useSettingsStore.getState().updateFont("code", { family: "Menlo" });
     useSettingsStore.getState().updateFont("terminal", { family: "Berkeley Mono" });
-    render(<FontsSection />);
+    render(<FontSettings />);
     expect(
       screen.getByText(
         /Berkeley Mono isn't installed on this computer\. Loxel shows JetBrains Mono NL instead\./,
@@ -147,7 +147,7 @@ describe("FontsSection", () => {
 
   test("resetting a font goes back to the default", () => {
     useSettingsStore.getState().updateFont("prose", { family: "Georgia" });
-    render(<FontsSection />);
+    render(<FontSettings />);
     fireEvent.click(screen.getByLabelText("Reset markdown font"));
     expect(useSettingsStore.getState().fonts.prose.family).toBeNull();
   });

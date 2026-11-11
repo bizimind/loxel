@@ -3,13 +3,15 @@ import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { ThemePreference } from "@/store/settings-store";
-import { useSettingsStore } from "@/store/settings-store";
+import { THEME_PREFERENCES, useSettingsStore } from "@/store/settings-store";
 
-const THEME_OPTIONS: readonly { value: ThemePreference; label: string; icon: LucideIcon }[] = [
-  { value: "dark", label: "Dark", icon: MoonIcon },
-  { value: "light", label: "Light", icon: SunIcon },
-  { value: "system", label: "System", icon: MonitorIcon },
-];
+import { FontSettings } from "./FontSettings";
+
+const THEME_LABELS: Record<ThemePreference, { label: string; icon: LucideIcon }> = {
+  dark: { label: "Dark", icon: MoonIcon },
+  light: { label: "Light", icon: SunIcon },
+  system: { label: "System", icon: MonitorIcon },
+};
 
 export function AppearanceSection() {
   const theme = useSettingsStore((s) => s.theme);
@@ -19,7 +21,11 @@ export function AppearanceSection() {
     <div className="space-y-5">
       <div>
         <h3 className="text-foreground text-sm font-medium">Appearance</h3>
-        <p className="text-muted-foreground mt-1 text-xs">Choose how Loxel looks.</p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Choose how Loxel looks. Fonts are the ones installed on this computer: settings keep only
+          the font&apos;s name, and where it isn&apos;t installed, Loxel shows its bundled font
+          instead.
+        </p>
       </div>
 
       <div className="space-y-1.5">
@@ -35,26 +41,31 @@ export function AppearanceSection() {
           // Light draws a grey track with the chosen segment raised in white, like a native control
           className="border-input not-dark:bg-muted inline-flex rounded-md border p-0.5 not-dark:border-transparent"
         >
-          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={theme === value}
-              onClick={() => setTheme(value)}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1 text-xs transition-colors",
-                theme === value
-                  ? "bg-accent text-accent-foreground not-dark:bg-background not-dark:text-link not-dark:font-medium not-dark:shadow-[0_0_0_1px_rgb(0_0_0/0.14),0_1px_3px_rgb(0_0_0/0.16)]"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" />
-              {label}
-            </button>
-          ))}
+          {THEME_PREFERENCES.map((value) => {
+            const { label, icon: Icon } = THEME_LABELS[value];
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={theme === value}
+                onClick={() => setTheme(value)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded px-3 py-1 text-xs transition-colors",
+                  theme === value
+                    ? "bg-accent text-accent-foreground not-dark:bg-background not-dark:text-link not-dark:font-medium not-dark:shadow-[0_0_0_1px_rgb(0_0_0/0.14),0_1px_3px_rgb(0_0_0/0.16)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      <FontSettings />
     </div>
   );
 }
