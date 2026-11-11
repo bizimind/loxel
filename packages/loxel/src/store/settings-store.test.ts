@@ -3,6 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
 import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 import { classifySchemaGlob } from "@/lib/schema-glob";
+import {
+  BUILTIN_TERMINAL_COLOR_SCHEMES,
+  DEFAULT_TERMINAL_COLOR_SCHEMES,
+} from "@/lib/terminal-color-schemes";
 
 import {
   BUILTIN_SCHEMA_DEFAULTS,
@@ -437,5 +441,74 @@ describe("updateMarkdownOutput", () => {
     const { markdownOutput } = useSettingsStore.getState().editor.formatting;
     expect(markdownOutput).toEqual({ ...before, fence: "~" });
     useSettingsStore.getState().updateMarkdownOutput(before);
+  });
+});
+
+describe("terminal color schemes", () => {
+  const night = { name: "Night", palette: { ...BUILTIN_TERMINAL_COLOR_SCHEMES[1]!.palette } };
+  const reset = () =>
+    useSettingsStore
+      .getState()
+      .updateTerminal({ colorSchemes: structuredClone(DEFAULT_TERMINAL_COLOR_SCHEMES) });
+
+  test("defaults to Loxel Light and Loxel Dark with nothing imported", () => {
+    reset();
+    expect(useSettingsStore.getState().terminal.colorSchemes).toEqual({
+      light: "loxel-light",
+      dark: "loxel-dark",
+      imported: [],
+    });
+  });
+
+  test("imports schemes, picks one per theme, and re-importing a name keeps its id", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    store.importTerminalColorSchemes([night]);
+    const [first] = useSettingsStore.getState().terminal.colorSchemes.imported;
+    expect(first).toMatchObject(night);
+    store.setTerminalColorScheme("dark", first!.id);
+    store.setTerminalColorScheme("light", "loxel-dark");
+
+    const recolored = { ...night, palette: { ...night.palette, background: "#000000" } };
+    store.importTerminalColorSchemes([recolored]);
+    const { colorSchemes } = useSettingsStore.getState().terminal;
+    expect(colorSchemes.imported).toEqual([{ id: first!.id, ...recolored }]);
+    expect(colorSchemes.dark).toBe(first!.id);
+    expect(colorSchemes.light).toBe("loxel-dark");
+    reset();
+  });
+
+  test("removing an imported scheme puts a theme using it back on its default", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    store.importTerminalColorSchemes([night, { ...night, name: "Day" }]);
+    const [nightScheme, day] = useSettingsStore.getState().terminal.colorSchemes.imported;
+    store.setTerminalColorScheme("light", day!.id);
+    store.setTerminalColorScheme("dark", nightScheme!.id);
+    store.removeTerminalColorScheme(nightScheme!.id);
+    expect(useSettingsStore.getState().terminal.colorSchemes).toEqual({
+      light: day!.id,
+      dark: "loxel-dark",
+      imported: [day!],
+    });
+    reset();
+  });
+
+  test("a scheme named like a built-in is told apart from it", () => {
+    reset();
+    useSettingsStore.getState().importTerminalColorSchemes([{ ...night, name: "Loxel Dark" }]);
+    const [scheme] = useSettingsStore.getState().terminal.colorSchemes.imported;
+    expect(scheme?.name).toBe("Loxel Dark (imported)");
+    reset();
+  });
+
+  test("settings stored before color schemes existed get the defaults on load", () => {
+    const merge = useSettingsStore.persist.getOptions().merge;
+    const terminal = { scrollbackLines: 5000, activatePythonEnv: false };
+    const merged = merge!({ terminal }, useSettingsStore.getState());
+    expect(merged.terminal).toEqual({
+      ...terminal,
+      colorSchemes: DEFAULT_TERMINAL_COLOR_SCHEMES,
+    } as SettingsState["terminal"]);
   });
 });

@@ -6,6 +6,7 @@ import type { ThemePreference } from "@/store/settings-store";
 import { THEME_PREFERENCES, useSettingsStore } from "@/store/settings-store";
 
 import { FontSettings } from "./FontSettings";
+import { TerminalColorSchemes } from "./TerminalColorSchemes";
 
 const THEME_LABELS: Record<ThemePreference, { label: string; icon: LucideIcon }> = {
   dark: { label: "Dark", icon: MoonIcon },
@@ -64,6 +65,8 @@ export function AppearanceSection() {
           })}
         </div>
       </div>
+
+      <TerminalColorSchemes />
 
       <FontSettings />
     </div>

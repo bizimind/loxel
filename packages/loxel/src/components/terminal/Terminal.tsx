@@ -20,6 +20,7 @@ import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActiv
 import { usePanelFind } from "@/hooks/usePanelFind";
 import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
+import { resolveTerminalColorScheme, xtermColorOptions } from "@/lib/terminal-color-schemes";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
 import { useSettingsStore } from "@/store/settings-store";
@@ -35,47 +36,6 @@ import { SEARCH_DECORATIONS } from "./search-decorations";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
-
-/** Read a CSS variable from :root. */
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-/** Build xterm.js theme from CSS variables defined in index.css. */
-function getTerminalTheme() {
-  const bg = cssVar("--editor-surface");
-  return {
-    background: bg,
-    foreground: cssVar("--term-foreground"),
-    cursor: cssVar("--term-cursor"),
-    cursorAccent: bg,
-    selectionBackground: cssVar("--term-selection"),
-    black: cssVar("--term-black"),
-    red: cssVar("--term-red"),
-    green: cssVar("--term-green"),
-    yellow: cssVar("--term-yellow"),
-    blue: cssVar("--term-blue"),
-    magenta: cssVar("--term-magenta"),
-    cyan: cssVar("--term-cyan"),
-    white: cssVar("--term-white"),
-    brightBlack: cssVar("--term-bright-black"),
-    brightRed: cssVar("--term-bright-red"),
-    brightGreen: cssVar("--term-bright-green"),
-    brightYellow: cssVar("--term-bright-yellow"),
-    brightBlue: cssVar("--term-bright-blue"),
-    brightMagenta: cssVar("--term-bright-magenta"),
-    brightCyan: cssVar("--term-bright-cyan"),
-    brightWhite: cssVar("--term-bright-white"),
-  };
-}
-
-/**
- * The theme's minimum foreground/background contrast (`--term-min-contrast`). Light themes raise
- * it so colors meant for dark backgrounds (white, bright white, dim) stay readable on white.
- */
-function getTerminalMinimumContrast(): number {
-  return Number(cssVar("--term-min-contrast")) || 1;
-}
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -282,6 +242,12 @@ interface TerminalProps {
 export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
+  // A built-in or stored scheme object, so the reference only changes when the colors do.
+  const colorScheme = useSettingsStore((s) =>
+    resolveTerminalColorScheme(s.terminal.colorSchemes, darkMode),
+  );
+  const colorSchemeRef = useRef(colorScheme);
+  colorSchemeRef.current = colorScheme;
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const font = useSettingsStore(useShallow((s) => resolveFont(s.fonts, "terminal")));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -340,8 +306,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       allowProposedApi: true,
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
-      theme: getTerminalTheme(),
-      minimumContrastRatio: getTerminalMinimumContrast(),
+      ...xtermColorOptions(colorSchemeRef.current),
     });
 
     const fitAddon = new FitAddon();
@@ -620,17 +585,14 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     };
   }, [terminalId, panelApi]);
 
-  // Update terminal theme when dark mode changes
+  // Switch colors when the scheme changes: another one picked, or the theme switched.
   useEffect(() => {
-    if (!xtermRef.current) return;
-    const id = requestAnimationFrame(() => {
-      if (xtermRef.current) {
-        xtermRef.current.options.theme = getTerminalTheme();
-        xtermRef.current.options.minimumContrastRatio = getTerminalMinimumContrast();
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, [darkMode]);
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    const { theme, minimumContrastRatio } = xtermColorOptions(colorScheme);
+    terminal.options.theme = theme;
+    terminal.options.minimumContrastRatio = minimumContrastRatio;
+  }, [colorScheme]);
 
   // Update scrollback buffer when setting changes
   useEffect(() => {
@@ -663,7 +625,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       <div
         ref={containerRef}
         className="h-full w-full overflow-hidden p-2"
-        style={{ backgroundColor: "var(--editor-surface)" }}
+        style={{ backgroundColor: colorScheme.palette.background }}
         onMouseDown={handleClick}
       />
       {findBarProps && <FindBar label="Find in terminal" {...findBarProps} />}

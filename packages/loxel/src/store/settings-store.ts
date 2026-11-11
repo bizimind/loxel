@@ -8,6 +8,14 @@ import {
   type NotificationSequences,
 } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import {
+  BUILTIN_TERMINAL_COLOR_SCHEMES,
+  DEFAULT_TERMINAL_COLOR_SCHEMES,
+  parseTerminalColorSchemeSettings,
+  type TerminalColorSchemeSettings,
+  type TerminalSchemeTheme,
+} from "@/lib/terminal-color-schemes";
+import type { ParsedTerminalScheme } from "@/lib/terminal-scheme-import";
 
 import type { PanelId } from "./panel-config";
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
@@ -25,13 +33,21 @@ export type ThemePreference = "dark" | "light" | "system";
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
 
 /**
- * A stored or synced settings slice with its `theme`, when it has one, checked: an unknown value
- * (hand-edited, or from a newer version) falls back to the default, dark.
+ * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the terminal's color
+ * schemes are parsed, which also fills them in for settings saved before they existed.
  */
-export function withValidTheme<T extends object>(slice: T): T {
-  if (!("theme" in slice)) return slice;
-  const theme = THEME_PREFERENCES.find((t) => t === slice.theme) ?? "dark";
-  return { ...slice, theme };
+export function withValidSettings<T extends object>(slice: T): T {
+  const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
+  if ("theme" in valid) valid.theme = THEME_PREFERENCES.find((t) => t === valid.theme) ?? "dark";
+  const { terminal } = valid;
+  if (typeof terminal === "object" && terminal !== null) {
+    const stored = "colorSchemes" in terminal ? terminal.colorSchemes : undefined;
+    const colorSchemes = parseTerminalColorSchemeSettings(stored);
+    if (colorSchemes !== stored) valid.terminal = { ...terminal, colorSchemes };
+  }
+  // Only fields already in the slice were replaced, each with a valid value of its type.
+  return valid as T;
 }
 
 export interface TerminalSettings {
@@ -41,6 +57,8 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
+  /** The color scheme each theme uses, and the imported schemes. */
+  colorSchemes: TerminalColorSchemeSettings;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -545,6 +563,14 @@ export interface SettingsState {
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
+  setTerminalColorScheme: (theme: TerminalSchemeTheme, schemeId: string) => void;
+  /**
+   * Add imported schemes; one named like a scheme imported before replaces it and keeps its id, so
+   * a theme using it switches to the new colors. One named like a built-in gets " (imported)".
+   */
+  importTerminalColorSchemes: (schemes: ParsedTerminalScheme[]) => void;
+  /** Remove an imported scheme; a theme using it goes back to its default. */
+  removeTerminalColorScheme: (schemeId: string) => void;
 
   // Layout actions
   updateLayout: (partial: Partial<LayoutSettings>) => void;
@@ -675,6 +701,7 @@ export const useSettingsStore = create<SettingsState>()(
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
+        colorSchemes: structuredClone(DEFAULT_TERMINAL_COLOR_SCHEMES),
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       fonts: structuredClone(DEFAULT_FONT_SETTINGS),
@@ -691,6 +718,48 @@ export const useSettingsStore = create<SettingsState>()(
       // -- Terminal --
 
       updateTerminal: (partial) => set((s) => ({ terminal: { ...s.terminal, ...partial } })),
+
+      setTerminalColorScheme: (theme, schemeId) =>
+        set((s) => ({
+          terminal: {
+            ...s.terminal,
+            colorSchemes: { ...s.terminal.colorSchemes, [theme]: schemeId },
+          },
+        })),
+
+      importTerminalColorSchemes: (schemes) =>
+        set((s) => {
+          const imported = [...s.terminal.colorSchemes.imported];
+          for (const scheme of schemes) {
+            const { palette } = scheme;
+            // Kept apart from the built-in it is named after, in the scheme pickers.
+            const name = BUILTIN_TERMINAL_COLOR_SCHEMES.some((b) => b.name === scheme.name)
+              ? `${scheme.name} (imported)`
+              : scheme.name;
+            const index = imported.findIndex((existing) => existing.name === name);
+            const previous = imported[index];
+            if (previous) imported[index] = { id: previous.id, name, palette };
+            else imported.push({ id: `imported:${crypto.randomUUID()}`, name, palette });
+          }
+          return {
+            terminal: { ...s.terminal, colorSchemes: { ...s.terminal.colorSchemes, imported } },
+          };
+        }),
+
+      removeTerminalColorScheme: (schemeId) =>
+        set((s) => {
+          const { light, dark, imported } = s.terminal.colorSchemes;
+          return {
+            terminal: {
+              ...s.terminal,
+              colorSchemes: {
+                light: light === schemeId ? DEFAULT_TERMINAL_COLOR_SCHEMES.light : light,
+                dark: dark === schemeId ? DEFAULT_TERMINAL_COLOR_SCHEMES.dark : dark,
+                imported: imported.filter((scheme) => scheme.id !== schemeId),
+              },
+            },
+          };
+        }),
 
       // -- Layout --
 
@@ -923,7 +992,9 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: persistedSettings,
       merge: (persisted, current) => ({
         ...current,
-        ...(typeof persisted === "object" && persisted !== null ? withValidTheme(persisted) : {}),
+        ...(typeof persisted === "object" && persisted !== null
+          ? withValidSettings(persisted)
+          : {}),
       }),
       version: 17,
       migrate: (persisted, version) => {

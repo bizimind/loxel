@@ -25,6 +25,19 @@ describe("applyStoreUpdate", () => {
     expect(useSettingsStore.getState().theme).toBe("dark");
   });
 
+  test("settings: synced color schemes are checked, and kept as is when only the theme changes", () => {
+    const { terminal } = useSettingsStore.getState();
+    applyStoreUpdate("settings", { terminal: { ...terminal, colorSchemes: { light: 1 } } });
+    const { colorSchemes } = useSettingsStore.getState().terminal;
+    expect(colorSchemes).toEqual({ light: "loxel-light", dark: "loxel-dark", imported: [] });
+
+    const persisted = useSettingsStore.persist
+      .getOptions()
+      .partialize?.(useSettingsStore.getState());
+    applyStoreUpdate("settings", { ...JSON.parse(JSON.stringify(persisted)), theme: "light" });
+    expect(useSettingsStore.getState().terminal.colorSchemes).toBe(colorSchemes);
+  });
+
   test("ui: darkMode from an older window is ignored", () => {
     useUIStore.setState({ darkMode: false });
     applyStoreUpdate("ui", { darkMode: true, diffViewMode: "unified" });

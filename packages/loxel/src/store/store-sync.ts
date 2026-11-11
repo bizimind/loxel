@@ -19,7 +19,7 @@ import {
 } from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
-import { persistedSettings, useSettingsStore, withValidTheme } from "./settings-store";
+import { persistedSettings, useSettingsStore, withValidSettings } from "./settings-store";
 import { useUIStore } from "./ui";
 import { mergePersistedProjectStates, persistedProjectStates, useWorktreeStore } from "./worktrees";
 
@@ -43,7 +43,7 @@ interface SyncTarget {
 const syncTargets: Record<string, SyncTarget> = {
   settings: {
     getState: () => persistedSettings(useSettingsStore.getState()),
-    setState: (partial) => useSettingsStore.setState(withValidTheme(partial)),
+    setState: (partial) => useSettingsStore.setState(withValidSettings(partial)),
   },
 
   keybindings: {
