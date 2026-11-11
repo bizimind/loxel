@@ -47,6 +47,14 @@ interface Window {
     ) => () => void;
     /** Answer a dialog from `onJavaScriptDialog` (payload: `JavaScriptDialogResponse`). */
     respondToJavaScriptDialog: (response: unknown) => void;
+    /**
+     * Passkey QR codes for this window's browser panels: `onShow` gets a `PasskeyQrCode` payload,
+     * `onHide` the webContents ID whose request ended. Returns an unsubscribe function.
+     */
+    onPasskeyQrCode: (
+      onShow: (request: unknown) => void,
+      onHide: (webContentsId: unknown) => void,
+    ) => () => void;
     /** The app update's current state, kept by Electron main. */
     getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
     /** Check the release manifest for a newer version; the result arrives as a status change. */

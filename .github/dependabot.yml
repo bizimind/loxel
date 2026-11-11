@@ -12,6 +12,10 @@ updates:
     ignore:
       - dependency-name: "@types/node"
         versions: [">= 25"]
+      # Releases package a patched build of the exact Electron version (packages/loxel/electron/),
+      # which has to be built and uploaded before the bump merges; a Dependabot bump would pass CI
+      # and then fail the release. See packages/loxel/docs/PATCHED_ELECTRON.md.
+      - dependency-name: "electron"
     groups:
       # New lint rules usually need a code commit before oxlint merges, so it gets its own PR instead
       # of holding back every other bump. oxfmt stays ungrouped: a formatter bump is reviewed alone.

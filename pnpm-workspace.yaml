@@ -9,6 +9,9 @@ minimumReleaseAgeExclude:
   - "postcss@8.5.26"
   # Dependabot's electron bump (#618) landed inside the 7-day window; drop once 44.9.1 is a week old.
   - "electron@44.9.1"
+  # Loxel ships a patched build of this Electron release (packages/loxel/electron/); 45.3.0 carries
+  # Chromium security fixes and was published 2026-11-10. Drop once it is a week old.
+  - "electron@45.3.0"
   # fast-uri 3.1.9 (Dependabot alerts #162-#165) was published 2026-10-19; drop once it is a week old.
   - "fast-uri@3.1.9"
   # happy-dom 21.0.4 (Dependabot alert #166) was published 2026-10-20; drop once it is a week old.
