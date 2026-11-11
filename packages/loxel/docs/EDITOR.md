@@ -187,6 +187,10 @@ Line breaks are handled by [soft-line-break.ts](../src/components/editor/soft-li
 
 Tables are Crepe's GFM table feature (prosemirror-tables) with no custom node; Loxel only restyles them in [milkdown-theme.css](../src/styles/milkdown-theme.css).
 
+### Code block highlighting
+
+[code-block-highlight.ts](../src/components/editor/code-block-highlight.ts) supplies the CodeMirror feature's `languages`. Each language from `@codemirror/language-data` keeps its CodeMirror parser for editing behavior (indentation, comment toggling) but is colored by the code editor's own Shiki highlighter ([highlighter.ts](../src/lib/highlighter.ts)), with the theme `getMonacoThemeName` picks, so a block's tokens get the same grammar and colors as Monaco. Shiki languages that `language-data` lacks are added with a plain parser; `language-data` languages Shiki doesn't load keep a hand-written fallback palette. An empty active `HighlightStyle` stops basicSetup's default CodeMirror colors from painting under Shiki's. Brackets are colored like Monaco's bracket pair colorization: Monaco's default colors cycled by depth across `()[]{}`, red for an unmatched closer, and none for brackets Monaco treats as strings, comments or regexes. `@shikijs/monaco` hands Monaco the scope of the first theme rule with a token's color and style, not the token's own scopes, so the block classifies a token the same way (`isTextToken`) to color the same brackets. Semantic tokens come from language servers and exist only in the code editor.
+
 ### Mermaid diagrams
 
 The CodeMirror feature's `renderPreview` is [code-block-preview.ts](../src/components/editor/code-block-preview.ts), which picks a renderer by fence language; languages without one return `null` (no preview panel). [mermaid-preview.ts](../src/components/editor/mermaid-preview.ts) renders ` ```mermaid ` blocks as diagrams in that panel. The preview is view-only: it never touches the node's text, so the block saves like any other code block and untouched fences keep their bytes.

@@ -6,8 +6,8 @@ import { loxelDark } from "./loxel-themes";
 // Singleton highlighter instance
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-// Common languages for code repositories
-const BUNDLED_LANGUAGES = [
+// Common languages for code repositories; also the languages markdown code blocks color.
+export const BUNDLED_LANGUAGES = [
   "javascript",
   "typescript",
   "tsx",

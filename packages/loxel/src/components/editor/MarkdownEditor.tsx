@@ -3,9 +3,7 @@
  * Accepts a filePath and optional callbacks.
  * Persists content to disk via autosave with conflict detection.
  */
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import { Crepe } from "@milkdown/crepe";
 import {
   commandsCtx,
@@ -58,6 +56,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
+import { codeBlockLanguages } from "./code-block-highlight";
 import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
@@ -206,35 +205,7 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
 /** CodeMirror theme matching loxel's JetBrains dark palette. */
 const codeTheme = EditorView.theme({}, { dark: true });
 
-const codeHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "#cf8e6d" },
-  { tag: tags.operator, color: "#cf8e6d" },
-  { tag: tags.name, color: "#bcbec4" },
-  { tag: tags.variableName, color: "#bcbec4" },
-  { tag: tags.propertyName, color: "#c77dbb" },
-  { tag: tags.function(tags.variableName), color: "#56a8f5" },
-  { tag: tags.function(tags.propertyName), color: "#56a8f5" },
-  { tag: tags.definition(tags.variableName), color: "#bcbec4" },
-  { tag: tags.typeName, color: "#2fbaa3" },
-  { tag: tags.className, color: "#2fbaa3" },
-  { tag: tags.string, color: "#6aab73" },
-  { tag: tags.special(tags.string), color: "#6aab73" },
-  { tag: tags.number, color: "#2aacb8" },
-  { tag: tags.bool, color: "#cf8e6d" },
-  { tag: tags.null, color: "#cf8e6d" },
-  { tag: tags.comment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.lineComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.blockComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.meta, color: "#bbb529" },
-  { tag: tags.regexp, color: "#6aab73" },
-  { tag: tags.tagName, color: "#e8bf6a" },
-  { tag: tags.attributeName, color: "#bababa" },
-  { tag: tags.attributeValue, color: "#6a8759" },
-  { tag: tags.heading, color: "#bcbec4", fontWeight: "bold" },
-  { tag: tags.link, color: "#56a8f5", textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
-]);
+const CODE_BLOCK_LANGUAGES = codeBlockLanguages();
 
 /** Scroll the editor so the current cursor is roughly 1/3 from the top of the viewport. */
 function scrollCursorNearTop(view: ProseMirrorView): void {
@@ -408,7 +379,8 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: [codeTheme, syntaxHighlighting(codeHighlight)],
+          theme: codeTheme,
+          languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
         },
         [Crepe.Feature.BlockEdit]: {
