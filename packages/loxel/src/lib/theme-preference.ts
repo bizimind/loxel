@@ -6,6 +6,12 @@
  */
 export type ThemePreference = "dark" | "light" | "system";
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
+/** How Settings and the command palette name each theme choice. */
+export const THEME_PREFERENCE_LABELS: Record<ThemePreference, string> = {
+  dark: "Dark",
+  light: "Light",
+  system: "System",
+};
 
 /** `value` as a theme choice, or null when it is not one. */
 export function asThemePreference(value: unknown): ThemePreference | null {

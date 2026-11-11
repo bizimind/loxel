@@ -54,6 +54,7 @@ function commandRows(
     key: action.id,
     label: labelOf(action),
     indices,
+    current: action.isCurrent?.(),
     bindings: getBindingsForAction(kbState, action.id),
   });
   const q = query.trim();

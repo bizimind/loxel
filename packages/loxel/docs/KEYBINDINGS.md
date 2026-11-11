@@ -4,21 +4,22 @@ How app shortcuts, keyboard focus navigation and find-in-panel are wired. For th
 
 ## Actions and bindings
 
-| Module                                       | Role                                                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `src/store/keybindings/action-registry.ts`   | Every action (`ActionDef`): id, label, category, `hidden`, `isEnabled`, `sharesKeyWith`       |
-| `src/store/keybindings/keybinding-schema.ts` | Default bindings (the "Loxel Default" template)                                               |
-| `src/store/keybindings/keybinding-store.ts`  | Template + user overrides (Settings > Keybindings), derived reverse lookup and chord prefixes |
-| `src/store/keybindings/key-combo.ts`         | Key combo / chord parsing and normalization                                                   |
-| `src/store/keybindings/pending-chord.ts`     | Keystroke resolution, including in-progress chords                                            |
-| `src/hooks/useKeybindings.ts`                | Document-level listener that resolves keystrokes and dispatches actions                       |
-| `src/store/keybindings/mac-window-tiling.ts` | macOS window tiling keys kept from widgets so they reach the Window menu                      |
-| `src/components/settings/KeyRecorder.tsx`    | Recording a binding in Settings, and which chords are allowed                                 |
+| Module                                       | Role                                                                                                 |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/store/keybindings/action-registry.ts`   | Every action (`ActionDef`): id, label, category, `hidden`, `isEnabled`, `isCurrent`, `sharesKeyWith` |
+| `src/store/keybindings/keybinding-schema.ts` | Default bindings (the "Loxel Default" template)                                                      |
+| `src/store/keybindings/keybinding-store.ts`  | Template + user overrides (Settings > Keybindings), derived reverse lookup and chord prefixes        |
+| `src/store/keybindings/key-combo.ts`         | Key combo / chord parsing and normalization                                                          |
+| `src/store/keybindings/pending-chord.ts`     | Keystroke resolution, including in-progress chords                                                   |
+| `src/hooks/useKeybindings.ts`                | Document-level listener that resolves keystrokes and dispatches actions                              |
+| `src/store/keybindings/mac-window-tiling.ts` | macOS window tiling keys kept from widgets so they reach the Window menu                             |
+| `src/components/settings/KeyRecorder.tsx`    | Recording a binding in Settings, and which chords are allowed                                        |
 
 Conventions:
 
 - **Every shortcut is an action.** Add an `ActionDef` and a default binding rather than a local `keydown` handler, so it shows in the command palette and can be remapped. `hidden: true` keeps internal actions (tree navigation, the palette itself) out of the palette.
 - **Context-dependent actions declare `isEnabled`.** A disabled action's key resolves as unbound, so it reaches the focused widget instead (for example `⌃⇧Space` in the center goes to the terminal or editor, and `⌘F` outside a find target goes to Monaco's own find widget). The command palette lists only the actions enabled where focus was when it opened (it takes focus itself, and the dialog gives it back before the chosen action runs).
+- **Actions that set a state** (the `theme.*` actions) declare `isCurrent`, and the palette checks the one in effect, like a quick pick's current item.
 - **Sharing a key.** Two actions enabled in different places can hold the same key: one declares `sharesKeyWith`, the binding's `lookup` entry lists both, and a keystroke runs whichever is enabled where focus is (the declaring one, if both are). `browser.hardRefresh` shares `⇧⌘R` with `panel.rename` this way. Each stays its own action: it has its own row in Settings > Keybindings, remapping one leaves the other on the key without reporting a conflict, and any other action taking the key (or a chord starting with it) removes it from both.
 - **Reserved keys.** Defaults stay clear of macOS text editing, Monaco's defaults and Rectangle's global `⌃⌥` shortcuts (Restore on `⌃⌥⌫` is why Delete Worktree has no default key). The "no default binding takes reserved keys" test in `keybinding-validation.test.ts` enforces this; extend its list when reserving a new key. macOS 15+ window tiling (fn⌃ / fn⌃⇧ arrows, which reach the page as `⌃`/`⌃⇧` Home, End, PageUp and PageDown) runs from the Window menu, which only gets the tiling items because the app menu's Window submenu has the `window` role (`src/electron/main.ts`), and only for a keydown the page leaves unhandled. So `useKeybindings` stops those keys before any widget sees them when no binding takes them, and defaults must not bind them (enforced by the "no default binding takes a macOS window tiling shortcut" test).
 - **Chords** are up to three keystrokes. A single-key binding takes precedence over a chord with the same first key, and remapping removes overlapping bindings (equal, or a chord prefix) from other actions, apart from a key they may share.
