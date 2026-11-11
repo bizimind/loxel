@@ -184,8 +184,12 @@ export function PickerDialog<T>({
             {inputAdornment}
           </div>
 
-          {/* Light mode insets the rows with rounded selection, as in JetBrains New UI popups */}
-          <div ref={listRef} className="max-h-[50vh] overflow-y-auto not-dark:p-1">
+          {/* Light mode insets the rows with rounded selection, as in JetBrains New UI popups. A row
+              under the pointer takes over from the active row, so only one row shows highlighted. */}
+          <div
+            ref={listRef}
+            className="max-h-[50vh] overflow-y-auto not-dark:p-1 [&:has([data-picker-option]:hover)_[data-active]:not(:hover)]:bg-transparent"
+          >
             {items.length === 0 && emptyState}
             {items.map((item, index) => (
               <button

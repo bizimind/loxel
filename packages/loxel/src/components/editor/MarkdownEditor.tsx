@@ -4,7 +4,8 @@
  * Persists content to disk via autosave with conflict detection.
  */
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
+import { Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { Crepe } from "@milkdown/crepe";
 import {
@@ -238,9 +239,40 @@ function codeColorVars(index: 0 | 1): Record<string, string> {
 /** CodeMirror theme for code blocks: the token colors of the light root, or of a `.dark` one. */
 const codeColorTheme = EditorView.theme({ "&": codeColorVars(1), ".dark &": codeColorVars(0) });
 
-/** Code-block theme: token colors, and CodeMirror's own defaults for the mode the editor opens in. */
-function codeTheme(darkMode: boolean) {
-  return [codeColorTheme, EditorView.darkTheme.of(darkMode)];
+/** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
+const darkThemeCompartment = new Compartment();
+
+/**
+ * Keeps a code block's `EditorView.darkTheme` (CodeMirror's own dark or light defaults, such as
+ * the cursor and selection) on the app theme: when the theme changes, and once at creation, since
+ * a block added after a change starts from the value the editor was created with.
+ */
+const followDarkMode = ViewPlugin.define((view) => {
+  let destroyed = false;
+  const apply = (darkMode: boolean) => {
+    if (destroyed || view.state.facet(EditorView.darkTheme) === darkMode) return;
+    view.dispatch({ effects: darkThemeCompartment.reconfigure(EditorView.darkTheme.of(darkMode)) });
+  };
+  // A view can't be updated while it is being constructed.
+  queueMicrotask(() => apply(useUIStore.getState().darkMode));
+  const unsubscribe = useUIStore.subscribe((state, prev) => {
+    if (state.darkMode !== prev.darkMode) apply(state.darkMode);
+  });
+  return {
+    destroy: () => {
+      destroyed = true;
+      unsubscribe();
+    },
+  };
+});
+
+/** Code-block theme: token colors, and CodeMirror's own defaults for the app theme. */
+function codeTheme() {
+  return [
+    codeColorTheme,
+    darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
+    followDarkMode,
+  ];
 }
 
 const codeHighlight = HighlightStyle.define([
@@ -445,7 +477,7 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: [codeTheme(useUIStore.getState().darkMode), syntaxHighlighting(codeHighlight)],
+          theme: [codeTheme(), syntaxHighlighting(codeHighlight)],
           renderPreview: renderCodeBlockPreview,
         },
         [Crepe.Feature.BlockEdit]: {

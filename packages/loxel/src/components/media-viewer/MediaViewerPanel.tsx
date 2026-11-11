@@ -123,7 +123,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   // --- Refs ---
   const viewportRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  /** The transparency checkerboard, sized and moved with the media (not scaled, so its squares
+  /** Light's transparency checkerboard, sized and moved with the media (not scaled, so its squares
    *  keep their size at any zoom). */
   const backdropRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef({ x: 0, y: 0 });
@@ -509,25 +509,33 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       <div
         ref={viewportRef}
         className={cn(
-          "relative flex-1 overflow-hidden bg-[var(--editor-surface)]",
-          // Light: a chrome-grey canvas, so the media's white-and-grey checkerboard and edge stand out
+          "relative flex-1 overflow-hidden",
+          // Dark: the transparency checkerboard fills the viewport
+          "dark:[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] dark:[background-size:16px_16px]",
+          // Light: a chrome-grey canvas, so the media's own checkerboard and edge stand out
           "not-dark:bg-card",
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
+        style={
+          {
+            "--checker-a": "var(--color-muted, #f0f0f0)",
+            "--checker-b": "var(--color-background, #ffffff)",
+          } as React.CSSProperties
+        }
         tabIndex={0}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
       >
-        {/* Checkerboard behind the media only, so its edges show where the image ends */}
+        {/* Light: a bordered checkerboard behind the media only, so its edges show where it ends */}
         {mediaBox && (
           <div
             ref={backdropRef}
             className={cn(
-              "border-border pointer-events-none absolute top-1/2 left-1/2 box-content border not-dark:border-[#b4b8c2] not-dark:shadow-sm",
+              "pointer-events-none absolute top-1/2 left-1/2 box-content border border-[#b4b8c2] shadow-sm dark:hidden",
               "[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] [background-size:16px_16px]",
-              // Light: a grey a step darker than the chrome so transparency reads at a glance.
-              "[--checker-a:#dadce1] [--checker-b:var(--color-background)] dark:[--checker-a:var(--color-muted)]",
+              // A grey a step darker than the chrome so transparency reads at a glance.
+              "[--checker-a:#dadce1] [--checker-b:var(--color-background)]",
             )}
             style={backdropStyle(mediaBox, scale, translateRef.current.x, translateRef.current.y)}
           />

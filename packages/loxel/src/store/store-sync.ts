@@ -19,7 +19,7 @@ import {
 } from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
-import { persistedSettings, useSettingsStore } from "./settings-store";
+import { persistedSettings, useSettingsStore, withValidTheme } from "./settings-store";
 import { useUIStore } from "./ui";
 import { mergePersistedProjectStates, persistedProjectStates, useWorktreeStore } from "./worktrees";
 
@@ -43,7 +43,7 @@ interface SyncTarget {
 const syncTargets: Record<string, SyncTarget> = {
   settings: {
     getState: () => persistedSettings(useSettingsStore.getState()),
-    setState: (partial) => useSettingsStore.setState(partial),
+    setState: (partial) => useSettingsStore.setState(withValidTheme(partial)),
   },
 
   keybindings: {
@@ -78,7 +78,9 @@ const syncTargets: Record<string, SyncTarget> = {
       };
     },
     setState: (partial) => useUIStore.setState(partial),
-    deserialize: (raw) => ({
+    // `darkMode` is resolved per window from the theme setting; a renderer from before it was,
+    // which still syncs it, must not flip this window's editors and terminals.
+    deserialize: ({ darkMode: _darkMode, ...raw }) => ({
       ...raw,
       favoriteBranches: new Set((raw.favoriteBranches as string[]) ?? []),
       logExcludedLevels: new Set((raw.logExcludedLevels as LogLevel[]) ?? []),

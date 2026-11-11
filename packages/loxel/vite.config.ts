@@ -35,7 +35,8 @@ const XTERM_WEBGL_PIXEL_GRID_PATCHES = [
 
 /**
  * Minimum contrast fixes, active only with a ratio set (the light theme's `--term-min-contrast`;
- * dark keeps 1, which skips this code).
+ * dark keeps 1, which skips this code). Only the WebGL renderer is patched: a terminal on the DOM
+ * fallback keeps stock xterm's handling of dim text.
  */
 const XTERM_WEBGL_CONTRAST_PATCHES = [
   // Hold dim (SGR 2) text to the ratio as drawn. Stock xterm checks the undimmed color against half

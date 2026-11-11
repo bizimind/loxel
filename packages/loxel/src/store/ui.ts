@@ -4,13 +4,17 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { LogLevel } from "@/api/log-entry-model";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { toggleSet } from "@/lib/set-utils";
+import { readCachedDarkMode } from "@/lib/theme-cache";
 
 import { serverUiStorage } from "./server-storage";
 
 export type DiffViewMode = "split" | "unified";
 
 interface UIState {
-  /** Resolved theme (from the theme setting and, for "system", the OS); set by useThemeSync. */
+  /**
+   * Resolved theme (from the theme setting and, for "system", the OS); set by useThemeSync, and
+   * starting from the last session's until the settings load.
+   */
   darkMode: boolean;
 
   // Diff view settings
@@ -47,7 +51,7 @@ interface UIState {
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
-      darkMode: true,
+      darkMode: readCachedDarkMode(),
 
       diffViewMode: "split",
       setDiffViewMode: (mode) => set({ diffViewMode: mode }),

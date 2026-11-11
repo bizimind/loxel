@@ -5,14 +5,21 @@ import type { Highlighter, ThemeRegistrationRaw } from "shiki";
 
 import { loxelDark, loxelLight } from "./loxel-themes";
 
+/** A 1x1 canvas for `toHexColor`, created on first use; null where 2D canvas is unavailable. */
+let colorContext: CanvasRenderingContext2D | null | undefined;
+
 /** Resolve any CSS color (hex, rgb(), oklch(), color-mix(), ...) to the hex form Monaco parses. */
 function toHexColor(raw: string): string {
   if (/^#[\da-f]{3,8}$/i.test(raw)) return raw;
-  const canvas = document.createElement("canvas");
-  canvas.width = 1;
-  canvas.height = 1;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (colorContext === undefined) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    colorContext = canvas.getContext("2d", { willReadFrequently: true });
+  }
+  const ctx = colorContext;
   if (!ctx) return raw;
+  ctx.clearRect(0, 0, 1, 1);
   ctx.fillStyle = raw;
   ctx.fillRect(0, 0, 1, 1);
   const [r = 0, g = 0, b = 0, a = 255] = ctx.getImageData(0, 0, 1, 1).data;
