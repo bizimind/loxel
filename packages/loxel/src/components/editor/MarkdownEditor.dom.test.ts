@@ -12,7 +12,7 @@ import { TextSelection } from "@milkdown/kit/prose/state";
 
 import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 
-import { installMarkdownImages } from "./markdown-images";
+import { IMAGE_PARAGRAPH_CLASS, installMarkdownImages } from "./markdown-images";
 import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 import {
   applyBodyToEditor,
@@ -305,6 +305,41 @@ describe("serializeBody source preservation", () => {
       expect(serializeBody(editor)).toBe(
         withImage.replace("last paragraph", "last paragraph, edited"),
       );
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
+  });
+
+  test("images without a title parse into image nodes and serialize back without one", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const untitled = "Intro ![ok](./assets/ok.png) inline\n\n![Flow chart](./assets/flow.png)\n";
+    const editor = new Crepe({
+      root: el,
+      defaultValue: untitled,
+      features: { [Crepe.Feature.ImageBlock]: false },
+    });
+    installMarkdownImages(editor.editor, { filePath: "/repo/wt/docs/plan.md" });
+    try {
+      await editor.create();
+      editor.editor.action((ctx) => {
+        const images: Record<string, unknown>[] = [];
+        ctx.get(editorViewCtx).state.doc.descendants((node) => {
+          if (node.type.name === "image") images.push(node.attrs);
+        });
+        expect(images).toEqual([
+          { src: "./assets/ok.png", alt: "ok", title: "" },
+          { src: "./assets/flow.png", alt: "Flow chart", title: "" },
+        ]);
+      });
+      // No source baseline: this is the serializer's own output, not preserved bytes.
+      expect(serializeBody(editor)).toBe(untitled);
+      // Only the paragraph holding nothing but an image is tagged for block centering.
+      const tagged = [...el.querySelectorAll(`p.${IMAGE_PARAGRAPH_CLASS}`)];
+      expect(tagged).toHaveLength(1);
+      expect(tagged[0]?.textContent).toBe("");
+      expect(el.querySelector("p")?.classList.contains(IMAGE_PARAGRAPH_CLASS)).toBe(false);
     } finally {
       await editor.destroy();
       el.remove();

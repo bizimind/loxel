@@ -10,7 +10,11 @@
 import { imageInlineComponent, inlineImageConfig } from "@milkdown/kit/component/image-inline";
 import type { Editor } from "@milkdown/kit/core";
 import { uploadConfig } from "@milkdown/kit/plugin/upload";
+import { imageSchema } from "@milkdown/kit/preset/commonmark";
 import type { Node as ProseNode, Schema } from "@milkdown/kit/prose/model";
+import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
+import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
+import { $prose } from "@milkdown/kit/utils";
 
 import * as api from "@/api/client";
 import { showToast } from "@/components/ui/toast";
@@ -110,11 +114,68 @@ export function createImageUploader(filePath: string) {
   };
 }
 
+const stringOrEmpty = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/**
+ * The commonmark `image` node with a parser that tolerates a missing title or alt. remark gives
+ * `![alt](src)` a `title: null`, and the preset's runner passes it through to attributes declared
+ * `validate: "string"`, so ProseMirror throws and the image is dropped. An empty title serializes
+ * back to no title.
+ */
+const imageSchemaWithOptionalTitle = imageSchema.extendSchema((prev) => (ctx) => {
+  const spec = prev(ctx);
+  return {
+    ...spec,
+    parseMarkdown: {
+      ...spec.parseMarkdown,
+      runner: (state, node, type) => {
+        state.addNode(type, {
+          src: stringOrEmpty(node["url"]),
+          alt: stringOrEmpty(node["alt"]),
+          title: stringOrEmpty(node["title"]),
+        });
+      },
+    },
+  };
+});
+
+/** Class on a paragraph whose only content is an image; the theme centers it as a block. */
+export const IMAGE_PARAGRAPH_CLASS = "image-paragraph";
+
+function imageParagraphDecorations(doc: ProseNode): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "paragraph") return true;
+    if (node.childCount === 1 && node.firstChild?.type.name === "image") {
+      decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: IMAGE_PARAGRAPH_CLASS }));
+    }
+    return false;
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+/**
+ * Tags paragraphs that hold nothing but an image. CSS can't tell on its own: `:only-child`
+ * ignores text nodes, so it would also match an icon in the middle of a sentence.
+ */
+const imageParagraphPlugin = $prose(() => {
+  const key = new PluginKey<DecorationSet>("loxel-image-paragraph");
+  return new Plugin<DecorationSet>({
+    key,
+    state: {
+      init: (_, state) => imageParagraphDecorations(state.doc),
+      apply: (tr, set) => (tr.docChanged ? imageParagraphDecorations(tr.doc) : set),
+    },
+    props: { decorations: (state) => key.getState(state) },
+  });
+});
+
 /**
  * Register image rendering and upload on a Crepe editor. Call before `create()`.
  * The inline image node view applies `proxyDomURL` to the DOM only; markdown is untouched.
  */
 export function installMarkdownImages(editor: Editor, options: { filePath: string }): void {
+  editor.use(imageSchemaWithOptionalTitle).use(imageParagraphPlugin);
   editor.use(imageInlineComponent).config((ctx) => {
     ctx.update(inlineImageConfig.key, (prev) => ({
       ...prev,

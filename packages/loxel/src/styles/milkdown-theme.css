@@ -1067,20 +1067,26 @@
   border-radius: 6px;
 }
 
-/* An image that is the only content of its paragraph renders as a centered block. */
-.milkdown p > .milkdown-image-inline:only-child {
-  display: block;
-  margin: 16px auto;
+/* An image that is the only content of its paragraph (tagged `image-paragraph` by
+   markdown-images.ts) is centered with a code block's gap around it. The wrapper stays inline:
+   ProseMirror's separator and trailing-break nodes around the image would each add an empty line
+   if it were a block. */
+.milkdown p.image-paragraph {
   text-align: center;
 }
 
-.milkdown p > .milkdown-image-inline:only-child img.image-inline {
+.milkdown p.image-paragraph > .milkdown-image-inline {
+  margin-block: calc(var(--u) * 1.2);
+  vertical-align: top;
+}
+
+/* No baseline gap under a loaded block image; a broken one keeps its inline placeholder. */
+.milkdown p.image-paragraph > .milkdown-image-inline:not(.broken) img.image-inline {
   display: block;
-  margin: 0 auto;
 }
 
 .milkdown .milkdown-image-inline.selected img.image-inline {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
