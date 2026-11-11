@@ -31,6 +31,7 @@ import { closeCenterTab } from "@/store/closed-tabs";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
+import { themeOfAction } from "@/store/keybindings/action-registry";
 import type { MoveDirection } from "@/store/layout-actions";
 import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
 import {
@@ -441,6 +442,12 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- App --
       case "app.settings":
         useSettingsStore.getState().openSettings();
+        break;
+      // The same store write as Settings > Appearance > Theme, which persists it.
+      case "theme.dark":
+      case "theme.light":
+      case "theme.system":
+        useSettingsStore.getState().setTheme(themeOfAction(actionId));
         break;
 
       // -- Panel creation (handled above via getCreateEventForAction early return) --

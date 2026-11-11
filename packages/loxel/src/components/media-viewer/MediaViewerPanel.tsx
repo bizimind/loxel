@@ -13,7 +13,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
-import { type Dimensions, type PanZoomView, viewTransform } from "@/components/pan-zoom/pan-zoom";
+import {
+  type ContentSize,
+  type Dimensions,
+  type PanZoomView,
+  viewTransform,
+} from "@/components/pan-zoom/pan-zoom";
 import { usePanZoom } from "@/components/pan-zoom/use-pan-zoom";
 import { ZoomControls } from "@/components/pan-zoom/ZoomToolbar";
 import { getMediaType } from "@/lib/media-extensions";
@@ -30,7 +35,7 @@ interface MediaViewerPanelProps {
 
 /** Messages posted by the media-frame iframe to this parent. Sender: `packages/loxel/src/server/routes.ts` (`/api/media-frame`). */
 type IframeMessage =
-  | { type: "media-dimensions"; width: number; height: number }
+  | { type: "media-dimensions"; width: number; height: number; scalesToFit: boolean }
   | {
       type: "media-video-state";
       playing: boolean;
@@ -50,6 +55,10 @@ type IframeMessage =
       clientX: number;
       clientY: number;
     };
+
+function isPositiveSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
 
 function isIframeMessage(data: unknown): data is IframeMessage {
   if (typeof data !== "object" || data === null || !("type" in data)) return false;
@@ -87,7 +96,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- State ---
   const [version, setVersion] = useState(1);
-  const [dimensions, setDimensions] = useState<Dimensions | null>(null);
+  const [dimensions, setDimensions] = useState<ContentSize | null>(null);
   const [videoState, setVideoState] = useState<VideoState | null>(null);
 
   // --- Refs ---
@@ -134,12 +143,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       const msg = e.data;
 
       switch (msg.type) {
-        case "media-dimensions":
-          // An SVG's own script can post this too, and audio-only video reports 0 x 0.
-          if (msg.width > 0 && msg.height > 0 && Number.isFinite(msg.width * msg.height)) {
-            setDimensions({ width: msg.width, height: msg.height });
-          }
+        case "media-dimensions": {
+          // An SVG's own scripts share the frame's window, so this may not come from our script,
+          // and audio-only video reports 0 x 0: keep only a usable size.
+          const { width, height } = msg;
+          if (!isPositiveSize(width) || !isPositiveSize(height)) break;
+          setDimensions({ width, height, scalesToFit: msg.scalesToFit === true });
           break;
+        }
         case "media-video-state":
           setVideoState({
             playing: msg.playing,
@@ -208,7 +219,9 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       {/* Toolbar */}
       <div className="border-border not-dark:border-input bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
         <span className="text-foreground dark:text-muted-foreground min-w-0 shrink-0">
-          {dimensions ? `${dimensions.width} \u00d7 ${dimensions.height}` : "\u2014"}
+          {dimensions
+            ? `${Math.round(dimensions.width)} \u00d7 ${Math.round(dimensions.height)}`
+            : "\u2014"}
         </span>
 
         <div className="mx-auto" />

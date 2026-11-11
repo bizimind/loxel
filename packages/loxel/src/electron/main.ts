@@ -84,6 +84,12 @@ import {
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import {
+  applyPersistedTheme,
+  followNativeTheme,
+  installNativeTheme,
+  windowBackgroundColor,
+} from "./native-theme";
+import {
   type BrowserPanelFrame,
   configurePasskeys,
   installAccountChooser,
@@ -293,6 +299,8 @@ async function createWindow(): Promise<BrowserWindow> {
     // A click on a backgrounded window also reaches the renderer, so the clicked panel takes
     // focus on the same click that activates the window.
     acceptFirstMouse: true,
+    // Painted until the renderer applies the theme, so a window does not flash the other one.
+    backgroundColor: windowBackgroundColor(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -304,6 +312,8 @@ async function createWindow(): Promise<BrowserWindow> {
       ],
     },
   });
+
+  followNativeTheme(win);
 
   if (IS_DEMO_HIDDEN) {
     win.setIgnoreMouseEvents(true);
@@ -688,6 +698,7 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
 installWebviewKeystrokeForwarding();
 installWebviewCopyImage();
 installJavaScriptDialogs();
+installNativeTheme();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
@@ -904,6 +915,7 @@ app.whenReady().then(async () => {
     browserSession.setPermissionCheckHandler(localFontsCheckHandler(() => false));
 
     buildAppMenu();
+    await applyPersistedTheme(SERVER_URL);
     await createWindow();
     const pathsOpenedAtLaunch = launchPaths;
     launchPaths = null;

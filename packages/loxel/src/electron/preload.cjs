@@ -9,6 +9,7 @@ const WINDOW_FOCUS_CHANGE = "window:focus-change";
 const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 const OPEN_FOLDER_DIALOG = "dialog:open-folder";
+const SET_THEME_SOURCE = "theme:set-source";
 const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
 const WEBVIEW_FOCUSED = "keybindings:webview-focused";
@@ -62,6 +63,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WINDOW_FULL_SCREEN_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
+  setThemeSource: (theme) => ipcRenderer.send(SET_THEME_SOURCE, theme),
   setKeystrokeInterception: (interception) =>
     ipcRenderer.send(SET_KEYSTROKE_INTERCEPTION, interception),
   onWebviewKeystroke: (callback) => {

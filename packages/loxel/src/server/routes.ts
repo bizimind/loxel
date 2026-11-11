@@ -681,19 +681,53 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     const svgContent = await file.text();
     bodyContent = `${svgContent}
     <script>
-      var el = document.querySelector("svg");
-      if (el) {
-        var vb = el.getAttribute("viewBox");
-        if (vb) {
-          var parts = vb.split(/[\\s,]+/).map(Number);
-          postDimensions(parts[2] || el.clientWidth, parts[3] || el.clientHeight);
-        } else {
-          postDimensions(
-            parseFloat(el.getAttribute("width")) || el.clientWidth || 300,
-            parseFloat(el.getAttribute("height")) || el.clientHeight || 150
-          );
+      // Sizes the SVG the way the viewer's zoom math expects (ContentSize in
+      // components/pan-zoom/pan-zoom.ts). Its scripts share this window, so keep our names out of
+      // the globals.
+      (function () {
+        var el = document.querySelector("svg");
+        if (!el) return;
+        // Measure it out of flow with the frame's caps lifted, in containing blocks of two sizes:
+        // a box that does not change is the SVG's own size (attributes or CSS); one that does is
+        // relative to the frame.
+        var body = document.body;
+        var svgCss = el.style.cssText;
+        var bodyCss = body.style.cssText;
+        el.style.cssText += ";position:absolute;max-width:none;max-height:none";
+        function measure(px) {
+          if (px) body.style.cssText = bodyCss + ";position:relative;width:" + px + "px;height:" + px + "px";
+          var r = el.getBoundingClientRect();
+          return { width: r.width, height: r.height };
         }
-      }
+        var inFrame = measure(0);
+        var small = measure(1000);
+        var large = measure(2000);
+        el.style.cssText = svgCss;
+        body.style.cssText = bodyCss;
+        var ownSize = small.width === large.width && small.height === large.height;
+        var vb = el.viewBox && el.viewBox.baseVal;
+        var hasViewBox = vb && vb.width > 0 && vb.height > 0;
+        if (!ownSize && hasViewBox) {
+          // Sized only by its viewBox (or percentages): the frame scales it to fit, enlarging it
+          // if needed, and the viewBox is its 1:1 size. Percentages other than 100% are not
+          // modelled.
+          postDimensions(vb.width, vb.height, true);
+          return;
+        }
+        if (!ownSize) {
+          // Frame-relative with no viewBox: its drawing is never scaled, only its box.
+          postDimensions(inFrame.width, inFrame.height);
+          return;
+        }
+        if (!hasViewBox && small.width > 0 && small.height > 0) {
+          // Without a viewBox the frame's cap would crop the drawing rather than shrink it, so
+          // give it one, with its size pinned (a viewBox alone would make it fill the frame).
+          el.setAttribute("width", small.width);
+          el.setAttribute("height", small.height);
+          el.setAttribute("viewBox", "0 0 " + small.width + " " + small.height);
+        }
+        postDimensions(small.width || 300, small.height || 150);
+      })();
     </script>`;
   } else if (mediaType === "video") {
     bodyContent = `<video id="v" src="${rawUrl}" onloadedmetadata="postDimensions(this.videoWidth, this.videoHeight)"></video>
@@ -739,8 +773,13 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   const html = `<!DOCTYPE html>
 <html><head>
 <script>
-  function postDimensions(w, h) {
-    window.parent.postMessage({ type: "media-dimensions", width: w, height: h }, "*");
+  // scalesToFit: the frame scales the media to fit, enlarging it if needed (see the SVG branch);
+  // otherwise it draws at its natural size and only shrinks it to fit.
+  function postDimensions(w, h, scalesToFit) {
+    window.parent.postMessage(
+      { type: "media-dimensions", width: w, height: h, scalesToFit: scalesToFit === true },
+      "*"
+    );
   }
   // Forward wheel events to parent for zoom/pan — wheel events inside the iframe
   // don't cross the browsing context boundary, so the parent can't capture them.

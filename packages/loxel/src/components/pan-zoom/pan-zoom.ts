@@ -20,6 +20,16 @@ export interface Dimensions {
   height: number;
 }
 
+/** Content's natural (1:1) size. */
+export interface ContentSize extends Dimensions {
+  /**
+   * The view draws the content scaled to fit the viewport, enlarging it if needed (the media
+   * frame does this for an SVG sized only by its viewBox). Otherwise it is drawn at its natural
+   * size, shrunk to fit but never enlarged.
+   */
+  scalesToFit?: boolean;
+}
+
 export interface PanZoomView extends Point {
   scale: number;
 }
@@ -51,6 +61,21 @@ export function wheelZoomFactor(deltaY: number): number {
   return 2 ** (-deltaY * 0.01);
 }
 
+/**
+ * Clamp a zoom step from `current` to `next` to `limits`. The limits widen to take in `current`,
+ * which actual size can put outside them (a tiny SVG icon enlarged to fit a big panel), so a step
+ * never jumps the opposite way.
+ */
+export function clampZoom(
+  current: number,
+  next: number,
+  limits: ScaleLimits = DEFAULT_LIMITS,
+): number {
+  const min = Math.min(limits.min, current);
+  const max = Math.max(limits.max, current);
+  return Math.min(max, Math.max(min, next));
+}
+
 /** `view` zoomed by `factor` about `at` (relative to the transform origin), which stays put. */
 export function zoomAt(
   view: PanZoomView,
@@ -58,7 +83,7 @@ export function zoomAt(
   at: Point,
   limits: ScaleLimits = DEFAULT_LIMITS,
 ): PanZoomView {
-  const scale = Math.min(limits.max, Math.max(limits.min, view.scale * factor));
+  const scale = clampZoom(view.scale, view.scale * factor, limits);
   const ratio = scale / view.scale;
   return { scale, x: at.x - (at.x - view.x) * ratio, y: at.y - (at.y - view.y) * ratio };
 }
@@ -67,17 +92,26 @@ export function viewTransform(view: PanZoomView): string {
   return `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
 }
 
-/**
- * Content's on-screen box at zoom 1: its natural size, shrunk (never grown) to fit the viewport.
- * Empty content or an empty viewport gives an empty box.
- */
-export function fitWithin(content: Dimensions, viewport: Dimensions): Dimensions {
-  const ratio = Math.min(1, viewport.width / content.width, viewport.height / content.height);
-  if (!(ratio > 0)) return { width: 0, height: 0 };
+/** On-screen size over natural size at zoom 1 (see {@link ContentSize.scalesToFit}). */
+function fitRatio(content: ContentSize, viewport: Dimensions): number {
+  const contain = Math.min(viewport.width / content.width, viewport.height / content.height);
+  return content.scalesToFit ? contain : Math.min(1, contain);
+}
+
+/** Content's on-screen box at zoom 1; empty for empty content or an empty viewport. */
+export function fitWithin(content: ContentSize, viewport: Dimensions): Dimensions {
+  const ratio = fitRatio(content, viewport);
+  if (!(Number.isFinite(ratio) && ratio > 0)) return { width: 0, height: 0 };
   return { width: content.width * ratio, height: content.height * ratio };
 }
 
-/** The zoom that shows content fitted into `box` at its natural size; 1 when either is empty. */
-export function actualSizeScale(content: Dimensions, box: Dimensions): number {
-  return content.width > 0 && box.width > 0 ? content.width / box.width : 1;
+/** The zoom that draws one content pixel per screen pixel; 1 when content or viewport is empty. */
+export function actualSizeScale(content: ContentSize, viewport: Dimensions): number {
+  const ratio = fitRatio(content, viewport);
+  return Number.isFinite(ratio) && ratio > 0 ? 1 / ratio : 1;
+}
+
+/** The toolbar's zoom percentage: the on-screen size at `scale` relative to the natural size. */
+export function zoomPercent(scale: number, content: ContentSize, viewport: Dimensions): number {
+  return Math.round((scale / actualSizeScale(content, viewport)) * 100);
 }
