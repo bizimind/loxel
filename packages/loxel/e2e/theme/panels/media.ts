@@ -27,6 +27,13 @@ const shot: PanelShot = {
   description:
     "Media viewer showing a partly transparent SVG badge on the transparency checkerboard, with the viewer toolbar (image dimensions, zoom out/in, zoom percentage, fit to panel, actual size, auto-fit toggle)",
   run: async (ctx) => {
+    // The OS preference opposite the app's theme, as on a Mac in light mode running Loxel's dark
+    // theme: if the <iframe> element's color scheme followed the app while its frame followed the
+    // OS, the frame would get an opaque canvas over the checkerboard (#1223), which this shot shows.
+    const appDark = await ctx.page.evaluate(() =>
+      document.documentElement.classList.contains("dark"),
+    );
+    await ctx.page.emulateMedia({ colorScheme: appDark ? "light" : "dark" });
     const assets = resolve(ctx.fixture, "../../assets");
     mkdirSync(assets, { recursive: true });
     const file = resolve(assets, "badge.svg");

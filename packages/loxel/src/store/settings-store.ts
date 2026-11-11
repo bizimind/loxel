@@ -8,6 +8,7 @@ import {
   type NotificationSequences,
 } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
@@ -20,24 +21,13 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
-/** Color theme choice; "system" follows the OS appearance. */
-export type ThemePreference = "dark" | "light" | "system";
-export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
-/** How Settings and the command palette name each theme choice. */
-export const THEME_PREFERENCE_LABELS: Record<ThemePreference, string> = {
-  dark: "Dark",
-  light: "Light",
-  system: "System",
-};
-
 /**
  * A stored or synced settings slice with its `theme`, when it has one, checked: an unknown value
  * (hand-edited, or from a newer version) falls back to the default, dark.
  */
 export function withValidTheme<T extends object>(slice: T): T {
   if (!("theme" in slice)) return slice;
-  const theme = THEME_PREFERENCES.find((t) => t === slice.theme) ?? "dark";
-  return { ...slice, theme };
+  return { ...slice, theme: parseThemePreference(slice.theme) };
 }
 
 export interface TerminalSettings {

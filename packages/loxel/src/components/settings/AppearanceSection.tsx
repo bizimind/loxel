@@ -1,13 +1,13 @@
 import type { LucideIcon } from "lucide-react";
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils";
-import type { ThemePreference } from "@/store/settings-store";
 import {
   THEME_PREFERENCE_LABELS,
   THEME_PREFERENCES,
-  useSettingsStore,
-} from "@/store/settings-store";
+  type ThemePreference,
+} from "@/lib/theme-preference";
+import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/store/settings-store";
 
 import { FontSettings } from "./FontSettings";
 

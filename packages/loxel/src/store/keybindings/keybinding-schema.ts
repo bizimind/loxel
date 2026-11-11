@@ -5,7 +5,7 @@
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
-import { THEME_PREFERENCES } from "@/store/settings-store";
+import { THEME_PREFERENCES } from "@/lib/theme-preference";
 
 import type { ActionId, SplitPanelType } from "./action-registry";
 import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES, canShareBinding } from "./action-registry";

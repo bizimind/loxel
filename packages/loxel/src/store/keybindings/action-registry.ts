@@ -15,13 +15,10 @@ import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
+import type { ThemePreference } from "@/lib/theme-preference";
+import { THEME_PREFERENCE_LABELS, THEME_PREFERENCES } from "@/lib/theme-preference";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
-import type { ThemePreference } from "@/store/settings-store";
-import {
-  THEME_PREFERENCE_LABELS,
-  THEME_PREFERENCES,
-  useSettingsStore,
-} from "@/store/settings-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**

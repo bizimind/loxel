@@ -1162,7 +1162,7 @@ if (distDir) log.info(`Serving static files from ${distDir}`);
 // for a dev server; see request-origin.ts for the full policy.
 const requestPolicy = {
   port: config.port,
-  allowDevOrigins: config.isDev,
+  viteDevPort: config.viteDevPort,
 } satisfies RequestOriginPolicy;
 
 /** What the REST routes may do to server state; see routes.ts. */

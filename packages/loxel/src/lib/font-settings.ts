@@ -24,7 +24,7 @@ export type FontKind = keyof FontSettings;
 export const DEFAULT_FONT_SETTINGS: FontSettings = {
   code: { family: null, size: 13 },
   terminal: { family: null, size: null },
-  prose: { family: null, size: 15 },
+  prose: { family: null, size: 16 },
 };
 
 /**
@@ -42,20 +42,20 @@ export const BUNDLED_FONT_FAMILY: Record<FontKind, string> = {
   code: "JetBrains Mono",
   // Without ligatures: a terminal draws each cell on its own.
   terminal: "JetBrains Mono NL",
-  prose: "Inter",
+  prose: "Literata",
 };
 
 const FALLBACK_STACK: Record<FontKind, string> = {
   code: `${quoteFontFamily(BUNDLED_FONT_FAMILY.code)}, ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace`,
   terminal: `${quoteFontFamily(BUNDLED_FONT_FAMILY.terminal)}, monospace`,
-  prose: `${quoteFontFamily(BUNDLED_FONT_FAMILY.prose)}, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
+  prose: `${quoteFontFamily(BUNDLED_FONT_FAMILY.prose)}, "Iowan Old Style", Georgia, serif`,
 };
 
 /** The generic family a font picker previews a row's font over. */
 export const GENERIC_FAMILY: Record<FontKind, string> = {
   code: "monospace",
   terminal: "monospace",
-  prose: "sans-serif",
+  prose: "serif",
 };
 
 export interface ResolvedFont {
