@@ -95,14 +95,19 @@ function nextFrame(): Promise<void> {
   });
 }
 
-/** Render the panel at 0×0, let its mount settle, then give it its real size. */
-async function openGraphPanel(): Promise<void> {
+/** Mount the panel at 0×0, as an inactive Git tab does, and let the mount settle. */
+async function mountUnlaidOut(): Promise<void> {
   render(<GraphPanel />);
-  await waitFor(() => expect(getWorktreeInnerLayout("graph")).toBeDefined());
   await act(nextFrame);
+}
+
+/** Mount the panel at 0×0, then give it its real size, as opening the Git panel does. */
+async function openGraphPanel(): Promise<void> {
+  await mountUnlaidOut();
   act(() => FakeResizeObserver.resizeAll(PANEL_WIDTH, PANEL_HEIGHT));
   // Dockview applies an observed resize on the next animation frame.
   await act(nextFrame);
+  await waitFor(() => expect(getWorktreeInnerLayout("graph")).toBeDefined());
 }
 
 /** The branches column's laid-out width, read from the splitview view that holds its group. */
@@ -153,13 +158,24 @@ describe("GraphPanel", () => {
   // An inactive Git tab mounts the panel without ever laying it out; the layout it saves holds the
   // column squeezed to its minimum, not a width anyone chose.
   test("opens at the default width after a mount that was never laid out", async () => {
-    render(<GraphPanel />);
-    await waitFor(() => expect(getWorktreeInnerLayout("graph")).toBeDefined());
+    await mountUnlaidOut();
     cleanup();
 
     await openGraphPanel();
 
     expect(branchesWidth()).toBe(BRANCHES_DEFAULT_WIDTH);
+  });
+
+  test("keeps the width it was left at through a mount that was never laid out", async () => {
+    await openGraphPanel();
+    setWorktreeInnerLayout("graph", layoutWithBranchesWidth(300));
+    cleanup();
+    await mountUnlaidOut();
+    cleanup();
+
+    await openGraphPanel();
+
+    expect(branchesWidth()).toBe(300);
   });
 
   test("reopens the branches column at the width it was left at", async () => {

@@ -273,7 +273,8 @@ export function GraphPanel() {
     });
     // Track side when user drags the panel and re-apply constraints after drag
     // (dragging creates a new group, losing the old min/max lock and size). Dockview batches
-    // layout changes into one microtask, so the layout built below is recorded once it is done.
+    // layout changes into one microtask, so the layout built below is recorded once it is done
+    // (and once the grid can hold it).
     api.onDidLayoutChange(() => {
       const newSide = detectPanelSide(api.toJSON().grid, "innerBranches", "innerGraphContent");
       const prevSide = getCurrentWorktreeUI().getState().branchesPanelSide;
@@ -285,14 +286,14 @@ export function GraphPanel() {
       if (collapsed && width > COLLAPSED_WIDTH) {
         setBranchesConstraints(panel.group, true);
         panel.group.api.setSize({ width: COLLAPSED_WIDTH });
-      } else if (!collapsed) {
-        if (newSide !== prevSide) {
-          panel.group.api.setSize({ width: savedWidthRef.current });
-        } else if (width >= BRANCHES_MIN_WIDTH && branchesFit(api.width, width)) {
-          savedWidthRef.current = width;
-        }
+      } else if (!collapsed && newSide !== prevSide) {
+        panel.group.api.setSize({ width: savedWidthRef.current });
       }
 
+      // A grid too narrow for the column (one never laid out, as in an inactive Git tab) squeezes
+      // it; recording that would replace the width the user left it at.
+      if (!branchesFit(api.width, width)) return;
+      if (!collapsed && width >= BRANCHES_MIN_WIDTH) savedWidthRef.current = width;
       setWorktreeInnerLayout("graph", api.toJSON());
     });
 
