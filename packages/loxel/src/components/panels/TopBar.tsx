@@ -103,7 +103,7 @@ export function TopBar() {
           <div className="border-border mx-1 h-4 border-l" />
 
           {/* Project */}
-          <div className="text-muted-foreground flex items-center gap-1.5">
+          <div className="text-muted-foreground not-dark:text-foreground/80 flex items-center gap-1.5">
             <ProjectIcon id={activeProject.id} name={activeProject.name} size="xs" />
             <span>{activeProject.name}</span>
           </div>
@@ -166,7 +166,7 @@ function UpdateIndicator() {
 
   return (
     <button
-      className="text-primary hover:text-primary/80 mr-1 rounded p-1 text-[10px] font-medium"
+      className="text-link hover:text-link/80 mr-1 rounded p-1 text-[10px] font-medium"
       onClick={() => useSettingsStore.getState().openSettings("general")}
       style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
       title="Update available"

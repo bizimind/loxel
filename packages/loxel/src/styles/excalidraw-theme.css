@@ -1,24 +1,31 @@
 /* Excalidraw theme overrides — map to git-view's JetBrains-style palette */
 
-/* Light mode */
-.excalidraw {
-  --color-primary: var(--primary);
-  --color-primary-darker: var(--primary);
-  --color-primary-darkest: var(--primary);
-  --color-primary-hover: var(--primary);
+/* Light mode. Excalidraw's own stylesheet is lazy-loaded after this file and defines its light
+   palette on `.excalidraw`, so the light block needs the extra `:not(.theme--dark)` specificity to
+   win. Values follow the app's JetBrains New UI Light tokens: blue accent instead of Excalidraw's
+   lavender, neutral greys instead of its violet-tinted surfaces. */
+.excalidraw:not(.theme--dark) {
+  --color-primary: var(--button-primary);
+  --color-primary-darker: #2e62d9;
+  --color-primary-darkest: #2353b8;
+  --color-primary-hover: #2e62d9;
   --color-primary-light: var(--primary);
-  --color-primary-light-darker: var(--primary);
+  --color-primary-light-darker: #c2d6fc;
+  --color-logo-icon: var(--button-primary);
 
   --island-bg-color: var(--card);
   --island-bg-color-alt: var(--card);
-  --popup-bg-color: var(--card);
-  --popup-secondary-bg-color: var(--muted);
+  --popup-bg-color: var(--popover);
+  --popup-secondary-bg-color: var(--card);
   --popup-text-color: var(--foreground);
-  --sidebar-bg-color: var(--card);
+  --sidebar-bg-color: var(--popover);
   --default-bg-color: var(--editor-surface);
   --input-bg-color: var(--background);
-  --input-border-color: var(--border);
-  --input-hover-bg-color: var(--muted);
+  --input-border-color: var(--input);
+  --input-hover-bg-color: var(--card);
+  --input-label-color: var(--muted-foreground);
+  --overlay-bg-color: rgb(255 255 255 / 0.88);
+  --link-color: var(--link);
 
   --color-on-surface: var(--foreground);
   --text-primary-color: var(--foreground);
@@ -27,47 +34,98 @@
   --default-border-color: var(--border);
   --dialog-border-color: var(--border);
   --sidebar-border-color: var(--border);
-  --color-border-outline: var(--muted-foreground);
-  --color-border-outline-variant: var(--border);
+  --avatar-border-color: var(--border);
+  --color-border-outline: #818594;
+  --color-border-outline-variant: var(--input);
 
-  --color-surface-high: var(--muted);
-  --color-surface-mid: var(--background);
-  --color-surface-low: var(--muted);
+  /* Neutral surfaces: hover/pressed fill (high), properties-panel option buttons (mid), floating
+     corner controls and text fields (low, the islands' chrome grey) */
+  --color-surface-high: var(--border);
+  --color-surface-mid: var(--secondary);
+  --color-surface-low: var(--card);
   --color-surface-lowest: var(--background);
+  /* Checked tools and options: selection blue with a deep blue icon */
   --color-surface-primary-container: var(--primary);
-  --color-on-primary-container: var(--primary);
-  --color-brand-hover: var(--primary);
-  --color-brand-active: var(--primary);
+  --color-on-primary-container: var(--link);
+  --color-brand-hover: #2e62d9;
+  --color-brand-active: #2353b8;
 
-  --button-hover-bg: var(--muted);
-  --button-active-bg: var(--muted);
-  --button-active-border: var(--primary);
+  --button-hover-bg: var(--border);
+  --button-active-bg: var(--input);
+  --button-active-border: var(--button-primary);
 
-  --focus-highlight-color: var(--ring);
-  --select-highlight-color: var(--primary);
-  --keybinding-color: var(--muted-foreground);
-  --color-selection: var(--primary);
+  --focus-highlight-color: #a6c5fa;
+  --select-highlight-color: var(--button-primary);
+  --keybinding-color: color-mix(in srgb, var(--foreground) 80%, var(--card));
+  --color-disabled: #8f93a0;
+  --color-selection: var(--button-primary);
+  --color-slider-track: #9a9eaa;
+  --color-slider-thumb: var(--button-primary);
+
+  /* Floating islands: Loxel's light chrome grey with a firm hairline and a soft drop shadow */
+  --shadow-island: 0 0 0 1px rgb(0 0 0 / 0.12), 0 4px 16px 0 rgb(0 0 0 / 0.1);
 }
 
-/* Dark mode */
-.excalidraw.theme--dark {
-  --color-primary: var(--primary);
-  --color-primary-darker: var(--primary);
-  --color-primary-darkest: var(--primary);
-  --color-primary-hover: var(--primary);
-  --color-primary-light: var(--primary);
-  --color-primary-light-darker: var(--primary);
+/* Floating corner controls (menu, Library, zoom, undo/redo, help) get the islands' edge instead
+   of Excalidraw's white ring, so they read as the same family as the toolbar and panel. */
+.excalidraw:not(.theme--dark)
+  :is(.zoom-actions, .undo-redo-buttons, .sidebar-trigger, .help-icon, .main-menu-trigger) {
+  box-shadow: var(--shadow-island);
+}
 
-  --island-bg-color: var(--surface-1);
-  --island-bg-color-alt: var(--surface-1);
-  --popup-bg-color: var(--surface-1);
+/* Properties-panel option buttons: white segments with a hairline edge on the grey panel, like
+   JetBrains segmented controls, instead of grey fills that sit close to the panel tone. */
+.excalidraw:not(.theme--dark) .App-menu__left {
+  --button-bg: var(--background);
+  --button-border: var(--input);
+  --button-selected-border: #a6c5fa;
+}
+
+/* Swatches: a crisper edge, and a "transparent" swatch whose checker reads on the white panel
+   (Excalidraw's bitmap checker is near-white). */
+.excalidraw:not(.theme--dark) .color-picker__button {
+  border-color: var(--input);
+}
+
+/* The selected swatch: a 2px accent ring instead of a 1px dark hairline */
+.excalidraw:not(.theme--dark) .color-picker__button.active .color-picker__button-outline {
+  box-shadow: 0 0 0 2px var(--button-primary);
+}
+
+.excalidraw:not(.theme--dark) .color-picker__button.is-transparent {
+  background-image: repeating-conic-gradient(#d3d5db 0% 25%, #ffffff 0% 50%);
+  background-size: 8px 8px;
+}
+
+/* The canvas hint ("Press Enter to add text...") uses a fixed light grey; lift it to secondary text. */
+.excalidraw:not(.theme--dark) .HintViewer {
+  color: color-mix(in srgb, var(--foreground) 85%, var(--background));
+}
+
+/* Dark mode. Excalidraw's dark palette is `.excalidraw.theme--dark` in the same lazy-loaded
+   stylesheet, so this block needs the `:root` prefix to win. Values follow the app's JetBrains New
+   UI Dark tokens: the dark selection blue with a light blue icon for checked tools (the light
+   block's pale-blue-and-deep-blue pairing, inverted), JetBrains' dark link blue for Excalidraw's
+   accent (slider, radio, primary buttons, which draw near-black text on it), and Loxel's neutral
+   panel greys instead of Excalidraw's violet-tinted ones. */
+:root .excalidraw.theme--dark {
+  --color-primary: #548af7;
+  --color-primary-darker: #6c9bf8;
+  --color-primary-darkest: #85acf9;
+  --color-primary-hover: #6c9bf8;
+  --color-primary-light: var(--primary);
+  --color-logo-icon: var(--color-primary);
+
+  --island-bg-color: var(--card);
+  --popup-bg-color: var(--popover);
   --popup-secondary-bg-color: var(--background);
   --popup-text-color: var(--foreground);
-  --sidebar-bg-color: var(--surface-1);
-  --default-bg-color: var(--surface-2);
-  --input-bg-color: var(--surface-2);
-  --input-border-color: var(--border);
-  --input-hover-bg-color: var(--surface-1);
+  --sidebar-bg-color: var(--popover);
+  --default-bg-color: var(--editor-surface);
+  --input-bg-color: var(--background);
+  --input-border-color: var(--input);
+  --input-label-color: var(--muted-foreground);
+  --link-color: var(--color-primary);
 
   --color-on-surface: var(--foreground);
   --text-primary-color: var(--foreground);
@@ -76,29 +134,102 @@
   --default-border-color: var(--border);
   --dialog-border-color: var(--border);
   --sidebar-border-color: var(--border);
-  --color-border-outline: var(--muted-foreground);
-  --color-border-outline-variant: var(--border);
+  --color-border-outline: #6f737a;
+  --color-border-outline-variant: var(--input);
 
-  --color-surface-high: #2a2d33;
-  --color-surface-mid: var(--surface-2);
-  --color-surface-low: var(--surface-2);
-  --color-surface-lowest: var(--surface-2);
-  --color-surface-primary-container: #002362;
-  --color-on-primary-container: var(--primary);
-  --color-brand-hover: var(--primary);
-  --color-brand-active: var(--primary);
+  /* Neutral surfaces: hover/pressed fill (high), properties-panel option buttons (mid), floating
+     corner controls and text fields (low, the islands' panel grey) */
+  --color-surface-high: var(--accent);
+  --color-surface-mid: var(--editor-surface);
+  --color-surface-low: var(--card);
+  --color-surface-lowest: var(--editor-surface);
+  /* Checked tools and options: the dark selection blue with a light blue icon */
+  --color-surface-primary-container: var(--primary);
+  --color-on-primary-container: #a8c4fb;
+  --color-brand-hover: var(--color-primary-hover);
+  --color-brand-active: var(--color-primary-darkest);
 
-  --button-hover-bg: #2a2d33;
-  --button-active-bg: #2a2d33;
-  --button-active-border: var(--primary);
+  --button-hover-bg: var(--accent);
+  --button-active-bg: var(--border);
+  --button-active-border: var(--color-primary);
 
   --focus-highlight-color: var(--ring);
-  --select-highlight-color: var(--primary);
+  --select-highlight-color: var(--color-primary);
   --keybinding-color: var(--muted-foreground);
-
-  --scrollbar-thumb: var(--muted-foreground);
-  --scrollbar-thumb-hover: var(--foreground);
+  --color-disabled: #6f737a;
   --color-selection: var(--primary);
+  --color-slider-track: #4e5157;
+  --color-slider-thumb: var(--color-primary);
+
+  /* Excalidraw sets its own thumb on `.excalidraw`, shadowing Loxel's; this repeats Loxel's dark
+     value (a `var(--scrollbar-thumb)` here would reference itself and drop the scrollbar color). */
+  --scrollbar-thumb: #505258;
+
+  /* Floating islands: Loxel's dark panel grey with a hairline edge and a deep drop shadow */
+  --shadow-island: 0 0 0 1px var(--border), 0 4px 16px 0 rgb(0 0 0 / 0.45);
+}
+
+/* Floating corner controls, as in light: the islands' edge instead of Excalidraw's ring. No
+   `:root` here: like the light rule, this ties with Excalidraw's `:active` ring, which then wins. */
+.excalidraw.theme--dark
+  :is(.zoom-actions, .undo-redo-buttons, .sidebar-trigger, .help-icon, .main-menu-trigger) {
+  box-shadow: var(--shadow-island);
+}
+
+/* Excalidraw's dark sheet sets these with a doubled `.excalidraw.theme--dark.excalidraw`
+   selector, so these repeat it after `:root`. At rest, dropdown triggers (such as the Library's
+   "..." menu; the main menu trigger sets its own fill) and the Help dialog's link buttons take
+   the editor tone, where Excalidraw's resting fill would equal the hover. On hover they take
+   Loxel's hover grey instead of a fixed violet. */
+:root .excalidraw.theme--dark.excalidraw :is(.dropdown-menu-button, .HelpDialog__btn) {
+  --background: var(--color-surface-mid);
+}
+
+:root .excalidraw.theme--dark.excalidraw :is(.dropdown-menu-button, .HelpDialog__btn):hover {
+  --background: var(--color-surface-high);
+}
+
+/* Find on canvas: Excalidraw gives the search field a fixed violet fill */
+:root .excalidraw.theme--dark.excalidraw .layer-ui__search-header .ExcTextField__input {
+  background-color: var(--input-bg-color);
+}
+
+/* Properties-panel option buttons (and their narrow-panel mobile menu): segments sunk to the
+   editor tone with a hairline edge on the panel grey, the dark counterpart of light's white
+   segments, with Loxel's hover grey instead of Excalidraw's violet. */
+:root .excalidraw.theme--dark.excalidraw :is(.App-menu__left, .App-mobile-menu) {
+  --button-bg: var(--editor-surface);
+  --button-hover-bg: var(--accent);
+  --button-border: var(--border);
+  --button-selected-border: #2a4f99;
+}
+
+/* Excalidraw draws the selection navy on its accent (and the reverse) for a few library and
+   toolbar marks, too faint in dark; use the near-black and light blue icon pairings instead. */
+:root
+  .excalidraw.theme--dark
+  :is(
+    .library-actions-counter,
+    .library-unit__checkbox.is-checked .Checkbox-box svg,
+    .library-unit__adder svg
+  ) {
+  color: var(--color-surface-lowest);
+}
+
+:root
+  .excalidraw.theme--dark
+  :is(.App-toolbar__extra-tools-trigger--selected, .excalidraw-eye-dropper-trigger.selected) {
+  color: var(--color-on-primary-container);
+}
+
+/* The selected swatch: a 2px accent ring, as in light */
+:root .excalidraw.theme--dark .color-picker__button.active .color-picker__button-outline {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+/* The canvas hint uses a fixed mid grey; lift it to secondary text, as in light. */
+:root .excalidraw.theme--dark .HintViewer {
+  color: var(--muted-foreground);
 }
 
 /* Fix laser pointer / lasso offset when embedded in dockview.

@@ -2,6 +2,7 @@ import { describe, expect, jest, test } from "bun:test";
 
 import { useSettingsStore } from "./settings-store";
 import { applyStoreUpdate } from "./store-sync";
+import { useUIStore } from "./ui";
 
 describe("applyStoreUpdate", () => {
   test("settings: an update matching the persisted slice is a no-op", () => {
@@ -15,5 +16,19 @@ describe("applyStoreUpdate", () => {
 
     unsubscribe();
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  test("settings: a synced theme is applied, and an unknown one falls back to dark", () => {
+    applyStoreUpdate("settings", { theme: "light" });
+    expect(useSettingsStore.getState().theme).toBe("light");
+    applyStoreUpdate("settings", { theme: "sepia" });
+    expect(useSettingsStore.getState().theme).toBe("dark");
+  });
+
+  test("ui: darkMode from an older window is ignored", () => {
+    useUIStore.setState({ darkMode: false });
+    applyStoreUpdate("ui", { darkMode: true, diffViewMode: "unified" });
+    expect(useUIStore.getState().darkMode).toBe(false);
+    expect(useUIStore.getState().diffViewMode).toBe("unified");
   });
 });

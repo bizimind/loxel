@@ -22,13 +22,20 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { getMediaType } from "@/lib/media-extensions";
 import { cn } from "@/lib/utils";
 
+import {
+  actualSizeScale,
+  clampZoom,
+  type Dimensions,
+  fitWithin,
+  type MediaSize,
+  zoomPercent,
+} from "./media-scale";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const ZOOM_STEP = 1.2;
-const ZOOM_MIN = 0.05;
-const ZOOM_MAX = 50;
 const DRAG_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
@@ -42,7 +49,7 @@ interface MediaViewerPanelProps {
 
 /** Messages posted by the media-frame iframe to this parent. Sender: `packages/loxel/src/server/routes.ts` (`/api/media-frame`). */
 type IframeMessage =
-  | { type: "media-dimensions"; width: number; height: number }
+  | { type: "media-dimensions"; width: number; height: number; scalesToFit: boolean }
   | {
       type: "media-video-state";
       playing: boolean;
@@ -69,9 +76,8 @@ function isIframeMessage(data: unknown): data is IframeMessage {
   return t === "media-dimensions" || t === "media-video-state" || t === "media-wheel";
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
+function isPositiveSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 interface VideoState {
@@ -104,15 +110,19 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- State ---
   const [version, setVersion] = useState(1);
-  const [dimensions, setDimensions] = useState<Dimensions | null>(null);
+  const [dimensions, setDimensions] = useState<MediaSize | null>(null);
   const [scale, setScale] = useState(1);
   const [autoFit, setAutoFit] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [videoState, setVideoState] = useState<VideoState | null>(null);
+  const [viewportSize, setViewportSize] = useState<Dimensions | null>(null);
 
   // --- Refs ---
   const viewportRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** The transparency checkerboard, sized and moved with the media (not scaled, so its squares keep
+   *  their size at any zoom). */
+  const backdropRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const isDraggingRef = useRef(false);
@@ -120,6 +130,10 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // Keep scaleRef in sync
   scaleRef.current = scale;
+
+  const mediaBox = dimensions && viewportSize ? fitWithin(dimensions, viewportSize) : null;
+  const mediaBoxRef = useRef(mediaBox);
+  mediaBoxRef.current = mediaBox;
 
   // --- URL ---
   const iframeSrc = worktreePath
@@ -140,31 +154,18 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- Apply transform ---
   const applyTransform = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
     const { x, y } = translateRef.current;
-    iframe.style.transform = `translate(${x}px, ${y}px) scale(${scaleRef.current})`;
+    const iframe = iframeRef.current;
+    if (iframe) iframe.style.transform = `translate(${x}px, ${y}px) scale(${scaleRef.current})`;
+    const backdrop = backdropRef.current;
+    const box = mediaBoxRef.current;
+    if (backdrop && box) Object.assign(backdrop.style, backdropStyle(box, scaleRef.current, x, y));
   }, []);
-
-  // --- Actual-size scale: what scale shows 1 content pixel = 1 screen pixel ---
-  const calcActualSizeScale = useCallback(
-    (dims?: Dimensions | null) => {
-      const d = dims ?? dimensions;
-      const viewport = viewportRef.current;
-      if (!d || !viewport) return 1;
-      const vw = viewport.clientWidth;
-      const vh = viewport.clientHeight;
-      if (vw === 0 || vh === 0) return 1;
-      const containRatio = Math.min(vw / d.width, vh / d.height);
-      return containRatio > 0 ? 1 / containRatio : 1;
-    },
-    [dimensions],
-  );
 
   // --- Shared zoom helper ---
   const applyZoom = useCallback(
     (factor: number) => {
-      const s = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scaleRef.current * factor));
+      const s = clampZoom(scaleRef.current, scaleRef.current * factor);
       setScale(s);
       scaleRef.current = s;
       setAutoFit(false);
@@ -183,12 +184,12 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
   // --- Set 100% (actual size) ---
   const setActualSize = useCallback(() => {
-    const s = calcActualSizeScale();
+    const s = dimensions && viewportSize ? actualSizeScale(dimensions, viewportSize) : 1;
     setScale(s);
     scaleRef.current = s;
     translateRef.current = { x: 0, y: 0 };
     applyTransform();
-  }, [calcActualSizeScale, applyTransform]);
+  }, [dimensions, viewportSize, applyTransform]);
 
   // --- Listen for postMessage from iframe ---
   useEffect(() => {
@@ -198,9 +199,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       const msg = e.data;
 
       switch (msg.type) {
-        case "media-dimensions":
-          setDimensions({ width: msg.width, height: msg.height });
+        case "media-dimensions": {
+          // An SVG's own scripts share the frame's window, so this may not come from our script:
+          // keep only a usable size.
+          const { width, height } = msg;
+          if (!isPositiveSize(width) || !isPositiveSize(height)) break;
+          setDimensions({ width, height, scalesToFit: msg.scalesToFit === true });
           break;
+        }
         case "media-video-state":
           setVideoState({
             playing: msg.playing,
@@ -225,7 +231,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
             const oldScale = scaleRef.current;
             const factor = Math.pow(2, -deltaY * 0.01);
-            const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+            const newScale = clampZoom(oldScale, oldScale * factor);
 
             const cx = viewport.clientWidth / 2;
             const cy = viewport.clientHeight / 2;
@@ -270,6 +276,17 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     return unsub;
   }, [filePath]);
 
+  // --- Viewport size, for the checkerboard's box ---
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(() => {
+      setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
   // --- ResizeObserver for auto-fit ---
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -300,7 +317,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
         const oldScale = scaleRef.current;
         const factor = Math.pow(2, -e.deltaY * 0.01);
-        const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+        const newScale = clampZoom(oldScale, oldScale * factor);
 
         const cx = viewport.clientWidth / 2;
         const cy = viewport.clientHeight / 2;
@@ -409,15 +426,19 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     [applyZoom, fitToContain, isVideo, sendCommand],
   );
 
-  const actualScale = calcActualSizeScale();
-  const zoomPercent = actualScale > 0 ? Math.round((scale / actualScale) * 100) : 100;
+  const zoomLabel =
+    dimensions && viewportSize
+      ? zoomPercent(scale, dimensions, viewportSize)
+      : Math.round(scale * 100);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="border-border bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
-        <span className="text-muted-foreground min-w-0 shrink-0">
-          {dimensions ? `${dimensions.width} \u00d7 ${dimensions.height}` : "\u2014"}
+      <div className="border-border not-dark:border-input bg-background flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs">
+        <span className="text-foreground dark:text-muted-foreground min-w-0 shrink-0">
+          {dimensions
+            ? `${Math.round(dimensions.width)} \u00d7 ${Math.round(dimensions.height)}`
+            : "\u2014"}
         </span>
 
         <div className="mx-auto" />
@@ -425,12 +446,14 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
         <ToolbarButton onClick={() => applyZoom(1 / ZOOM_STEP)} title="Zoom out (-)">
           <MinusIcon className="size-3.5" />
         </ToolbarButton>
-        <span className="text-muted-foreground w-10 text-center tabular-nums">{zoomPercent}%</span>
+        <span className="text-foreground dark:text-muted-foreground w-10 text-center tabular-nums">
+          {zoomLabel}%
+        </span>
         <ToolbarButton onClick={() => applyZoom(ZOOM_STEP)} title="Zoom in (+)">
           <PlusIcon className="size-3.5" />
         </ToolbarButton>
 
-        <div className="bg-border mx-1 h-3.5 w-px" />
+        <ToolbarSeparator />
 
         <ToolbarButton
           onClick={() => {
@@ -453,7 +476,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           <span>1:1</span>
         </ToolbarButton>
 
-        <div className="bg-border mx-1 h-3.5 w-px" />
+        <ToolbarSeparator />
 
         <ToolbarButton
           onClick={() => {
@@ -477,21 +500,29 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       <div
         ref={viewportRef}
         className={cn(
-          "relative flex-1 overflow-hidden",
-          "[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] [background-size:16px_16px]",
+          // A chrome-grey canvas, so the media's own checkerboard and edge stand out
+          "bg-card relative flex-1 overflow-hidden",
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
-        style={
-          {
-            "--checker-a": "var(--color-muted, #f0f0f0)",
-            "--checker-b": "var(--color-background, #ffffff)",
-          } as React.CSSProperties
-        }
         tabIndex={0}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
       >
+        {/* A bordered checkerboard behind the media only, so its edges show where it ends */}
+        {mediaBox && (
+          <div
+            ref={backdropRef}
+            className={cn(
+              "pointer-events-none absolute top-1/2 left-1/2 box-content border border-[#b4b8c2] shadow-sm dark:border-[#4a4c53]",
+              "[background-image:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)] [background-size:16px_16px]",
+              // Greys a step off the chrome so transparency reads at a glance.
+              "[--checker-a:#dadce1] [--checker-b:var(--color-background)]",
+              "dark:[--checker-a:#2c2d32] dark:[--checker-b:#232428]",
+            )}
+            style={backdropStyle(mediaBox, scale, translateRef.current.x, translateRef.current.y)}
+          />
+        )}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           {iframeSrc && (
             <iframe
@@ -502,6 +533,11 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
               style={{
                 width: "100%",
                 height: "100%",
+                // The frame's document declares `color-scheme: light dark`, which resolves to the
+                // browser's preferred scheme (the OS's), not to this element's. Declaring the same
+                // here keeps the two equal under either app theme; when they differ, Chromium paints
+                // the frame an opaque canvas that hides the checkerboard under transparent pixels.
+                colorScheme: "light dark",
                 transformOrigin: "center center",
                 transform: `translate(${translateRef.current.x}px, ${translateRef.current.y}px) scale(${scale})`,
                 pointerEvents: isDragging ? "none" : "auto",
@@ -516,6 +552,20 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       {isVideo && videoState && <VideoControls state={videoState} onCommand={sendCommand} />}
     </div>
   );
+}
+
+/** Size and place the checkerboard over the media's zoomed, panned box (border outside it). */
+function backdropStyle(
+  box: Dimensions,
+  scale: number,
+  x: number,
+  y: number,
+): Pick<React.CSSProperties, "width" | "height" | "transform"> {
+  return {
+    width: `${box.width * scale}px`,
+    height: `${box.height * scale}px`,
+    transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -741,11 +791,18 @@ function ToolbarButton({
       title={title}
       className={cn(
         "hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-        active && "bg-primary text-foreground",
-        !active && "text-muted-foreground",
+        // Light: on toggles take the accent text, idle buttons the full text color (their thin icons
+        // read as grey at toolbar size).
+        active && "bg-primary text-link dark:text-foreground",
+        !active && "text-foreground dark:text-muted-foreground",
       )}
     >
       {children}
     </button>
   );
+}
+
+/** Divider between toolbar groups (a step darker than the border in light). */
+function ToolbarSeparator() {
+  return <div className="bg-muted-foreground/80 dark:bg-border mx-1 h-3.5 w-px" />;
 }

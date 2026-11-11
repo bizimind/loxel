@@ -9,6 +9,7 @@ const WINDOW_FOCUS_CHANGE = "window:focus-change";
 const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 const OPEN_FOLDER_DIALOG = "dialog:open-folder";
+const SET_THEME_SOURCE = "theme:set-source";
 const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
 const WEBVIEW_FOCUSED = "keybindings:webview-focused";
@@ -18,6 +19,8 @@ const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
 const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
 const UPDATE_GET_STATUS = "update:get-status";
+const PASSKEY_QR_SHOW = "passkey:qr-show";
+const PASSKEY_QR_HIDE = "passkey:qr-hide";
 const UPDATE_CHECK = "update:check";
 const UPDATE_DOWNLOAD = "update:download";
 const UPDATE_INSTALL = "update:install";
@@ -60,6 +63,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WINDOW_FULL_SCREEN_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
+  setThemeSource: (theme) => ipcRenderer.send(SET_THEME_SOURCE, theme),
   setKeystrokeInterception: (interception) =>
     ipcRenderer.send(SET_KEYSTROKE_INTERCEPTION, interception),
   onWebviewKeystroke: (callback) => {
@@ -87,6 +91,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     };
   },
   respondToJavaScriptDialog: (response) => ipcRenderer.send(JAVASCRIPT_DIALOG_RESPOND, response),
+  onPasskeyQrCode: (onShow, onHide) => {
+    const show = (_event, request) => onShow(request);
+    const hide = (_event, webContentsId) => onHide(webContentsId);
+    ipcRenderer.on(PASSKEY_QR_SHOW, show);
+    ipcRenderer.on(PASSKEY_QR_HIDE, hide);
+    return () => {
+      ipcRenderer.removeListener(PASSKEY_QR_SHOW, show);
+      ipcRenderer.removeListener(PASSKEY_QR_HIDE, hide);
+    };
+  },
   getUpdateStatus: () => ipcRenderer.invoke(UPDATE_GET_STATUS),
   checkForUpdates: () => ipcRenderer.invoke(UPDATE_CHECK),
   downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD),

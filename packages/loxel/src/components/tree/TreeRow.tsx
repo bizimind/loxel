@@ -73,16 +73,16 @@ export function TreeRow({
         aria-current={isActive ? "true" : undefined}
         // Hover is a light tint; the focused row (the keyboard cursor, also set by a click) is a
         // stronger tint with an outline; the active row (the entry shown elsewhere, e.g. in the
-        // editor or diff viewer) is solid. Light --primary is pale, so the light theme keeps the
-        // tints well apart and outlines in a darker color than its grey --ring.
+        // editor or diff viewer) is solid. Light --primary is pale, so the light theme draws the
+        // focused row as an accent outline only, which never reads as a second selected row.
         className={cn(
-          "focus:ring-foreground/50 dark:focus:ring-ring flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0 focus:ring-1 focus:ring-inset",
+          "focus:ring-ring/55 dark:focus:ring-ring flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0 focus:ring-1 focus:ring-inset",
           isActive
             ? isPanelActive
               ? "bg-primary hover:bg-primary focus:bg-primary"
               : // A neutral grey: visible on the panel background, unlike --muted.
                 "bg-foreground/10 hover:bg-foreground/10 focus:bg-foreground/10"
-            : "hover:bg-primary/30 focus:bg-primary/50 dark:hover:bg-primary/20 dark:focus:bg-primary/50",
+            : "hover:bg-primary/40 not-dark:focus:hover:bg-primary/40 dark:hover:bg-primary/20 dark:focus:bg-primary/50 not-dark:focus:bg-transparent",
           buttonClassName,
         )}
         style={{ paddingLeft: indentPx, ...buttonProps?.style }}

@@ -19,7 +19,9 @@ export function CommentMarkdown({ content }: { content: string }) {
               );
             }
             return (
-              <code className="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">{children}</code>
+              <code className="bg-muted ring-border rounded px-1 py-0.5 font-mono text-[11px] ring-1 ring-inset dark:ring-0">
+                {children}
+              </code>
             );
           },
           pre({ children }) {
@@ -29,7 +31,7 @@ export function CommentMarkdown({ content }: { content: string }) {
             return (
               <a
                 href={href}
-                className="text-primary hover:underline"
+                className="text-link hover:underline"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -73,5 +75,38 @@ export function CommentMarkdown({ content }: { content: string }) {
         {content}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/** Inline markdown a preview keeps; everything else is unwrapped to its text. */
+const PREVIEW_ELEMENTS = ["p", "code", "em", "strong", "del"];
+
+/**
+ * One-paragraph preview of a comment body: markdown is rendered inline (emphasis and code keep
+ * their style, blocks and links flatten to text) so a clamped preview never shows raw syntax.
+ */
+export function CommentPreview({ content, className }: { content: string; className?: string }) {
+  return (
+    <p className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        allowedElements={PREVIEW_ELEMENTS}
+        unwrapDisallowed
+        components={{
+          p({ children }) {
+            return <>{children} </>;
+          },
+          code({ children }) {
+            return (
+              <code className="bg-muted ring-border rounded px-0.5 font-mono text-[10px] whitespace-nowrap ring-1 ring-inset dark:ring-0">
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </p>
   );
 }

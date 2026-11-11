@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { detectLanguage, highlightCode } from "@/lib/highlighter";
+import { detectLanguage, highlightCode, readOnlyCodeTheme } from "@/lib/highlighter";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui";
 
@@ -79,7 +79,7 @@ export function FilePanel({
     }
 
     let cancelled = false;
-    const theme = darkMode ? "github-dark" : "github-light";
+    const theme = readOnlyCodeTheme(darkMode);
     const code = lines.join("\n");
 
     highlightCode(code, language, theme)

@@ -47,7 +47,7 @@ Within a modified line, the characters that actually changed are highlighted: re
 
 ## Syntax highlighting
 
-Code in the diff viewer is syntax-highlighted with GitHub's color themes, following your dark/light mode setting.
+Code in the diff viewer is syntax-highlighted in colors that follow the theme you choose in **Settings > Appearance > Theme**: GitHub's dark colors in the dark theme, and the code editor's own colors in the light theme.
 
 ---
 
@@ -60,6 +60,7 @@ The diff viewer can compare:
 - Commit vs commit
 - Branch range
 - Any two files (see [Comparing two files](#comparing-two-files))
+- A patch written in a markdown file (see [Patches from markdown](#patches-from-markdown))
 
 To open a diff, select one or more commits in the commit graph, then double-click a file in the Changes panel (or right-click it and choose **Open Diff**). See [Git](/docs/git) for how the commit graph and Changes panel work.
 
@@ -91,6 +92,14 @@ The comparison opens in its own tab with the same split and unified views, synch
 - **Conflicts and deleted files.** If a file changes on disk while you have unsaved edits to it, a banner above the comparison names the file and lets you accept the disk version or keep yours. A comparison stays on the paths it was opened with: if a compared file is deleted, renamed or moved, a banner offers to re-create it.
 
 Comparisons have no previous/next file navigation and no review comments.
+
+---
+
+## Patches from markdown
+
+A ` ```diff ` or ` ```patch ` block in a markdown file shows its diff in the editor. Click **Open in diff panel** above it to read the diff in its own tab, with the same split and unified views. The tab is named after the file the patch changes, or after the markdown file when the patch touches several files or names none, and clicking the button again on the same block brings that tab back.
+
+The tab shows the block as it was when you opened it: edit the block and open it again to see the new version. A patch carries only the lines it lists, so split view shows the two sides of each hunk in a table, and the lines between hunks are not available. Patches have no review comments and can't be edited in the diff viewer; edit the block in the markdown file instead. With several files, the previous/next file buttons step through them in the order the patch lists them.
 
 ---
 

@@ -58,16 +58,17 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 
 ## Navigation & global
 
-| Action                                  | Shortcut      |
-| --------------------------------------- | ------------- |
-| Quick Open (file)                       | `Cmd+P`       |
-| Go to symbol in workspace               | `Cmd+Alt+O`   |
-| Find in files                           | `Cmd+Shift+F` |
-| Command palette                         | `Cmd+Shift+P` |
-| Open settings                           | `Cmd+,`       |
-| Reveal the active file in Project Files | `Cmd+Alt+E`   |
-| Go to the most recent notification      | `` Ctrl+` ``  |
-| Save                                    | `Cmd+S`       |
+| Action                                  | Shortcut                  |
+| --------------------------------------- | ------------------------- |
+| Quick Open (file)                       | `Cmd+P`                   |
+| Go to symbol in workspace               | `Cmd+Alt+O`               |
+| Find in files                           | `Cmd+Shift+F`             |
+| Command palette                         | `Cmd+Shift+P`             |
+| Open settings                           | `Cmd+,`                   |
+| Theme: Dark / Light / System            | unbound — command palette |
+| Reveal the active file in Project Files | `Cmd+Alt+E`               |
+| Go to the most recent notification      | `` Ctrl+` ``              |
+| Save                                    | `Cmd+S`                   |
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
 

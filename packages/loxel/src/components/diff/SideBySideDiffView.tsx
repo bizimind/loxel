@@ -336,7 +336,7 @@ export function SideBySideDiffView({
 
   return (
     <div className="bg-editor-surface flex h-full flex-col">
-      <div className="border-border bg-muted/20 flex shrink-0 border-b text-[10px]">
+      <div className="border-border bg-card dark:bg-muted/20 flex shrink-0 border-b font-sans text-xs dark:font-mono dark:text-[10px]">
         <div className="border-border min-w-0 flex-1 truncate border-r px-2 py-1">
           {oldSide.label}
         </div>

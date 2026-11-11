@@ -1,11 +1,10 @@
 import type { InlineOption } from "@bizimind/localdb-sdk";
 
-import { Badge } from "@/components/ui/badge";
-
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
 import { EmptyValue, FieldError } from "../field-ui.tsx";
 import { issueMessage } from "../issue-message.ts";
 import { registerField } from "../registry.ts";
+import { OptionBadge } from "./OptionBadge.tsx";
 
 // Value is InlineOption[] (hydrated) for view
 export function MultiSelectView({ value }: FieldViewProps<InlineOption[]>) {
@@ -83,15 +82,3 @@ registerField({
   View: MultiSelectView,
   Edit: MultiSelectCheckboxes,
 });
-
-function OptionBadge({ option }: { option: InlineOption }) {
-  return (
-    <Badge
-      variant="outline"
-      className="h-6 px-2.5 py-0.5 text-[0.85em]"
-      style={option.color ? { borderColor: option.color } : undefined}
-    >
-      {option.label}
-    </Badge>
-  );
-}

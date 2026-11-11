@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { SelectWebauthnAccountDetails, Session, WebAuthnAccount } from "electron";
+import type {
+  SelectWebauthnAccountDetails,
+  Session,
+  WebAuthnAccount,
+  WebFrameMain,
+} from "electron";
 
+import { PASSKEY_QR_HIDE, PASSKEY_QR_SHOW } from "./ipc-channels";
 import {
   APP_BUNDLE_ID,
   APPLE_TEAM_ID,
@@ -14,6 +21,8 @@ import {
   configurePasskeys,
   embeddedProvisioningProfilePath,
   installAccountChooser,
+  installHybridQrCode,
+  type BrowserPanelFrame,
 } from "./webauthn";
 
 const packageRoot = path.resolve(import.meta.dirname, "..", "..");
@@ -232,5 +241,160 @@ describe("installAccountChooser", () => {
     } finally {
       console.error = originalError;
     }
+  });
+});
+
+describe("installHybridQrCode", () => {
+  const QR = "FIDO:/1234567890";
+
+  interface FakeFrame {
+    origin: string;
+    detached: boolean;
+  }
+
+  /** A session, browser panels by webContents ID, and the messages sent to their window. */
+  function setup() {
+    const browserSession = new EventEmitter();
+    const sent: { channel: string; payload: unknown }[] = [];
+    const panels = new Map<FakeFrame, { webContentsId: number; gone: boolean }>();
+    // `destroyed` listeners per webContents ID, as the real webviews would hold them.
+    const goneListeners = new Map<number, Set<() => void>>();
+    /** A frame of the webview with this webContents ID; call twice for two frames of one webview. */
+    const frame = (webContentsId: number): FakeFrame => {
+      const f = { origin: "https://example.com", detached: false };
+      panels.set(f, { webContentsId, gone: false });
+      return f;
+    };
+    const destroy = (f: FakeFrame) => {
+      const panel = panels.get(f)!;
+      panel.gone = true;
+      for (const listener of goneListeners.get(panel.webContentsId) ?? []) listener();
+    };
+    const locate = (f: WebFrameMain): BrowserPanelFrame | null => {
+      const panel = panels.get(f as unknown as FakeFrame);
+      if (!panel) return null;
+      return {
+        webContentsId: panel.webContentsId,
+        send: (channel, payload) => sent.push({ channel, payload }),
+        isGone: () => panel.gone,
+        onGone: (callback) => {
+          const listeners = goneListeners.get(panel.webContentsId) ?? new Set();
+          goneListeners.set(panel.webContentsId, listeners);
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
+      };
+    };
+    installHybridQrCode(browserSession, locate);
+    const request = (details: Record<string, unknown>) =>
+      browserSession.emit("webauthn-hybrid-request", {}, details);
+    const get = (f: FakeFrame | null, relyingPartyId = "example.com") =>
+      request({ relyingPartyId, requestType: "get", qrCode: QR, frame: f });
+    const completed = (f: FakeFrame | null, relyingPartyId = "example.com") =>
+      browserSession.emit("webauthn-hybrid-request-completed", {}, { relyingPartyId, frame: f });
+    const hidden = () => sent.filter((m) => m.channel === PASSKEY_QR_HIDE).map((m) => m.payload);
+    const watchers = (webContentsId: number) => goneListeners.get(webContentsId)?.size ?? 0;
+    return { sent, frame, destroy, request, get, completed, hidden, watchers };
+  }
+
+  test("shows the QR code in the panel that made the request", () => {
+    const { sent, frame, get } = setup();
+    get(frame(7));
+    expect(sent).toEqual([
+      {
+        channel: PASSKEY_QR_SHOW,
+        payload: {
+          webContentsId: 7,
+          relyingPartyId: "example.com",
+          requestType: "get",
+          qrCode: QR,
+        },
+      },
+    ]);
+  });
+
+  test("ignores frames outside the browser panels and malformed details", () => {
+    const { sent, frame, request, get } = setup();
+    get({ origin: "https://example.com", detached: false });
+    get(null);
+    request({
+      relyingPartyId: "example.com",
+      requestType: "get",
+      qrCode: "https://x",
+      frame: frame(7),
+    });
+    request({ relyingPartyId: "example.com", requestType: "sign", qrCode: QR, frame: frame(7) });
+    request({ requestType: "get", qrCode: QR, frame: frame(7) });
+    expect(sent).toEqual([]);
+  });
+
+  test("hides the QR code of the panel whose request completed", () => {
+    const { frame, get, completed, hidden } = setup();
+    const a = frame(7);
+    get(a);
+    get(frame(8));
+    completed(a);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("without a frame, hides the request whose frame has gone, not others on the same site", () => {
+    const { frame, get, completed, hidden } = setup();
+    const a = frame(7);
+    get(a);
+    get(frame(8));
+    a.detached = true;
+    completed(null);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("without a frame, hides the only request for the site", () => {
+    const { frame, get, completed, hidden } = setup();
+    get(frame(7));
+    get(frame(8), "other.com");
+    completed(null);
+    expect(hidden()).toEqual([7]);
+    completed(null);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("hides the QR code when the panel's webview is destroyed", () => {
+    const { frame, destroy, get, completed, hidden } = setup();
+    const a = frame(7);
+    get(a);
+    destroy(a);
+    expect(hidden()).toEqual([7]);
+    // The late completion finds nothing left to hide.
+    completed(null);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("a completion from a frame outside the panels hides nothing", () => {
+    const { frame, get, completed, hidden } = setup();
+    get(frame(7));
+    // E.g. a sign-in popup on the same session, finishing its own request for the same site.
+    completed({ origin: "https://example.com", detached: false });
+    expect(hidden()).toEqual([]);
+  });
+
+  test("a late completion of an older request keeps the newer code", () => {
+    const { frame, get, completed, hidden, watchers } = setup();
+    const older = frame(7);
+    const newer = frame(7);
+    get(older);
+    get(newer);
+    expect(watchers(7)).toBe(1);
+    completed(older);
+    expect(hidden()).toEqual([]);
+    completed(newer);
+    expect(hidden()).toEqual([7]);
+  });
+
+  test("stops watching the webview once its request ends", () => {
+    const { frame, get, completed, watchers } = setup();
+    const a = frame(7);
+    get(a);
+    expect(watchers(7)).toBe(1);
+    completed(a);
+    expect(watchers(7)).toBe(0);
   });
 });

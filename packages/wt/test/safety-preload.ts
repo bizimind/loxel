@@ -7,7 +7,7 @@
  * with the host repository or inheriting ambient configuration that could
  * redirect git operations.
  *
- * Three layers:
+ * Layers:
  *
  * 1. GIT_CEILING_DIRECTORIES blocks git from discovering the host repo when a
  *    test runs without an explicit temp-directory path. Any git command whose
@@ -26,8 +26,11 @@
  * 4. wt's own git helpers (runGit, git, gitSucceeds) are wrapped to reject any
  *    cwd at or below the checkout root. The ceiling only stops git walking *up*
  *    into the root; a command started exactly there still finds it.
+ *
+ * 5. The repo template createTestRepo() copies is removed once the tests that
+ *    share it are done, through the same guarded cleanup.
  */
-import { mock } from "bun:test";
+import { afterAll, mock } from "bun:test";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -105,3 +108,13 @@ mock.module("../src/git/run.ts", () => ({
     return gitSucceeds(args, cwd);
   },
 }));
+
+// ---------------------------------------------------------------------------
+// 5. Fixture cleanup
+// ---------------------------------------------------------------------------
+// A preload's afterAll runs after the last test that shares its module registry: at the end of the
+// run, or of each file under --isolate and --parallel. Imported only then, after the mock above.
+afterAll(async () => {
+  const { removeTestRepoTemplate } = await import("../src/test-repo.ts");
+  await removeTestRepoTemplate();
+});

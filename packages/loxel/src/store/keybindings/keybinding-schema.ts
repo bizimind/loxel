@@ -5,6 +5,7 @@
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { THEME_PREFERENCES } from "@/lib/theme-preference";
 
 import type { ActionId, SplitPanelType } from "./action-registry";
 import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES, canShareBinding } from "./action-registry";
@@ -187,6 +188,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "language.restartServers": [],
   "worktree.manageRepoTrust": [],
   "app.settings": ["Cmd+Comma"],
+  ...Object.fromEntries(THEME_PREFERENCES.map((theme) => [`theme.${theme}`, []])),
 });
 
 export const TEMPLATES: Record<TemplateName, BindingTemplate> = { loxel: LOXEL_DEFAULT_TEMPLATE };

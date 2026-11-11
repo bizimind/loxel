@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 
 const PORT = 7433;
-const prod: RequestOriginPolicy = { port: PORT, allowDevOrigins: false };
-const dev: RequestOriginPolicy = { port: 7434, allowDevOrigins: true };
+const prod: RequestOriginPolicy = { port: PORT, viteDevPort: null };
+const dev: RequestOriginPolicy = { port: 7434, viteDevPort: 5173 };
 
 // Built from headers rather than `new Request(...)`: the test DOM preload's Request strips the
 // `Host` and `Origin` headers these rules inspect.

@@ -5,10 +5,9 @@
  */
 import { app, BrowserWindow, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
-import { z } from "zod";
 
 import type { UpdateState } from "../api/update-model";
-import { isAutoCheckEnabled, SETTINGS_STORE_KEY } from "../server/persisted-settings";
+import { isAutoCheckEnabled } from "../server/persisted-settings";
 import {
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
@@ -16,6 +15,7 @@ import {
   UPDATE_INSTALL,
   UPDATE_STATUS_CHANGED,
 } from "./ipc-channels";
+import { readSettingsRow } from "./settings-row";
 import { ManifestProvider } from "./update-manifest";
 
 /** How long after launch the automatic check runs. */
@@ -105,15 +105,6 @@ export function installAppUpdater(): void {
   ipcMain.handle(UPDATE_CHECK, () => checkForUpdates());
   ipcMain.handle(UPDATE_DOWNLOAD, () => downloadUpdate());
   ipcMain.on(UPDATE_INSTALL, () => installUpdate());
-}
-
-const StoreRowSchema = z.object({ value: z.string().nullable() });
-
-/** The persisted settings row, read from the server that stores it. */
-async function readSettingsRow(serverUrl: string): Promise<string | null> {
-  const res = await fetch(`${serverUrl}/api/stores/${SETTINGS_STORE_KEY}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return StoreRowSchema.parse(await res.json()).value;
 }
 
 /**

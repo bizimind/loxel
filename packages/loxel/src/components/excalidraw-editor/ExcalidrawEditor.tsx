@@ -182,18 +182,23 @@ function deserializeExcalidraw(content: string): ExcalidrawData {
   return { elements, appState, files };
 }
 
-/** Apply ExcalidrawData to the Excalidraw imperative API. */
+/**
+ * Apply ExcalidrawData to the Excalidraw imperative API and return the version of the scene it
+ * loaded. `updateScene` fills in missing fractional indices and bumps the version of each element
+ * it fixes, so the loaded version can differ from `data`'s.
+ */
 function applyScene(
   apiRef: React.MutableRefObject<ExcalidrawImperativeAPI | null>,
   data: ExcalidrawData,
-): void {
+): number {
   const scene: Record<string, unknown> = { elements: data.elements };
   if (data.appState.viewBackgroundColor !== undefined) {
     scene.appState = { viewBackgroundColor: data.appState.viewBackgroundColor };
   }
-  apiRef.current?.updateScene(
-    scene as Parameters<NonNullable<typeof apiRef.current>["updateScene"]>[0],
-  );
+  const api = apiRef.current;
+  if (!api) return sceneVersion(data.elements);
+  api.updateScene(scene as Parameters<typeof api.updateScene>[0]);
+  return sceneVersion(api.getSceneElementsIncludingDeleted());
 }
 
 interface ExcalidrawEditorProps {
@@ -215,6 +220,8 @@ export function ExcalidrawEditor({
   const darkMode = useUIStore((s) => s.darkMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastVersionRef = useRef(0);
+  // False until Excalidraw reports the scene it loaded from initialData (see handleChange).
+  const sceneLoadedRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
 
   // Excalidraw has no imperative focus API; focusing the canvas container is
@@ -262,9 +269,9 @@ export function ExcalidrawEditor({
   // Initial data: prefer cache for instant mount, fall back to disk
   const initialData = drawingContentCache.get(cacheKey) ?? diskContent;
 
-  // Seed version ref so the initial Excalidraw onChange (which fires with the
-  // initial elements) doesn't trigger a spurious save of potentially stale data.
-  if (lastVersionRef.current === 0 && initialData) {
+  // Seed version ref so the disk-sync effect doesn't re-apply the content Excalidraw is still
+  // loading; the first onChange replaces it with the version of the scene actually loaded.
+  if (!sceneLoadedRef.current && lastVersionRef.current === 0 && initialData) {
     lastVersionRef.current = sceneVersion(initialData.elements);
   }
 
@@ -274,17 +281,24 @@ export function ExcalidrawEditor({
     if (!data) return;
     isProgrammaticRef.current = true;
     try {
-      applyScene(excalidrawApiRef, data);
+      lastVersionRef.current = applyScene(excalidrawApiRef, data);
     } finally {
       isProgrammaticRef.current = false;
     }
-    lastVersionRef.current = sceneVersion(data.elements);
   }, [hookAcceptDisk, isProgrammaticRef]);
 
   const handleChange = useCallback(
     (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
       if (isProgrammaticRef.current || drawingTeardownActive) return;
       const version = sceneVersion(elements);
+      // The first change after mount is Excalidraw reporting the scene it loaded, not an edit.
+      // Loading fills in missing fractional indices and bumps those elements' versions, so a
+      // drawing without indices would otherwise be rewritten on open. Take it as the baseline.
+      if (!sceneLoadedRef.current) {
+        sceneLoadedRef.current = true;
+        lastVersionRef.current = version;
+        return;
+      }
       if (version !== lastVersionRef.current) {
         lastVersionRef.current = version;
         hookHandleChange({ elements, appState, files });
@@ -354,8 +368,7 @@ export function ExcalidrawEditor({
     isProgrammaticRef.current = true;
     try {
       drawingContentCache.set(cacheKeyRef.current, diskContent);
-      applyScene(excalidrawApiRef, diskContent);
-      lastVersionRef.current = diskVersion;
+      lastVersionRef.current = applyScene(excalidrawApiRef, diskContent);
     } finally {
       isProgrammaticRef.current = false;
     }

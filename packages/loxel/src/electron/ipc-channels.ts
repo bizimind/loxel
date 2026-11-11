@@ -13,6 +13,11 @@ export const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 export const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 /**
+ * Renderer → main: the Theme setting (`ThemePreference`), applied as `nativeTheme.themeSource` so
+ * native UI and browser panels follow it.
+ */
+export const SET_THEME_SOURCE = "theme:set-source";
+/**
  * Renderer → main: which keystrokes to intercept in its webviews — the first keystrokes of its
  * bindings, or all of them while a chord is in progress.
  */
@@ -55,3 +60,7 @@ export const UPDATE_DOWNLOAD = "update:download";
 export const UPDATE_INSTALL = "update:install";
 /** Main → renderer: the app update's `UpdateState` changed. */
 export const UPDATE_STATUS_CHANGED = "update:status-changed";
+/** Main → renderer: show a passkey QR code (`PasskeyQrCode`) in one of its browser panels. */
+export const PASSKEY_QR_SHOW = "passkey:qr-show";
+/** Main → renderer: the passkey request of a webview (by webContents ID) ended; hide its QR code. */
+export const PASSKEY_QR_HIDE = "passkey:qr-hide";

@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import {
+  SET_THEME_SOURCE,
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
   UPDATE_GET_STATUS,
@@ -58,5 +59,10 @@ describe("window preload", () => {
     expect(callback).toHaveBeenCalledWith({ state: "checking" });
     unsubscribe();
     expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(UPDATE_STATUS_CHANGED, listener);
+  });
+
+  test("sends the theme setting on its channel", () => {
+    api.setThemeSource("light");
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(SET_THEME_SOURCE, "light");
   });
 });

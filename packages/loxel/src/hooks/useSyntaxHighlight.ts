@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
-import { detectLanguage, escapeHtml, highlightCode, type HighlightedLine } from "@/lib/highlighter";
+import {
+  detectLanguage,
+  escapeHtml,
+  highlightCode,
+  type HighlightedLine,
+  readOnlyCodeTheme,
+} from "@/lib/highlighter";
 import { useUIStore } from "@/store/ui";
 
 export interface HighlightedHunk {
@@ -61,7 +67,7 @@ export function useSyntaxHighlight(file: FileDiff | null): HighlightedFile | nul
       return;
     }
 
-    const theme = darkMode ? "github-dark" : "github-light";
+    const theme = readOnlyCodeTheme(darkMode);
     const lang = language; // Capture for async closure
     let cancelled = false;
 

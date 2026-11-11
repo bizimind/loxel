@@ -6,7 +6,7 @@ How the Electron shell fits around the Bun server and React renderer, how the ap
 
 - **One app process, one server.** A packaged app takes Electron's single-instance lock, and the app spawns its server on launch: the compiled `loxel-server` binary in production, `bun run src/server/index.ts` with `LOXEL_DEV=1` in dev, on the mode's port (7433 prod, 7434 dev, 7435 + n for [demo](#demo-mode) instance n). The server lives as long as the app. Every window connects to it, identifies itself with its window ID, and talks to it over REST and WebSocket. Startup, crash restarts, shutdown and state scopes are detailed in [SHARED_SERVER.md](SHARED_SERVER.md).
 - **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server).
-- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus and fullscreen state, opening links in a browser panel, keystrokes inside webviews, copying images from webviews, page dialogs in webviews, app updates). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
+- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus and fullscreen state, opening links in a browser panel, keystrokes inside webviews, copying images from webviews, page dialogs in webviews, app updates, the theme). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
 
 ## Updates
 
@@ -17,6 +17,14 @@ The app updates as a whole. Each release replaces the bundle, with its Electron 
 - **State and UI.** Main keeps the `UpdateState` ([update-model.ts](../src/api/update-model.ts)) and sends every change to all windows over IPC (`UPDATE_*` in `ipc-channels.ts`). Settings > General and the top bar's Update button show it through `useUpdateStatus` ([use-update-status.ts](../src/queries/use-update-status.ts)). Downloading and installing happen only when the user asks. `autoInstallOnAppQuit` is off, so an ordinary quit never installs.
 - **Automatic check.** Five seconds after launch, a packaged app reads the persisted settings row from its server and checks unless `autoCheckForUpdates` is off (`isAutoCheckEnabled` in [persisted-settings.ts](../src/server/persisted-settings.ts)). The manual check ignores the setting. Unpackaged builds never check.
 - **Install location.** Squirrel can only replace a bundle it can write to. A packaged app outside an Applications folder that it cannot write to, such as one opened from the disk image or run from a read-only translocated copy, offers on launch to move itself to `/Applications`. When an install fails, Settings shows the error with a link to the download page.
+
+## Theme
+
+Electron's `nativeTheme.themeSource` follows the Theme setting, so native menus and dialogs, every page's `prefers-color-scheme` (browser panels' and the renderer's own) and window backgrounds match the app instead of the OS. [native-theme.ts](../src/electron/native-theme.ts) owns it:
+
+- **Changes.** `useThemeSync` sends the setting (`dark`, `light` or `system`, the same values as `themeSource`) with `SET_THEME_SOURCE` once the settings load and on every change. With an explicit theme, the renderer's own `(prefers-color-scheme: dark)` query then matches the setting; only `system` reads it.
+- **Launch.** Before the first window, main reads the persisted `theme` from the server (`persistedTheme` in [persisted-settings.ts](../src/server/persisted-settings.ts)), so the window and its webviews start in it. If the row can't be read within two seconds, the OS appearance applies until the renderer reports the setting.
+- **Window background.** Windows are created with, and keep while `nativeTheme` changes, the background of the renderer's `--background` in the current theme (`WINDOW_BACKGROUND`, kept in step with `src/index.css`), so a new window or a reload paints no flash of the other theme.
 
 ## Browser panels
 
@@ -32,6 +40,7 @@ Browser panels host a `<webview>` per tab. `will-attach-webview` in `src/electro
   - **Toolbar navigation.** A browser-initiated navigation waits for the blocked page (its `beforeunload` round trip), so the panel dismisses its queued dialogs before navigating from the toolbar.
   - **Preload rules.** The preload ignores dialogs during `beforeunload` and `pagehide`. `disableDialogs` is set as a backstop, so frames the preload can't reach (`about:blank` iframes) get no dialog rather than a window-wide sheet.
 - **Passkeys** use the macOS Touch ID platform authenticator (`src/electron/webauthn.ts`). This needs a restricted entitlement that only provisioned Developer ID builds carry, so dev runs and unprovisioned local builds have no passkeys; see [RELEASE_SIGNING.md](RELEASE_SIGNING.md).
+- **Passkeys from a phone** (FIDO hybrid transport, "use a phone or tablet") come from the `webauthn-hybrid-request` session events, which leave drawing the QR code to the app. `installHybridQrCode` (`src/electron/webauthn.ts`) routes each request to the browser panel whose webview made it, and `PasskeyQrOverlay` draws the code over that panel only, so a background panel cannot put a code in front of the user. The `FIDO:/` string is a per-request secret: it goes to the hosting window's renderer and nowhere else, and is never logged. The events come from the patched Electron releases ship with ([PATCHED_ELECTRON.md](PATCHED_ELECTRON.md)); on stock Electron, as in dev runs and tests, the listeners never fire.
 - **Installed fonts.** The font pickers in Settings list installed fonts with the Local Font Access API (`window.queryLocalFonts`, `src/lib/local-fonts.ts`). Electron decides `local-fonts` from the session's permission check handler alone, since its permission status is never "ask", so `src/electron/local-fonts-permission.ts` installs one on the default session that allows only the app origin (and no frame embedded by another origin), and one on `BROWSER_PARTITION` that refuses it. Blink resolves a refused query with an empty list rather than an error.
 
 ## macOS integration
@@ -47,6 +56,6 @@ Browser panels host a `<webview>` per tab. `will-attach-webview` in `src/electro
 
 ## Build and release
 
-`pnpm run build:app` compiles the standalone server, builds the renderer and packages the app with electron-builder into `release/`, on macOS for this machine's architecture (`build:app:local` builds an unpacked arm64 app only). `release-loxel.yml` releases on every merge to main that touches `packages/loxel/**`; see the [README](../README.md#releases).
+`pnpm run build:app` compiles the standalone server, builds the renderer and packages the app with electron-builder into `release/`, on macOS for this machine's architecture (`build:app:local` builds an unpacked arm64 app only). `release-loxel.yml` releases on every merge to main that touches `packages/loxel/**`; see the [README](../README.md#releases). Releases package a patched Electron rather than the npm package's binary; see [PATCHED_ELECTRON.md](PATCHED_ELECTRON.md).
 
 The server, language server scripts and Go builds all produce binaries for the machine they run on, so each macOS architecture builds on a runner of that architecture. [check-binary-arch.ts](../scripts/check-binary-arch.ts) reads the header of every file in the app and fails the release if a binary doesn't match.

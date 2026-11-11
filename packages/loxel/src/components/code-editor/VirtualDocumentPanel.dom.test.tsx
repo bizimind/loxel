@@ -43,6 +43,10 @@ mock.module("@/components/ui/toast", () => ({
   showToast: (message: string) => toasts.push(message),
 }));
 mock.module("@/lib/monaco-theme", () => ({ getMonacoThemeName: () => "loxel-dark" }));
+mock.module("@/components/code-editor/caret-row", () => ({
+  caretOptionsFor: () => ({}),
+  trackCaretRow: () => ({ dispose() {} }),
+}));
 
 const { VirtualDocumentPanel } = await import("./VirtualDocumentPanel");
 const { registerVirtualDocumentScheme, virtualDocumentConnection } =

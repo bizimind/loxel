@@ -38,9 +38,10 @@ export function LanguageServerStatus() {
       type="button"
       onClick={restartStoppedLanguageServers}
       title={tooltip}
-      className="text-warning hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
+      className="text-foreground dark:text-warning dark:hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
     >
-      <TriangleAlertIcon className="size-3.5" />
+      {/* Light mode keeps the label in the body color: amber text is too faint on the light bar */}
+      <TriangleAlertIcon className="text-warning size-3.5 dark:text-current" />
       {label}
     </button>
   );

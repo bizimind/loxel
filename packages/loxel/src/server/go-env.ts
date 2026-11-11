@@ -168,8 +168,9 @@ function startResolution(wtPath: string, entry: WorktreeGoEnv): Promise<GoEnv | 
 
 /**
  * Watch what `env` calls for, if that differs from what is watched: a watch is not fully armed when
- * it returns, so one that stays cannot miss a change. Keeps the old watch until the new one is armed,
- * and hands a change it saw during resolution to the new one's debounce.
+ * it returns, so keeping one that stays leaves no moment in which a change is missed. Opens the new
+ * watch before closing the old one, and hands a change the old one saw during resolution to the new
+ * one's debounce.
  */
 function rewatch(
   wtPath: string,
@@ -687,8 +688,9 @@ function watchTargets(wtPath: string, current: GoEnv | null): WatchTargets {
       if (!name || !path.isAbsolute(gomodcache)) continue;
       const dir = path.join(gomodcache, "golang.org", name);
       addByAncestor(dir);
-      // `go` makes its binaries executable only after unpacking.
-      if (isDirectory(path.join(dir, "bin"))) add(path.join(dir, "bin"), GO);
+      // Also by its `go`, which a toolchain still being unpacked may not have, nor its `bin`: `go`
+      // makes its binaries executable only after unpacking.
+      addByAncestor(path.join(dir, "bin", GO));
     }
   }
   if (current) {

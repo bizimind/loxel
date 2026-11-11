@@ -39,11 +39,14 @@ const {
   createBrowser,
   createTerminal,
   duplicateComparison,
+  duplicatePatchDiff,
   handleFileDeleted,
   handleFileMoved,
   openBrowserTab,
   openCompareFiles,
   openFileBacked,
+  openPatchDiff,
+  patchDiffTitle,
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
@@ -666,5 +669,60 @@ describe("compare panels", () => {
     a.api.setActive();
     duplicateComparison({ split: "right" });
     expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
+  });
+});
+
+describe("patch diff panels", () => {
+  const PATCH = "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const patchPanels = (api: DockviewApi) => api.panels.filter((p) => p.id.startsWith("patchdiff-"));
+
+  test("open a patch in its own panel, and focus it when the same block opens again", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+
+    const [panel] = patchPanels(api);
+    expect(panel?.view.contentComponent).toBe("patchDiff");
+    expect(panel?.title).toBe("app.ts patch");
+    expect(panel?.params).toEqual({ patch: PATCH, sourcePath: "docs/notes.md" });
+    expect(api.activePanel).toBe(panel);
+    // Opened as a tab next to the markdown editor it came from.
+    expect(panel?.group).toBe(a.group);
+
+    a.api.setActive();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+    expect(patchPanels(api)).toHaveLength(1);
+    expect(api.activePanel).toBe(panel);
+
+    // Edited text is another patch: a panel of its own, the first keeps what it opened with.
+    openPatchDiff({ patch: `${PATCH}+c\n`, sourcePath: "docs/notes.md" });
+    expect(patchPanels(api)).toHaveLength(2);
+    expect(panel?.params?.patch).toBe(PATCH);
+  });
+
+  test("a split duplicates the patch panel it starts from", () => {
+    const { api } = setup();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+    duplicatePatchDiff({ split: "right" });
+
+    const panels = patchPanels(api);
+    expect(panels).toHaveLength(2);
+    expect(panels[1]!.params).toEqual(panels[0]!.params);
+    expect(panels[1]!.group).not.toBe(panels[0]!.group);
+  });
+
+  test("a split from a panel that is not a patch opens nothing", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    duplicatePatchDiff({ split: "right" });
+    expect(patchPanels(api)).toHaveLength(0);
+  });
+
+  test("the title names the patch's one file, or else the markdown file it came from", () => {
+    const sourcePath = "docs/notes.md";
+    expect(patchDiffTitle({ patch: PATCH, sourcePath })).toBe("app.ts patch");
+    const twoFiles = `${PATCH}--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-x\n+y\n`;
+    expect(patchDiffTitle({ patch: twoFiles, sourcePath })).toBe("notes.md patch");
+    expect(patchDiffTitle({ patch: "-old\n+new\n", sourcePath })).toBe("notes.md patch");
   });
 });

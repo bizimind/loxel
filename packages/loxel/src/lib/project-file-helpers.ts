@@ -40,9 +40,9 @@ export function pathName(path: string): string {
 export function statusColorClass(status: ProjectFileStatus | undefined): string | undefined {
   switch (status) {
     case "modified":
-      return "text-diff-modify-text";
+      return "text-vcs-modified dark:text-diff-modify-text";
     case "untracked":
-      return "text-diff-add-text";
+      return "text-vcs-untracked dark:text-diff-add-text";
     case "ignored":
       return "text-muted-foreground";
     case "normal":

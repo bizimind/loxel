@@ -3,9 +3,8 @@
  * Accepts a filePath and optional callbacks.
  * Persists content to disk via autosave with conflict detection.
  */
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { Crepe } from "@milkdown/crepe";
 import {
   commandsCtx,
@@ -28,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { codeBlockText, handleDiffBlockClick } from "@/components/editor/diff-block-preview";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import { installMarkdownImages, observeImageLoadErrors } from "@/components/editor/markdown-images";
@@ -42,6 +42,7 @@ import {
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import {
   type MarkdownBlockCodec,
   type SourceBaseline,
@@ -57,6 +58,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
+import { codeBlockLanguages } from "./code-block-highlight";
 import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
@@ -202,38 +204,45 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
   return serializeBody(crepe);
 }
 
-/** CodeMirror theme matching loxel's JetBrains dark palette. */
-const codeTheme = EditorView.theme({}, { dark: true });
+/** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
+const darkThemeCompartment = new Compartment();
 
-const codeHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "#cf8e6d" },
-  { tag: tags.operator, color: "#cf8e6d" },
-  { tag: tags.name, color: "#bcbec4" },
-  { tag: tags.variableName, color: "#bcbec4" },
-  { tag: tags.propertyName, color: "#c77dbb" },
-  { tag: tags.function(tags.variableName), color: "#56a8f5" },
-  { tag: tags.function(tags.propertyName), color: "#56a8f5" },
-  { tag: tags.definition(tags.variableName), color: "#bcbec4" },
-  { tag: tags.typeName, color: "#2fbaa3" },
-  { tag: tags.className, color: "#2fbaa3" },
-  { tag: tags.string, color: "#6aab73" },
-  { tag: tags.special(tags.string), color: "#6aab73" },
-  { tag: tags.number, color: "#2aacb8" },
-  { tag: tags.bool, color: "#cf8e6d" },
-  { tag: tags.null, color: "#cf8e6d" },
-  { tag: tags.comment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.lineComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.blockComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.meta, color: "#bbb529" },
-  { tag: tags.regexp, color: "#6aab73" },
-  { tag: tags.tagName, color: "#e8bf6a" },
-  { tag: tags.attributeName, color: "#bababa" },
-  { tag: tags.attributeValue, color: "#6a8759" },
-  { tag: tags.heading, color: "#bcbec4", fontWeight: "bold" },
-  { tag: tags.link, color: "#56a8f5", textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
-]);
+/**
+ * Keeps a code block's `EditorView.darkTheme` (CodeMirror's own dark or light defaults, such as
+ * the cursor and selection) on the app theme: when the theme changes, and once at creation, since
+ * a block added after a change starts from the value the editor was created with.
+ */
+const followDarkMode = ViewPlugin.define((view) => {
+  let destroyed = false;
+  const apply = (darkMode: boolean) => {
+    if (destroyed || view.state.facet(EditorView.darkTheme) === darkMode) return;
+    view.dispatch({ effects: darkThemeCompartment.reconfigure(EditorView.darkTheme.of(darkMode)) });
+  };
+  // A view can't be updated while it is being constructed.
+  queueMicrotask(() => apply(useUIStore.getState().darkMode));
+  const unsubscribe = useUIStore.subscribe((state, prev) => {
+    if (state.darkMode !== prev.darkMode) apply(state.darkMode);
+  });
+  return {
+    destroy: () => {
+      destroyed = true;
+      unsubscribe();
+    },
+  };
+});
+
+/**
+ * Code-block theme: CodeMirror's own defaults for the app theme. Token colors come with each
+ * block's language (code-block-highlight.ts).
+ */
+function codeTheme() {
+  return [
+    darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
+    followDarkMode,
+  ];
+}
+
+const CODE_BLOCK_LANGUAGES = codeBlockLanguages();
 
 /** Scroll the editor so the current cursor is roughly 1/3 from the top of the viewport. */
 function scrollCursorNearTop(view: ProseMirrorView): void {
@@ -270,6 +279,7 @@ export function MarkdownEditor({
   panelApi,
 }: MarkdownEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
+  const diffViewMode = useUIStore((s) => s.diffViewMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
 
@@ -406,7 +416,8 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: [codeTheme, syntaxHighlighting(codeHighlight)],
+          theme: codeTheme(),
+          languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
         },
         [Crepe.Feature.BlockEdit]: {
@@ -888,6 +899,18 @@ export function MarkdownEditor({
     });
   }, [cacheKey]);
 
+  // Diff fence previews are static markup; their buttons work through this delegated handler.
+  const handleContainerClick = useCallback(
+    (event: React.MouseEvent) =>
+      handleDiffBlockClick(event, (codeBlock) => {
+        const patch = crepeRef.current?.editor.action((ctx) =>
+          codeBlockText(ctx.get(editorViewCtx), codeBlock),
+        );
+        if (patch) dispatchLoxelEvent("loxel-open-patch-diff", { patch, sourcePath: filePath });
+      }),
+    [filePath],
+  );
+
   // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
   // be re-created; only a file that never loaded has nothing to show.
   if (isError && diskContent === null) {
@@ -917,18 +940,29 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      <div ref={containerRef} key={crepeKey} className="flex-1 overflow-hidden" />
-      <button
-        onClick={handleCopy}
-        title="Copy markdown"
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity group-hover/editor:opacity-100"
-      >
-        {copied ? (
-          <CheckIcon className="size-3.5 text-green-500" />
-        ) : (
-          <ClipboardIcon className="size-3.5" />
-        )}
-      </button>
+      {/* The copy button floats over the document body, below the banners and the frontmatter
+          header, so it never covers their controls. */}
+      <div className="relative min-h-0 flex-1">
+        {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+        <div
+          ref={containerRef}
+          key={crepeKey}
+          className="h-full overflow-hidden"
+          data-diff-view-mode={diffViewMode}
+          onClick={handleContainerClick}
+        />
+        <button
+          onClick={handleCopy}
+          title="Copy markdown"
+          className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted not-dark:bg-background not-dark:border-input not-dark:text-foreground/75 not-dark:hover:bg-muted not-dark:hover:text-foreground absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity not-dark:shadow-sm group-hover/editor:opacity-100"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-green-500" />
+          ) : (
+            <ClipboardIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

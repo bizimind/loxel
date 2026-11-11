@@ -20,6 +20,54 @@
   src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
 }
 
+/* Literata - markdown font. Variable weight and optical size, in Latin and Latin Extended files
+   the browser loads by unicode-range; OFL-1.1 in public/fonts/LICENSE-Literata.txt */
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable-LatinExt.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable-Italic.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/fonts/Literata-Variable-LatinExt-Italic.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
 /* JetBrains Mono - code font */
 @font-face {
   font-family: "JetBrains Mono";
@@ -82,97 +130,152 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.25);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.147 0.004 49.25);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.147 0.004 49.25);
-  --primary: oklch(0.92 0.04 290);
-  --primary-foreground: oklch(0.147 0.004 49.25);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0.001 106.424);
-  --muted-foreground: oklch(0.553 0.013 58.071);
-  --destructive: oklch(0.577 0.245 27.325);
-  --warning: #9a6700;
-  --border: oklch(0.923 0.003 48.717);
-  --input: oklch(0.923 0.003 48.717);
-  --ring: oklch(0.709 0.01 56.259);
+:root,
+.light {
+  /* JetBrains New UI Light: white editor, light grey chrome, soft borders, blue accent */
+
+  /* Surface scale (mirrors the .dark roles) */
+  --surface-0: #ebecf0; /* elevated elements, hovers, buttons on cards */
+  --surface-1: #ffffff; /* panels, cards, popups */
+  --surface-2: #ffffff; /* editor, inputs */
+  --surface-3: #cfd2d8; /* borders */
+
+  --background: #ffffff;
+  --foreground: #1e1f22;
+  /* Chrome: sidebars, tool bars, title and status bars */
+  --card: #f3f4f6;
+  --card-foreground: #1e1f22;
+  --popover: #ffffff;
+  --popover-foreground: #1e1f22;
+  /* Selection fill (rows, menus, active items) — keeps foreground text */
+  --primary: #d4e2ff;
+  --primary-foreground: #1e1f22;
+  /* Accent text: links, check marks, active filters */
+  --link: #2e62d9;
+  /* Solid accent for primary buttons and on switches */
+  --button-primary: #3574f0;
+  --button-primary-foreground: #ffffff;
+  --secondary: #e2e4e9;
+  --secondary-foreground: #1e1f22;
+  --muted: #ebecf0;
+  --muted-foreground: #5e6270;
+  /* Selected segment / active nav item */
+  --accent: #d4e2ff;
+  --accent-foreground: #1e1f22;
+  --destructive: #db3b4b;
+  --warning: #a46704;
+  --border: #cfd2d8;
+  --input: #b9bdc8;
+  --ring: #3574f0;
   --radius: 0.5rem;
 
-  /* Editor surface (diff panels) */
-  --editor-surface: oklch(0.97 0 0);
+  /* Elevation for menus and popovers: hairline edge plus a soft drop shadow */
+  --shadow-popover: 0 0 0 1px rgb(0 0 0 / 0.2), 0 6px 20px -4px rgb(0 0 0 / 0.2);
+  --shadow-dialog: 0 0 0 1px rgb(0 0 0 / 0.08), 0 16px 48px -8px rgb(0 0 0 / 0.3);
+  /* Pickers (Quick Open, command palette): they float over the IDE without a scrim in light */
+  --shadow-picker: 0 0 0 1px rgb(0 0 0 / 0.05), 0 10px 32px -6px rgb(0 0 0 / 0.22);
+  /* Settings section nav: the section in view */
+  --nav-active: var(--accent);
+  --text-shadow: none;
+  --scrollbar-thumb: #c4c7ce;
+  --scrollbar-track: transparent;
 
-  /* Slightly elevated surface — brighter than card, same hue */
-  --surface-muted: oklch(0.96 0 0);
+  /* Editor surface (diff panels, terminal, editors) */
+  --editor-surface: #ffffff;
+
+  /* Slightly elevated surface (unfocused window title bar) */
+  --surface-muted: #ebecf0;
 
   /* Ref badge colors (light mode) */
-  --ref-head: oklch(0.5 0.18 290);
-  --ref-local: oklch(0.5 0.15 170);
-  --ref-remote: oklch(0.5 0.12 80);
-  --ref-tag: oklch(0.55 0.18 85);
+  --ref-head: oklch(0.46 0.18 290);
+  --ref-local: oklch(0.41 0.09 175);
+  --ref-remote: oklch(0.44 0.13 45);
+  --ref-tag: oklch(0.45 0.1 70);
+  /* Light ref pill fills (dark tints the ref color instead, and fills HEAD with it) */
+  --ref-head-bg: oklch(0.93 0.05 290);
+  --ref-local-bg: oklch(0.94 0.04 175);
+  --ref-remote-bg: oklch(0.94 0.035 50);
+  --ref-tag-bg: oklch(0.94 0.05 85);
 
   /* Branch colors for graph */
-  --branch-1: oklch(0.65 0.2 250);
-  --branch-2: oklch(0.65 0.2 150);
-  --branch-3: oklch(0.65 0.2 30);
-  --branch-4: oklch(0.65 0.2 300);
-  --branch-5: oklch(0.65 0.2 200);
-  --branch-6: oklch(0.65 0.2 80);
+  --branch-1: oklch(0.53 0.19 255);
+  --branch-2: oklch(0.53 0.15 150);
+  --branch-3: oklch(0.57 0.19 35);
+  --branch-4: oklch(0.52 0.21 300);
+  --branch-5: oklch(0.5 0.12 205);
+  --branch-6: oklch(0.6 0.14 75);
 
   /* Tree colors (light mode) */
-  --tree-folder: oklch(0.147 0.004 49.25);
+  --tree-folder: #1e1f22;
+  /* Git status of files and change counts (file trees, status bar); dark uses the diff text colors */
+  --vcs-modified: #1c58d9;
+  --vcs-untracked: #217f00;
 
   /* Editor line numbers */
-  --editor-line-number: #8b8685;
-  --editor-line-number-active: #1b1b1f;
+  --editor-line-number: #7f8391;
+  --editor-line-number-active: #1e1f22;
 
   /* Diff colors (light mode) */
-  --diff-modify-bg: #d4e2f7;
-  --diff-modify-gutter: #d4e2f7;
-  --diff-modify-text: #0550ae;
-  --diff-add-bg: #d4f5dc;
-  --diff-add-gutter: #d4f5dc;
+  --diff-modify-bg: #e2ebfd;
+  /* Gutter fills are translucent: the diff connector paints over the line numbers. */
+  --diff-modify-gutter: #7f8fb033;
+  --diff-modify-text: #2e5fc7;
+  --diff-add-bg: #e5f4e7;
+  --diff-add-gutter: #27af4347;
   --diff-add-text: #1a7f37;
-  --diff-del-bg: #f5d4d4;
-  --diff-del-gutter: #f5d4d4;
-  --diff-del-text: #cf222e;
-  --diff-add-inline-bg: #abf2bc;
-  --diff-del-inline-bg: #ffb3b5;
+  --diff-del-bg: #fbe7e7;
+  --diff-del-gutter: #db3f3f38;
+  --diff-del-text: #c4232f;
+  --diff-add-inline-bg: #b2e0b5;
+  --diff-del-inline-bg: #f4adb3;
+  /* Gutter connectors: the fill is the gutter tint, the edge a step stronger */
+  --diff-add-connector-fill: var(--diff-add-gutter);
+  --diff-add-connector-edge: #27af4380;
+  --diff-del-connector-fill: var(--diff-del-gutter);
+  --diff-del-connector-edge: #db3f3f70;
 
   /* Comment colors (light mode) */
-  --comment-bg: rgba(255, 213, 79, 0.12);
+  --comment-bg: rgba(255, 190, 40, 0.12);
   --comment-bg-resolved: rgba(128, 128, 128, 0.05);
-  --comment-marker: #e6a817;
-  --comment-stripe: rgba(230, 168, 23, 0.15);
+  --comment-marker: #9a5d00;
+  /* Left edge of commented code lines (light only) */
+  --comment-edge: #eba200;
+  --comment-stripe: rgba(214, 140, 0, 0.34);
   --comment-stripe-resolved: rgba(128, 128, 128, 0.15);
 
   /* Collapse squiggly line colors (light mode) */
   --diff-collapse-line: #c0c0c0;
   --diff-collapse-line-hover: #808080;
+  /* Edges of the side-by-side diff's line-number gutter */
+  --diff-gutter-border: #c6c9d1;
 
-  /* Terminal ANSI colors (light mode — JetBrains-style) */
-  --term-foreground: #1b1b1f;
-  --term-cursor: #1b1b1f;
-  --term-selection: rgba(0, 0, 0, 0.15);
-  --term-black: #000000;
-  --term-red: #cf222e;
-  --term-green: #1a7f37;
-  --term-yellow: #9a6700;
-  --term-blue: #0550ae;
-  --term-magenta: #8250df;
-  --term-cyan: #1b7c83;
-  --term-white: #6e7781;
-  --term-bright-black: #57606a;
-  --term-bright-red: #a40e26;
-  --term-bright-green: #116329;
-  --term-bright-yellow: #7c4d00;
-  --term-bright-blue: #0349b4;
-  --term-bright-magenta: #6639ba;
-  --term-bright-cyan: #136069;
-  --term-bright-white: #1b1b1f;
+  /* Terminal ANSI colors (light mode). Normal colors are deep (7-9:1 on white); bright colors
+   * are vivid and light, so as backgrounds they carry black text and as text the minimum contrast
+   * below darkens them to 4.5:1, which keeps each one lighter than its normal color. Bright black
+   * is a dark grey; white a light grey and bright white an off-white, both still visible as
+   * swatches. */
+  --term-foreground: #1e1f22;
+  --term-cursor: #1e1f22;
+  --term-selection: rgba(53, 116, 240, 0.22);
+  --term-black: #1e1f22;
+  --term-red: #a31621;
+  --term-green: #0e5a26;
+  --term-yellow: #7f4300;
+  --term-blue: #06449a;
+  --term-magenta: #7e2a98;
+  --term-cyan: #08525a;
+  --term-white: #b6bac2;
+  --term-bright-black: #40444d;
+  --term-bright-red: #f2453d;
+  --term-bright-green: #1cc24f;
+  --term-bright-yellow: #f5a623;
+  --term-bright-blue: #4a8cff;
+  --term-bright-magenta: #b56cff;
+  --term-bright-cyan: #2bb5e0;
+  --term-bright-white: #e6e8ec;
+  /* xterm.js minimumContrastRatio: lifts white-on-white and light brights to readable; vite.config.ts
+   * patches the WebGL renderer so dim text meets it as drawn too */
+  --term-min-contrast: 4.5;
 }
 
 .dark {
@@ -201,6 +304,11 @@
   /* Primary accent - matches selection */
   --primary: #214283;
   --primary-foreground: #ffffff;
+  --link: #214283;
+  --button-primary: #214283;
+  --button-primary-foreground: #ffffff;
+  --accent: var(--surface-0);
+  --accent-foreground: #dfe1e5;
 
   /* Secondary/muted */
   --secondary: var(--surface-1);
@@ -216,6 +324,13 @@
   --border: var(--surface-3);
   --input: var(--surface-3);
   --ring: #467ff2;
+
+  --shadow-popover: 0 0px 0px 1px rgba(255, 255, 255, 0.15), 0 6px 16px 0px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --nav-active: var(--muted);
+  --text-shadow: 0 0.5px 1px rgb(0 0 0 / 0.1);
+  --scrollbar-thumb: #505258;
+  --scrollbar-track: rgb(54 54 56 / 30%);
 
   /* Ref badge colors - using JetBrains accent palette */
   --ref-head: #c77dbb;
@@ -261,6 +376,7 @@
   /* Collapse squiggly line colors (dark mode) */
   --diff-collapse-line: #4e5157;
   --diff-collapse-line-hover: #9da0a8;
+  --diff-gutter-border: #303438;
 
   /* Terminal ANSI colors (dark mode — Darcula console palette, inherited by New UI Dark) */
   --term-foreground: #a9b7c6;
@@ -282,6 +398,7 @@
   --term-bright-magenta: #ff99ff;
   --term-bright-cyan: #6cdada;
   --term-bright-white: #ffffff;
+  --term-min-contrast: 1;
 }
 
 @theme inline {
@@ -301,6 +418,11 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-link: var(--link);
+  --color-button-primary: var(--button-primary);
+  --color-button-primary-foreground: var(--button-primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -313,6 +435,10 @@
   --color-ref-local: var(--ref-local);
   --color-ref-remote: var(--ref-remote);
   --color-ref-tag: var(--ref-tag);
+  --color-ref-head-bg: var(--ref-head-bg);
+  --color-ref-local-bg: var(--ref-local-bg);
+  --color-ref-remote-bg: var(--ref-remote-bg);
+  --color-ref-tag-bg: var(--ref-tag-bg);
   --color-branch-1: var(--branch-1);
   --color-branch-2: var(--branch-2);
   --color-branch-3: var(--branch-3);
@@ -329,6 +455,8 @@
   --color-diff-del-gutter: var(--diff-del-gutter);
   --color-diff-del-text: var(--diff-del-text);
   --color-tree-folder: var(--tree-folder);
+  --color-vcs-modified: var(--vcs-modified);
+  --color-vcs-untracked: var(--vcs-untracked);
   --color-editor-line-number: var(--editor-line-number);
   --color-editor-line-number-active: var(--editor-line-number-active);
   --color-comment-bg: var(--comment-bg);
@@ -355,13 +483,13 @@
   }
   body {
     @apply bg-background text-foreground font-sans;
-    text-shadow: 0 0.5px 1px rgb(0 0 0 / 0.1);
+    text-shadow: var(--text-shadow);
   }
   html {
     @apply bg-background font-sans;
   }
   * {
-    scrollbar-color: #505258 rgb(54 54 56 / 30%);
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
     scrollbar-width: thin;
   }
   button:not(:disabled) {
@@ -396,6 +524,30 @@
 .diff-gutter-modify {
   background-color: var(--diff-modify-gutter);
   color: var(--diff-modify-text);
+}
+/* Light split diffs tint a modified line by its side, removed red and added green, and so does the
+ * gutter connector between the sides (DiffGutter). Dark tints both with the modify color. */
+:root:not(.dark) [data-diff-side="old"] {
+  --diff-modify-bg: var(--diff-del-bg);
+  --diff-modify-text: var(--diff-del-text);
+}
+:root:not(.dark) [data-diff-side="new"] {
+  --diff-modify-bg: var(--diff-add-bg);
+  --diff-modify-text: var(--diff-add-text);
+}
+/* Light gutter connectors get an edge a step stronger than their fill (DiffGutter) */
+:root:not(.dark) .diff-connector {
+  stroke-width: 1px;
+}
+:root:not(.dark) .diff-connector[data-connector="add"] {
+  stroke: var(--diff-add-connector-edge);
+}
+:root:not(.dark) .diff-connector[data-connector="delete"] {
+  stroke: var(--diff-del-connector-edge);
+}
+:root:not(.dark) .diff-connector[data-connector="modify"] {
+  fill: var(--diff-modify-fill);
+  stroke: var(--diff-modify-edge);
 }
 
 /* Intra-line changes inside modification blocks (rendered above the line background) */
@@ -460,6 +612,13 @@
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {
   flex-shrink: 0;
   max-width: none;
+}
+
+/* The caret row's band while text is selected (code-editor/caret-row.ts); light mode only. Below the
+ * selection, which Monaco draws in an earlier overlay than decorations. */
+:root:not(.dark) .monaco-editor .loxel-caret-row {
+  z-index: -1;
+  background-color: var(--vscode-editor-lineHighlightBackground);
 }
 
 /* Prevent overscroll bounce on Monaco and diff containers */
@@ -536,6 +695,13 @@
   );
   background-size: 10px 10px;
 }
+/* Light marks commented code lines with an amber left edge alone: over the diff tints an amber
+ * fill or hatch turns muddy. */
+:root:not(.dark) .comment-highlight::after {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: inset 3px 0 0 var(--comment-edge);
+}
 .comment-highlight-resolved {
   position: relative;
 }
@@ -598,6 +764,10 @@
   );
   background-size: 10px 10px;
 }
+/* Light drops the hatch: over the diff tints it turns muddy (LineNumbersColumn keeps the marker). */
+:root:not(.dark) .line-comment-stripe {
+  background-image: none;
+}
 
 /* Selection highlight — full-row background for lines being targeted for a comment */
 .comment-selection-highlight {
@@ -616,7 +786,7 @@
 }
 
 .settings-nav-link:target-current {
-  background: var(--muted);
+  background: var(--nav-active);
   color: var(--foreground);
 }
 

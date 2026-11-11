@@ -9,6 +9,11 @@ interface Window {
     onWindowFocusChange: (callback: (focused: boolean) => void) => () => void;
     openFolderDialog: () => Promise<string | null>;
     /**
+     * Apply the Theme setting to Electron's `nativeTheme`, so native menus and dialogs, browser
+     * panels' `prefers-color-scheme` and window backgrounds follow it ("system": the OS).
+     */
+    setThemeSource: (theme: import("@/lib/theme-preference").ThemePreference) => void;
+    /**
      * Keystrokes (KeyCombo strings) to withhold from this window's webviews and forward to it;
      * `captureAll` forwards every keystroke (a chord is in progress).
      */
@@ -47,6 +52,14 @@ interface Window {
     ) => () => void;
     /** Answer a dialog from `onJavaScriptDialog` (payload: `JavaScriptDialogResponse`). */
     respondToJavaScriptDialog: (response: unknown) => void;
+    /**
+     * Passkey QR codes for this window's browser panels: `onShow` gets a `PasskeyQrCode` payload,
+     * `onHide` the webContents ID whose request ended. Returns an unsubscribe function.
+     */
+    onPasskeyQrCode: (
+      onShow: (request: unknown) => void,
+      onHide: (webContentsId: unknown) => void,
+    ) => () => void;
     /** The app update's current state, kept by Electron main. */
     getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
     /** Check the release manifest for a newer version; the result arrives as a status change. */

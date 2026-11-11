@@ -14,12 +14,14 @@ import {
   createEditor,
   createTerminal,
   duplicateComparison,
+  duplicatePatchDiff,
   handleFileDeleted,
   handleFileMoved,
   openCompareFiles,
   openDiff,
   openLocalDb,
   openFileBacked,
+  openPatchDiff,
   openVirtualDocument,
 } from "@/lib/panel-creators";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -62,6 +64,9 @@ export function useLoxelEventListeners(): void {
         openFileBacked("media", d.filePath, { placement: d.placement, focus: d.focus }),
       ),
       onLoxelEvent("loxel-open-diff", () => openDiff()),
+      onLoxelEvent("loxel-open-patch-diff", (d) =>
+        "patch" in d ? openPatchDiff(d) : duplicatePatchDiff(d.placement),
+      ),
       onLoxelEvent("loxel-compare-files", (d) =>
         "oldPath" in d ? openCompareFiles(d.oldPath, d.newPath) : duplicateComparison(d.placement),
       ),

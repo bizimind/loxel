@@ -15,6 +15,8 @@ Press `Cmd+Shift+B` to open a browser panel. Like any panel, it can go next to a
 
 A browser panel is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page, and `Cmd+Shift+R` while the tab has focus does a hard refresh, reloading the page and bypassing the cache. Clicking the title of the active browser tab returns focus to its page.
 
+Pages see the light or dark mode you choose in **Settings > Appearance > Theme**, not your Mac's: a site or dev server that follows the system appearance (`prefers-color-scheme`) shows its light colors in a light Loxel and its dark colors in a dark one. With **System**, they follow your Mac as Loxel does.
+
 ---
 
 ## Bookmarks
@@ -54,6 +56,8 @@ Every menu ends with **Inspect Element**, which opens DevTools on the element yo
 ## Logins and passkeys
 
 All browser panels share one persistent session, so cookies and logins carry across panels, tasks and restarts: sign in to GitHub once and every task's tabs are signed in. In the signed macOS app, sites can create and use passkeys with Touch ID.
+
+You can also sign in with a passkey saved on your phone. When a site asks for a passkey your phone can provide, the browser panel that asked shows a QR code: scan it with your phone's camera and confirm on the phone. Bluetooth has to be on for both your Mac and your phone, because the phone checks that it is nearby, and the first time macOS asks to let Loxel use Bluetooth. **Hide QR code** only hides the code: the site still waits, so you can answer with Touch ID or a security key instead. When a site asks for a passkey that only a single device holds, such as one kept in this Mac's iCloud Keychain, no code appears and the site's other sign-in options still work.
 
 ---
 

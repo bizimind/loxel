@@ -92,6 +92,10 @@ mock.module("@/lib/textmate-inspector", () => ({ inspectTokenAtPosition: async (
 mock.module("@/components/code-editor/TextMateScopeInspector", () => ({
   TextMateScopeInspector: () => {},
 }));
+mock.module("@/components/code-editor/caret-row", () => ({
+  caretOptionsFor: () => ({}),
+  trackCaretRow: () => ({ dispose() {} }),
+}));
 
 const { CodeEditorPanel } = await import("./CodeEditorPanel");
 
