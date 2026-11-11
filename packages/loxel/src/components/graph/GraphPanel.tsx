@@ -199,12 +199,21 @@ function setBranchesConstraints(group: DockviewGroupPanel, collapsed: boolean): 
 }
 
 /**
+ * Whether a grid `gridWidth` wide holds the branches column at `width` next to the graph's minimum.
+ * In a narrower grid (one not laid out yet, say) the column is squeezed, so its width there is not
+ * one to remember or restore.
+ */
+function branchesFit(gridWidth: number, width: number): boolean {
+  return gridWidth >= width + BRANCHES_MIN_WIDTH;
+}
+
+/**
  * Give the branches column `width` once the grid is wide enough to hold it next to the graph. The
  * inner grid mounts at whatever size its panel has then (a placeholder while the Git panel is
  * still opening), and widths set at that size would be kept as proportions through later resizes.
  */
 function sizeBranchesWhenItFits(api: DockviewApi, group: DockviewGroupPanel, width: number): void {
-  const fits = () => api.width >= width + BRANCHES_MIN_WIDTH;
+  const fits = () => branchesFit(api.width, width);
   if (fits()) {
     group.api.setSize({ width });
     return;
@@ -279,7 +288,7 @@ export function GraphPanel() {
       } else if (!collapsed) {
         if (newSide !== prevSide) {
           panel.group.api.setSize({ width: savedWidthRef.current });
-        } else if (width >= BRANCHES_MIN_WIDTH) {
+        } else if (width >= BRANCHES_MIN_WIDTH && branchesFit(api.width, width)) {
           savedWidthRef.current = width;
         }
       }
@@ -320,9 +329,13 @@ export function GraphPanel() {
       if (collapsed) {
         branchesGroup.api.setSize({ width: COLLAPSED_WIDTH });
       } else {
-        // A layout saved while the column was squeezed to nothing would bring it back that way.
+        // A layout saved while the column was squeezed (before the grid was laid out, say) would
+        // bring it back that way.
         const width =
-          savedWidth !== undefined && savedWidth >= BRANCHES_MIN_WIDTH
+          savedLayout &&
+          savedWidth !== undefined &&
+          savedWidth >= BRANCHES_MIN_WIDTH &&
+          branchesFit(savedLayout.grid.width, savedWidth)
             ? savedWidth
             : BRANCHES_DEFAULT_WIDTH;
         savedWidthRef.current = width;

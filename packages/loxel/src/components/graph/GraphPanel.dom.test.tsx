@@ -150,6 +150,18 @@ describe("GraphPanel", () => {
     expect(branchesWidth()).toBe(BRANCHES_DEFAULT_WIDTH);
   });
 
+  // An inactive Git tab mounts the panel without ever laying it out; the layout it saves holds the
+  // column squeezed to its minimum, not a width anyone chose.
+  test("opens at the default width after a mount that was never laid out", async () => {
+    render(<GraphPanel />);
+    await waitFor(() => expect(getWorktreeInnerLayout("graph")).toBeDefined());
+    cleanup();
+
+    await openGraphPanel();
+
+    expect(branchesWidth()).toBe(BRANCHES_DEFAULT_WIDTH);
+  });
+
   test("reopens the branches column at the width it was left at", async () => {
     await openGraphPanel();
     setWorktreeInnerLayout("graph", layoutWithBranchesWidth(300));
