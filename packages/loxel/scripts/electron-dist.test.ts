@@ -45,7 +45,7 @@ describe("buildId", () => {
 test("names files the way electron-builder and the bucket expect", () => {
   expect(distZipName("45.3.0", "x64")).toBe("electron-v45.3.0-darwin-x64.zip");
   expect(objectKey("45.3.0-abc", "electron-v45.3.0-darwin-x64.zip")).toBe(
-    "loxel/electron/45.3.0-abc/electron-v45.3.0-darwin-x64.zip",
+    "electron/45.3.0-abc/electron-v45.3.0-darwin-x64.zip",
   );
 });
 
@@ -62,7 +62,7 @@ test("this checkout pins an exact Electron and has patches to apply", () => {
 });
 
 test("r2Client names the credentials it is missing", () => {
-  expect(() => r2Client({ R2_ACCESS_KEY_ID: "id" })).toThrow(
-    /R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID/,
+  expect(() => r2Client({ R2_PRIVATE_ACCESS_KEY_ID: "id" })).toThrow(
+    /R2_PRIVATE_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID/,
   );
 });

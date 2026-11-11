@@ -8,7 +8,7 @@ Loxel's releases run on a patched build of Electron, not the npm package's binar
 - **The patches** are applied in file-name order with `git am` onto that release's tag.
 - **The build ID** is the version plus a digest of the patches' names and contents (`buildId()` in [`scripts/electron-dist.ts`](../scripts/electron-dist.ts)). Changing, adding or reordering a patch, or bumping the version, gives a new ID, so a release can never pair new source with an old binary.
 
-Builds live in the release R2 bucket at `loxel/electron/<build ID>/electron-v<version>-darwin-<arch>.zip`, each with a `.sha256` file next to it.
+Builds live in the private CI bucket `loxel-ci-private` at `electron/<build ID>/electron-v<version>-darwin-<arch>.zip`, each with a `.sha256` file next to it. They are an input to the release, not a download, so they stay out of the public release bucket.
 
 ## Building and uploading
 
@@ -21,7 +21,7 @@ pnpm -C packages/loxel run build:electron -- --arch arm64 --no-upload
 
 [`scripts/build-electron.ts`](../scripts/build-electron.ts) uses Electron's build tools (`npm i -g @electron/build-tools`) with one config per architecture (`loxel-release-arm64`, `loxel-release-x64`) sharing a checkout at `~/git/open-source/electron-loxel` (override with `--root` or `LOXEL_ELECTRON_ROOT`). It checks out the release tag, applies the patches, syncs Chromium and builds Electron's release configuration. Before uploading, it checks that each zip reports the pinned version and holds the right architecture. Each zip is kept under `<root>/loxel-dist/<build ID>/` and copied to `build/electron-dist/` for local packaging. A build already in R2 (zip and checksum both present) is skipped, and one already built for the same ID, for example by a `--no-upload` run, is only uploaded; `--force` rebuilds either. An existing build config must point at the same checkout, or the script stops.
 
-Needs Xcode with its Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`), about 150 GB of free disk, and an R2 API token with write access to the `loxel` bucket in the root `.env`: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `CLOUDFLARE_ACCOUNT_ID`. The first run clones about 30 GB; a release build takes several hours per architecture on a laptop.
+Needs Xcode with its Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`), about 150 GB of free disk, and an R2 API token with write access to `loxel-ci-private` in the root `.env`: `R2_PRIVATE_ACCESS_KEY_ID`, `R2_PRIVATE_SECRET_ACCESS_KEY` and `CLOUDFLARE_ACCOUNT_ID`, the same names as the CI secrets. The first run clones about 30 GB; a release build takes several hours per architecture on a laptop.
 
 ## Releases
 

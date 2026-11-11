@@ -5,7 +5,8 @@
  *   bun scripts/fetch-electron.ts <arm64|x64>
  *   bun scripts/fetch-electron.ts --check
  *
- * Needs R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID. Fails when the build
+ * Needs R2_PRIVATE_ACCESS_KEY_ID, R2_PRIVATE_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID (the
+ * private CI bucket's token). Fails when the build
  * this checkout pins was never uploaded, so a release can't fall back to stock Electron. The
  * release workflow runs `--check` before it bumps the version, so a missing build stops it before
  * it leaves a release commit or tag behind.

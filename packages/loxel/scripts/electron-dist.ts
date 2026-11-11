@@ -13,6 +13,8 @@ import { S3Client } from "bun";
 
 export const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..");
 export const PATCHES_DIR = path.join(PACKAGE_ROOT, "electron", "patches");
+/** The private CI bucket the builds are stored in. */
+export const BUCKET = "loxel-ci-private";
 /** Where the fetched zips land; electron-builder reads it as `electronDist`. */
 export const DIST_DIR = path.join(PACKAGE_ROOT, "build", "electron-dist");
 
@@ -82,9 +84,9 @@ export function buildIdMarker(zipPath: string): string {
   return `${zipPath}.build-id`;
 }
 
-/** Object key in the R2 bucket for a file of a build. */
+/** Object key in the private CI bucket for a file of a build. */
 export function objectKey(id: string, file: string): string {
-  return `loxel/electron/${id}/${file}`;
+  return `electron/${id}/${file}`;
 }
 
 export interface CurrentBuild {
@@ -103,20 +105,27 @@ export function currentBuild(): CurrentBuild {
   return { version, id: buildId(version, patches), patches };
 }
 
-/** The R2 bucket the release artifacts live in, from the same credentials the release uses. */
+/**
+ * The private CI bucket the builds live in. They are an input to the release, not something users
+ * download, so they stay out of the public release bucket.
+ */
 export function r2Client(env: Record<string, string | undefined> = process.env): S3Client {
-  const names = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "CLOUDFLARE_ACCOUNT_ID"] as const;
+  const names = [
+    "R2_PRIVATE_ACCESS_KEY_ID",
+    "R2_PRIVATE_SECRET_ACCESS_KEY",
+    "CLOUDFLARE_ACCOUNT_ID",
+  ] as const;
   const missing = names.filter((name) => !env[name]);
   if (missing.length > 0) {
     throw new Error(
-      `Set ${missing.join(", ")} to reach R2 (an R2 API token for the "loxel" bucket)`,
+      `Set ${missing.join(", ")} to reach R2 (an R2 API token for the "${BUCKET}" bucket)`,
     );
   }
   return new S3Client({
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    accessKeyId: env.R2_PRIVATE_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_PRIVATE_SECRET_ACCESS_KEY,
     endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-    bucket: "loxel",
+    bucket: BUCKET,
   });
 }
 
