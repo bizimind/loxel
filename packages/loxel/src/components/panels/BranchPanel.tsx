@@ -605,7 +605,7 @@ function BranchItem({
       </button>
 
       {branch.isHead ? (
-        <CheckIcon className="text-link size-3 shrink-0" />
+        <CheckIcon className="text-link dark:text-foreground size-3 shrink-0" />
       ) : (
         <GitBranchIcon className="text-muted-foreground size-3 shrink-0" />
       )}
