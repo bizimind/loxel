@@ -1,5 +1,6 @@
 import type {
   DockviewApi,
+  DockviewGroupPanel,
   DockviewReadyEvent,
   IDockviewPanelHeaderProps,
   IDockviewPanelProps,
@@ -33,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { detectPanelSide } from "@/lib/dockview-utils";
+import { detectPanelSide, findGridLeaf } from "@/lib/dockview-utils";
 import { cn } from "@/lib/utils";
 import { useCreateBranchMutation } from "@/queries/use-git-mutations";
 import { useBranchesQuery, useCommitsQuery } from "@/queries/use-repo-queries";
@@ -184,7 +185,46 @@ const innerComponents = { innerBranches: InnerBranches, innerGraphContent: Inner
 const innerTabComponents = { branchesTab: BranchesTab };
 
 const COLLAPSED_WIDTH = 28;
+/** Dockview's default minimum group width; the shown column never gets narrower. */
+const BRANCHES_MIN_WIDTH = 100;
 const BRANCHES_DEFAULT_WIDTH = 220;
+
+/** Lock the branches group to the collapsed strip, or let it resize down to its minimum. */
+function setBranchesConstraints(group: DockviewGroupPanel, collapsed: boolean): void {
+  group.api.setConstraints(
+    collapsed
+      ? { minimumWidth: COLLAPSED_WIDTH, maximumWidth: COLLAPSED_WIDTH }
+      : { minimumWidth: BRANCHES_MIN_WIDTH, maximumWidth: Number.MAX_SAFE_INTEGER },
+  );
+}
+
+/**
+ * Whether a grid `gridWidth` wide holds the branches column at `width` next to the graph's minimum.
+ * In a narrower grid (one not laid out yet, say) the column is squeezed, so its width there is not
+ * one to remember or restore.
+ */
+function branchesFit(gridWidth: number, width: number): boolean {
+  return gridWidth >= width + BRANCHES_MIN_WIDTH;
+}
+
+/**
+ * Give the branches column `width` once the grid is wide enough to hold it next to the graph. The
+ * inner grid mounts at whatever size its panel has then (a placeholder while the Git panel is
+ * still opening), and widths set at that size would be kept as proportions through later resizes.
+ */
+function sizeBranchesWhenItFits(api: DockviewApi, group: DockviewGroupPanel, width: number): void {
+  const fits = () => branchesFit(api.width, width);
+  if (fits()) {
+    group.api.setSize({ width });
+    return;
+  }
+  const listener = group.api.onDidDimensionsChange(() => {
+    if (!fits()) return;
+    listener.dispose();
+    // This fires from inside the grid's layout pass; resize once that pass is done.
+    queueMicrotask(() => group.api.setSize({ width }));
+  });
+}
 
 // --- Main GraphPanel ---
 
@@ -193,26 +233,30 @@ export function GraphPanel() {
 
   const innerApiRef = useRef<DockviewApi | null>(null);
   const savedWidthRef = useRef(BRANCHES_DEFAULT_WIDTH);
+  /**
+   * The collapsed state the inner grid was last laid out for. `onInnerReady` lays out the state
+   * it mounts with, so the effect below resizes only on a real toggle: running its expand path on
+   * mount, before the grid has its real size, squeezed the column to zero (#1219).
+   */
+  const appliedCollapsedRef = useRef<boolean | null>(null);
 
   // Collapse/expand the branches panel by resizing and locking constraints
   useEffect(() => {
     const api = innerApiRef.current;
-    if (!api) return;
-    const panel = api.getPanel("innerBranches");
-    if (!panel?.group) return;
+    if (!api || appliedCollapsedRef.current === branchesPanelCollapsed) return;
+    const group = api.getPanel("innerBranches")?.group;
+    if (!group) return;
+    appliedCollapsedRef.current = branchesPanelCollapsed;
 
     if (branchesPanelCollapsed) {
-      const currentWidth = panel.group.api.width;
-      if (currentWidth > COLLAPSED_WIDTH) savedWidthRef.current = currentWidth;
-      panel.group.api.setConstraints({
-        minimumWidth: COLLAPSED_WIDTH,
-        maximumWidth: COLLAPSED_WIDTH,
-      });
-      panel.group.api.setSize({ width: COLLAPSED_WIDTH });
+      const currentWidth = group.api.width;
+      if (currentWidth >= BRANCHES_MIN_WIDTH) savedWidthRef.current = currentWidth;
+      setBranchesConstraints(group, true);
+      group.api.setSize({ width: COLLAPSED_WIDTH });
     } else {
-      panel.group.api.setConstraints({ minimumWidth: 0, maximumWidth: Number.MAX_SAFE_INTEGER });
+      setBranchesConstraints(group, false);
       requestAnimationFrame(() => {
-        panel.group.api.setSize({ width: savedWidthRef.current });
+        group.api.setSize({ width: savedWidthRef.current });
       });
     }
   }, [branchesPanelCollapsed]);
@@ -221,12 +265,47 @@ export function GraphPanel() {
     const { api } = event;
     innerApiRef.current = api;
 
+    // Restrict docking to left/right only
+    api.onWillShowOverlay((e) => {
+      if (e.position !== "left" && e.position !== "right") {
+        e.preventDefault();
+      }
+    });
+    // Track side when user drags the panel and re-apply constraints after drag
+    // (dragging creates a new group, losing the old min/max lock and size). Dockview batches
+    // layout changes into one microtask, so the layout built below is recorded once it is done
+    // (and once the grid can hold it).
+    api.onDidLayoutChange(() => {
+      const newSide = detectPanelSide(api.toJSON().grid, "innerBranches", "innerGraphContent");
+      const prevSide = getCurrentWorktreeUI().getState().branchesPanelSide;
+      getCurrentWorktreeUI().getState().setBranchesPanelSide(newSide);
+      const panel = api.getPanel("innerBranches");
+      if (!panel?.group) return;
+      const collapsed = getCurrentWorktreeUI().getState().branchesPanelCollapsed;
+      const width = panel.group.api.width;
+      if (collapsed && width > COLLAPSED_WIDTH) {
+        setBranchesConstraints(panel.group, true);
+        panel.group.api.setSize({ width: COLLAPSED_WIDTH });
+      } else if (!collapsed && newSide !== prevSide) {
+        panel.group.api.setSize({ width: savedWidthRef.current });
+      }
+
+      // A grid too narrow for the column (one never laid out, as in an inactive Git tab) squeezes
+      // it; recording that would replace the width the user left it at.
+      if (!branchesFit(api.width, width)) return;
+      if (!collapsed && width >= BRANCHES_MIN_WIDTH) savedWidthRef.current = width;
+      setWorktreeInnerLayout("graph", api.toJSON());
+    });
+
     // Restore saved inner layout (panel sizes, positions) or create default
+    const uiState = getCurrentWorktreeUI().getState();
     const savedLayout = getWorktreeInnerLayout("graph");
+    const savedWidth = savedLayout
+      ? findGridLeaf(savedLayout.grid, "innerBranches")?.size
+      : undefined;
     if (savedLayout && api.panels.length === 0) {
       api.fromJSON(savedLayout);
     } else if (api.panels.length === 0) {
-      const uiState = getCurrentWorktreeUI().getState();
       api.addPanel({ id: "innerGraphContent", component: "innerGraphContent", title: "Graph" });
       api.addPanel({
         id: "innerBranches",
@@ -243,39 +322,27 @@ export function GraphPanel() {
       graphContentPanel.group.header.hidden = true;
       graphContentPanel.group.locked = "no-drop-target";
     }
-    // Restrict docking to left/right only
-    api.onWillShowOverlay((e) => {
-      if (e.position !== "left" && e.position !== "right") {
-        e.preventDefault();
+    const branchesGroup = api.getPanel("innerBranches")?.group;
+    if (branchesGroup) {
+      const collapsed = uiState.branchesPanelCollapsed;
+      setBranchesConstraints(branchesGroup, collapsed);
+      appliedCollapsedRef.current = collapsed;
+      if (collapsed) {
+        branchesGroup.api.setSize({ width: COLLAPSED_WIDTH });
+      } else {
+        // A layout saved while the column was squeezed (before the grid was laid out, say) would
+        // bring it back that way.
+        const width =
+          savedLayout &&
+          savedWidth !== undefined &&
+          savedWidth >= BRANCHES_MIN_WIDTH &&
+          branchesFit(savedLayout.grid.width, savedWidth)
+            ? savedWidth
+            : BRANCHES_DEFAULT_WIDTH;
+        savedWidthRef.current = width;
+        sizeBranchesWhenItFits(api, branchesGroup, width);
       }
-    });
-    // Track side when user drags the panel and re-apply constraints after drag
-    // (dragging creates a new group, losing the old min/max lock and size)
-    api.onDidLayoutChange(() => {
-      const newSide = detectPanelSide(api, "innerBranches", "innerGraphContent");
-      const prevSide = getCurrentWorktreeUI().getState().branchesPanelSide;
-      getCurrentWorktreeUI().getState().setBranchesPanelSide(newSide);
-      const panel = api.getPanel("innerBranches");
-      if (!panel?.group) return;
-      if (
-        getCurrentWorktreeUI().getState().branchesPanelCollapsed &&
-        panel.group.api.width > COLLAPSED_WIDTH
-      ) {
-        panel.group.api.setConstraints({
-          minimumWidth: COLLAPSED_WIDTH,
-          maximumWidth: COLLAPSED_WIDTH,
-        });
-        panel.group.api.setSize({ width: COLLAPSED_WIDTH });
-      } else if (!getCurrentWorktreeUI().getState().branchesPanelCollapsed) {
-        if (newSide !== prevSide) {
-          panel.group.api.setSize({ width: savedWidthRef.current });
-        } else {
-          savedWidthRef.current = panel.group.api.width;
-        }
-      }
-
-      setWorktreeInnerLayout("graph", api.toJSON());
-    });
+    }
   }, []);
 
   return (
