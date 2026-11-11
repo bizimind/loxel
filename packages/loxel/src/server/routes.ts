@@ -760,11 +760,12 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   /* Chromium paints an opaque canvas behind a frame whose color scheme differs from its
-     <iframe> element's, hiding the viewer's checkerboard under transparent pixels. With both
-     schemes allowed, the frame takes the scheme of the <iframe> element (the embedding
-     element's scheme is a frame's preferred scheme), so it always matches the app's, and an
-     SVG's own prefers-color-scheme and light-dark() rules follow the app rather than the OS. */
-  :root { color-scheme: light dark; }
+     <iframe> element's, hiding the viewer's checkerboard under transparent pixels. This root and
+     the <iframe> element (its inline style in MediaViewerPanel.tsx) both declare "light dark",
+     which each resolves to the browser's preferred scheme (the OS's), so they match under either
+     app theme; an inlined SVG's own :root rule cannot override it, and the SVG's
+     prefers-color-scheme and light-dark() rules follow the OS. */
+  :root { color-scheme: light dark !important; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
   body { display: flex; align-items: center; justify-content: center; }
   img, video, svg { display: block; max-width: 100%; max-height: 100%; }
