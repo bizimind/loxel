@@ -1,9 +1,9 @@
 import type { PanelShot } from "../lib";
 
-/** The Settings modal scrolled to Appearance, with the Theme control showing Light selected. */
+/** The Settings modal scrolled to Appearance: the Theme control and the font rows. */
 const shot: PanelShot = {
   description:
-    "Settings modal (over the app shell) scrolled to the Appearance section: Theme radio group (Dark / Light / System, Light selected), followed by the Keybindings section; left section nav with scrollspy highlight",
+    "Settings modal (over the app shell) scrolled to the Appearance section: Theme radio group (Dark / Light / System, the current theme selected) and the Code, Terminal and Markdown font rows (font button and size field), followed by the Keybindings section; left section nav with scrollspy highlight",
   run: async ({ page, settle }) => {
     await page.keyboard.press("Meta+Comma");
     const appearance = page.locator("#settings-appearance");
@@ -16,7 +16,7 @@ const shot: PanelShot = {
       if (!el || !pane) return false;
       return Math.abs(el.getBoundingClientRect().top - pane.getBoundingClientRect().top) < 30;
     });
-    await page.getByRole("radio", { name: "Light", checked: true }).waitFor();
+    await page.getByRole("radio", { checked: true }).waitFor();
     await settle();
   },
 };

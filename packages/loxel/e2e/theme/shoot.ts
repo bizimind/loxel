@@ -8,8 +8,18 @@ import { resolve } from "node:path";
 
 import { chromium } from "@playwright/test";
 
+import { useSettingsStore } from "@/store/settings-store";
+
 import type { PanelShot, ShotContext } from "./lib";
-import { api, fixturePath, settle, trackRequests, waitForLoxel } from "./lib";
+import {
+  api,
+  assertThemeStack,
+  fixturePath,
+  SERVER_URL,
+  settle,
+  trackRequests,
+  waitForLoxel,
+} from "./lib";
 
 const args = process.argv.slice(2);
 const dark = args.includes("--dark");
@@ -23,10 +33,11 @@ const mod = (await import(resolve(import.meta.dirname, "panels", `${panel}.ts`))
 };
 const shot = mod.default;
 const fixture = fixturePath(workDir);
+await assertThemeStack(workDir);
 
 /** Notifications live on the server; drop leftovers from earlier shots so no bell badge shows. */
 async function clearNotifications(): Promise<void> {
-  const ws = new WebSocket("ws://127.0.0.1:7434/ws");
+  const ws = new WebSocket(`${SERVER_URL.replace(/^http/, "ws")}/ws`);
   await new Promise<void>((res, rej) => {
     ws.addEventListener("open", () => {
       ws.send(JSON.stringify({ type: "notifications_clear" }));
@@ -82,7 +93,7 @@ try {
         ? (JSON.parse(body.value) as { state: object; version: number })
         : null;
       const value = JSON.stringify({
-        version: stored?.version ?? 14,
+        version: stored?.version ?? useSettingsStore.persist.getOptions().version,
         state: { ...stored?.state, theme: "dark" },
       });
       await route.fulfill({ json: { value } });

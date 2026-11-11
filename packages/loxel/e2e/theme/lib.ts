@@ -39,6 +39,32 @@ export function fixturePath(workDir: string): string {
   return resolve(workDir, "fixture/orbit-shop");
 }
 
+/** Store key holding the token `seed.ts` gives the stack's server; the work dir keeps a copy. */
+export const STACK_TOKEN_KEY = "theme-stack-token";
+
+export function stackTokenPath(workDir: string): string {
+  return resolve(workDir, "stack-token");
+}
+
+/**
+ * Throw unless the server on SERVER_URL is the theme stack started with `workDir`. Shots seed
+ * settings, add the fixture project and clear notifications, so they must never reach a
+ * developer's own dev server on the same port.
+ */
+export async function assertThemeStack(workDir: string): Promise<void> {
+  const expected = await Bun.file(stackTokenPath(workDir))
+    .text()
+    .catch(() => null);
+  const stored = (await api(`/api/stores/${STACK_TOKEN_KEY}`).catch(() => null)) as {
+    value?: unknown;
+  } | null;
+  if (expected === null || stored?.value !== expected) {
+    throw new Error(
+      `${SERVER_URL} is not the theme stack started with ${workDir}; start it with e2e/theme/stack.sh`,
+    );
+  }
+}
+
 export async function api(path: string, init?: { method?: string; body?: unknown }) {
   const res = await fetch(`${SERVER_URL}${path}`, {
     method: init?.method ?? (init?.body === undefined ? "GET" : "POST"),
