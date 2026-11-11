@@ -6,7 +6,7 @@ How the Electron shell fits around the Bun server and React renderer, how the ap
 
 - **One app process, one server.** A packaged app takes Electron's single-instance lock, and the app spawns its server on launch: the compiled `loxel-server` binary in production, `bun run src/server/index.ts` with `LOXEL_DEV=1` in dev, on the mode's port (7433 prod, 7434 dev, 7435 + n for [demo](#demo-mode) instance n). The server lives as long as the app. Every window connects to it, identifies itself with its window ID, and talks to it over REST and WebSocket. Startup, crash restarts, shutdown and state scopes are detailed in [SHARED_SERVER.md](SHARED_SERVER.md).
 - **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server).
-- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus and fullscreen state, opening links in a browser panel, keystrokes inside webviews, copying images from webviews, page dialogs in webviews, app updates). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
+- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus and fullscreen state, opening links in a browser panel, keystrokes inside webviews, copying images from webviews, page dialogs in webviews, app updates, the theme). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
 
 ## Updates
 
@@ -17,6 +17,14 @@ The app updates as a whole. Each release replaces the bundle, with its Electron 
 - **State and UI.** Main keeps the `UpdateState` ([update-model.ts](../src/api/update-model.ts)) and sends every change to all windows over IPC (`UPDATE_*` in `ipc-channels.ts`). Settings > General and the top bar's Update button show it through `useUpdateStatus` ([use-update-status.ts](../src/queries/use-update-status.ts)). Downloading and installing happen only when the user asks. `autoInstallOnAppQuit` is off, so an ordinary quit never installs.
 - **Automatic check.** Five seconds after launch, a packaged app reads the persisted settings row from its server and checks unless `autoCheckForUpdates` is off (`isAutoCheckEnabled` in [persisted-settings.ts](../src/server/persisted-settings.ts)). The manual check ignores the setting. Unpackaged builds never check.
 - **Install location.** Squirrel can only replace a bundle it can write to. A packaged app outside an Applications folder that it cannot write to, such as one opened from the disk image or run from a read-only translocated copy, offers on launch to move itself to `/Applications`. When an install fails, Settings shows the error with a link to the download page.
+
+## Theme
+
+Electron's `nativeTheme.themeSource` follows the Theme setting, so native menus and dialogs, every page's `prefers-color-scheme` (browser panels' and the renderer's own) and window backgrounds match the app instead of the OS. [native-theme.ts](../src/electron/native-theme.ts) owns it:
+
+- **Changes.** `useThemeSync` sends the setting (`dark`, `light` or `system`, the same values as `themeSource`) with `SET_THEME_SOURCE` once the settings load and on every change. With an explicit theme, the renderer's own `(prefers-color-scheme: dark)` query then matches the setting; only `system` reads it.
+- **Launch.** Before the first window, main reads the persisted `theme` from the server (`persistedTheme` in [persisted-settings.ts](../src/server/persisted-settings.ts)), so the window and its webviews start in it. If the row can't be read within two seconds, the OS appearance applies until the renderer reports the setting.
+- **Window background.** Windows are created with, and keep while `nativeTheme` changes, the background of the renderer's `--background` in the current theme (`WINDOW_BACKGROUND`, kept in step with `src/index.css`), so a new window or a reload paints no flash of the other theme.
 
 ## Browser panels
 

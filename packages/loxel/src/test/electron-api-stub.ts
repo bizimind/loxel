@@ -7,6 +7,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     setDockBadge: () => {},
     onWindowFocusChange: () => () => {},
     openFolderDialog: async () => null,
+    setThemeSource: () => {},
     setKeystrokeInterception: () => {},
     onWebviewKeystroke: () => () => {},
     onWebviewFocused: () => () => {},
