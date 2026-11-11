@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 import { type Plugin, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 
-import { DEFAULT_DEV_SERVER_PORT, parsePortEnv, vitePort } from "./src/dev-ports";
+import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
 
 const isElectron = !!process.env.ELECTRON;
 
@@ -67,7 +67,7 @@ function xtermWebglPixelGrid(): Plugin {
 export default defineConfig(({ mode }) => {
   const serverPort =
     parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
-    (mode === "development" ? DEFAULT_DEV_SERVER_PORT : 7433);
+    (mode === "development" ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
 
   return {
     plugins: [

@@ -26,8 +26,8 @@
   --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 7%, transparent);
   --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
   --crepe-color-selected: var(--primary);
-  /* The fonts and sizes from Settings > Fonts (font-settings.ts). Prose sizes below are a 15px
-     design scaled to the prose size. */
+  /* The fonts and sizes from Settings > Fonts (font-settings.ts). Sizes and spacing below are
+     multiples of the prose size, so the layout keeps its proportions at any size. */
   --crepe-font-default: var(--loxel-font-prose);
   --crepe-font-code: var(--loxel-font-code);
   --crepe-font-title: var(--loxel-font-prose);
@@ -192,7 +192,7 @@
 
 /* ── Inline code — neutral gray tint, sized relative to surrounding text ── */
 
-.milkdown .ProseMirror code {
+.milkdown .ProseMirror :not(pre) > code {
   color: var(--crepe-color-inline-code);
   background: var(--crepe-color-inline-area);
   font-family: var(--crepe-font-code);
@@ -400,8 +400,8 @@
 .milkdown .milkdown-list-item-block li .label-wrapper .label.ordered {
   color: transparent;
   position: relative;
-  overflow: hidden;
-  /* The counter replaces the label text, so the box can't size to that text. */
+  /* The counter replaces the label text, so the box can't size to that text. A counter wider than
+     the marker box ("viii.", "100.") extends left into the indent instead of being clipped. */
   width: 100%;
 }
 
@@ -496,16 +496,27 @@
 }
 
 /* The language button and tools float over the top-right corner, so a block's code starts at the
-   same inset as every other side; the picker opens below them. */
+   same inset as every other side; the picker opens below them. The whole row fades, background
+   included, so while hidden it doesn't mask the code under it. It shows while the block is hovered
+   or its language list is open, and its stacking context sits above the content after the block,
+   which the open list can overlap. */
 .milkdown .milkdown-code-block .tools {
   position: absolute;
   top: 6px;
   right: 8px;
-  z-index: 5;
+  z-index: 50;
   gap: 4px;
   padding: 2px;
   border-radius: 4px;
   background: var(--crepe-color-surface);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.milkdown .milkdown-code-block:is(:hover, :has(.language-picker .list-wrapper)) .tools {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .milkdown .milkdown-code-block .tools .language-picker {
@@ -513,24 +524,14 @@
   right: 0;
 }
 
-/* Language button & tools — shown only while the block is hovered or being edited */
-/* The whole row fades, background included, so while hidden it doesn't mask the code under it. */
-.milkdown .milkdown-code-block .tools {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.milkdown .milkdown-code-block:is(:hover, :focus-within) .tools {
-  opacity: 1;
-  pointer-events: auto;
+/* With the code hidden, a preview (a diagram, a diff and its header buttons) starts below the
+   floating tools instead of under them. */
+.milkdown .milkdown-code-block:has(.codemirror-host.hidden) .preview-panel {
+  margin-top: 24px;
 }
 
 .milkdown .milkdown-code-block .tools .language-button {
   opacity: 0.7;
-}
-
-.milkdown .milkdown-code-block .tools .language-button {
   font-family: var(--crepe-font-default);
   font-size: 11px;
   background: transparent;

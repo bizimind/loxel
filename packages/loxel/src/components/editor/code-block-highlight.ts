@@ -25,8 +25,11 @@ import {
 import { tags } from "@lezer/highlight";
 import { type Highlighter, bundledLanguagesInfo } from "shiki";
 
+import { frontendLog } from "@/lib/frontend-logger";
 import { BUNDLED_LANGUAGES, getHighlighter } from "@/lib/highlighter";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
+
+const log = frontendLog.child("ui");
 
 /** For languages Shiki doesn't load: CodeMirror's parse, in the editor theme's main colors. */
 const FALLBACK_HIGHLIGHT = HighlightStyle.define([
@@ -128,8 +131,9 @@ function styleMark(color: string | undefined, style: number): Decoration {
 }
 
 /**
- * Monaco's bracket pair colors (its defaults, which Loxel's themes don't override): a cycle by
- * nesting depth across all bracket kinds, and a color for a closer with no opener.
+ * Monaco's bracket pair colors (its defaults, which Loxel's themes don't override), by the theme's
+ * type as Monaco picks them: a cycle by nesting depth across all bracket kinds, and a color for a
+ * closer with no opener.
  */
 const BRACKET_COLORS = {
   dark: { levels: ["#FFD700", "#DA70D6", "#179FFF"], unexpected: "rgba(255, 18, 18, 0.8)" },
@@ -137,6 +141,7 @@ const BRACKET_COLORS = {
 } as const;
 const OPENERS = new Set(["(", "[", "{"]);
 const CLOSERS = new Set([")", "]", "}"]);
+const STRIKETHROUGH = 8;
 
 /** Shiki's font style bits for a theme rule's `fontStyle` string. */
 function fontStyleBits(fontStyle: string | undefined): number {
@@ -144,12 +149,18 @@ function fontStyleBits(fontStyle: string | undefined): number {
   return (
     (words.has("italic") ? ITALIC : 0) |
     (words.has("bold") ? BOLD : 0) |
-    (words.has("underline") ? UNDERLINE : 0)
+    (words.has("underline") ? UNDERLINE : 0) |
+    (words.has("strikethrough") ? STRIKETHROUGH : 0)
   );
 }
 
-const colorStyleKey = (color: string, style: number) =>
-  `${color.replace(/^#/, "").toLowerCase()}|${style}`;
+/** A color as `@shikijs/monaco` normalizes it: lowercase hex without `#`, short forms expanded. */
+function normalizeColor(color: string): string {
+  const hex = color.replace(/^#/, "").toLowerCase();
+  return hex.length === 3 || hex.length === 4 ? hex.replaceAll(/./g, "$&$&") : hex;
+}
+
+const colorStyleKey = (color: string, style: number) => `${normalizeColor(color)}|${style}`;
 
 const scopesByTheme = new Map<string, Map<string, string>>();
 
@@ -165,10 +176,11 @@ function isTextToken(highlighter: Highlighter, themeName: string, color: string,
     scopes = new Map();
     for (const rule of highlighter.getTheme(themeName).settings) {
       const foreground = rule.settings.foreground;
-      if (!foreground) continue;
-      const key = colorStyleKey(foreground, fontStyleBits(rule.settings.fontStyle));
       const scope = Array.isArray(rule.scope) ? rule.scope[0] : rule.scope;
-      if (!scopes.has(key)) scopes.set(key, scope ?? "");
+      // `@shikijs/monaco` turns each scope into a Monaco rule, so a rule without one maps nothing.
+      if (!foreground || !scope) continue;
+      const key = colorStyleKey(foreground, fontStyleBits(rule.settings.fontStyle));
+      if (!scopes.has(key)) scopes.set(key, scope);
     }
     scopesByTheme.set(themeName, scopes);
   }
@@ -177,12 +189,12 @@ function isTextToken(highlighter: Highlighter, themeName: string, color: string,
 }
 
 function shikiDecorations(highlighter: Highlighter, lang: string, text: string): DecorationSet {
-  const isDark = document.documentElement.classList.contains("dark");
-  const themeName = getMonacoThemeName(isDark);
-  const brackets = isDark ? BRACKET_COLORS.dark : BRACKET_COLORS.light;
+  const themeName = getMonacoThemeName(document.documentElement.classList.contains("dark"));
+  const theme = highlighter.getTheme(themeName);
+  const brackets = theme.type === "light" ? BRACKET_COLORS.light : BRACKET_COLORS.dark;
   const lines = highlighter.codeToTokensBase(text, {
     lang: lang as Parameters<Highlighter["codeToTokensBase"]>[1]["lang"],
-    theme: highlighter.getTheme(themeName),
+    theme,
   });
   const ranges: ReturnType<Decoration["range"]>[] = [];
   let depth = 0;
@@ -210,8 +222,16 @@ function shikiDecorations(highlighter: Highlighter, lang: string, text: string):
   return Decoration.set(ranges, true);
 }
 
+/**
+ * How long after the last edit a block is re-tokenized. Tokenizing is synchronous and grows with
+ * the block (tens of milliseconds for a few hundred lines), so edits only shift the existing colors
+ * and the block is colored again once typing pauses.
+ */
+const RETOKENIZE_DELAY_MS = 150;
+
 /** Set once the shared highlighter has loaded, so later blocks color on their first paint. */
 let loadedHighlighter: Highlighter | null = null;
+let loadFailureLogged = false;
 
 /** Colors a code block's text with Shiki's tokens for `lang`. */
 function shikiHighlight(lang: string): Extension {
@@ -219,37 +239,46 @@ function shikiHighlight(lang: string): Extension {
     class {
       decorations: DecorationSet = Decoration.none;
       private destroyed = false;
+      private timer: ReturnType<typeof setTimeout> | undefined;
 
       constructor(private readonly view: EditorView) {
-        this.highlight();
+        if (loadedHighlighter) {
+          this.decorations = this.tokenize(loadedHighlighter);
+          return;
+        }
+        getHighlighter()
+          .then((highlighter) => {
+            loadedHighlighter = highlighter;
+            this.repaint();
+          })
+          .catch((error: unknown) => {
+            if (loadFailureLogged) return;
+            loadFailureLogged = true;
+            log.error("Code block highlighter failed to load; blocks stay uncolored", { error });
+          });
       }
 
       update(update: ViewUpdate) {
         if (!update.docChanged) return;
         this.decorations = this.decorations.map(update.changes);
-        this.highlight();
+        clearTimeout(this.timer);
+        this.timer = setTimeout(() => this.repaint(), RETOKENIZE_DELAY_MS);
       }
 
-      private highlight() {
-        if (loadedHighlighter) {
-          this.decorations = shikiDecorations(
-            loadedHighlighter,
-            lang,
-            this.view.state.doc.toString(),
-          );
-          return;
-        }
-        void getHighlighter().then((highlighter) => {
-          loadedHighlighter = highlighter;
-          if (this.destroyed) return;
-          this.decorations = shikiDecorations(highlighter, lang, this.view.state.doc.toString());
-          // An empty transaction makes the view read the new decorations.
-          this.view.dispatch({});
-        });
+      private tokenize(highlighter: Highlighter): DecorationSet {
+        return shikiDecorations(highlighter, lang, this.view.state.doc.toString());
+      }
+
+      /** Re-tokenizes outside a view update and makes the view read the new decorations. */
+      private repaint() {
+        if (this.destroyed || !loadedHighlighter) return;
+        this.decorations = this.tokenize(loadedHighlighter);
+        this.view.dispatch({});
       }
 
       destroy() {
         this.destroyed = true;
+        clearTimeout(this.timer);
       }
     },
     { decorations: (value) => value.decorations },
@@ -273,10 +302,13 @@ function withShikiColors(language: LanguageDescription): LanguageDescription {
   });
 }
 
-/** A language only Shiki has: plain editing, Shiki's colors. */
+/**
+ * A language only Shiki has: plain editing, Shiki's colors. The picker writes the name as the
+ * fence's info string, which ends at the first space, so multi-word names use the id.
+ */
 function shikiOnly(info: (typeof SHIKI_LANGUAGES)[number]): LanguageDescription {
   return LanguageDescription.of({
-    name: info.name,
+    name: /\s/.test(info.name) ? info.id : info.name,
     alias: [info.id, ...(info.aliases ?? [])],
     load: async () => new LanguageSupport(PLAIN_LANGUAGE, shikiHighlight(info.id)),
   });

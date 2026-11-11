@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "../app-ports";
 import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
-import { DEFAULT_DEV_SERVER_PORT, parsePortEnv, vitePort } from "../dev-ports";
 
 const isDev = process.env.LOXEL_DEV === "1";
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
@@ -17,7 +17,11 @@ const stateDir =
   join(stateBase, isDemo ? demoStateName(demoInstance) : isDev ? "loxel-dev" : "loxel");
 const port =
   parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
-  (isDemo ? demoPort(demoInstance) : isDev ? DEFAULT_DEV_SERVER_PORT : 7433);
+  (isDemo
+    ? demoPort(demoInstance)
+    : isDev
+      ? DEFAULT_SERVER_PORT.dev
+      : DEFAULT_SERVER_PORT.production);
 
 /** A positive integer process ID from an environment variable, or null. */
 function parsePid(value: string | undefined): number | null {

@@ -1,13 +1,14 @@
 /**
- * Ports of the web dev setup (`pnpm run dev`): the Bun server and the Vite dev server that proxies
- * to it. `LOXEL_SERVE_PORT` and `LOXEL_VITE_PORT` move both, so a second worktree can run its own
- * dev instance beside one already on the defaults. One source of truth for vite.config.ts and the
- * server's dev-origin check (src/server/request-origin.ts).
+ * The app's default server ports and the web dev setup's (`pnpm run dev`): the Bun server and the
+ * Vite dev server that proxies to it. `LOXEL_SERVE_PORT` and `LOXEL_VITE_PORT` move both, so a
+ * second worktree can run its own dev instance beside one already on the defaults. One source of
+ * truth for the server, the Electron main process, the CLI, vite.config.ts and the server's
+ * dev-origin check (src/server/request-origin.ts); demo ports are in demo-instance.ts.
  */
 
 const DEFAULT_VITE_PORT = 5173;
-/** The dev server's port when `LOXEL_SERVE_PORT` is unset; production uses 7433. */
-export const DEFAULT_DEV_SERVER_PORT = 7434;
+/** The server's port when `LOXEL_SERVE_PORT` is unset, in production and in dev mode. */
+export const DEFAULT_SERVER_PORT = { production: 7433, dev: 7434 } as const;
 
 /**
  * A TCP port from environment variable `name`, or undefined when unset. Anything else throws:

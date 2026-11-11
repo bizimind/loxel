@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parsePortEnv, vitePort } from "./dev-ports";
+import { parsePortEnv, vitePort } from "./app-ports";
 
 describe("parsePortEnv", () => {
   test("returns undefined when unset or empty", () => {

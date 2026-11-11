@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 
 import { LanguageDescription } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
@@ -15,6 +15,11 @@ describe("codeBlockLanguages", () => {
     expect(new Set(names).size).toBe(names.length);
     expect(LanguageDescription.matchLanguageName(languages, "bash")?.name).toBe("Shell");
     expect(LanguageDescription.matchLanguageName(languages, "terraform")).toBeDefined();
+  });
+
+  test("names multi-word Shiki-only languages by id, so the picker writes a one-word fence", () => {
+    expect(LanguageDescription.matchLanguageName(languages, "jsonc")?.name).toBe("jsonc");
+    expect(LanguageDescription.matchLanguageName(languages, "razor")?.name).toBe("razor");
   });
 });
 
@@ -43,6 +48,22 @@ const colorOf = (chars: { char: string; color: string }[], char: string, nth = 0
   chars.filter((c) => c.char === char)[nth]?.color;
 
 describe("code block colors", () => {
+  test("shifts colors on an edit and re-tokenizes once typing pauses", async () => {
+    await colors("typescript", "x;");
+    jest.useFakeTimers();
+    try {
+      view!.dispatch({ changes: { from: 0, insert: "const " } });
+      const keyword = () =>
+        [...view!.contentDOM.querySelectorAll("span")].find((span) => span.textContent === "const");
+      // Typed text is plain until the block is tokenized again, after the pause.
+      expect(keyword()).toBeUndefined();
+      jest.advanceTimersByTime(1000);
+      expect(keyword()?.style.color).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test("colors tokens with the editor theme", async () => {
     const chars = await colors("typescript", 'const a = "x";');
     expect(colorOf(chars, "c")).not.toBe("");

@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
+import { DEFAULT_SERVER_PORT } from "./app-ports";
 import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { isCodingAgent } from "./coding-agent-env";
 import { requestOpenAll } from "./open-request";
 import { isHttpUrl } from "./url-utils";
 
-const PROD_PORT = 7433;
-const DEV_PORT = 7434;
+const PROD_PORT = DEFAULT_SERVER_PORT.production;
+const DEV_PORT = DEFAULT_SERVER_PORT.dev;
 
 /** Whether a Loxel server is answering on `port`. One that is shutting down (its app is quitting or restarting to update) does not count: its replacement is the one to talk to. */
 async function isServerRunning(port: number): Promise<boolean> {
