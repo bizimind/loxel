@@ -122,6 +122,14 @@ describe("parseTerminalSchemeFile", () => {
       expect(() => parseTerminalSchemeFile("prefs.plist", xml)).toThrow(SchemeImportError);
     });
 
+    test("decodes entities, numeric ones included", () => {
+      const file = itermFile().replace(
+        "<key>Use Bright Bold</key>",
+        "<key>A &amp; B &#38; C</key>",
+      );
+      expect(parseOne("e.itermcolors", file).name).toBe("e");
+    });
+
     test("rejects malformed XML", () => {
       expect(() => parseTerminalSchemeFile("x.itermcolors", "<plist><dict><key>a</key>")).toThrow(
         "x.itermcolors is not a valid property list.",
@@ -249,6 +257,22 @@ describe("parseTerminalSchemeFile", () => {
         },
       }`;
       expect(names("settings.json", settings)).toEqual(["settings", "Solar Dusk"]);
+    });
+
+    test("a theme's customizations apply over the ones for every theme", () => {
+      const colors = { ...ansi, "terminal.foreground": "#eeeeee", "terminal.background": "#000" };
+      const settings = JSON.stringify({
+        "workbench.colorCustomizations": {
+          ...colors,
+          "[Light+]": { "terminal.ansiRed": "#cd3131" },
+        },
+      });
+      const { schemes, skipped } = parseTerminalSchemeFile("settings.json", settings);
+      expect(skipped).toEqual([]);
+      expect(schemes.map((s) => [s.name, s.palette.red])).toEqual([
+        ["settings", hexAt(1)],
+        ["Light+", "#cd3131"],
+      ]);
     });
 
     test("rejects a settings.json without terminal color customizations", () => {

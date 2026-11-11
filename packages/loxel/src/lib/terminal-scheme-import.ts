@@ -129,8 +129,11 @@ function vsCodeSettingsReaders(
   }
   for (const [key, colors] of Object.entries(customizations)) {
     const theme = /^\[(.+)\]$/.exec(key)?.[1];
+    // VS Code applies a theme's block over the colors set for every theme.
     if (theme && isRecord(colors) && hasTerminalColors(colors)) {
-      readers.push(() => parseVsCodeColors(schemeName(theme, fallbackName), colors));
+      readers.push(() =>
+        parseVsCodeColors(schemeName(theme, fallbackName), { ...customizations, ...colors }),
+      );
     }
   }
   if (readers.length === 0) {
@@ -279,90 +282,47 @@ function itermColor(value: unknown): string | undefined {
 type PlistValue = string | number | boolean | PlistValue[] | { [key: string]: PlistValue };
 
 /**
- * A minimal XML property list reader: dicts, arrays, strings, numbers and booleans, which is all
- * a color scheme uses. Data and date values read as strings.
+ * Read an XML property list with the platform's XML parser: dicts, arrays, strings, numbers and
+ * booleans, which is all a color scheme uses. Data and date values read as strings.
  */
-type PlistToken =
-  | { kind: "open"; tag: string; selfClose: boolean }
-  | { kind: "close"; tag: string }
-  | { kind: "text"; text: string };
-
-/** Elements and non-blank text; the XML declaration, doctype and comments are dropped. */
-function plistTokens(xml: string): PlistToken[] {
-  const tokens: PlistToken[] = [];
-  for (const [, close, tag, selfClose, text] of xml.matchAll(
-    /<!--[\s\S]*?-->|<[?!][^>]*>|<(\/?)([A-Za-z]+)[^>]*?(\/?)>|([^<]+)/g,
-  )) {
-    if (tag && close) tokens.push({ kind: "close", tag });
-    else if (tag) tokens.push({ kind: "open", tag, selfClose: selfClose === "/" });
-    else if (text?.trim()) tokens.push({ kind: "text", text });
-  }
-  return tokens;
-}
-
 function parsePlist(xml: string, fileName: string): PlistValue {
-  const tokens = plistTokens(xml);
-  let pos = 0;
   const fail = (): never => {
     throw new SchemeImportError(`${fileName} is not a valid property list.`);
   };
-  const next = (): PlistToken => tokens[pos++] ?? fail();
-  const isClose = (token: PlistToken, tag: string) => token.kind === "close" && token.tag === tag;
-
-  /** The text of an element whose open tag was just read, through its close tag. */
-  const readText = (tag: string): string => {
-    const token = next();
-    if (isClose(token, tag)) return "";
-    if (token.kind !== "text" || !isClose(next(), tag)) return fail();
-    return decodeEntities(token.text);
-  };
-
-  const readValue = (token: PlistToken): PlistValue => {
-    if (token.kind !== "open") return fail();
-    const { tag, selfClose } = token;
-    switch (tag) {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length > 0) fail();
+  const root = doc.documentElement;
+  const readValue = (el: Element | null): PlistValue => {
+    if (!el) return fail();
+    switch (el.tagName) {
       case "dict": {
         const dict: { [key: string]: PlistValue } = {};
-        if (selfClose) return dict;
-        for (let t = next(); !isClose(t, "dict"); t = next()) {
-          if (t.kind !== "open" || t.tag !== "key" || t.selfClose) return fail();
-          const key = readText("key");
-          dict[key] = readValue(next());
+        const children = [...el.children];
+        for (let i = 0; i < children.length; i += 2) {
+          const key = children[i];
+          if (key?.tagName !== "key") return fail();
+          dict[key.textContent ?? ""] = readValue(children[i + 1] ?? null);
         }
         return dict;
       }
-      case "array": {
-        const array: PlistValue[] = [];
-        if (selfClose) return array;
-        for (let t = next(); !isClose(t, "array"); t = next()) array.push(readValue(t));
-        return array;
-      }
+      case "array":
+        return [...el.children].map(readValue);
       case "true":
       case "false":
-        if (!selfClose && readText(tag) !== "") fail();
-        return tag === "true";
+        return el.tagName === "true";
       case "real":
       case "integer":
-        return selfClose ? fail() : Number(readText(tag));
+        return Number(el.textContent);
       case "string":
       case "data":
       case "date":
-        return selfClose ? "" : readText(tag);
+        return el.textContent ?? "";
       default:
         return fail();
     }
   };
-
-  const first = next();
-  if (first.kind === "open" && first.tag === "plist" && !first.selfClose) return readValue(next());
-  return readValue(first);
+  return readValue(root.tagName === "plist" ? root.firstElementChild : root);
 }
-
-function decodeEntities(text: string): string {
-  return text.replaceAll(/&(amp|lt|gt|quot|apos);/g, (_, entity: string) => ENTITIES[entity] ?? "");
-}
-
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
 // ---------------------------------------------------------------------------
 // Shared
