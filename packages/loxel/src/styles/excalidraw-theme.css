@@ -164,6 +164,7 @@
   /* Excalidraw sets its own thumb on `.excalidraw`, shadowing Loxel's; this repeats Loxel's dark
      value (a `var(--scrollbar-thumb)` here would reference itself and drop the scrollbar color). */
   --scrollbar-thumb: #505258;
+  --scrollbar-thumb-hover: var(--muted-foreground);
 
   /* Floating islands: Loxel's dark panel grey with a hairline edge and a deep drop shadow */
   --shadow-island: 0 0 0 1px var(--border), 0 4px 16px 0 rgb(0 0 0 / 0.45);
@@ -177,10 +178,11 @@
 }
 
 /* Excalidraw's dark sheet sets these with a doubled `.excalidraw.theme--dark.excalidraw`
-   selector, so these repeat it after `:root`: the Help dialog's link buttons rest on the editor
-   tone (Excalidraw's resting fill would equal the dialog), and they and the main menu trigger
-   hover with Loxel's hover grey instead of a fixed violet. */
-:root .excalidraw.theme--dark.excalidraw .HelpDialog__btn {
+   selector, so these repeat it after `:root`. At rest, dropdown triggers (such as the Library's
+   "..." menu; the main menu trigger sets its own fill) and the Help dialog's link buttons take
+   the editor tone, where Excalidraw's would match the hover or the dialog. On hover they take
+   Loxel's hover grey instead of a fixed violet. */
+:root .excalidraw.theme--dark.excalidraw :is(.dropdown-menu-button, .HelpDialog__btn) {
   --background: var(--color-surface-mid);
 }
 
