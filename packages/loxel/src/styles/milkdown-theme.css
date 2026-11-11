@@ -444,13 +444,13 @@
 /* ── Code blocks — bordered, rounded, JetBrains-like ── */
 
 .milkdown .milkdown-code-block {
-  background: var(--crepe-color-surface);
-  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 60%);
+  background: var(--surface-1);
+  border: none;
   border-radius: 6px;
-  /* Even on all sides once the tools float (below): the code's own 4px top and bottom padding
-     plus 20px makes the same 24px inset as the sides. */
+  /* The inset sits inside the code's scroller, not on this box, so a long line scrolls to the
+     box's edge and the horizontal scrollbar spans the whole box. */
   --code-block-inset: 24px;
-  padding: calc(var(--code-block-inset) - 4px) var(--code-block-inset);
+  padding: 0;
   margin: calc(var(--u) * 1.2) 0;
   overflow: visible;
 }
@@ -465,8 +465,13 @@
   max-height: min(400px, 50vh);
 }
 
+.milkdown .milkdown-code-block .cm-editor,
+.milkdown .milkdown-code-block .cm-scroller {
+  border-radius: inherit;
+}
+
 .milkdown .milkdown-code-block .cm-editor {
-  background: var(--crepe-color-surface);
+  background: transparent;
   font-family: var(--crepe-font-code);
   font-size: var(--loxel-font-code-size);
   line-height: 1.5;
@@ -480,6 +485,21 @@
 
 .milkdown .milkdown-code-block .cm-content {
   font-family: var(--crepe-font-code);
+  padding: var(--code-block-inset);
+}
+
+.milkdown .milkdown-code-block .cm-line {
+  padding-inline: 0;
+}
+
+/* The same inset for what isn't in the scroller: the preview panel, and the plain-text
+   placeholder Crepe shows while a block is off-screen. */
+.milkdown .milkdown-code-block .preview-panel {
+  padding: 0 var(--code-block-inset) var(--code-block-inset);
+}
+
+.milkdown .milkdown-code-block .milkdown-code-block-placeholder {
+  padding: var(--code-block-inset);
 }
 
 .milkdown .milkdown-code-block .cm-activeLine {
@@ -529,7 +549,7 @@
 /* With the code hidden, a preview (a diagram, a diff and its header buttons) starts below the
    floating tools instead of under them. */
 .milkdown .milkdown-code-block:has(.codemirror-host.hidden) .preview-panel {
-  margin-top: 24px;
+  padding-top: calc(var(--code-block-inset) + 24px);
 }
 
 .milkdown .milkdown-code-block .tools .language-button {
@@ -986,18 +1006,13 @@
   padding: 2px 8px;
 }
 
-/* A faint grey fill sets code blocks apart from the white page, as in JetBrains Light. */
-.milkdown:not(.dark) .milkdown-code-block,
-.milkdown:not(.dark) .milkdown-code-block .cm-editor,
-.milkdown:not(.dark) .milkdown-code-block .cm-gutters {
+/* A faint grey fill sets code blocks apart from the white page (where --surface-1 is white), as in
+   JetBrains Light. */
+.milkdown:not(.dark) .milkdown-code-block {
   background: var(--card);
 }
 
-.milkdown:not(.dark) .milkdown-code-block {
-  border-color: #d1d3d8;
-}
-
-/* Code-block outline and table row dividers: a firmer neutral grey (no blue tint) */
+/* Table row dividers: a firmer neutral grey (no blue tint) */
 .milkdown:not(.dark) .milkdown-table-block td {
   border-bottom-color: #d1d3d8;
 }
