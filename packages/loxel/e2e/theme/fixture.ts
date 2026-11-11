@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 
 import { $ } from "bun";
 
-const FILES_V1: Record<string, string> = {
+const FILES_V1 = {
   "package.json": `{
   "name": "orbit-shop",
   "version": "1.4.0",
@@ -92,7 +92,7 @@ features:
   recommendations: false
   checkout_v2: true
 `,
-};
+} satisfies Record<string, string>;
 
 const PLAN_MD = `---
 status: in-progress
@@ -127,6 +127,32 @@ export interface RecommendationRequest {
 \`\`\`
 
 Read more in the [catalog module](src/catalog.ts) and keep *latency* under **50 ms**.
+`;
+
+const REVIEW_MD = `# Search review
+
+The request flow:
+
+\`\`\`mermaid
+flowchart LR
+  Client -->|GET /products| Server
+  Server --> Catalog
+  Catalog -->|matches| Server
+\`\`\`
+
+The change under review:
+
+\`\`\`diff
+--- a/src/search.ts
++++ b/src/search.ts
+@@ -1,6 +1,7 @@
+ export function search(products: Product[], query: string): Product[] {
+-  const needle = query.toLowerCase();
++  const needle = query.trim().toLowerCase();
++  if (needle === "") return products;
+   return products.filter((p) => p.name.toLowerCase().includes(needle));
+ }
+\`\`\`
 `;
 
 function rect(id: string, x: number, y: number, w: number, h: number, color: string, seed: number) {
@@ -249,7 +275,11 @@ export async function buildFixture(root: string): Promise<string> {
   write(root, FILES_V1);
   await commit(root, "feat: initial storefront", 1);
 
-  write(root, { "docs/plan.md": PLAN_MD, "docs/architecture.excalidraw": DRAWING });
+  write(root, {
+    "docs/plan.md": PLAN_MD,
+    "docs/review.md": REVIEW_MD,
+    "docs/architecture.excalidraw": DRAWING,
+  });
   await commit(root, "docs: recommendations plan and architecture", 3);
 
   await $`git checkout -q -b feature/search`.cwd(root);

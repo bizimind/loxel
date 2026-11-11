@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
-import { trackCaretRow } from "@/components/code-editor/caret-row";
+import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -162,18 +162,6 @@ interface CodeEditorPanelProps {
   column?: number;
   onClose: () => void;
   panelApi: DockviewPanelApi;
-}
-
-/**
- * Light shows the caret JetBrains-style: it tints the caret row, gutter included (`trackCaretRow`
- * keeps the row's band while text is selected), and leaves it out of the overview ruler, which
- * keeps to diagnostics and highlights. Dark paints no current-line band at all.
- */
-function caretOptionsFor(darkMode: boolean) {
-  return {
-    renderLineHighlight: darkMode ? "line" : "all",
-    hideCursorInOverviewRuler: !darkMode,
-  } satisfies monacoEditor.IEditorOptions;
 }
 
 export function CodeEditorPanel({
