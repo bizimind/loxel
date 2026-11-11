@@ -144,12 +144,13 @@ export const IMAGE_PARAGRAPH_CLASS = "image-paragraph";
 
 function imageParagraphDecorations(doc: ProseNode): DecorationSet {
   const decorations: Decoration[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== "paragraph") return true;
+  // Top-level paragraphs only: in a table cell or list item an image keeps the cell's alignment
+  // and sits next to its bullet.
+  doc.forEach((node, pos) => {
+    if (node.type.name !== "paragraph") return;
     if (node.childCount === 1 && node.firstChild?.type.name === "image") {
       decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: IMAGE_PARAGRAPH_CLASS }));
     }
-    return false;
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -171,7 +172,9 @@ const imageParagraphPlugin = $prose(() => {
 });
 
 /**
- * Register image rendering and upload on a Crepe editor. Call before `create()`.
+ * Register image rendering and upload on a Crepe editor. Call before `create()` and after the
+ * commonmark preset is registered (Crepe's constructor does that), so the extended image schema
+ * replaces the preset's.
  * The inline image node view applies `proxyDomURL` to the DOM only; markdown is untouched.
  */
 export function installMarkdownImages(editor: Editor, options: { filePath: string }): void {

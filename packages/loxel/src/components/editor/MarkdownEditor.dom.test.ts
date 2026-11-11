@@ -314,7 +314,8 @@ describe("serializeBody source preservation", () => {
   test("images without a title parse into image nodes and serialize back without one", async () => {
     const el = document.createElement("div");
     document.body.appendChild(el);
-    const untitled = "Intro ![ok](./assets/ok.png) inline\n\n![Flow chart](./assets/flow.png)\n";
+    const untitled =
+      "Intro ![ok](./assets/ok.png) inline\n\n![Flow chart](./assets/flow.png)\n\n* ![bullet](./assets/b.png)\n";
     const editor = new Crepe({
       root: el,
       defaultValue: untitled,
@@ -331,11 +332,13 @@ describe("serializeBody source preservation", () => {
         expect(images).toEqual([
           { src: "./assets/ok.png", alt: "ok", title: "" },
           { src: "./assets/flow.png", alt: "Flow chart", title: "" },
+          { src: "./assets/b.png", alt: "bullet", title: "" },
         ]);
       });
       // No source baseline: this is the serializer's own output, not preserved bytes.
       expect(serializeBody(editor)).toBe(untitled);
-      // Only the paragraph holding nothing but an image is tagged for block centering.
+      // Only the top-level paragraph holding nothing but an image is tagged for block centering,
+      // not the image-only list item.
       const tagged = [...el.querySelectorAll(`p.${IMAGE_PARAGRAPH_CLASS}`)];
       expect(tagged).toHaveLength(1);
       expect(tagged[0]?.textContent).toBe("");
