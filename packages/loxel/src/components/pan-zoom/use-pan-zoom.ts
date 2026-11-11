@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  actualSizeScale,
   type Dimensions,
   DRAG_THRESHOLD,
   fitWithin,
@@ -40,7 +41,7 @@ export function usePanZoom({ contentSize, onView }: UsePanZoomOptions) {
 
   const fitBox = contentSize && viewportSize ? fitWithin(contentSize, viewportSize) : null;
   /** The scale that shows one content pixel per screen pixel. */
-  const actualScale = contentSize && fitBox ? contentSize.width / fitBox.width : 1;
+  const actualScale = contentSize && fitBox ? actualSizeScale(contentSize, fitBox) : 1;
   const actualScaleRef = useRef(actualScale);
   actualScaleRef.current = actualScale;
 

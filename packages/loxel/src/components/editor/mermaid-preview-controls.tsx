@@ -266,13 +266,31 @@ export function attachMermaidPreviewControls(
     if (setView(parts, { ...view, x: view.x - event.deltaX })) event.preventDefault();
   };
 
+  /**
+   * Wheel listeners must be non-passive to cancel the event, and a non-passive listener makes the
+   * browser wait for JS before scrolling. So each viewport gets its own when the pointer first
+   * enters it, and the rest of the editor keeps scrolling off the main thread.
+   */
+  const wheelTargets = new WeakSet<HTMLElement>();
+  const handlePointerOver = (event: PointerEvent) => {
+    const viewport = previewParts(event.target)?.viewport;
+    if (!viewport || wheelTargets.has(viewport)) return;
+    wheelTargets.add(viewport);
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+  };
+
   // Capture phase: ProseMirror's own handlers on the editor must not see a press on a diagram first.
   container.addEventListener("mousedown", handleMouseDown, true);
   container.addEventListener("click", handleClick);
-  container.addEventListener("wheel", handleWheel, { passive: false });
+  container.addEventListener("pointerover", handlePointerOver);
   return () => {
     container.removeEventListener("mousedown", handleMouseDown, true);
     container.removeEventListener("click", handleClick);
-    container.removeEventListener("wheel", handleWheel);
+    container.removeEventListener("pointerover", handlePointerOver);
+    for (const viewport of container.querySelectorAll<HTMLElement>(
+      `.${MERMAID_CLASSES.viewport}`,
+    )) {
+      viewport.removeEventListener("wheel", handleWheel);
+    }
   };
 }

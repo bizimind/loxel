@@ -61,6 +61,7 @@ function mouse(target: EventTarget, type: string, x: number, y = 0): MouseEvent 
 }
 
 function wheel(init: WheelEventInit): WheelEvent {
+  canvas().dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
   const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...init });
   // happy-dom's WheelEvent drops the modifier keys and pointer position of its init.
   for (const key of ["ctrlKey", "clientX", "clientY"] as const) {

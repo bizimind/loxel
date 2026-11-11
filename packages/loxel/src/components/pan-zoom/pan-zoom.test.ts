@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  actualSizeScale,
   fitWithin,
   IDENTITY_VIEW,
   viewTransform,
@@ -44,6 +45,16 @@ test("fitWithin shrinks to fit but never grows", () => {
     width: 200,
     height: 100,
   });
+});
+
+test("empty content or viewports give an empty box and an actual size of 1, never NaN", () => {
+  // Audio-only video reports 0 x 0; a hidden panel has a 0 x 0 viewport.
+  const empty = fitWithin({ width: 0, height: 0 }, { width: 0, height: 0 });
+  expect(empty).toEqual({ width: 0, height: 0 });
+  expect(actualSizeScale({ width: 0, height: 0 }, empty)).toBe(1);
+  const hidden = fitWithin({ width: 800, height: 600 }, { width: 0, height: 0 });
+  expect(actualSizeScale({ width: 800, height: 600 }, hidden)).toBe(1);
+  expect(actualSizeScale({ width: 800, height: 600 }, { width: 400, height: 300 })).toBe(2);
 });
 
 test("viewTransform", () => {

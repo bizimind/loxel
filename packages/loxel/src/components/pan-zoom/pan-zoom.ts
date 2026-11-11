@@ -67,8 +67,17 @@ export function viewTransform(view: PanZoomView): string {
   return `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
 }
 
-/** Content's on-screen box at zoom 1: its natural size, shrunk (never grown) to fit the viewport. */
+/**
+ * Content's on-screen box at zoom 1: its natural size, shrunk (never grown) to fit the viewport.
+ * Empty content or an empty viewport gives an empty box.
+ */
 export function fitWithin(content: Dimensions, viewport: Dimensions): Dimensions {
   const ratio = Math.min(1, viewport.width / content.width, viewport.height / content.height);
+  if (!(ratio > 0)) return { width: 0, height: 0 };
   return { width: content.width * ratio, height: content.height * ratio };
+}
+
+/** The zoom that shows content fitted into `box` at its natural size; 1 when either is empty. */
+export function actualSizeScale(content: Dimensions, box: Dimensions): number {
+  return content.width > 0 && box.width > 0 ? content.width / box.width : 1;
 }

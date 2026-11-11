@@ -135,7 +135,10 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
       switch (msg.type) {
         case "media-dimensions":
-          setDimensions({ width: msg.width, height: msg.height });
+          // An SVG's own script can post this too, and audio-only video reports 0 x 0.
+          if (msg.width > 0 && msg.height > 0 && Number.isFinite(msg.width * msg.height)) {
+            setDimensions({ width: msg.width, height: msg.height });
+          }
           break;
         case "media-video-state":
           setVideoState({
@@ -149,14 +152,16 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           });
           break;
         case "media-wheel": {
-          // The frame reports the pointer in its own (transformed) coordinates.
+          // The frame reports the pointer in its own untransformed pixels; its on-screen box is
+          // scaled by the view.
           const viewport = viewportRef.current;
           if (!viewport) break;
           const rect = viewport.getBoundingClientRect();
           const iframeRect = iframeRef.current.getBoundingClientRect();
+          const { scale } = viewRef.current;
           wheel(msg, {
-            x: iframeRect.left - rect.left + msg.clientX,
-            y: iframeRect.top - rect.top + msg.clientY,
+            x: iframeRect.left - rect.left + msg.clientX * scale,
+            y: iframeRect.top - rect.top + msg.clientY * scale,
           });
           break;
         }
@@ -168,7 +173,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [viewportRef, wheel]);
+  }, [viewportRef, viewRef, wheel]);
 
   // --- Live reload on disk change ---
   useEffect(() => {

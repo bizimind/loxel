@@ -35,7 +35,10 @@ export function MermaidDiagramViewer({ source, onClose }: MermaidDiagramViewerPr
     let cancelled = false;
     renderMermaidDiagram(source).then(
       (rendered) => {
-        if (!cancelled) setDiagram(rendered);
+        if (cancelled) return;
+        // Without a viewBox there is no size to fit; mermaid always emits one.
+        if (rendered.size) setDiagram(rendered);
+        else setFailed(true);
       },
       (error: unknown) => {
         frontendLog.child("ui").error("Failed to render diagram for the viewer", { error });

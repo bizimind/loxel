@@ -9,18 +9,24 @@ const PNG_SCALE = 2;
 
 export type DiagramCopyFormat = "svg" | "png";
 
-/** The SVG markup at its natural size (mermaid emits `width="100%"` and a max-width style). */
-function standaloneMarkup(svg: SVGSVGElement): { markup: string; width: number; height: number } {
+/**
+ * The SVG markup at its natural size (mermaid emits `width="100%"` and a max-width style), on
+ * `background`: the diagram's colors assume the surface it is shown on.
+ */
+function standaloneMarkup(
+  svg: SVGSVGElement,
+  background: string,
+): { markup: string; width: number; height: number } {
   const { width, height } = svg.viewBox.baseVal;
   const copy = svg.cloneNode(true) as SVGSVGElement;
-  copy.removeAttribute("style");
+  copy.setAttribute("style", `background-color: ${background}`);
   copy.setAttribute("width", String(width));
   copy.setAttribute("height", String(height));
   return { markup: new XMLSerializer().serializeToString(copy), width, height };
 }
 
 async function pngBlob(svg: SVGSVGElement, background: string): Promise<Blob> {
-  const { markup, width, height } = standaloneMarkup(svg);
+  const { markup, width, height } = standaloneMarkup(svg, background);
   if (width <= 0 || height <= 0) throw new Error("The diagram has no size");
   // A data: URL, not a blob: URL: Chromium taints the canvas for blob: SVGs with foreignObject.
   const image = new Image();
@@ -31,7 +37,6 @@ async function pngBlob(svg: SVGSVGElement, background: string): Promise<Blob> {
   canvas.height = Math.ceil(height * PNG_SCALE);
   const context = canvas.getContext("2d");
   if (!context) throw new Error("No 2D canvas context");
-  // The diagram's colors assume the surface it is shown on, so the PNG keeps that background.
   context.fillStyle = background;
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
@@ -42,7 +47,7 @@ async function pngBlob(svg: SVGSVGElement, background: string): Promise<Blob> {
   return blob;
 }
 
-/** Copy `svg` in `format`, with `background` behind a PNG; reports the outcome in a toast. */
+/** Copy `svg` in `format` on `background`; reports the outcome in a toast. */
 export async function copyDiagram(
   svg: SVGSVGElement,
   format: DiagramCopyFormat,
@@ -50,7 +55,7 @@ export async function copyDiagram(
 ): Promise<void> {
   try {
     if (format === "svg") {
-      await navigator.clipboard.writeText(standaloneMarkup(svg).markup);
+      await navigator.clipboard.writeText(standaloneMarkup(svg, background).markup);
     } else {
       const blob = await pngBlob(svg, background);
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
