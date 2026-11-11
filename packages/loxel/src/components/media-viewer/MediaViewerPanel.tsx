@@ -2,15 +2,9 @@ import type { DockviewPanelApi } from "dockview-react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
-  Maximize2Icon,
-  MinusIcon,
   PauseIcon,
   PlayIcon,
-  PlusIcon,
   Repeat1Icon,
-  ScanIcon,
-  ToggleLeftIcon,
-  ToggleRightIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react";
@@ -19,17 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { type Dimensions, type PanZoomView, viewTransform } from "@/components/pan-zoom/pan-zoom";
+import { usePanZoom } from "@/components/pan-zoom/use-pan-zoom";
+import { ZoomControls } from "@/components/pan-zoom/ZoomToolbar";
 import { getMediaType } from "@/lib/media-extensions";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const ZOOM_STEP = 1.2;
-const ZOOM_MIN = 0.05;
-const ZOOM_MAX = 50;
-const DRAG_THRESHOLD = 3;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,20 +57,6 @@ function isIframeMessage(data: unknown): data is IframeMessage {
   return t === "media-dimensions" || t === "media-video-state" || t === "media-wheel";
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
-}
-
-/**
- * The media's on-screen box at zoom 1: its natural size, shrunk to fit the viewport. The frame page
- * caps img/video/svg at 100% of its size and never upscales them.
- */
-function fitWithin(media: Dimensions, viewport: Dimensions): Dimensions {
-  const ratio = Math.min(1, viewport.width / media.width, viewport.height / media.height);
-  return { width: media.width * ratio, height: media.height * ratio };
-}
-
 interface VideoState {
   playing: boolean;
   currentTime: number;
@@ -114,28 +88,25 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   // --- State ---
   const [version, setVersion] = useState(1);
   const [dimensions, setDimensions] = useState<Dimensions | null>(null);
-  const [scale, setScale] = useState(1);
-  const [autoFit, setAutoFit] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
   const [videoState, setVideoState] = useState<VideoState | null>(null);
-  const [viewportSize, setViewportSize] = useState<Dimensions | null>(null);
 
   // --- Refs ---
-  const viewportRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   /** The transparency checkerboard, sized and moved with the media (not scaled, so its squares keep
    *  their size at any zoom). */
   const backdropRef = useRef<HTMLDivElement>(null);
-  const translateRef = useRef({ x: 0, y: 0 });
-  const dragStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
-  const isDraggingRef = useRef(false);
-  const scaleRef = useRef(1);
+  /** The media's on-screen box at zoom 1; the frame page fits the media the same way. */
+  const mediaBoxRef = useRef<Dimensions | null>(null);
 
-  // Keep scaleRef in sync
-  scaleRef.current = scale;
-
-  const mediaBox = dimensions && viewportSize ? fitWithin(dimensions, viewportSize) : null;
-  const mediaBoxRef = useRef(mediaBox);
+  const applyView = useCallback((view: PanZoomView) => {
+    const iframe = iframeRef.current;
+    if (iframe) iframe.style.transform = viewTransform(view);
+    const backdrop = backdropRef.current;
+    const box = mediaBoxRef.current;
+    if (backdrop && box) Object.assign(backdrop.style, backdropStyle(box, view));
+  }, []);
+  const panZoom = usePanZoom({ contentSize: dimensions, onView: applyView });
+  const { viewportRef, viewRef, fitBox: mediaBox, isDragging, wheel } = panZoom;
   mediaBoxRef.current = mediaBox;
 
   // --- URL ---
@@ -154,60 +125,6 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     panelApi.updateParameters({ filePath });
     panelApi.setTitle(filename);
   }, [filePath, panelApi]);
-
-  // --- Apply transform ---
-  const applyTransform = useCallback(() => {
-    const { x, y } = translateRef.current;
-    const iframe = iframeRef.current;
-    if (iframe) iframe.style.transform = `translate(${x}px, ${y}px) scale(${scaleRef.current})`;
-    const backdrop = backdropRef.current;
-    const box = mediaBoxRef.current;
-    if (backdrop && box) Object.assign(backdrop.style, backdropStyle(box, scaleRef.current, x, y));
-  }, []);
-
-  // --- Actual-size scale: what scale shows 1 content pixel = 1 screen pixel ---
-  const calcActualSizeScale = useCallback(
-    (dims?: Dimensions | null) => {
-      const d = dims ?? dimensions;
-      const viewport = viewportRef.current;
-      if (!d || !viewport) return 1;
-      const vw = viewport.clientWidth;
-      const vh = viewport.clientHeight;
-      if (vw === 0 || vh === 0) return 1;
-      const containRatio = Math.min(vw / d.width, vh / d.height);
-      return containRatio > 0 ? 1 / containRatio : 1;
-    },
-    [dimensions],
-  );
-
-  // --- Shared zoom helper ---
-  const applyZoom = useCallback(
-    (factor: number) => {
-      const s = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scaleRef.current * factor));
-      setScale(s);
-      scaleRef.current = s;
-      setAutoFit(false);
-      applyTransform();
-    },
-    [applyTransform],
-  );
-
-  // --- Fit to contain ---
-  const fitToContain = useCallback(() => {
-    setScale(1);
-    scaleRef.current = 1;
-    translateRef.current = { x: 0, y: 0 };
-    applyTransform();
-  }, [applyTransform]);
-
-  // --- Set 100% (actual size) ---
-  const setActualSize = useCallback(() => {
-    const s = calcActualSizeScale();
-    setScale(s);
-    scaleRef.current = s;
-    translateRef.current = { x: 0, y: 0 };
-    applyTransform();
-  }, [calcActualSizeScale, applyTransform]);
 
   // --- Listen for postMessage from iframe ---
   useEffect(() => {
@@ -232,41 +149,15 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           });
           break;
         case "media-wheel": {
+          // The frame reports the pointer in its own (transformed) coordinates.
           const viewport = viewportRef.current;
           if (!viewport) break;
-
-          const { deltaX, deltaY, ctrlKey, metaKey, clientX, clientY } = msg;
-          if (ctrlKey || metaKey) {
-            const rect = viewport.getBoundingClientRect();
-            const iframeRect = iframeRef.current.getBoundingClientRect();
-            const cursorX = iframeRect.left - rect.left + clientX;
-            const cursorY = iframeRect.top - rect.top + clientY;
-
-            const oldScale = scaleRef.current;
-            const factor = Math.pow(2, -deltaY * 0.01);
-            const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
-
-            const cx = viewport.clientWidth / 2;
-            const cy = viewport.clientHeight / 2;
-            const worldX = (cursorX - cx - translateRef.current.x) / oldScale;
-            const worldY = (cursorY - cy - translateRef.current.y) / oldScale;
-            translateRef.current = {
-              x: cursorX - cx - worldX * newScale,
-              y: cursorY - cy - worldY * newScale,
-            };
-
-            scaleRef.current = newScale;
-            setScale(newScale);
-            setAutoFit(false);
-            applyTransform();
-          } else {
-            translateRef.current = {
-              x: translateRef.current.x - deltaX,
-              y: translateRef.current.y - deltaY,
-            };
-            setAutoFit(false);
-            applyTransform();
-          }
+          const rect = viewport.getBoundingClientRect();
+          const iframeRect = iframeRef.current.getBoundingClientRect();
+          wheel(msg, {
+            x: iframeRect.left - rect.left + msg.clientX,
+            y: iframeRect.top - rect.top + msg.clientY,
+          });
           break;
         }
         default: {
@@ -277,7 +168,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [applyTransform]);
+  }, [viewportRef, wheel]);
 
   // --- Live reload on disk change ---
   useEffect(() => {
@@ -289,158 +180,23 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     return unsub;
   }, [filePath]);
 
-  // --- Viewport size, for the checkerboard's box ---
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const observer = new ResizeObserver(() => {
-      setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
-    });
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, []);
-
-  // --- ResizeObserver for auto-fit ---
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const observer = new ResizeObserver(() => {
-      if (!autoFit) return;
-      setScale(1);
-      scaleRef.current = 1;
-      translateRef.current = { x: 0, y: 0 };
-      applyTransform();
-    });
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [autoFit, applyTransform]);
-
-  // --- Wheel/trackpad on viewport background (non-passive) ---
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-
-      if (e.ctrlKey || e.metaKey) {
-        const rect = viewport.getBoundingClientRect();
-        const cursorX = e.clientX - rect.left;
-        const cursorY = e.clientY - rect.top;
-
-        const oldScale = scaleRef.current;
-        const factor = Math.pow(2, -e.deltaY * 0.01);
-        const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
-
-        const cx = viewport.clientWidth / 2;
-        const cy = viewport.clientHeight / 2;
-        const worldX = (cursorX - cx - translateRef.current.x) / oldScale;
-        const worldY = (cursorY - cy - translateRef.current.y) / oldScale;
-        translateRef.current = {
-          x: cursorX - cx - worldX * newScale,
-          y: cursorY - cy - worldY * newScale,
-        };
-
-        scaleRef.current = newScale;
-        setScale(newScale);
-        setAutoFit(false);
-        applyTransform();
-      } else {
-        translateRef.current = {
-          x: translateRef.current.x - e.deltaX,
-          y: translateRef.current.y - e.deltaY,
-        };
-        setAutoFit(false);
-        applyTransform();
-      }
-    };
-
-    viewport.addEventListener("wheel", handleWheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [applyTransform]);
-
-  // --- Mouse drag for pan ---
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
-      dragStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        tx: translateRef.current.x,
-        ty: translateRef.current.y,
-      };
-
-      const handleMouseMove = (me: MouseEvent) => {
-        const start = dragStartRef.current;
-        if (!start) return;
-        const dx = me.clientX - start.x;
-        const dy = me.clientY - start.y;
-
-        if (!isDraggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-
-        if (!isDraggingRef.current) {
-          isDraggingRef.current = true;
-          setIsDragging(true);
-        }
-        translateRef.current = { x: start.tx + dx, y: start.ty + dy };
-        setAutoFit(false);
-        applyTransform();
-      };
-
-      const handleMouseUp = () => {
-        dragStartRef.current = null;
-        isDraggingRef.current = false;
-        setIsDragging(false);
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    },
-    [applyTransform],
-  );
-
-  // --- Double-click: toggle contain / actual size ---
-  const handleDoubleClick = useCallback(() => {
-    if (Math.abs(scaleRef.current - 1) < 0.01) {
-      setActualSize();
-      setAutoFit(false);
-    } else {
-      fitToContain();
-      setAutoFit(true);
-    }
-  }, [fitToContain, setActualSize]);
-
   // --- Keyboard ---
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        applyZoom(ZOOM_STEP);
-      } else if (e.key === "-") {
-        e.preventDefault();
-        applyZoom(1 / ZOOM_STEP);
-      } else if (e.key === "0") {
-        e.preventDefault();
-        fitToContain();
-        setAutoFit(true);
-      } else if (isVideo && e.key === " ") {
+      if (panZoom.handleKeyDown(e) || !isVideo) return;
+      if (e.key === " ") {
         e.preventDefault();
         sendCommand("toggle");
-      } else if (isVideo && e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         sendCommand("step", -FRAME_STEP);
-      } else if (isVideo && e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight") {
         e.preventDefault();
         sendCommand("step", FRAME_STEP);
       }
     },
-    [applyZoom, fitToContain, isVideo, sendCommand],
+    [isVideo, panZoom, sendCommand],
   );
-
-  const actualScale = calcActualSizeScale();
-  const zoomPercent = actualScale > 0 ? Math.round((scale / actualScale) * 100) : 100;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -452,57 +208,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 
         <div className="mx-auto" />
 
-        <ToolbarButton onClick={() => applyZoom(1 / ZOOM_STEP)} title="Zoom out (-)">
-          <MinusIcon className="size-3.5" />
-        </ToolbarButton>
-        <span className="text-foreground dark:text-muted-foreground w-10 text-center tabular-nums">
-          {zoomPercent}%
-        </span>
-        <ToolbarButton onClick={() => applyZoom(ZOOM_STEP)} title="Zoom in (+)">
-          <PlusIcon className="size-3.5" />
-        </ToolbarButton>
-
-        <ToolbarSeparator />
-
-        <ToolbarButton
-          onClick={() => {
-            fitToContain();
-            setAutoFit(true);
-          }}
-          title="Fit to panel (0)"
-        >
-          <ScanIcon className="size-3.5" />
-          <span>Fit</span>
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={() => {
-            setActualSize();
-            setAutoFit(false);
-          }}
-          title="Actual size"
-        >
-          <Maximize2Icon className="size-3.5" />
-          <span>1:1</span>
-        </ToolbarButton>
-
-        <ToolbarSeparator />
-
-        <ToolbarButton
-          onClick={() => {
-            const next = !autoFit;
-            setAutoFit(next);
-            if (next) fitToContain();
-          }}
-          title="Auto-fit on resize"
-          active={autoFit}
-        >
-          {autoFit ? (
-            <ToggleRightIcon className="size-3.5" />
-          ) : (
-            <ToggleLeftIcon className="size-3.5" />
-          )}
-          <span>Auto</span>
-        </ToolbarButton>
+        <ZoomControls panZoom={panZoom} />
       </div>
 
       {/* Viewport */}
@@ -514,8 +220,8 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
           isDragging ? "cursor-grabbing" : "cursor-default",
         )}
         tabIndex={0}
-        onMouseDown={handleMouseDown}
-        onDoubleClick={handleDoubleClick}
+        onMouseDown={panZoom.handleMouseDown}
+        onDoubleClick={panZoom.handleDoubleClick}
         onKeyDown={handleKeyDown}
       >
         {/* A bordered checkerboard behind the media only, so its edges show where it ends */}
@@ -529,7 +235,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
               "[--checker-a:#dadce1] [--checker-b:var(--color-background)]",
               "dark:[--checker-a:#2c2d32] dark:[--checker-b:#232428]",
             )}
-            style={backdropStyle(mediaBox, scale, translateRef.current.x, translateRef.current.y)}
+            style={backdropStyle(mediaBox, viewRef.current)}
           />
         )}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -548,7 +254,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
                 // the frame an opaque canvas that hides the checkerboard under transparent pixels.
                 colorScheme: "light dark",
                 transformOrigin: "center center",
-                transform: `translate(${translateRef.current.x}px, ${translateRef.current.y}px) scale(${scale})`,
+                transform: viewTransform(viewRef.current),
                 pointerEvents: isDragging ? "none" : "auto",
               }}
               title={filePath}
@@ -566,9 +272,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
 /** Size and place the checkerboard over the media's zoomed, panned box (border outside it). */
 function backdropStyle(
   box: Dimensions,
-  scale: number,
-  x: number,
-  y: number,
+  { x, y, scale }: PanZoomView,
 ): Pick<React.CSSProperties, "width" | "height" | "transform"> {
   return {
     width: `${box.width * scale}px`,
@@ -776,42 +480,4 @@ function VideoControls({
       </div>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Toolbar button
-// ---------------------------------------------------------------------------
-
-function ToolbarButton({
-  children,
-  onClick,
-  title,
-  active,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  active?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-        // Light: on toggles take the accent text, idle buttons the full text color (their thin icons
-        // read as grey at toolbar size).
-        active && "bg-primary text-link dark:text-foreground",
-        !active && "text-foreground dark:text-muted-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Divider between toolbar groups (a step darker than the border in light). */
-function ToolbarSeparator() {
-  return <div className="bg-muted-foreground/80 dark:bg-border mx-1 h-3.5 w-px" />;
 }

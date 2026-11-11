@@ -30,6 +30,8 @@ import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { codeBlockText, handleDiffBlockClick } from "@/components/editor/diff-block-preview";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
+import { attachMermaidPreviewControls } from "@/components/editor/mermaid-preview-controls";
+import { MermaidDiagramViewer } from "@/components/editor/MermaidDiagramViewer";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { installSoftLineBreaks } from "@/components/editor/soft-line-break";
 import {
@@ -905,6 +907,22 @@ export function MarkdownEditor({
     [filePath],
   );
 
+  // Mermaid previews are static markup too; their zoom, pan, copy and open work by delegation.
+  // Opening reads the block's text from the document, so the viewer renders the current source.
+  const [viewerSource, setViewerSource] = useState<string | null>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    return attachMermaidPreviewControls(container, (codeBlock) => {
+      const source = crepeRef.current?.editor.action((ctx) =>
+        codeBlockText(ctx.get(editorViewCtx), codeBlock),
+      );
+      if (source) setViewerSource(source);
+    });
+    // crepeKey re-attaches the listeners after the container is remounted (accept disk version).
+  }, [crepeKey]);
+  const closeViewer = useCallback(() => setViewerSource(null), []);
+
   // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
   // be re-created; only a file that never loaded has nothing to show.
   if (isError && diskContent === null) {
@@ -957,6 +975,9 @@ export function MarkdownEditor({
           )}
         </button>
       </div>
+      {viewerSource !== null && (
+        <MermaidDiagramViewer source={viewerSource} onClose={closeViewer} />
+      )}
     </div>
   );
 }
