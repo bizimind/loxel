@@ -9,6 +9,7 @@
 set -euo pipefail
 WORK=${1:?usage: stack.sh <work-dir>}
 cd "$(dirname "$0")/../.."
+command -v lsof >/dev/null || { echo "lsof is required to check that the dev ports are free" >&2; exit 1; }
 for port in 7434 5173; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "port $port is in use (a dev server?); stop it before starting the theme stack" >&2
@@ -34,7 +35,14 @@ VITE_SCREENSHOT=1 node_modules/.bin/vite --mode development >"$WORK/vite.log" 2>
 VITE=$!
 trap 'pkill -P $SERVER; kill $SERVER $VITE 2>/dev/null' EXIT INT TERM
 
+# Seed only once the server on 7434 is the one started above: whatever else answers there (a dev
+# server that took the port after the check) must never get the fixture or the theme seed.
 until curl -sf http://127.0.0.1:7434/api/version >/dev/null; do sleep 0.5; done
+LISTENER=$(lsof -t -nP -iTCP:7434 -sTCP:LISTEN | head -1)
+if ! pgrep -P "$SERVER" | grep -qx "$LISTENER"; then
+  echo "the server on port 7434 (pid $LISTENER) is not this stack's; not seeding it" >&2
+  exit 1
+fi
 bun e2e/theme/seed.ts "$WORK"
 until curl -sf http://127.0.0.1:5173/ >/dev/null; do sleep 0.5; done
 echo "theme stack ready: http://127.0.0.1:5173 (fixture $FIXTURE)"
