@@ -4,7 +4,8 @@
  * Persists content to disk via autosave with conflict detection.
  */
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
+import { Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { Crepe } from "@milkdown/crepe";
 import {
@@ -203,35 +204,103 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
   return serializeBody(crepe);
 }
 
-/** CodeMirror theme matching loxel's JetBrains dark palette. */
-const codeTheme = EditorView.theme({}, { dark: true });
+/**
+ * Code-block token colors as [dark, light]: loxel's JetBrains dark palette, and IntelliJ Light to
+ * match the light editor theme. They reach the highlight style through CSS variables, so a code
+ * block follows the app theme without being rebuilt.
+ */
+const CODE_COLORS = {
+  keyword: ["#cf8e6d", "#1f3a93"],
+  operator: ["#cf8e6d", "#1e1f22"],
+  name: ["#bcbec4", "#1e1f22"],
+  property: ["#c77dbb", "#85358C"],
+  function: ["#56a8f5", "#156275"],
+  type: ["#2fbaa3", "#0a6b72"],
+  string: ["#6aab73", "#1f7a2b"],
+  number: ["#2aacb8", "#a85400"],
+  comment: ["#7a7e85", "#747882"],
+  meta: ["#bbb529", "#9e880d"],
+  tag: ["#e8bf6a", "#1f3a93"],
+  attribute: ["#bababa", "#174ad4"],
+  attributeValue: ["#6a8759", "#1f7a2b"],
+  link: ["#56a8f5", "#2a5dd8"],
+} satisfies Record<string, [dark: string, light: string]>;
+
+type CodeColor = keyof typeof CODE_COLORS;
+
+const codeColor = (name: CodeColor) => `var(--md-code-${name})`;
+
+function codeColorVars(index: 0 | 1): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(CODE_COLORS).map(([name, colors]) => [`--md-code-${name}`, colors[index]]),
+  );
+}
+
+/** CodeMirror theme for code blocks: the token colors of the light root, or of a `.dark` one. */
+const codeColorTheme = EditorView.theme({ "&": codeColorVars(1), ".dark &": codeColorVars(0) });
+
+/** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
+const darkThemeCompartment = new Compartment();
+
+/**
+ * Keeps a code block's `EditorView.darkTheme` (CodeMirror's own dark or light defaults, such as
+ * the cursor and selection) on the app theme: when the theme changes, and once at creation, since
+ * a block added after a change starts from the value the editor was created with.
+ */
+const followDarkMode = ViewPlugin.define((view) => {
+  let destroyed = false;
+  const apply = (darkMode: boolean) => {
+    if (destroyed || view.state.facet(EditorView.darkTheme) === darkMode) return;
+    view.dispatch({ effects: darkThemeCompartment.reconfigure(EditorView.darkTheme.of(darkMode)) });
+  };
+  // A view can't be updated while it is being constructed.
+  queueMicrotask(() => apply(useUIStore.getState().darkMode));
+  const unsubscribe = useUIStore.subscribe((state, prev) => {
+    if (state.darkMode !== prev.darkMode) apply(state.darkMode);
+  });
+  return {
+    destroy: () => {
+      destroyed = true;
+      unsubscribe();
+    },
+  };
+});
+
+/** Code-block theme: token colors, and CodeMirror's own defaults for the app theme. */
+function codeTheme() {
+  return [
+    codeColorTheme,
+    darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
+    followDarkMode,
+  ];
+}
 
 const codeHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "#cf8e6d" },
-  { tag: tags.operator, color: "#cf8e6d" },
-  { tag: tags.name, color: "#bcbec4" },
-  { tag: tags.variableName, color: "#bcbec4" },
-  { tag: tags.propertyName, color: "#c77dbb" },
-  { tag: tags.function(tags.variableName), color: "#56a8f5" },
-  { tag: tags.function(tags.propertyName), color: "#56a8f5" },
-  { tag: tags.definition(tags.variableName), color: "#bcbec4" },
-  { tag: tags.typeName, color: "#2fbaa3" },
-  { tag: tags.className, color: "#2fbaa3" },
-  { tag: tags.string, color: "#6aab73" },
-  { tag: tags.special(tags.string), color: "#6aab73" },
-  { tag: tags.number, color: "#2aacb8" },
-  { tag: tags.bool, color: "#cf8e6d" },
-  { tag: tags.null, color: "#cf8e6d" },
-  { tag: tags.comment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.lineComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.blockComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.meta, color: "#bbb529" },
-  { tag: tags.regexp, color: "#6aab73" },
-  { tag: tags.tagName, color: "#e8bf6a" },
-  { tag: tags.attributeName, color: "#bababa" },
-  { tag: tags.attributeValue, color: "#6a8759" },
-  { tag: tags.heading, color: "#bcbec4", fontWeight: "bold" },
-  { tag: tags.link, color: "#56a8f5", textDecoration: "underline" },
+  { tag: tags.keyword, color: codeColor("keyword") },
+  { tag: tags.operator, color: codeColor("operator") },
+  { tag: tags.name, color: codeColor("name") },
+  { tag: tags.variableName, color: codeColor("name") },
+  { tag: tags.propertyName, color: codeColor("property") },
+  { tag: tags.function(tags.variableName), color: codeColor("function") },
+  { tag: tags.function(tags.propertyName), color: codeColor("function") },
+  { tag: tags.definition(tags.variableName), color: codeColor("name") },
+  { tag: tags.typeName, color: codeColor("type") },
+  { tag: tags.className, color: codeColor("type") },
+  { tag: tags.string, color: codeColor("string") },
+  { tag: tags.special(tags.string), color: codeColor("string") },
+  { tag: tags.number, color: codeColor("number") },
+  { tag: tags.bool, color: codeColor("keyword") },
+  { tag: tags.null, color: codeColor("keyword") },
+  { tag: tags.comment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.lineComment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.blockComment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.meta, color: codeColor("meta") },
+  { tag: tags.regexp, color: codeColor("string") },
+  { tag: tags.tagName, color: codeColor("tag") },
+  { tag: tags.attributeName, color: codeColor("attribute") },
+  { tag: tags.attributeValue, color: codeColor("attributeValue") },
+  { tag: tags.heading, color: codeColor("name"), fontWeight: "bold" },
+  { tag: tags.link, color: codeColor("link"), textDecoration: "underline" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
 ]);
@@ -408,7 +477,7 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: [codeTheme, syntaxHighlighting(codeHighlight)],
+          theme: [codeTheme(), syntaxHighlighting(codeHighlight)],
           renderPreview: renderCodeBlockPreview,
         },
         [Crepe.Feature.BlockEdit]: {
@@ -926,25 +995,29 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
-      <div
-        ref={containerRef}
-        key={crepeKey}
-        className="flex-1 overflow-hidden"
-        data-diff-view-mode={diffViewMode}
-        onClick={handleContainerClick}
-      />
-      <button
-        onClick={handleCopy}
-        title="Copy markdown"
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity group-hover/editor:opacity-100"
-      >
-        {copied ? (
-          <CheckIcon className="size-3.5 text-green-500" />
-        ) : (
-          <ClipboardIcon className="size-3.5" />
-        )}
-      </button>
+      {/* The copy button floats over the document body, below the banners and the frontmatter
+          header, so it never covers their controls. */}
+      <div className="relative min-h-0 flex-1">
+        {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+        <div
+          ref={containerRef}
+          key={crepeKey}
+          className="h-full overflow-hidden"
+          data-diff-view-mode={diffViewMode}
+          onClick={handleContainerClick}
+        />
+        <button
+          onClick={handleCopy}
+          title="Copy markdown"
+          className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted not-dark:bg-background not-dark:border-input not-dark:text-foreground/75 not-dark:hover:bg-muted not-dark:hover:text-foreground absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity not-dark:shadow-sm group-hover/editor:opacity-100"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-green-500" />
+          ) : (
+            <ClipboardIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

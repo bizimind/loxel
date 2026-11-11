@@ -33,6 +33,29 @@ const XTERM_WEBGL_PIXEL_GRID_PATCHES = [
   },
 ];
 
+/**
+ * Minimum contrast fixes, active only with a ratio set (the light theme's `--term-min-contrast`;
+ * dark keeps 1, which skips this code). Only the WebGL renderer is patched: a terminal on the DOM
+ * fallback keeps stock xterm's handling of dim text.
+ */
+const XTERM_WEBGL_CONTRAST_PATCHES = [
+  // Hold dim (SGR 2) text to the ratio as drawn. Stock xterm checks the undimmed color against half
+  // the ratio and then draws it at 50% opacity, so dim text on white ends up near 2:1. Here the
+  // check blends the color 50% over the background first, the way it is drawn, against 1.4 times
+  // the full ratio (dim text is small secondary text); colors that fail are drawn opaque
+  // at that ratio, which still keeps them lighter than normal text.
+  {
+    find: "I=this._resolveForegroundRgba(o,r,a,l),L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio/(u?2:1))",
+    replace:
+      "I=this._resolveForegroundRgba(o,r,a,l);u&&(I=((f>>>24)+(I>>>24)>>1<<24|((f>>16&255)+(I>>16&255)>>1)<<16|((f>>8&255)+(I>>8&255)>>1)<<8|255)>>>0);let L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio*(u?1.4:1))",
+  },
+  // When a color can't reach the ratio in its own direction (black text on a dark red swatch can't
+  // get dark enough), stock xterm flips it only as far as the ratio, leaving a mid grey; flip it
+  // all the way to white (or black) instead, so the text stays crisp.
+  { find: "if(L<l){let M=n(r,a,l),q=", replace: "if(L<l){let M=n(r,a,21),q=" },
+  { find: "if(f<l){let I=t(r,a,l),L=", replace: "if(f<l){let I=t(r,a,21),L=" },
+];
+
 function xtermWebglPixelGrid(): Plugin {
   let isBuild = false;
   let patched = false;
@@ -50,7 +73,10 @@ function xtermWebglPixelGrid(): Plugin {
     transform(code, id) {
       if (!id.includes(XTERM_WEBGL_MODULE)) return null;
       let source = code;
-      for (const { find, replace } of XTERM_WEBGL_PIXEL_GRID_PATCHES) {
+      for (const { find, replace } of [
+        ...XTERM_WEBGL_PIXEL_GRID_PATCHES,
+        ...XTERM_WEBGL_CONTRAST_PATCHES,
+      ]) {
         if (source.split(find).length !== 2) {
           throw new Error(`xterm-webgl-pixel-grid: expected one match in ${id} for: ${find}`);
         }

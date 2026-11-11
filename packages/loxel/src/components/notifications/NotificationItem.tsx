@@ -8,8 +8,9 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 
 const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
   low: "bg-muted-foreground/40",
-  normal: "bg-blue-500",
-  high: "bg-orange-500",
+  // Light takes the accent blue and a deeper amber, which sit calmer on white
+  normal: "bg-blue-500 not-dark:bg-button-primary",
+  high: "bg-orange-500 not-dark:bg-amber-600",
   critical: "bg-red-500",
 };
 
@@ -42,18 +43,21 @@ export function NotificationItem({
     >
       {/* Urgency bar */}
       <div
-        className={cn("mt-1 h-4 w-0.5 shrink-0 rounded-full", URGENCY_COLORS[notification.urgency])}
+        className={cn(
+          "mt-1 h-4 w-0.5 shrink-0 rounded-full not-dark:my-0.5 not-dark:h-auto not-dark:w-[3px]",
+          URGENCY_COLORS[notification.urgency],
+        )}
       />
 
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="text-foreground truncate text-xs font-medium">{title}</div>
         {notification.body && (
-          <div className="text-muted-foreground line-clamp-2 text-[11px] leading-tight">
+          <div className="text-muted-foreground not-dark:text-foreground/85 line-clamp-2 text-[11px] leading-tight">
             {notification.body}
           </div>
         )}
-        <div className="text-muted-foreground mt-0.5 text-[10px]">
+        <div className="text-muted-foreground mt-0.5 text-[10px] not-dark:text-[11px]">
           {sourceLabel(notification)} &middot; {dayjs(notification.timestamp).fromNow()}
         </div>
       </div>

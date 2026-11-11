@@ -1,9 +1,20 @@
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
-import { EmptyValue } from "../field-ui.tsx";
 import { registerField } from "../registry.ts";
 
 export function BooleanView({ value }: FieldViewProps<boolean>) {
-  return value ? <span aria-label="checked">✓</span> : <EmptyValue />;
+  // Light: heavier marks so true and false read at a glance.
+  if (value) {
+    return (
+      <span aria-label="checked" className="font-semibold dark:font-normal">
+        ✓
+      </span>
+    );
+  }
+  return (
+    <span className="text-foreground/70 dark:text-muted-foreground font-semibold dark:font-normal">
+      -
+    </span>
+  );
 }
 
 export function BooleanCheckbox({ value, onChange, disabled }: FieldEditProps<boolean>) {

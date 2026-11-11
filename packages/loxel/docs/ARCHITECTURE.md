@@ -22,7 +22,7 @@ All code lives under one `src/` tree with one [tsconfig.json](../tsconfig.json) 
 | [src/lib/](../src/lib/)               | Helpers and some shared models, mostly non-React: LSP clients, Monaco setup, themes, three-way merge, content anchors, the frontend logger and perf monitor.                                                                                                                       |
 | `src/` root                           | Entry points (`main.tsx`, `App.tsx`, `cli.ts`), `query-client.ts`, ambient `.d.ts` files, and a few modules used by several processes (`open-request.ts`, `cli-args.ts`, `coding-agent-env.ts`, `url-utils.ts`, `fs-utils.ts`).                                                    |
 | [scripts/](../scripts/)               | Build-time scripts: app packaging (`build-app.ts`), building and fetching the patched Electron ([PATCHED_ELECTRON.md](PATCHED_ELECTRON.md)), bundling or downloading language-server binaries, copying the TypeScript 7 binary.                                                    |
-| [e2e/](../e2e/)                       | Playwright suite, currently specs that capture app states. See [Testing](#testing).                                                                                                                                                                                                |
+| [e2e/](../e2e/)                       | Playwright suite, currently specs that capture app states, and the dev-only theme screenshot harness. See [Testing](#testing).                                                                                                                                                     |
 
 File naming conventions (hook file casing, kebab-case versus PascalCase in `components/ui/`, `*-model.ts` modules) are not uniformly applied, so follow the surrounding folder rather than inferring a rule from one file.
 
@@ -128,6 +128,7 @@ Services by scope:
 - **`*.dom.test.tsx`** marks tests that render React with Testing Library (keybindings, find bar, tree, sidebar, menus, panels). It is a naming convention only: the preloads apply to every test.
 - **Server tests** use temporary directories and real Git repos ([git-commands/test-utils.ts](../src/server/git-commands/test-utils.ts)); route tests call `handleRequest` with a fake `RouteContext` (`routes.*.test.ts`).
 - **E2E** ([e2e/](../e2e/)): `pnpm run e2e` runs Playwright with [global-setup.ts](../e2e/global-setup.ts), which builds the renderer with `VITE_SCREENSHOT=1`, starts the server from source on a free port in 17434 to 17534 with a throwaway `LOXEL_STATE_DIR`, and waits for `/api/version`. The current specs in `e2e/screenshots/` capture app states into `e2e/test-results/screenshots` and run with one worker against the shared server. The site's screenshots are staged separately, in demo mode ([ELECTRON.md](ELECTRON.md#demo-mode)).
+- **Theme screenshots** ([e2e/theme/](../e2e/theme/)): a dev-only harness, never run in CI, that shoots panels in light and dark against a throwaway dev stack (`stack.sh`, which refuses to start while the dev ports are taken), one script per panel in `panels/`. `rate.ts` sends a screenshot to external LLM CLIs (`claude`, `codex`) for scoring.
 
 ## Internal docs
 

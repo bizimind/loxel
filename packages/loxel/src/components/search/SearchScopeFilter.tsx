@@ -411,7 +411,7 @@ export function SearchScopeFilter({
       {scopeFilterOpen && (
         <div
           ref={panelRef}
-          className="bg-popover border-border absolute top-full right-1 left-1 z-50 mt-1 flex flex-col rounded-lg border shadow-[0_0px_0px_1px_rgba(255,255,255,.15),0_6px_16px_0px_rgba(0,0,0,.5)]"
+          className="bg-popover border-border absolute top-full right-1 left-1 z-50 mt-1 flex flex-col rounded-lg border shadow-(--shadow-popover)"
           onKeyDown={handlePanelKeyDown}
         >
           {/* Filter input */}
@@ -461,7 +461,7 @@ export function SearchScopeFilter({
                           {item.detail}
                         </span>
                       )}
-                      {isSelected && <CheckIcon className="text-primary size-3 shrink-0" />}
+                      {isSelected && <CheckIcon className="text-link size-3 shrink-0" />}
                     </button>
                   );
                 })}

@@ -157,7 +157,12 @@ export function CenterWatermark(_props: IWatermarkPanelProps) {
   return (
     <div className="bg-editor-surface flex h-full items-center justify-center">
       <div className="flex items-center gap-10">
-        <img src="/watermark.svg" alt="" className="h-20 w-20 select-none" draggable={false} />
+        <img
+          src="/watermark.svg"
+          alt=""
+          className="h-20 w-20 opacity-85 invert select-none dark:opacity-100 dark:invert-0"
+          draggable={false}
+        />
 
         <div className="flex flex-col gap-1.5">
           {QUICKSTART_PANELS.map((def) => (
@@ -197,7 +202,10 @@ function QuickAction({
       {icon}
       <span className="flex-1 text-left">{label}</span>
       {binding && (
-        <KeyBindingDisplay binding={binding} className="text-muted-foreground/60 ml-4 text-xs" />
+        <KeyBindingDisplay
+          binding={binding}
+          className="text-muted-foreground dark:text-muted-foreground/60 ml-4 text-xs"
+        />
       )}
     </button>
   );

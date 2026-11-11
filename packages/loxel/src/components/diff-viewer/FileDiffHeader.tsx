@@ -18,7 +18,7 @@ export function FileDiffHeader({ file, title }: { file: FileDiff; title?: ReactN
     <div className="bg-muted/50 border-border sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs">
       <FileTypeIcon filename={path.split("/").pop() ?? ""} className="size-3.5" />
       <span className="text-foreground min-w-0 truncate font-medium">{title ?? path}</span>
-      <span className="text-muted-foreground ml-auto flex gap-2 text-[10px]">
+      <span className="text-muted-foreground ml-auto flex gap-2 text-xs font-medium dark:text-[10px] dark:font-normal">
         {file.additions > 0 && <span className="text-diff-add-text">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-diff-del-text">-{file.deletions}</span>}
       </span>

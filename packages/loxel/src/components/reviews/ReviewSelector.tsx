@@ -123,7 +123,7 @@ export function ReviewSelector({ defaultContext, defaultName }: ReviewSelectorPr
         className={cn(
           "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors",
           selectedCount > 0
-            ? "bg-comment-bg text-comment-marker hover:bg-comment-bg/80"
+            ? "bg-comment-bg text-comment-marker hover:bg-comment-bg/80 font-medium dark:font-normal"
             : "text-muted-foreground hover:bg-muted hover:text-foreground",
         )}
         onClick={() => setOpen(!open)}

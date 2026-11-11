@@ -85,12 +85,19 @@ export function StatusBar() {
               </Badge>
             )}
             {status.unstaged.length > 0 && (
-              <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+              <Badge
+                variant="secondary"
+                // Light tints the counts with the file trees' git status colors
+                className="bg-vcs-modified/10 text-vcs-modified dark:bg-secondary dark:text-secondary-foreground h-4 px-1.5 text-[10px] not-dark:font-semibold"
+              >
                 {status.unstaged.length} modified
               </Badge>
             )}
             {status.untracked.length > 0 && (
-              <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+              <Badge
+                variant="outline"
+                className="bg-vcs-untracked/10 text-vcs-untracked dark:text-foreground dark:border-border h-4 border-transparent px-1.5 text-[10px] not-dark:font-semibold dark:bg-transparent"
+              >
                 {status.untracked.length} untracked
               </Badge>
             )}

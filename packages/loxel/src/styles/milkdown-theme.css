@@ -831,3 +831,85 @@
   display: block;
   margin: 16px 0;
 }
+
+/* ── Light theme accents (dark keeps the rules above) ── */
+
+.milkdown:not(.dark) {
+  --crepe-color-inline-area: var(--secondary);
+}
+
+/* Inline code: a hairline edge so the chip holds its shape on white */
+.milkdown:not(.dark) .ProseMirror code {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.milkdown:not(.dark) .ProseMirror a {
+  color: var(--link);
+}
+
+.milkdown:not(.dark) .ProseMirror blockquote::before {
+  background: color-mix(in srgb, var(--button-primary) 75%, var(--background));
+  opacity: 1;
+}
+
+.milkdown:not(.dark) .milkdown-code-block .tools .language-button {
+  opacity: 1;
+}
+
+/* The language label and Copy button: secondary text a step darker than muted on the grey fill */
+.milkdown:not(.dark) .milkdown-code-block .tools {
+  --crepe-color-on-surface-variant: var(--foreground);
+}
+
+/* Line numbers and fold markers: secondary text, readable on the grey fill */
+.milkdown:not(.dark) .milkdown-code-block .cm-gutters .cm-gutterElement {
+  color: color-mix(in srgb, var(--foreground) 70%, var(--card));
+}
+
+/* The Copy control reads as a button: white with a hairline edge on the grey fill */
+.milkdown:not(.dark) .milkdown-code-block .tools .tools-button-group button {
+  background: var(--background);
+  box-shadow: inset 0 0 0 1px var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+/* A faint grey fill sets code blocks apart from the white page, as in JetBrains Light. */
+.milkdown:not(.dark) .milkdown-code-block,
+.milkdown:not(.dark) .milkdown-code-block .cm-editor,
+.milkdown:not(.dark) .milkdown-code-block .cm-gutters {
+  background: var(--card);
+}
+
+.milkdown:not(.dark) .milkdown-code-block {
+  border-color: #d1d3d8;
+}
+
+/* Code-block outline and table row dividers: a firmer neutral grey (no blue tint) */
+.milkdown:not(.dark) .milkdown-table-block td {
+  border-bottom-color: #d1d3d8;
+}
+
+/* The header rule clearly heavier than the row dividers */
+.milkdown:not(.dark) .milkdown-table-block th {
+  border-bottom-color: #8c90a0;
+}
+
+.milkdown:not(.dark) .milkdown-list-item-block li .label-wrapper .checked svg {
+  fill: var(--button-primary);
+}
+
+/* The frontmatter YAML editor (Monaco, above the document): light puts it on chrome grey with its
+   header, so the metadata reads apart from the white page. Monaco's theme variables are unlayered
+   rules on `.monaco-editor`, so this override has to be unlayered and more specific. */
+:root:not(.dark) .frontmatter-editor .monaco-editor {
+  --vscode-editor-background: var(--card);
+  --vscode-editorGutter-background: var(--card);
+  /* Same quiet gutter as the document's code blocks (no black active-line number) */
+  --vscode-editorLineNumber-foreground: color-mix(in srgb, var(--foreground) 70%, var(--card));
+  --vscode-editorLineNumber-activeForeground: color-mix(
+    in srgb,
+    var(--foreground) 70%,
+    var(--card)
+  );
+}

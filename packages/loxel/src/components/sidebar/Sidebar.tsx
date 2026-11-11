@@ -283,7 +283,9 @@ export function Sidebar() {
               {sidebarExpanded ? (
                 <div
                   className={cn(
-                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
+                    // Light insets the row with rounded corners like the worktree rows' highlight, taking
+                    // the inset out of its left padding (ROW_LEFT - 4px) so the icons keep their column
+                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center px-2.5 py-1.5 transition-colors outline-none not-dark:mx-1 not-dark:rounded-md not-dark:pl-1! focus-visible:ring-2 focus-visible:ring-inset",
                     isRootActive && "bg-primary",
                   )}
                   style={{ paddingLeft: `${ROW_LEFT}px` }}
@@ -333,7 +335,10 @@ export function Sidebar() {
                           {project.name}
                         </div>
                         <div
-                          className="text-muted-foreground truncate text-[10px]"
+                          className={cn(
+                            "text-muted-foreground truncate text-[10px]",
+                            isRootActive && "not-dark:text-foreground/70",
+                          )}
                           title={project.path}
                         >
                           {abbreviateHomePath(project.path, homeDir)}
@@ -371,7 +376,7 @@ export function Sidebar() {
         <div className={cn(projects.length > 0 && "mt-2")}>
           {sidebarExpanded ? (
             <div
-              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
+              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors not-dark:mx-1 not-dark:rounded-md not-dark:px-1.5"
               style={{ paddingLeft: "13px" }}
               onClick={handleAddProject}
             >

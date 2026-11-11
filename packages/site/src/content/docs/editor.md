@@ -117,7 +117,7 @@ Diff views show the code as it is, without hints.
 
 ## Fonts
 
-Choose the fonts Loxel uses in **Settings > Fonts**, from the fonts installed on your Mac. Each has a family and a size, and changes apply at once to open editors and terminals:
+Choose the fonts Loxel uses in **Settings > Appearance**, from the fonts installed on your Mac. Each has a family and a size, and changes apply at once to open editors and terminals:
 
 | Font          | Used for                                         | Default                                                                                |
 | ------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |

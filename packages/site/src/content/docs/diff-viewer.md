@@ -47,7 +47,7 @@ Within a modified line, the characters that actually changed are highlighted: re
 
 ## Syntax highlighting
 
-Code in the diff viewer is syntax-highlighted with GitHub's color themes, following your dark/light mode setting.
+Code in the diff viewer is syntax-highlighted in colors that follow the theme you choose in **Settings > Appearance > Theme**: GitHub's dark colors in the dark theme, and the code editor's own colors in the light theme.
 
 ---
 

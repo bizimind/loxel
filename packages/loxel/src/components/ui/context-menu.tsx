@@ -4,9 +4,12 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-/** Shared by the root menu and submenus so they look identical. */
+/**
+ * Shared by the root menu and submenus so they look identical. Light menus take the popover
+ * elevation (hairline edge and drop shadow) so a white menu lifts off a white editor.
+ */
 const POPUP_CLASS_NAME =
-  "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 bg-popover text-popover-foreground z-50 min-w-36 overflow-hidden rounded-md p-1 shadow-md ring-1 duration-100 outline-none";
+  "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 dark:ring-foreground/10 bg-popover text-popover-foreground z-50 min-w-36 overflow-hidden rounded-md p-1 shadow-(--shadow-popover) dark:shadow-md dark:ring-1 duration-100 outline-none";
 
 interface ContextMenuProps {
   children: React.ReactNode;
@@ -129,8 +132,10 @@ function ContextMenuLabel({
     <div
       data-slot="context-menu-label"
       data-inset={inset}
+      // Light sets the header on a chrome-grey band across the top of the menu, edged by the
+      // separator that follows it, so it reads as a title rather than an item.
       className={cn(
-        "text-muted-foreground px-2 py-1.5 text-xs font-semibold data-inset:pl-8",
+        "text-muted-foreground not-dark:bg-card px-2 py-1.5 text-xs font-semibold not-dark:-mx-1 not-dark:-mt-1 not-dark:-mb-1 not-dark:px-3 not-dark:py-2 data-inset:pl-8",
         className,
       )}
       {...props}

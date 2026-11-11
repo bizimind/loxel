@@ -30,3 +30,13 @@
 .loxel-diff-block .sticky {
   position: static;
 }
+
+/* Light marks the active segment with a hairline ring and medium weight, like the diff toolbar's. */
+:root:not(.dark) [data-diff-view-mode="unified"] .milkdown [data-diff-view-mode-option="unified"],
+:root:not(.dark) [data-diff-view-mode="split"] .milkdown [data-diff-view-mode-option="split"] {
+  font-weight: 500;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.15),
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
