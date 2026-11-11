@@ -57,11 +57,17 @@ const CODE_COLORS = {
 
 type CodeColor = keyof typeof CODE_COLORS;
 
-const codeColor = (name: CodeColor) => `var(--md-code-${name})`;
+/**
+ * The variable a token color is read from, lowercased: `style-mod` kebab-cases the property names
+ * it emits (`attributeValue` would be declared as `attribute-value`) but not the `var()` values.
+ */
+const codeVar = (name: string) => `--md-code-${name.toLowerCase()}`;
+
+const codeColor = (name: CodeColor) => `var(${codeVar(name)})`;
 
 function codeColorVars(index: 0 | 1): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(CODE_COLORS).map(([name, colors]) => [`--md-code-${name}`, colors[index]]),
+    Object.entries(CODE_COLORS).map(([name, colors]) => [codeVar(name), colors[index]]),
   );
 }
 

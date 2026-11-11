@@ -105,6 +105,17 @@ describe("code block colors", () => {
     expect(colorOf(chars, "(", 2)).toBe(colorOf(chars, "y"));
   });
 
+  test("declares every color variable the fallback palette reads", async () => {
+    // Liquid has a CodeMirror grammar but no Shiki one, so it takes the fallback palette.
+    const support = await LanguageDescription.matchLanguageName(languages, "liquid")!.load();
+    view = new EditorView({ doc: '<a href="x">', extensions: [support], parent: document.body });
+    const css = [...document.querySelectorAll("style")].map((style) => style.textContent).join("");
+    const read = new Set([...css.matchAll(/var\((--md-code-[\w-]+)\)/g)].map((m) => m[1]));
+    const declared = new Set([...css.matchAll(/(--md-code-[\w-]+)\s*:/g)].map((m) => m[1]));
+    expect(read.size).toBeGreaterThan(0);
+    expect([...read].filter((name) => !declared.has(name))).toEqual([]);
+  });
+
   test("marks a closing bracket with no opener", async () => {
     const chars = await colors("typescript", "a);");
     expect(colorOf(chars, ")")).toBe("rgba(255, 18, 18, 0.8)");
