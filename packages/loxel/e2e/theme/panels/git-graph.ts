@@ -24,18 +24,6 @@ const shot: PanelShot = {
     // The bottom zone opens short; drag the sash above it up so the graph has room.
     const box = await gitGroup.first().boundingBox();
     if (box) await drag(page, [box.x + box.width / 2, box.y - 1], [box.x + box.width / 2, 520]);
-    // The branches column inside the Git panel starts at zero width when the panel first opens;
-    // hiding and showing it again restores its default width (and leaves the setting as it was).
-    // The zero-width Hide button can't take a pointer click, so dispatch one.
-    await page.locator('[title="Hide branches"]').first().dispatchEvent("click");
-    await page.locator('[title="Show branches"]').first().dispatchEvent("click");
-    await page.locator('[title="Hide branches"]').first().waitFor({ state: "attached" });
-    // It comes back at its collapsed width; drag its sash out to a readable width.
-    const sash = await gitGroup.first().locator(".dv-sash").first().boundingBox();
-    if (sash) {
-      const y = sash.y + sash.height / 2;
-      await drag(page, [sash.x + sash.width / 2, y], [330, y]);
-    }
     await page.locator('[title="Hide branches"]').first().waitFor({ state: "visible" });
     await page.getByText("feat(search): substring product search").first().click();
     await ctx.settle();
