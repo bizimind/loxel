@@ -22,7 +22,8 @@ export function DiffToolbar({ fileNavigation }: { fileNavigation?: DiffFileNavig
   const setDiffViewMode = useUIStore((s) => s.setDiffViewMode);
 
   return (
-    <div className="border-border bg-muted/30 flex items-center gap-1 border-b px-2 py-1">
+    // Light sets the toolbar in the UI font like the rest of the chrome; dark keeps the diff's mono.
+    <div className="border-border bg-muted/30 flex items-center gap-1 border-b px-2 py-1 font-sans dark:font-mono">
       {fileNavigation && (
         <>
           <Button
@@ -51,7 +52,7 @@ export function DiffToolbar({ fileNavigation }: { fileNavigation?: DiffFileNavig
         size="icon-xs"
         title="Previous change (coming soon)"
         disabled
-        className="text-muted-foreground/50"
+        className="text-muted-foreground dark:text-muted-foreground/50"
       >
         <ArrowUpIcon className="size-3.5" />
       </Button>
@@ -60,13 +61,13 @@ export function DiffToolbar({ fileNavigation }: { fileNavigation?: DiffFileNavig
         size="icon-xs"
         title="Next change (coming soon)"
         disabled
-        className="text-muted-foreground/50"
+        className="text-muted-foreground dark:text-muted-foreground/50"
       >
         <ArrowDownIcon className="size-3.5" />
       </Button>
       {/* A file kept open after leaving the diff has no place in it. */}
       {fileNavigation && fileNavigation.index >= 0 && (
-        <span className="text-muted-foreground ml-2 text-[10px]">
+        <span className="text-foreground/70 dark:text-muted-foreground ml-2 text-[11px] dark:text-[10px]">
           File {fileNavigation.index + 1} of {fileNavigation.count}
         </span>
       )}
@@ -96,7 +97,7 @@ export function DiffViewModeToggle({
   onChange?: (mode: DiffViewMode) => void;
 }) {
   return (
-    <div className="bg-muted flex h-6 items-center rounded-md p-0.5 text-[10px]">
+    <div className="bg-secondary dark:bg-muted flex h-6 items-center rounded-md p-0.5 text-[11px] ring-1 ring-black/10 ring-inset dark:text-[10px] dark:ring-0">
       {VIEW_MODES.map(({ mode, label }) => (
         <button
           key={mode}
@@ -105,8 +106,8 @@ export function DiffViewModeToggle({
           className={cn(
             "rounded px-2 py-0.5 transition-colors",
             viewMode === mode
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
+              ? "bg-background text-foreground font-medium shadow-sm ring-1 ring-black/15 dark:font-normal dark:ring-0"
+              : "text-foreground/80 dark:text-muted-foreground hover:text-foreground",
           )}
           onClick={onChange && (() => onChange(mode))}
         >

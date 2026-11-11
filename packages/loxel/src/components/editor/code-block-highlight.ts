@@ -15,10 +15,11 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { languages as codeMirrorLanguages } from "@codemirror/language-data";
+import type { Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
-  type EditorView,
+  EditorView,
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
@@ -28,39 +29,78 @@ import { type Highlighter, bundledLanguagesInfo } from "shiki";
 import { frontendLog } from "@/lib/frontend-logger";
 import { BUNDLED_LANGUAGES, getHighlighter } from "@/lib/highlighter";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
+import { useUIStore } from "@/store/ui";
 
 const log = frontendLog.child("ui");
 
-/** For languages Shiki doesn't load: CodeMirror's parse, in the editor theme's main colors. */
+/**
+ * Code-block token colors as [dark, light]: loxel's JetBrains dark palette, and IntelliJ Light to
+ * match the light editor theme. They reach the highlight style through CSS variables, so a code
+ * block follows the app theme without being rebuilt.
+ */
+const CODE_COLORS = {
+  keyword: ["#cf8e6d", "#1f3a93"],
+  operator: ["#cf8e6d", "#1e1f22"],
+  name: ["#bcbec4", "#1e1f22"],
+  property: ["#c77dbb", "#85358C"],
+  function: ["#56a8f5", "#156275"],
+  type: ["#2fbaa3", "#0a6b72"],
+  string: ["#6aab73", "#1f7a2b"],
+  number: ["#2aacb8", "#a85400"],
+  comment: ["#7a7e85", "#747882"],
+  meta: ["#bbb529", "#9e880d"],
+  tag: ["#e8bf6a", "#1f3a93"],
+  attribute: ["#bababa", "#174ad4"],
+  attributeValue: ["#6a8759", "#1f7a2b"],
+  link: ["#56a8f5", "#2a5dd8"],
+} satisfies Record<string, [dark: string, light: string]>;
+
+type CodeColor = keyof typeof CODE_COLORS;
+
+const codeColor = (name: CodeColor) => `var(--md-code-${name})`;
+
+function codeColorVars(index: 0 | 1): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(CODE_COLORS).map(([name, colors]) => [`--md-code-${name}`, colors[index]]),
+  );
+}
+
+/** CodeMirror theme for code blocks: the token colors of the light root, or of a `.dark` one. */
+const codeColorTheme = EditorView.theme({ "&": codeColorVars(1), ".dark &": codeColorVars(0) });
+
+/** For languages Shiki doesn't load: CodeMirror's parse, in the colors above. */
 const FALLBACK_HIGHLIGHT = HighlightStyle.define([
-  { tag: tags.keyword, color: "#cf8e6d" },
-  { tag: tags.operator, color: "#cf8e6d" },
-  { tag: tags.name, color: "#bcbec4" },
-  { tag: tags.variableName, color: "#bcbec4" },
-  { tag: tags.propertyName, color: "#c77dbb" },
-  { tag: tags.function(tags.variableName), color: "#56a8f5" },
-  { tag: tags.function(tags.propertyName), color: "#56a8f5" },
-  { tag: tags.definition(tags.variableName), color: "#bcbec4" },
-  { tag: tags.typeName, color: "#2fbaa3" },
-  { tag: tags.className, color: "#2fbaa3" },
-  { tag: tags.string, color: "#6aab73" },
-  { tag: tags.special(tags.string), color: "#6aab73" },
-  { tag: tags.number, color: "#2aacb8" },
-  { tag: tags.bool, color: "#cf8e6d" },
-  { tag: tags.null, color: "#cf8e6d" },
-  { tag: tags.comment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.lineComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.blockComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.meta, color: "#bbb529" },
-  { tag: tags.regexp, color: "#6aab73" },
-  { tag: tags.tagName, color: "#e8bf6a" },
-  { tag: tags.attributeName, color: "#bababa" },
-  { tag: tags.attributeValue, color: "#6a8759" },
-  { tag: tags.heading, color: "#bcbec4", fontWeight: "bold" },
-  { tag: tags.link, color: "#56a8f5", textDecoration: "underline" },
+  { tag: tags.keyword, color: codeColor("keyword") },
+  { tag: tags.operator, color: codeColor("operator") },
+  { tag: tags.name, color: codeColor("name") },
+  { tag: tags.variableName, color: codeColor("name") },
+  { tag: tags.propertyName, color: codeColor("property") },
+  { tag: tags.function(tags.variableName), color: codeColor("function") },
+  { tag: tags.function(tags.propertyName), color: codeColor("function") },
+  { tag: tags.definition(tags.variableName), color: codeColor("name") },
+  { tag: tags.typeName, color: codeColor("type") },
+  { tag: tags.className, color: codeColor("type") },
+  { tag: tags.string, color: codeColor("string") },
+  { tag: tags.special(tags.string), color: codeColor("string") },
+  { tag: tags.number, color: codeColor("number") },
+  { tag: tags.bool, color: codeColor("keyword") },
+  { tag: tags.null, color: codeColor("keyword") },
+  { tag: tags.comment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.lineComment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.blockComment, color: codeColor("comment"), fontStyle: "italic" },
+  { tag: tags.meta, color: codeColor("meta") },
+  { tag: tags.regexp, color: codeColor("string") },
+  { tag: tags.tagName, color: codeColor("tag") },
+  { tag: tags.attributeName, color: codeColor("attribute") },
+  { tag: tags.attributeValue, color: codeColor("attributeValue") },
+  { tag: tags.heading, color: codeColor("name"), fontWeight: "bold" },
+  { tag: tags.link, color: codeColor("link"), textDecoration: "underline" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
 ]);
+
+/** The fallback colors and the variables they read, for the app theme. */
+const FALLBACK_COLORS: Extension = [syntaxHighlighting(FALLBACK_HIGHLIGHT), codeColorTheme];
 
 /**
  * An active style with no rules: it keeps CodeMirror's basicSetup from painting its default colors
@@ -97,9 +137,6 @@ function shikiIdFor(language: LanguageDescription): string | undefined {
   }
   return undefined;
 }
-
-/** A CodeMirror extension, as `LanguageSupport` takes them (without importing `@codemirror/state`). */
-type Extension = NonNullable<ConstructorParameters<typeof LanguageSupport>[1]>;
 
 /** Shiki's `FontStyle` bits. */
 const ITALIC = 1;
@@ -189,7 +226,7 @@ function isTextToken(highlighter: Highlighter, themeName: string, color: string,
 }
 
 function shikiDecorations(highlighter: Highlighter, lang: string, text: string): DecorationSet {
-  const themeName = getMonacoThemeName(document.documentElement.classList.contains("dark"));
+  const themeName = getMonacoThemeName(useUIStore.getState().darkMode);
   const theme = highlighter.getTheme(themeName);
   const brackets = theme.type === "light" ? BRACKET_COLORS.light : BRACKET_COLORS.dark;
   const lines = highlighter.codeToTokensBase(text, {
@@ -240,6 +277,10 @@ function shikiHighlight(lang: string): Extension {
       decorations: DecorationSet = Decoration.none;
       private destroyed = false;
       private timer: ReturnType<typeof setTimeout> | undefined;
+      /** Recolors the block for the new theme when the app theme changes. */
+      private readonly unsubscribe = useUIStore.subscribe((state, prev) => {
+        if (state.darkMode !== prev.darkMode) this.repaint();
+      });
 
       constructor(private readonly view: EditorView) {
         if (loadedHighlighter) {
@@ -279,6 +320,7 @@ function shikiHighlight(lang: string): Extension {
       destroy() {
         this.destroyed = true;
         clearTimeout(this.timer);
+        this.unsubscribe();
       }
     },
     { decorations: (value) => value.decorations },
@@ -296,7 +338,7 @@ function withShikiColors(language: LanguageDescription): LanguageDescription {
     filename: language.filename,
     load: async () => {
       const support = await language.load();
-      const colors = shikiId ? shikiHighlight(shikiId) : syntaxHighlighting(FALLBACK_HIGHLIGHT);
+      const colors = shikiId ? shikiHighlight(shikiId) : FALLBACK_COLORS;
       return new LanguageSupport(support.language, [support.support, colors]);
     },
   });

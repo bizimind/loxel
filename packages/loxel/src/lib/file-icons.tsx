@@ -3,6 +3,8 @@
  * Derived from vscode-jetbrains-icon-theme (theme-dark.json).
  */
 
+import { cn } from "@/lib/utils";
+
 /** Exact filename to SVG icon filename */
 const FILE_NAME_MAP: Record<string, string> = {
   dune: "dune.svg",
@@ -432,5 +434,22 @@ export function FileTypeIcon({
   className?: string;
 }) {
   const src = isFolder ? getFolderIconPath(filename) : getFileIconPath(filename);
-  return <img src={src} alt="" className={className} />;
+  // The fallback file icon is a light grey drawn for dark backgrounds; light mode darkens it to a
+  // mid grey so unknown file types stay visible next to the colored icons.
+  const fallback = src === `./icons/${DEFAULT_FILE_ICON}`;
+  // Folder icons are dark fills with light outlines; light mode inverts their lightness (keeping
+  // hues) into light fills with dark outlines, the way the light IDE theme draws them. The other
+  // icons are tuned for dark backgrounds too; light mode deepens their pale tints a little.
+  return (
+    <img
+      src={src}
+      alt=""
+      className={cn(
+        fallback && "not-dark:brightness-45",
+        isFolder && "not-dark:hue-rotate-180 not-dark:invert",
+        !isFolder && !fallback && "not-dark:brightness-85 not-dark:saturate-130",
+        className,
+      )}
+    />
+  );
 }

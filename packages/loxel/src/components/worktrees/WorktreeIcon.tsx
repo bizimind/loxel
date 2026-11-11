@@ -41,7 +41,8 @@ export function WorktreeIcon({ name, size, active }: WorktreeIconProps) {
       className={cn(
         "corner-superellipse shrink-0 rounded-2xl",
         sizeClasses[size],
-        active && "shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
+        active &&
+          "shadow-[0_0_0_2px_white,0_0_0_4px_var(--ring)] dark:shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
       )}
       style={{ backgroundColor: color.bg }}
     >

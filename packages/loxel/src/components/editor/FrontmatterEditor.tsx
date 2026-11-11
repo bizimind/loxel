@@ -222,8 +222,12 @@ export function FrontmatterEditor({
   }
 
   return (
-    <div className="border-border border-b">
-      <div className="flex items-center gap-1 px-2 py-1">
+    <div className="border-border not-dark:border-input border-b">
+      {/* Light: the whole block (header and YAML editor) sits on chrome grey, like the code blocks
+          in the document, so it reads as metadata apart from the white page. */}
+      <div
+        className={`not-dark:bg-card flex items-center gap-1 px-2 py-1 ${collapsed ? "" : "not-dark:border-border not-dark:border-b"}`}
+      >
         <button
           onClick={toggleCollapse}
           className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs font-medium"
@@ -241,14 +245,14 @@ export function FrontmatterEditor({
       </div>
       {!collapsed && (
         <>
-          <div ref={containerRef} style={{ height }} />
+          <div ref={containerRef} style={{ height }} className="frontmatter-editor" />
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div
             onMouseDown={handleResizeStart}
             className="group/resize relative h-0 shrink-0 cursor-row-resize"
           >
             {/* Visual line: 1px */}
-            <div className="bg-border group-hover/resize:bg-primary/50 absolute inset-x-0 top-0 h-px transition-colors" />
+            <div className="bg-border group-hover/resize:bg-primary/50 not-dark:bg-input not-dark:group-hover/resize:bg-primary/50 absolute inset-x-0 top-0 h-px transition-colors" />
             {/* Hit target: 3px centered on the visual line */}
             <div className="absolute inset-x-0 -top-[1px] h-[3px]" />
           </div>

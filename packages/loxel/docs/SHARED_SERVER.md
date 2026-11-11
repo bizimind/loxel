@@ -15,7 +15,7 @@ Running one server instead of one per window removes a whole class of cross-proc
 
 ## One app process
 
-A packaged app takes Electron's single-instance lock (`src/electron/main.ts`). A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev builds take no lock: they have the installed app's name and data directory, so a lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a rebuilt Electron before the old one has exited. A second dev app finds the first one's app-owned server on the dev port and fails to start once the 15-second wait runs out.
+A packaged app takes Electron's single-instance lock (`src/electron/main.ts`). A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev builds take no lock, because vite-plugin-electron starts a rebuilt Electron before the old one has exited. They keep their own Electron data directory (the app's with a `-dev` suffix), so a dev app's browser panels never share a profile with the installed app's. A second dev app finds the first one's app-owned server on the dev port and fails to start once the 15-second wait runs out.
 
 ## Starting and restarting the server
 

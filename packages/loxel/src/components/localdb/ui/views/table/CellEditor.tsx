@@ -39,7 +39,7 @@ export function CellEditor({
     const EditComponent = registered.Edit;
     return (
       <div
-        className="outline-primary rounded-sm outline-1"
+        className="outline-ring dark:outline-primary rounded-md outline-1 -outline-offset-1 dark:rounded-sm dark:outline-offset-0"
         onKeyDown={(e) => {
           if (e.key === "Enter" && def.kind !== "longtext") {
             e.preventDefault();

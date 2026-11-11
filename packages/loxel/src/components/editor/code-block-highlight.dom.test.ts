@@ -4,6 +4,7 @@ import { LanguageDescription } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 
 import { getHighlighter } from "@/lib/highlighter";
+import { useUIStore } from "@/store/ui";
 
 import { codeBlockLanguages } from "./code-block-highlight";
 
@@ -61,6 +62,22 @@ describe("code block colors", () => {
       expect(keyword()?.style.color).toBeTruthy();
     } finally {
       jest.useRealTimers();
+    }
+  });
+
+  test("recolors when the app theme changes", async () => {
+    const initial = useUIStore.getState().darkMode;
+    try {
+      useUIStore.setState({ darkMode: true });
+      const dark = colorOf(await colors("typescript", "const a = 1;"), "c");
+      useUIStore.setState({ darkMode: false });
+      const keyword = [...view!.contentDOM.querySelectorAll("span")].find(
+        (span) => span.textContent === "const",
+      );
+      expect(keyword?.style.color).toBeTruthy();
+      expect(keyword?.style.color).not.toBe(dark);
+    } finally {
+      useUIStore.setState({ darkMode: initial });
     }
   });
 

@@ -114,7 +114,7 @@ The file the diff viewer shows is `selectedDiffFile` in [worktree-ui.ts](../src/
 
 ### Highlighting
 
-[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) renders the true side-by-side view ([GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx) over [SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx)) as two Monaco editors over full file contents when in split mode with a commit or worktree context, so highlighting there is Monaco's (see [EDITOR.md](EDITOR.md)). Otherwise it renders hunks only ([HunkBasedDiffView.tsx](../src/components/diff-viewer/HunkBasedDiffView.tsx)), highlighted with Shiki by [useSyntaxHighlight](../src/hooks/useSyntaxHighlight.ts) through `highlightCode` in [highlighter.ts](../src/lib/highlighter.ts), using `github-dark` or `github-light` according to `darkMode`.
+[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) renders the true side-by-side view ([GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx) over [SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx)) as two Monaco editors over full file contents when in split mode with a commit or worktree context, so highlighting there is Monaco's (see [EDITOR.md](EDITOR.md)). Otherwise it renders hunks only ([HunkBasedDiffView.tsx](../src/components/diff-viewer/HunkBasedDiffView.tsx)), highlighted with Shiki by [useSyntaxHighlight](../src/hooks/useSyntaxHighlight.ts) through `highlightCode` in [highlighter.ts](../src/lib/highlighter.ts), using the theme `readOnlyCodeTheme(darkMode)` picks (`github-dark`, or the editor's `loxel-light`).
 
 ### Collapsed regions
 

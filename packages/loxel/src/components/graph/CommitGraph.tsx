@@ -210,7 +210,7 @@ function CommitRow({
     <div
       className={cn(
         "absolute right-0 left-0 flex h-8 cursor-pointer items-center text-xs transition-colors duration-100",
-        selected ? "bg-primary" : "hover:bg-primary/50",
+        selected ? "bg-primary" : "hover:bg-muted/60 dark:hover:bg-primary/50",
       )}
       style={{ top: y - 16 }}
       onClick={onClick}
@@ -297,7 +297,8 @@ function CommitRow({
             style={{ width: cell.column.getSize() }}
             className={cn(
               "text-muted-foreground shrink-0 px-1.5",
-              cell.column.id === "hash" && "font-mono",
+              cell.column.id === "hash" &&
+                "text-foreground/75 dark:text-muted-foreground font-mono",
               cell.column.id === "author" && "truncate",
               cell.column.id === "date" && "text-right",
               isDragging && "opacity-50",

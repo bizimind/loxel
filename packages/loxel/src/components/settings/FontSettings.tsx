@@ -18,16 +18,10 @@ import { useSettingsStore } from "@/store/settings-store";
 
 import { FontPicker } from "./FontPicker";
 
-export function FontsSection() {
+/** The code, terminal and markdown font rows of Settings > Appearance. */
+export function FontSettings() {
   return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-foreground text-sm font-medium">Fonts</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          Use fonts installed on this computer. Settings keep only the font&apos;s name: where it
-          isn&apos;t installed, Loxel shows its bundled font instead.
-        </p>
-      </div>
+    <>
       <FontRow
         kind="code"
         label="Code Font"
@@ -39,7 +33,7 @@ export function FontsSection() {
         description="Follows the code font until set."
       />
       <FontRow kind="prose" label="Markdown Font" description="Markdown text and headings." />
-    </div>
+    </>
   );
 }
 
@@ -79,7 +73,7 @@ function FontRow({
   return (
     <div className="space-y-1.5">
       <label className="text-muted-foreground text-xs">{label}</label>
-      <p className="text-muted-foreground text-[10px]">{description}</p>
+      <p className="text-muted-foreground text-[10px] not-dark:text-[12px]">{description}</p>
       <div className="flex items-center gap-2">
         <button
           type="button"

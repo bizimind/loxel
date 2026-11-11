@@ -3,7 +3,8 @@
  * Accepts a filePath and optional callbacks.
  * Persists content to disk via autosave with conflict detection.
  */
-import { EditorView } from "@codemirror/view";
+import { Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { Crepe } from "@milkdown/crepe";
 import {
   commandsCtx,
@@ -202,8 +203,43 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
   return serializeBody(crepe);
 }
 
-/** CodeMirror theme matching loxel's JetBrains dark palette. */
-const codeTheme = EditorView.theme({}, { dark: true });
+/** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
+const darkThemeCompartment = new Compartment();
+
+/**
+ * Keeps a code block's `EditorView.darkTheme` (CodeMirror's own dark or light defaults, such as
+ * the cursor and selection) on the app theme: when the theme changes, and once at creation, since
+ * a block added after a change starts from the value the editor was created with.
+ */
+const followDarkMode = ViewPlugin.define((view) => {
+  let destroyed = false;
+  const apply = (darkMode: boolean) => {
+    if (destroyed || view.state.facet(EditorView.darkTheme) === darkMode) return;
+    view.dispatch({ effects: darkThemeCompartment.reconfigure(EditorView.darkTheme.of(darkMode)) });
+  };
+  // A view can't be updated while it is being constructed.
+  queueMicrotask(() => apply(useUIStore.getState().darkMode));
+  const unsubscribe = useUIStore.subscribe((state, prev) => {
+    if (state.darkMode !== prev.darkMode) apply(state.darkMode);
+  });
+  return {
+    destroy: () => {
+      destroyed = true;
+      unsubscribe();
+    },
+  };
+});
+
+/**
+ * Code-block theme: CodeMirror's own defaults for the app theme. Token colors come with each
+ * block's language (code-block-highlight.ts).
+ */
+function codeTheme() {
+  return [
+    darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
+    followDarkMode,
+  ];
+}
 
 const CODE_BLOCK_LANGUAGES = codeBlockLanguages();
 
@@ -379,7 +415,7 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: codeTheme,
+          theme: codeTheme(),
           languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
         },
@@ -898,25 +934,29 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
-      <div
-        ref={containerRef}
-        key={crepeKey}
-        className="flex-1 overflow-hidden"
-        data-diff-view-mode={diffViewMode}
-        onClick={handleContainerClick}
-      />
-      <button
-        onClick={handleCopy}
-        title="Copy markdown"
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity group-hover/editor:opacity-100"
-      >
-        {copied ? (
-          <CheckIcon className="size-3.5 text-green-500" />
-        ) : (
-          <ClipboardIcon className="size-3.5" />
-        )}
-      </button>
+      {/* The copy button floats over the document body, below the banners and the frontmatter
+          header, so it never covers their controls. */}
+      <div className="relative min-h-0 flex-1">
+        {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+        <div
+          ref={containerRef}
+          key={crepeKey}
+          className="h-full overflow-hidden"
+          data-diff-view-mode={diffViewMode}
+          onClick={handleContainerClick}
+        />
+        <button
+          onClick={handleCopy}
+          title="Copy markdown"
+          className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted not-dark:bg-background not-dark:border-input not-dark:text-foreground/75 not-dark:hover:bg-muted not-dark:hover:text-foreground absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity not-dark:shadow-sm group-hover/editor:opacity-100"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-green-500" />
+          ) : (
+            <ClipboardIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

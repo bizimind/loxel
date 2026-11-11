@@ -44,6 +44,7 @@ import {
 } from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
 import { JavaScriptDialog } from "./JavaScriptDialog";
+import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
 import { webSearchUrl } from "./web-search";
 
@@ -431,7 +432,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             href={initialUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary text-sm underline"
+            className="text-link text-sm underline"
           >
             Open in browser
           </a>
@@ -518,6 +519,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             onReturnFocus={returnFocusToPage}
           />
         )}
+        <PasskeyQrOverlay webContentsId={webContentsId} />
       </div>
       {contextMenu && (
         <BrowserContextMenu

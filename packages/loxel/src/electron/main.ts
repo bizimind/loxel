@@ -19,7 +19,7 @@ import { z } from "zod";
 
 import { DEFAULT_SERVER_PORT } from "../app-ports";
 import { demoPort } from "../demo-instance";
-import { loadOrCreateDek } from "./dek";
+import { getDek, initDek } from "./dek";
 import {
   DEMO_INSTANCE,
   DEMO_WINDOW_SIZE,
@@ -83,7 +83,12 @@ import {
 } from "./javascript-dialogs";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
-import { configurePasskeys, installAccountChooser } from "./webauthn";
+import {
+  type BrowserPanelFrame,
+  configurePasskeys,
+  installAccountChooser,
+  installHybridQrCode,
+} from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
 import { handleWebviewWindowOpens } from "./webview-new-tabs";
@@ -145,7 +150,7 @@ function startServer(): void {
   serverProcess = child;
 
   // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
-  const dekBase64 = IS_DEMO ? null : loadOrCreateDek();
+  const dekBase64 = IS_DEMO ? null : getDek();
   child.stdin.on("error", () => {});
   // Closing stdin without a key tells the server that secret storage is unavailable.
   if (dekBase64) child.stdin.write(dekBase64 + "\n");
@@ -787,6 +792,24 @@ function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
   );
 }
 
+/** The browser panel showing a frame: its webview and the window renderer hosting it. */
+function browserPanelFrame(frame: WebFrameMain): BrowserPanelFrame | null {
+  const contents = webContents.fromFrame(frame);
+  const host = contents?.hostWebContents;
+  if (!contents || !host) return null;
+  return {
+    webContentsId: contents.id,
+    send: (channel, payload) => {
+      if (!host.isDestroyed()) host.send(channel, payload);
+    },
+    isGone: () => contents.isDestroyed(),
+    onGone: (callback) => {
+      contents.once("destroyed", callback);
+      return () => contents.removeListener("destroyed", callback);
+    },
+  };
+}
+
 /** Ask which passkey to use when a site matches several. */
 async function promptForAccount(
   frame: WebFrameMain | null,
@@ -809,9 +832,11 @@ async function promptForAccount(
 
 // One Electron process per installed app: it owns the server, and Squirrel can replace only a bundle
 // no other process runs from. A second launch (`open -n`, or the binary run directly) hands over and
-// exits. Packaged builds only: dev builds have the installed app's name and data directory, so a
-// lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a
-// rebuilt Electron before the old one has exited.
+// exits. Packaged builds only: vite-plugin-electron starts a rebuilt dev Electron before the old
+// one has exited, which a lock would turn into a quit.
+// A dev run keeps its own data directory (Chromium profile and cookies): sharing the installed
+// app's while both run makes their databases lock each other and breaks sites in browser panels.
+if (IS_DEV) app.setPath("userData", `${app.getPath("userData")}-dev`);
 // A demo keeps its data directory apart, so its lock, cookies and settings don't meet the app's.
 if (IS_DEMO)
   app.setPath(
@@ -857,6 +882,8 @@ app.whenReady().then(async () => {
   if (!isPrimaryInstance) return;
   try {
     if (await offerMoveToApplications()) return;
+    // Every server spawn reads the key synchronously, so load it before the first one.
+    if (!IS_DEMO) await initDek();
     await startAppServer();
 
     // After `ready`: with a prompt reason, configureWebAuthn writes to Chromium's
@@ -869,12 +896,12 @@ app.whenReady().then(async () => {
       configureWebAuthn: (options) => app.configureWebAuthn(options),
     });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
-    installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
+    const browserSession = session.fromPartition(BROWSER_PARTITION);
+    installAccountChooser(browserSession, promptForAccount);
+    installHybridQrCode(browserSession, browserPanelFrame);
     // Installed fonts are for Loxel's own window (the font pickers), never for browser panels.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    session
-      .fromPartition(BROWSER_PARTITION)
-      .setPermissionCheckHandler(localFontsCheckHandler(() => false));
+    browserSession.setPermissionCheckHandler(localFontsCheckHandler(() => false));
 
     buildAppMenu();
     await createWindow();
