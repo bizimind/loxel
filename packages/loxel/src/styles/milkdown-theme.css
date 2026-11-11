@@ -511,6 +511,18 @@
   background: var(--crepe-color-selected) !important;
 }
 
+/* Other occurrences of the selected text (basicSetup's highlightSelectionMatches): the code
+   editor's selection highlight, a faint tint that keeps the syntax colors readable, instead of
+   CodeMirror's bright green. Monaco's dark default; the light theme's in monaco-theme.ts. */
+.milkdown .milkdown-code-block .cm-selectionMatch {
+  background-color: #add6ff26;
+}
+
+.milkdown:not(.dark) .milkdown-code-block .cm-selectionMatch {
+  background-color: #8b7be524;
+  box-shadow: inset 0 0 0 1px #8b7be599;
+}
+
 /* CodeMirror cursor color */
 .milkdown .milkdown-code-block .cm-cursor {
   border-left-color: var(--crepe-color-on-surface);
