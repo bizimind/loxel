@@ -15,6 +15,8 @@ Press `Cmd+Shift+B` to open a browser panel. Like any panel, it can go next to a
 
 A browser panel is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page, and `Cmd+Shift+R` while the tab has focus does a hard refresh, reloading the page and bypassing the cache. Clicking the title of the active browser tab returns focus to its page.
 
+Pages see the light or dark mode you choose in **Settings > Appearance > Theme**, not your Mac's: a site or dev server that follows the system appearance (`prefers-color-scheme`) shows its light colors in a light Loxel and its dark colors in a dark one. With **System**, they follow your Mac as Loxel does.
+
 ---
 
 ## Bookmarks

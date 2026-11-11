@@ -13,6 +13,11 @@ export const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 export const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 /**
+ * Renderer → main: the Theme setting (`ThemePreference`), applied as `nativeTheme.themeSource` so
+ * native UI and browser panels follow it.
+ */
+export const SET_THEME_SOURCE = "theme:set-source";
+/**
  * Renderer → main: which keystrokes to intercept in its webviews — the first keystrokes of its
  * bindings, or all of them while a chord is in progress.
  */

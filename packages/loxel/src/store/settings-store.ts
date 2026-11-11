@@ -16,6 +16,7 @@ import {
   type TerminalSchemeTheme,
 } from "@/lib/terminal-color-schemes";
 import type { ParsedTerminalScheme } from "@/lib/terminal-scheme-import";
+import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
@@ -28,10 +29,6 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
-/** Color theme choice; "system" follows the OS appearance. */
-export type ThemePreference = "dark" | "light" | "system";
-export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
-
 /**
  * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
  * (hand-edited, or from a newer version) falls back to the default, dark, and the terminal's color
@@ -39,7 +36,7 @@ export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
-  if ("theme" in valid) valid.theme = THEME_PREFERENCES.find((t) => t === valid.theme) ?? "dark";
+  if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
   const { terminal } = valid;
   if (typeof terminal === "object" && terminal !== null) {
     const stored = "colorSchemes" in terminal ? terminal.colorSchemes : undefined;

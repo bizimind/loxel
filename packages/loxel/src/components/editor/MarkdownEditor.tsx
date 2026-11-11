@@ -3,10 +3,8 @@
  * Accepts a filePath and optional callbacks.
  * Persists content to disk via autosave with conflict detection.
  */
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import { Crepe } from "@milkdown/crepe";
 import {
   commandsCtx,
@@ -59,6 +57,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
+import { codeBlockLanguages } from "./code-block-highlight";
 import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
@@ -204,41 +203,6 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
   return serializeBody(crepe);
 }
 
-/**
- * Code-block token colors as [dark, light]: loxel's JetBrains dark palette, and IntelliJ Light to
- * match the light editor theme. They reach the highlight style through CSS variables, so a code
- * block follows the app theme without being rebuilt.
- */
-const CODE_COLORS = {
-  keyword: ["#cf8e6d", "#1f3a93"],
-  operator: ["#cf8e6d", "#1e1f22"],
-  name: ["#bcbec4", "#1e1f22"],
-  property: ["#c77dbb", "#85358C"],
-  function: ["#56a8f5", "#156275"],
-  type: ["#2fbaa3", "#0a6b72"],
-  string: ["#6aab73", "#1f7a2b"],
-  number: ["#2aacb8", "#a85400"],
-  comment: ["#7a7e85", "#747882"],
-  meta: ["#bbb529", "#9e880d"],
-  tag: ["#e8bf6a", "#1f3a93"],
-  attribute: ["#bababa", "#174ad4"],
-  attributeValue: ["#6a8759", "#1f7a2b"],
-  link: ["#56a8f5", "#2a5dd8"],
-} satisfies Record<string, [dark: string, light: string]>;
-
-type CodeColor = keyof typeof CODE_COLORS;
-
-const codeColor = (name: CodeColor) => `var(--md-code-${name})`;
-
-function codeColorVars(index: 0 | 1): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(CODE_COLORS).map(([name, colors]) => [`--md-code-${name}`, colors[index]]),
-  );
-}
-
-/** CodeMirror theme for code blocks: the token colors of the light root, or of a `.dark` one. */
-const codeColorTheme = EditorView.theme({ "&": codeColorVars(1), ".dark &": codeColorVars(0) });
-
 /** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
 const darkThemeCompartment = new Compartment();
 
@@ -266,44 +230,18 @@ const followDarkMode = ViewPlugin.define((view) => {
   };
 });
 
-/** Code-block theme: token colors, and CodeMirror's own defaults for the app theme. */
+/**
+ * Code-block theme: CodeMirror's own defaults for the app theme. Token colors come with each
+ * block's language (code-block-highlight.ts).
+ */
 function codeTheme() {
   return [
-    codeColorTheme,
     darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
     followDarkMode,
   ];
 }
 
-const codeHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: codeColor("keyword") },
-  { tag: tags.operator, color: codeColor("operator") },
-  { tag: tags.name, color: codeColor("name") },
-  { tag: tags.variableName, color: codeColor("name") },
-  { tag: tags.propertyName, color: codeColor("property") },
-  { tag: tags.function(tags.variableName), color: codeColor("function") },
-  { tag: tags.function(tags.propertyName), color: codeColor("function") },
-  { tag: tags.definition(tags.variableName), color: codeColor("name") },
-  { tag: tags.typeName, color: codeColor("type") },
-  { tag: tags.className, color: codeColor("type") },
-  { tag: tags.string, color: codeColor("string") },
-  { tag: tags.special(tags.string), color: codeColor("string") },
-  { tag: tags.number, color: codeColor("number") },
-  { tag: tags.bool, color: codeColor("keyword") },
-  { tag: tags.null, color: codeColor("keyword") },
-  { tag: tags.comment, color: codeColor("comment"), fontStyle: "italic" },
-  { tag: tags.lineComment, color: codeColor("comment"), fontStyle: "italic" },
-  { tag: tags.blockComment, color: codeColor("comment"), fontStyle: "italic" },
-  { tag: tags.meta, color: codeColor("meta") },
-  { tag: tags.regexp, color: codeColor("string") },
-  { tag: tags.tagName, color: codeColor("tag") },
-  { tag: tags.attributeName, color: codeColor("attribute") },
-  { tag: tags.attributeValue, color: codeColor("attributeValue") },
-  { tag: tags.heading, color: codeColor("name"), fontWeight: "bold" },
-  { tag: tags.link, color: codeColor("link"), textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
-]);
+const CODE_BLOCK_LANGUAGES = codeBlockLanguages();
 
 /** Scroll the editor so the current cursor is roughly 1/3 from the top of the viewport. */
 function scrollCursorNearTop(view: ProseMirrorView): void {
@@ -477,7 +415,8 @@ export function MarkdownEditor({
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
         [Crepe.Feature.CodeMirror]: {
-          theme: [codeTheme(), syntaxHighlighting(codeHighlight)],
+          theme: codeTheme(),
+          languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
         },
         [Crepe.Feature.BlockEdit]: {

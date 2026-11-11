@@ -28,7 +28,9 @@ function getSettingsHydrated(): boolean {
  * Resolve the theme setting ("system" follows the OS) into the UI store's `darkMode`, the `dark`
  * class on `<html>` and its `color-scheme`, so native controls and scrollbars match. Until the
  * settings load, the page keeps the theme index.html applied from the last session's cache, which
- * this keeps current.
+ * this keeps current. In Electron the setting also goes to `nativeTheme`, for native UI, browser
+ * panels and window backgrounds. With an explicit theme that makes this page's own
+ * `prefers-color-scheme` match the setting too, which is why only "system" reads it.
  */
 export function useThemeSync(): void {
   const theme = useSettingsStore((s) => s.theme);
@@ -44,4 +46,9 @@ export function useThemeSync(): void {
     root.style.colorScheme = darkMode ? "dark" : "light";
     cacheDarkMode(darkMode);
   }, [hydrated, darkMode]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    window.electronAPI?.setThemeSource(theme);
+  }, [hydrated, theme]);
 }
