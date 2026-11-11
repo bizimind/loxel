@@ -220,7 +220,7 @@ Through the same `renderPreview` dispatch as [mermaid diagrams](#mermaid-diagram
 
 ## Other content panels
 
-- **Drawings** ([ExcalidrawEditor.tsx](../src/components/excalidraw-editor/ExcalidrawEditor.tsx)) use the same hook with JSON (de)serialization and `drawingContentCache`, but register no merge callbacks, so any external change while dirty goes straight to `diverged`. Clean-state updates compare scene versions before calling `updateScene`. Excalidraw fires empty `onChange`s during teardown, so layout code wraps `api.clear()` in `withDrawingCachePreserved`.
+- **Drawings** ([ExcalidrawEditor.tsx](../src/components/excalidraw-editor/ExcalidrawEditor.tsx)) use the same hook with JSON (de)serialization and `drawingContentCache`, but register no merge callbacks, so any external change while dirty goes straight to `diverged`. Clean-state updates compare scene versions before calling `updateScene`. The baseline for both is the version of the scene Excalidraw actually loaded, never the file's: loading and `updateScene` fill in missing fractional indices and bump those elements' versions, and that normalization alone must not mark the file dirty. Excalidraw fires empty `onChange`s during teardown, so layout code wraps `api.clear()` in `withDrawingCachePreserved`.
 - **Media** ([MediaViewerPanel.tsx](../src/components/media-viewer/MediaViewerPanel.tsx)) has no editor state. It renders `/api/media-frame` in a sandboxed iframe whose CSP blocks network access for inlined SVGs, loads other media from `/api/file-raw`, and reloads on `file_content_changed` for its path.
 - **Browser** panels ([BrowserPanel.tsx](../src/components/browser/BrowserPanel.tsx)) host an Electron `<webview>`; see [ELECTRON.md](ELECTRON.md#browser-panels).
 
