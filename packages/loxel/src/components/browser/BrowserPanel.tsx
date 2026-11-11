@@ -431,7 +431,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             href={initialUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary text-sm underline"
+            className="text-link text-sm underline"
           >
             Open in browser
           </a>

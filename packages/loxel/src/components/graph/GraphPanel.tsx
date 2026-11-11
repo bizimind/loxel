@@ -338,7 +338,7 @@ function GraphPanelHeader() {
           <DropdownMenuTrigger
             className={cn(
               "hover:bg-muted flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors",
-              searchFilters.branches.length > 0 && "bg-primary/10 text-primary",
+              searchFilters.branches.length > 0 && "bg-primary/10 text-link",
             )}
             title="Filter by branch"
           >
@@ -390,7 +390,7 @@ function GraphPanelHeader() {
           <DropdownMenuTrigger
             className={cn(
               "hover:bg-muted flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors",
-              searchFilters.users.length > 0 && "bg-primary/10 text-primary",
+              searchFilters.users.length > 0 && "bg-primary/10 text-link",
             )}
             title="Filter by author"
           >
@@ -442,7 +442,7 @@ function GraphPanelHeader() {
           <DropdownMenuTrigger
             className={cn(
               "hover:bg-muted flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors",
-              searchFilters.dateRange !== "all" && "bg-primary/10 text-primary",
+              searchFilters.dateRange !== "all" && "bg-primary/10 text-link",
             )}
             title="Filter by date"
           >

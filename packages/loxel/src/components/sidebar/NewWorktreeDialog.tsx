@@ -93,7 +93,7 @@ export function NewWorktreeDialog({
   };
 
   const fieldClass =
-    "bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-ring";
+    "bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-ring not-dark:focus:ring-3 not-dark:focus:ring-ring/20";
 
   return (
     <DialogShell open onCancel={cancel} className="w-[26rem]">
@@ -103,7 +103,7 @@ export function NewWorktreeDialog({
           submit();
         }}
       >
-        <div className="flex flex-col gap-3 px-4 pt-4 pb-2">
+        <div className="flex flex-col gap-3 px-4 pt-4 pb-2 not-dark:gap-4">
           <div>
             <h3 className="text-foreground text-sm font-medium">New worktree</h3>
             <p className="text-muted-foreground mt-1 text-xs">
@@ -120,7 +120,9 @@ export function NewWorktreeDialog({
 
           {titles && (
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-[11px]">Title</span>
+              <span className="text-muted-foreground not-dark:text-foreground/80 text-[11px] not-dark:text-[12px] not-dark:font-medium">
+                Title
+              </span>
               <input
                 autoFocus
                 value={title}
@@ -137,7 +139,9 @@ export function NewWorktreeDialog({
           )}
 
           <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground text-[11px]">Name</span>
+            <span className="text-muted-foreground not-dark:text-foreground/80 text-[11px] not-dark:text-[12px] not-dark:font-medium">
+              Name
+            </span>
             <input
               autoFocus={!titles}
               value={name}
@@ -151,7 +155,7 @@ export function NewWorktreeDialog({
               placeholder="worktree-name"
               className={`${fieldClass} font-mono`}
             />
-            <span className="text-muted-foreground text-[10px]">
+            <span className="text-muted-foreground text-[10px] not-dark:text-[11px] not-dark:leading-snug">
               {titles
                 ? "The worktree's directory and branch. Follows the title until you edit it."
                 : "The worktree's directory and branch. Enable worktree nesting to give worktrees titles."}

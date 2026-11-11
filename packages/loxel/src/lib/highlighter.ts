@@ -1,7 +1,7 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
 import { JAVA_PROPERTIES_GRAMMAR } from "./java-properties-grammar";
-import { loxelDark } from "./loxel-themes";
+import { loxelDark, loxelLight } from "./loxel-themes";
 
 // Singleton highlighter instance
 let highlighterPromise: Promise<Highlighter> | null = null;
@@ -61,7 +61,7 @@ const BUNDLED_LANGUAGES = [
 export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: [loxelDark, "github-dark"],
+      themes: [loxelDark, loxelLight, "github-dark"],
       langs: [...BUNDLED_LANGUAGES, JAVA_PROPERTIES_GRAMMAR],
     });
   }
@@ -364,6 +364,17 @@ export function detectLanguage(filePath: string): string | null {
   return EXT_TO_LANG[ext] ?? null;
 }
 
+/** Themes `highlightCode` can paint with: those `getHighlighter` loads. */
+export type CodeTheme = "github-dark" | "loxel-light";
+
+/**
+ * Theme for read-only highlighted code (diff hunks, file previews, log context). Light uses the
+ * editor's own loxel-light; dark keeps github-dark.
+ */
+export function readOnlyCodeTheme(darkMode: boolean): CodeTheme {
+  return darkMode ? "github-dark" : "loxel-light";
+}
+
 export interface HighlightedLine {
   html: string;
 }
@@ -374,7 +385,7 @@ export interface HighlightedLine {
 export async function highlightCode(
   code: string,
   language: string,
-  theme: "github-dark" | "github-light",
+  theme: CodeTheme,
 ): Promise<HighlightedLine[]> {
   const highlighter = await getHighlighter();
 

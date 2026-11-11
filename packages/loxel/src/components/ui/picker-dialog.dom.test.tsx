@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 
 import { PickerDialog, PickerMessage } from "./picker-dialog";
@@ -57,6 +57,19 @@ describe("PickerDialog", () => {
     const { onAccept, input } = setup();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAccept).toHaveBeenCalledWith("alpha");
+  });
+
+  test("the first item shows as active only while the input has focus", () => {
+    const { input, option } = setup();
+    // Focus again inside act so React applies the focus handler's state update.
+    act(() => {
+      input.blur();
+      input.focus();
+    });
+    expect(option("alpha").hasAttribute("data-active")).toBe(true);
+    expect(option("beta").hasAttribute("data-active")).toBe(false);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(option("alpha").hasAttribute("data-active")).toBe(false);
   });
 
   test("arrow keys move through the items and back to the input", () => {

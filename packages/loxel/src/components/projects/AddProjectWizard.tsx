@@ -645,7 +645,7 @@ function ImportFlow({
               Did you mean to create a new project?{" "}
               <button
                 onClick={onSwitchToNew}
-                className="text-primary cursor-pointer underline underline-offset-2"
+                className="text-link cursor-pointer underline underline-offset-2"
               >
                 Switch to New Project
               </button>
@@ -877,7 +877,7 @@ function SetupOption({
         </div>
         <span className="text-foreground text-xs font-medium">{title}</span>
         {recommended && (
-          <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">
+          <span className="bg-primary/10 text-link rounded px-1.5 py-0.5 text-[10px] font-medium">
             recommended
           </span>
         )}
@@ -890,13 +890,13 @@ function SetupOption({
 function StatusLine({ icon, text }: { icon: "success" | "error" | "info"; text: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      {icon === "success" && <GitBranchIcon className="text-primary size-3.5 shrink-0" />}
+      {icon === "success" && <GitBranchIcon className="text-link size-3.5 shrink-0" />}
       {icon === "error" && <XCircleIcon className="text-destructive size-3.5 shrink-0" />}
       {icon === "info" && <InfoIcon className="text-muted-foreground size-3.5 shrink-0" />}
       <span
         className={cn(
           "text-xs",
-          icon === "success" && "text-primary",
+          icon === "success" && "text-link",
           icon === "error" && "text-destructive",
           icon === "info" && "text-muted-foreground",
         )}
@@ -908,8 +908,8 @@ function StatusLine({ icon, text }: { icon: "success" | "error" | "info"; text: 
 }
 
 function SourceIcon({ type }: { type: DetectPathResult["type"] | undefined }) {
-  if (type === "git-url") return <GlobeIcon className="text-primary size-3.5 shrink-0" />;
+  if (type === "git-url") return <GlobeIcon className="text-link size-3.5 shrink-0" />;
   if (type === "git-repo-bare" || type === "git-repo-regular")
-    return <GitBranchIcon className="text-primary size-3.5 shrink-0" />;
+    return <GitBranchIcon className="text-link size-3.5 shrink-0" />;
   return <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />;
 }

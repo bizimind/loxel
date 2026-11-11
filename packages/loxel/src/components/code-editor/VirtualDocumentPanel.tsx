@@ -3,6 +3,7 @@ import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { EditorBanner } from "@/components/editor/EditorBanner";
 import { showToast } from "@/components/ui/toast";
 import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
@@ -113,6 +114,7 @@ export function VirtualDocumentPanel({
     let revealFrame: number | undefined;
     let editor: monacoEditor.IStandaloneCodeEditor | undefined;
     let model: monacoEditor.ITextModel | undefined;
+    let caretRow: monaco.IDisposable | undefined;
 
     connection.read(uri, tokens.token).then(
       (text) => {
@@ -122,16 +124,19 @@ export function VirtualDocumentPanel({
         model =
           monaco.editor.getModel(parsed) ??
           monaco.editor.createModel(text, connection.languageId, parsed);
+        const { darkMode } = useUIStore.getState();
         editor = monaco.editor.create(container, {
           ...CODE_EDITOR_OPTIONS,
+          ...caretOptionsFor(darkMode),
           inlayHints: inlayHintsOption(),
           ...codeFontOptions(),
           model,
-          theme: getMonacoThemeName(useUIStore.getState().darkMode),
+          theme: getMonacoThemeName(darkMode),
           readOnly: true,
           readOnlyMessage: { value: VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE },
         });
         editorRef.current = editor;
+        caretRow = trackCaretRow(editor);
         // `usePanelActivationFocus` found no editor when the panel opened.
         if (isActivatedPanel(panelApi)) editor.focus();
         // After `create`: the first editor flips the global `detectIndentation`, which resets models.
@@ -161,6 +166,7 @@ export function VirtualDocumentPanel({
       tokens.dispose();
       if (revealFrame !== undefined) cancelAnimationFrame(revealFrame);
       editorRef.current = null;
+      caretRow?.dispose();
       editor?.dispose();
       model?.dispose();
     };
@@ -173,6 +179,7 @@ export function VirtualDocumentPanel({
 
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
+    editorRef.current?.updateOptions(caretOptionsFor(darkMode));
   }, [darkMode]);
 
   return (

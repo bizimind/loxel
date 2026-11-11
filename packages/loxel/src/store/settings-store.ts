@@ -20,6 +20,20 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
+/** Color theme choice; "system" follows the OS appearance. */
+export type ThemePreference = "dark" | "light" | "system";
+export const THEME_PREFERENCES: readonly ThemePreference[] = ["dark", "light", "system"];
+
+/**
+ * A stored or synced settings slice with its `theme`, when it has one, checked: an unknown value
+ * (hand-edited, or from a newer version) falls back to the default, dark.
+ */
+export function withValidTheme<T extends object>(slice: T): T {
+  if (!("theme" in slice)) return slice;
+  const theme = THEME_PREFERENCES.find((t) => t === slice.theme) ?? "dark";
+  return { ...slice, theme };
+}
+
 export interface TerminalSettings {
   /** Maximum number of lines kept in terminal scrollback history. */
   scrollbackLines: number;
@@ -497,17 +511,19 @@ export const selectEffectiveSchemas = createBuiltinMergeSelector(
 
 type SettingsSection =
   | "general"
+  | "appearance"
   | "keybindings"
   | "layout"
   | "terminal"
   | "editor"
-  | "fonts"
   | "schemas"
   | "fileAssociations"
   | "security"
   | "worktrees";
 
 export interface SettingsState {
+  /** Color theme. Dark by default. */
+  theme: ThemePreference;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
@@ -524,6 +540,8 @@ export interface SettingsState {
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
+
+  setTheme: (theme: ThemePreference) => void;
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
@@ -632,6 +650,7 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
 /** The persisted slice of the settings store; cross-window sync applies the same slice. */
 export function persistedSettings(state: SettingsState) {
   return {
+    theme: state.theme,
     layout: state.layout,
     terminal: state.terminal,
     editor: state.editor,
@@ -650,6 +669,7 @@ export function persistedSettings(state: SettingsState) {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
+      theme: "dark",
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
@@ -665,6 +685,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       isOpen: false,
       activeSection: "general",
+
+      setTheme: (theme) => set({ theme }),
 
       // -- Terminal --
 
@@ -899,6 +921,10 @@ export const useSettingsStore = create<SettingsState>()(
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
       partialize: persistedSettings,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(typeof persisted === "object" && persisted !== null ? withValidTheme(persisted) : {}),
+      }),
       version: 17,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;

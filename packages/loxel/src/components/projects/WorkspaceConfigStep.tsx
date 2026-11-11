@@ -125,7 +125,7 @@ export function WorkspaceConfigStep({
                   key={file}
                   className="bg-muted/50 flex items-center gap-2 rounded px-2.5 py-1.5"
                 >
-                  <CheckIcon className="text-primary size-3 shrink-0" />
+                  <CheckIcon className="text-link size-3 shrink-0" />
                   <span className="text-foreground flex-1 text-xs">{file}</span>
                   <button
                     onClick={() => removeFile(file)}
@@ -186,7 +186,7 @@ export function WorkspaceConfigStep({
                   key={cmd}
                   className="bg-muted/50 flex items-center gap-2 rounded px-2.5 py-1.5"
                 >
-                  <CheckIcon className="text-primary size-3 shrink-0" />
+                  <CheckIcon className="text-link size-3 shrink-0" />
                   <span className="text-foreground flex-1 font-mono text-xs">{cmd}</span>
                   <button
                     onClick={() => removeCommand(cmd)}

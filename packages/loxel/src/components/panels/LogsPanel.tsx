@@ -23,7 +23,7 @@ import { stringify as yamlStringify } from "yaml";
 import type { LogEntry, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES } from "@/api/log-entry-model";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
-import { highlightCode } from "@/lib/highlighter";
+import { highlightCode, readOnlyCodeTheme } from "@/lib/highlighter";
 import { lazyLspClients } from "@/lib/lsp-clients";
 import { cn } from "@/lib/utils";
 import { useLogStore } from "@/store/logs";
@@ -32,10 +32,11 @@ import { useUIStore } from "@/store/ui";
 const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
-  debug: "text-muted-foreground",
-  info: "text-blue-400",
-  warn: "text-amber-400",
-  error: "text-red-400",
+  debug: "text-gray-500 dark:text-muted-foreground",
+  info: "text-link dark:text-blue-400",
+  // Light: a deep amber that holds 4.5:1 on white and on the hovered row.
+  warn: "text-[#ad4c00] dark:text-amber-400",
+  error: "text-red-600 dark:text-red-400",
 };
 
 /** The fixed categories, then the language servers that are not among them. */
@@ -77,13 +78,15 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
   }, [entry]);
 
   return (
-    <div className="group hover:bg-muted/50 relative px-3 py-0.5 font-mono text-xs leading-5">
+    <div className="group hover:bg-primary dark:hover:bg-muted/50 relative px-3 py-0.5 font-mono text-xs leading-5">
       <div className="whitespace-pre">
         {
           <button
             className={cn(
               "mr-0.5 inline-flex items-center align-baseline transition-transform select-none",
-              ctx !== null ? "text-muted-foreground hover:text-foreground" : "invisible",
+              ctx !== null
+                ? "text-foreground/70 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground"
+                : "invisible",
             )}
             onClick={ctx !== null ? () => setExpanded((v) => !v) : undefined}
           >
@@ -101,7 +104,7 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
         {ctx !== null && !expanded && (
           <>
             {" "}
-            <span className="text-muted-foreground">
+            <span className="text-foreground/80 dark:text-muted-foreground">
               {Object.entries(ctx)
                 .map(
                   ([k, v]) =>
@@ -116,7 +119,7 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
       <button
         onClick={handleCopy}
         title={copied ? "Copied" : "Copy entry as JSON"}
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground absolute top-0.5 right-1 flex size-5 items-center justify-center rounded border opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
+        className="text-foreground/70 hover:bg-background hover:border-input dark:bg-muted/80 dark:border-border dark:text-muted-foreground dark:hover:bg-muted/80 dark:hover:border-border hover:text-foreground absolute top-0.5 right-1 flex size-5 items-center justify-center rounded border border-transparent opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
       >
         {copied ? <CheckIcon className="size-3 text-green-500" /> : <CopyIcon className="size-3" />}
       </button>
@@ -127,10 +130,11 @@ function LogEntryRow({ entry }: { entry: LogEntry }) {
 function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
   const [html, setHtml] = useState<string | null>(null);
   const yaml = useMemo(() => yamlStringify(ctx, { lineWidth: 0 }).trimEnd(), [ctx]);
+  const darkMode = useUIStore((s) => s.darkMode);
 
   useEffect(() => {
     let cancelled = false;
-    highlightCode(yaml, "yaml", "github-dark")
+    highlightCode(yaml, "yaml", readOnlyCodeTheme(darkMode))
       .then((lines) => {
         if (!cancelled) setHtml(lines.map((l) => l.html).join("\n"));
       })
@@ -138,11 +142,11 @@ function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
     return () => {
       cancelled = true;
     };
-  }, [yaml]);
+  }, [yaml, darkMode]);
 
   return (
     <pre
-      className="mt-0.5 mb-1 ml-4 text-xs whitespace-pre-wrap"
+      className="bg-muted/70 border-link/60 mt-0.5 mb-1 ml-4 rounded-r border-l-2 py-0.5 pl-2 text-xs whitespace-pre-wrap dark:rounded-none dark:border-l-0 dark:bg-transparent dark:py-0 dark:pl-0"
       dangerouslySetInnerHTML={html !== null ? { __html: html } : undefined}
     >
       {html === null ? yaml : undefined}
@@ -173,7 +177,7 @@ function FilterToggle({
     >
       <span
         className={cn(
-          "size-1.5 shrink-0 rounded-full",
+          "size-[7px] shrink-0 rounded-full dark:size-1.5",
           excluded ? "bg-muted" : (color ?? "bg-current"),
         )}
       />
@@ -183,10 +187,10 @@ function FilterToggle({
 }
 
 const LEVEL_DOT_COLORS: Record<LogLevel, string> = {
-  debug: "bg-gray-400",
-  info: "bg-blue-400",
-  warn: "bg-amber-400",
-  error: "bg-red-400",
+  debug: "bg-gray-600 dark:bg-gray-400",
+  info: "bg-blue-500 dark:bg-blue-400",
+  warn: "bg-amber-500 dark:bg-amber-400",
+  error: "bg-red-500 dark:bg-red-400",
 };
 
 function FilterSidebar() {
@@ -196,7 +200,7 @@ function FilterSidebar() {
   const toggleLogCategory = useUIStore((s) => s.toggleLogCategory);
 
   return (
-    <div className="border-border flex h-full w-32 shrink-0 flex-col gap-3 overflow-y-auto border-r px-2 py-2.5">
+    <div className="border-border bg-card flex h-full w-32 shrink-0 flex-col gap-3 overflow-y-auto border-r px-2 py-2.5 dark:bg-transparent">
       <div>
         <div className="text-muted-foreground mb-1 text-[10px] font-semibold tracking-wider uppercase">
           Level
@@ -224,11 +228,14 @@ function FilterSidebar() {
               key={cat}
               label={cat}
               excluded={logExcludedCategories.has(cat)}
+              color="bg-gray-600 dark:bg-current"
               onClick={() => toggleLogCategory(cat)}
             />
           ))}
         </div>
       </div>
+      {/* Light fades the list out at the bottom edge while more categories are below it */}
+      <div className="from-card pointer-events-none sticky -bottom-2.5 -mt-3 hidden h-8 shrink-0 bg-linear-to-t not-dark:block" />
     </div>
   );
 }
@@ -406,7 +413,10 @@ export function LogsPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <DraggablePanelHeader panelId="logs" className="flex items-center gap-2">
+      <DraggablePanelHeader
+        panelId="logs"
+        className="bg-card flex items-center gap-2 dark:bg-transparent"
+      >
         <span className="text-sm font-medium">Logs</span>
         <span className="text-muted-foreground text-xs">{filteredEntries.length}</span>
 
@@ -461,7 +471,7 @@ export function LogsPanel() {
                 placeholder="Filter logs..."
                 value={logTextFilter}
                 onChange={(e) => setLogTextFilter(e.target.value)}
-                className="bg-muted/50 text-foreground placeholder:text-muted-foreground w-full rounded py-0.5 pr-6 pl-6 font-mono text-xs focus:outline-none"
+                className="bg-background text-foreground placeholder:text-muted-foreground ring-muted-foreground/75 focus:ring-ring dark:bg-muted/50 w-full rounded py-0.5 pr-6 pl-6 font-mono text-xs ring-1 ring-inset focus:outline-none dark:ring-0"
               />
               {logTextFilter.length > 0 && (
                 <button

@@ -9,6 +9,7 @@ import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 
 import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
@@ -17,7 +18,7 @@ import { isLiveEditorModel } from "./live-editor-model";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
-import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
+import { enhanceMonacoThemes, getMonacoThemeName, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
 import { installRenameSummary } from "./rename-summary";
@@ -77,11 +78,13 @@ for (const register of Object.values(
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
-// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark is
+// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark and loxel-light are
 // loaded as Shiki themes so shikiToMonaco recognizes them natively.
 void getHighlighter().then((highlighter) => {
   shikiToMonaco(highlighter, monaco);
   enhanceMonacoThemes(highlighter);
+  // shikiToMonaco activates the first loaded theme (loxel-dark); Monaco themes are global.
+  monaco.editor.setTheme(getMonacoThemeName(useUIStore.getState().darkMode));
 });
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
