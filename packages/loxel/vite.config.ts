@@ -60,10 +60,10 @@ const XTERM_WEBGL_CONTRAST_PATCHES = [
 
 /**
  * Give upright text in the glyph atlas an explicit `normal` style. The addon builds the canvas
- * font as `${italic} ${weight} ...`, which starts with a space for upright text; Chromium 156
- * (Electron 45) rejects that value and the atlas stays on the canvas default of 10px sans-serif.
- * The addon's `_getFont` builds the same string but only for `_fillCharTrueColor`, which nothing
- * calls, so it is left as is.
+ * font as `${italic} ${weight} ...`, which starts with a space for upright text; Electron 45's
+ * Chromium rejects that value (electron/electron#55616) and the atlas stays on the canvas default
+ * of 10px sans-serif. Upstream fix: xtermjs/xterm.js#6312. The addon's `_getFont` builds the same
+ * string but only for `_fillCharTrueColor`, which nothing calls, so it is left as is.
  */
 const XTERM_WEBGL_FONT_PATCHES = [
   {
