@@ -1,7 +1,8 @@
 import type { RefObject } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { detectLanguage, highlightCode, readOnlyCodeTheme } from "@/lib/highlighter";
+import { detectLanguage, highlightCode } from "@/lib/highlighter";
+import { useReadOnlyCodeTheme } from "@/lib/syntax-theme";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui";
 
@@ -65,6 +66,8 @@ export function FilePanel({
   contentRef,
 }: FilePanelProps) {
   const darkMode = useUIStore((s) => s.darkMode);
+  // `revision` reruns the highlighting when the theme's colors change under the same name.
+  const { theme, revision } = useReadOnlyCodeTheme(darkMode);
   const [highlightedLines, setHighlightedLines] = useState<string[] | null>(null);
 
   // Build a map of line number -> change type for O(1) lookup
@@ -79,7 +82,6 @@ export function FilePanel({
     }
 
     let cancelled = false;
-    const theme = readOnlyCodeTheme(darkMode);
     const code = lines.join("\n");
 
     highlightCode(code, language, theme)
@@ -97,7 +99,7 @@ export function FilePanel({
     return () => {
       cancelled = true;
     };
-  }, [lines, filePath, darkMode]);
+  }, [lines, filePath, theme, revision]);
 
   if (lines.length === 0) {
     return (

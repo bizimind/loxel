@@ -29,6 +29,7 @@ import { type Highlighter, bundledLanguagesInfo } from "shiki";
 import { frontendLog } from "@/lib/frontend-logger";
 import { BUNDLED_LANGUAGES, getHighlighter } from "@/lib/highlighter";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
+import { useSyntaxThemeStore } from "@/lib/syntax-theme";
 import { useUIStore } from "@/store/ui";
 
 const log = frontendLog.child("ui");
@@ -283,10 +284,11 @@ function shikiHighlight(lang: string): Extension {
       decorations: DecorationSet = Decoration.none;
       private destroyed = false;
       private timer: ReturnType<typeof setTimeout> | undefined;
-      /** Recolors the block for the new theme when the app theme changes. */
-      private readonly unsubscribe = useUIStore.subscribe((state, prev) => {
+      /** Recolors the block for the new theme when the mode or a theme's syntax colors change. */
+      private readonly unsubscribeMode = useUIStore.subscribe((state, prev) => {
         if (state.darkMode !== prev.darkMode) this.repaint();
       });
+      private readonly unsubscribeSyntax = useSyntaxThemeStore.subscribe(() => this.repaint());
 
       constructor(private readonly view: EditorView) {
         if (loadedHighlighter) {
@@ -326,7 +328,8 @@ function shikiHighlight(lang: string): Extension {
       destroy() {
         this.destroyed = true;
         clearTimeout(this.timer);
-        this.unsubscribe();
+        this.unsubscribeMode();
+        this.unsubscribeSyntax();
       }
     },
     { decorations: (value) => value.decorations },

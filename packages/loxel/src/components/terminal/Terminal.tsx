@@ -8,7 +8,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import * as api from "@/api/client";
@@ -18,9 +18,11 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { toHexColor } from "@/lib/css-color";
 import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
-import { resolveTerminalColorScheme, xtermColorOptions } from "@/lib/terminal-color-schemes";
+import { resolveTheme, xtermColorOptions } from "@/lib/loxel-theme";
+import { readThemeTokens } from "@/lib/theme-stylesheet";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
 import { useSettingsStore } from "@/store/settings-store";
@@ -36,6 +38,14 @@ import { SEARCH_DECORATIONS } from "./search-decorations";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
+
+/**
+ * A theme color in a form xterm.js parses: it reads hex and comma-separated `rgb()`/`rgba()` on
+ * its own, and other forms only through a canvas, which drops their alpha.
+ */
+function xtermColor(color: string): string {
+  return /^#[\da-f]{3,8}$|^rgba?\(\s*[\d.]+\s*,/i.test(color) ? color : toHexColor(color);
+}
 
 const RESIZE_DEBOUNCE_MS = 100;
 
@@ -242,12 +252,18 @@ interface TerminalProps {
 export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
-  // A built-in or stored scheme object, so the reference only changes when the colors do.
-  const colorScheme = useSettingsStore((s) =>
-    resolveTerminalColorScheme(s.terminal.colorSchemes, darkMode),
-  );
-  const colorSchemeRef = useRef(colorScheme);
-  colorSchemeRef.current = colorScheme;
+  // A built-in or stored theme object, so the reference only changes when the colors do.
+  const colorTheme = useSettingsStore((s) => resolveTheme(s.themes, darkMode));
+  const colors = useMemo(() => {
+    const surface = readThemeTokens(colorTheme, ["editor-surface"])["editor-surface"] ?? "";
+    const { theme, minimumContrastRatio } = xtermColorOptions(colorTheme, toHexColor(surface));
+    const xtermTheme = Object.fromEntries(
+      Object.entries(theme).map(([key, color]) => [key, xtermColor(color)]),
+    ) as typeof theme;
+    return { theme: xtermTheme, minimumContrastRatio };
+  }, [colorTheme]);
+  const colorsRef = useRef(colors);
+  colorsRef.current = colors;
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const font = useSettingsStore(useShallow((s) => resolveFont(s.fonts, "terminal")));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -306,7 +322,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       allowProposedApi: true,
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
-      ...xtermColorOptions(colorSchemeRef.current),
+      ...colorsRef.current,
     });
 
     const fitAddon = new FitAddon();
@@ -585,14 +601,13 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     };
   }, [terminalId, panelApi]);
 
-  // Switch colors when the scheme changes: another one picked, or the theme switched.
+  // Switch colors when the theme changes: another one picked or edited, or the mode switched.
   useEffect(() => {
     const terminal = xtermRef.current;
     if (!terminal) return;
-    const { theme, minimumContrastRatio } = xtermColorOptions(colorScheme);
-    terminal.options.theme = theme;
-    terminal.options.minimumContrastRatio = minimumContrastRatio;
-  }, [colorScheme]);
+    terminal.options.theme = colors.theme;
+    terminal.options.minimumContrastRatio = colors.minimumContrastRatio;
+  }, [colors]);
 
   // Update scrollback buffer when setting changes
   useEffect(() => {
@@ -625,7 +640,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       <div
         ref={containerRef}
         className="h-full w-full overflow-hidden p-2"
-        style={{ backgroundColor: colorScheme.palette.background }}
+        style={{ backgroundColor: colors.theme.background }}
         onMouseDown={handleClick}
       />
       {findBarProps && <FindBar label="Find in terminal" {...findBarProps} />}

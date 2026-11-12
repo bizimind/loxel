@@ -1,22 +1,21 @@
 /**
- * Parse terminal color scheme files the user imports: iTerm2 `.itermcolors` (an XML property
- * list), Windows Terminal schemes (one scheme object, an array of them, or a `settings.json` with
- * a `schemes` array) and VS Code color themes or settings (their `terminal.*` colors). Everything
- * is read locally; a scheme without a complete palette is rejected with a message saying what it
- * lacks.
+ * Read the 16 ANSI colors of terminal color scheme files, which a Loxel theme can take as its
+ * terminal colors: iTerm2 `.itermcolors` (an XML property list), Windows Terminal schemes (one
+ * scheme object, an array of them, or a `settings.json` with a `schemes` array) and VS Code color
+ * themes or settings (their `terminal.ansi*` colors). Their background, foreground and other
+ * colors are not read: a theme's terminal sits on its own surfaces. Everything is read locally; a
+ * scheme without all 16 colors is rejected with a message saying which it lacks.
  */
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 
 import { isRecord } from "./is-record";
-import {
-  ANSI_COLOR_NAMES,
-  type AnsiColorName,
-  type TerminalColorScheme,
-  type TerminalPalette,
-} from "./terminal-color-schemes";
+import { ANSI_COLOR_NAMES, type AnsiColorName, type AnsiPalette } from "./loxel-theme";
 
-/** A scheme read from a file, before it gets an id in the settings. */
-export type ParsedTerminalScheme = Omit<TerminalColorScheme, "id">;
+/** A scheme's name and ANSI colors, read from a file. */
+export interface ParsedTerminalScheme {
+  name: string;
+  ansi: AnsiPalette;
+}
 
 /** The schemes a file holds, and why any others in it were left out. */
 export interface ParsedSchemeFile {
@@ -33,9 +32,6 @@ export class SchemeImportError extends Error {
 export const MAX_SCHEME_FILE_BYTES = 1024 * 1024;
 
 const MAX_NAME_LENGTH = 80;
-
-/** Selection color for a scheme that sets none: its foreground at 30% opacity. */
-const DEFAULT_SELECTION_ALPHA = "4d";
 
 /** Reads one scheme of a file; throws `SchemeImportError` when it is incomplete. */
 type SchemeReader = () => ParsedTerminalScheme;
@@ -174,13 +170,7 @@ function parseWindowsTerminalScheme(
   const ansi = Object.fromEntries(
     ANSI_COLOR_NAMES.map((color) => [color, pick(...windowsTerminalKey(color))]),
   );
-  return completePalette(name, {
-    ...ansi,
-    foreground: pick("foreground"),
-    background: pick("background"),
-    cursor: pick("cursorColor"),
-    selection: firstColor([scheme.selectionBackground], { keepAlpha: true }),
-  });
+  return completePalette(name, ansi);
 }
 
 function parseVsCodeColors(name: string, colors: Record<string, unknown>): ParsedTerminalScheme {
@@ -190,28 +180,12 @@ function parseVsCodeColors(name: string, colors: Record<string, unknown>): Parse
       firstColor([colors[`terminal.ansi${capitalize(color)}`]]),
     ]),
   );
-  return completePalette(name, {
-    ...ansi,
-    foreground: firstColor([colors["terminal.foreground"], colors["editor.foreground"]]),
-    background: firstColor([colors["terminal.background"], colors["editor.background"]]),
-    cursor: firstColor([colors["terminalCursor.foreground"]]),
-    selection: firstColor(
-      [colors["terminal.selectionBackground"], colors["editor.selectionBackground"]],
-      { keepAlpha: true },
-    ),
-  });
+  return completePalette(name, ansi);
 }
 
 // ---------------------------------------------------------------------------
 // iTerm2 .itermcolors
 // ---------------------------------------------------------------------------
-
-const ITERM_KEYS: Record<Exclude<keyof TerminalPalette, AnsiColorName>, string> = {
-  foreground: "Foreground Color",
-  background: "Background Color",
-  cursor: "Cursor Color",
-  selection: "Selection Color",
-};
 
 /** iTerm2's per-mode colors, in keys ending in " (Light)" and " (Dark)". */
 const ITERM_MODES = [" (Light)", " (Dark)"] as const;
@@ -239,10 +213,7 @@ function itermReaders(xml: string, fallbackName: string, fileName: string): Sche
     const ansi = Object.fromEntries(
       ANSI_COLOR_NAMES.map((name, i) => [name, color(`Ansi ${i} Color`)]),
     );
-    const named = Object.fromEntries(
-      Object.entries(ITERM_KEYS).map(([field, key]) => [field, color(key)]),
-    );
-    return completePalette(`${fallbackName}${suffix}`, { ...ansi, ...named });
+    return completePalette(`${fallbackName}${suffix}`, ansi);
   });
 }
 
@@ -328,47 +299,36 @@ function parsePlist(xml: string, fileName: string): PlistValue {
 // Shared
 // ---------------------------------------------------------------------------
 
-type PartialPalette = { [K in keyof TerminalPalette]?: string | undefined };
-
-/**
- * A palette with every color set, or an error naming the ones missing. A scheme without a cursor
- * color uses its foreground; one without a selection color, its foreground at 30% opacity.
- */
-function completePalette(name: string, colors: PartialPalette): ParsedTerminalScheme {
-  const missing = [...ANSI_COLOR_NAMES, "foreground", "background"].filter(
-    (key) => !colors[key as keyof TerminalPalette],
-  );
-  const { foreground, background } = colors;
-  if (missing.length > 0 || !foreground || !background) {
+/** The 16 ANSI colors, or an error naming the ones missing. */
+function completePalette(
+  name: string,
+  colors: Record<string, string | undefined>,
+): ParsedTerminalScheme {
+  const ansi: Partial<AnsiPalette> = {};
+  const missing: string[] = [];
+  for (const color of ANSI_COLOR_NAMES) {
+    const value = colors[color];
+    if (value) ansi[color] = value;
+    else missing.push(color);
+  }
+  if (missing.length > 0) {
     throw new SchemeImportError(`${name} is missing colors: ${missing.join(", ")}.`);
   }
-  const ansi = Object.fromEntries(ANSI_COLOR_NAMES.map((c) => [c, colors[c] ?? foreground]));
-  return {
-    name,
-    palette: {
-      ...(ansi as Record<AnsiColorName, string>),
-      foreground,
-      background,
-      cursor: colors.cursor ?? foreground,
-      selection: colors.selection ?? `${foreground}${DEFAULT_SELECTION_ALPHA}`,
-    },
-  };
+  return { name, ansi: ansi as AnsiPalette };
 }
 
 /**
  * The first value that is a hex color (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), as lowercase
- * `#rrggbb`. Only a selection keeps its alpha: the terminal draws the rest opaque.
+ * `#rrggbb`: the terminal draws ANSI colors opaque.
  */
-function firstColor(values: unknown[], { keepAlpha = false } = {}): string | undefined {
+function firstColor(values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value !== "string") continue;
     const digits = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value.trim())?.[1];
     if (!digits) continue;
     let hex = digits.toLowerCase();
     if (hex.length <= 4) hex = hex.replaceAll(/./g, "$&$&");
-    const rgb = hex.slice(0, 6);
-    const alpha = hex.slice(6);
-    return keepAlpha && alpha && alpha !== "ff" ? `#${rgb}${alpha}` : `#${rgb}`;
+    return `#${hex.slice(0, 6)}`;
   }
   return undefined;
 }

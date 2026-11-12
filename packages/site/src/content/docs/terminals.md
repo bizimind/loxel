@@ -71,19 +71,7 @@ Your shell's startup runs after that, so it can still change what you get. A `JA
 
 ## Theme and font
 
-Terminal colors follow the theme you choose in **Settings > Appearance > Theme**: terminals use Loxel Light in the light theme and Loxel Dark in the dark theme.
-
-To use other colors, pick a color scheme for each theme under **Settings > Appearance > Terminal Colors**. Any scheme works with either theme, so you can keep a dark terminal in the light theme, for example. Open terminals switch at once, and again whenever the theme switches between light and dark.
-
-Click **Import Scheme…** to add schemes from files on your computer. Loxel reads these formats:
-
-| Format           | File                                                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| iTerm2           | An `.itermcolors` file. A profile with separate light and dark mode colors becomes a scheme for each                                  |
-| Windows Terminal | A JSON file with one scheme, a list of schemes, or a `settings.json` with a `schemes` list                                            |
-| VS Code          | A color theme JSON file that sets the `terminal.ansi*` colors, or a `settings.json` that sets them in `workbench.colorCustomizations` |
-
-A scheme needs all 16 ANSI colors and a foreground and background color; Settings tells you what a file lacks, and from a file with several schemes imports the complete ones. Imported schemes are saved with your settings, on your computer, and importing a scheme with the same name again replaces it. Remove one with the **×** beside it; a theme that used it goes back to its Loxel scheme.
+Terminal colors come from the theme of the current mode, which you choose in **Settings > Appearance > Color Themes**: its 16 ANSI colors, text, cursor and selection, on the theme's editor surface. Open terminals switch at once when you change themes or the mode switches between light and dark. To use other terminal colors, make a theme of your own and take its ANSI colors from an iTerm2, Windows Terminal or VS Code file. See [Themes](/docs/themes).
 
 Terminals use the code font until you pick a terminal font of their own in **Settings > Appearance**, and open terminals switch to a new font at once. See [Fonts](/docs/editor#fonts).
 

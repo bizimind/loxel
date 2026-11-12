@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ANSI_COLOR_NAMES } from "./terminal-color-schemes";
+import { ANSI_COLOR_NAMES } from "./loxel-theme";
 import { parseTerminalSchemeFile, SchemeImportError } from "./terminal-scheme-import";
 
 /** The names of the schemes a file holds. */
@@ -70,14 +70,10 @@ function windowsTerminalScheme(name = "Campbell"): Record<string, string> {
 
 describe("parseTerminalSchemeFile", () => {
   describe("iTerm2", () => {
-    test("reads the ANSI, background, foreground, cursor and selection colors", () => {
+    test("reads the 16 ANSI colors", () => {
       const scheme = parseOne("Solar Flare.itermcolors", itermFile());
       expect(scheme.name).toBe("Solar Flare");
-      expect(ANSI_COLOR_NAMES.map((c) => scheme.palette[c])).toEqual(HEX);
-      expect(scheme.palette.background).toBe("#102030");
-      expect(scheme.palette.foreground).toBe("#f0e0d0");
-      expect(scheme.palette.cursor).toBe("#ff0000");
-      expect(scheme.palette.selection).toBe("#334455");
+      expect(ANSI_COLOR_NAMES.map((c) => scheme.ansi[c])).toEqual(HEX);
     });
 
     test("a file with only light and dark mode colors becomes one scheme per mode", () => {
@@ -97,17 +93,17 @@ describe("parseTerminalSchemeFile", () => {
 
     test("converts P3 colors to sRGB", () => {
       const file = itermFile().replace(
-        /<key>Background Color<\/key><dict>[\s\S]*?<\/dict>/,
-        `<key>Background Color</key>${itermColor("#ff0000", "P3")}`,
+        /<key>Ansi 1 Color<\/key><dict>[\s\S]*?<\/dict>/,
+        `<key>Ansi 1 Color</key>${itermColor("#ff0000", "P3")}`,
       );
       // P3 red is outside sRGB: it clips to pure red, with green and blue at 0.
-      expect(parseOne("p3.itermcolors", file).palette.background).toBe("#ff0000");
+      expect(parseOne("p3.itermcolors", file).ansi.red).toBe("#ff0000");
       const mid = itermFile().replace(
-        /<key>Background Color<\/key><dict>[\s\S]*?<\/dict>/,
-        `<key>Background Color</key>${itermColor("#808080", "P3")}`,
+        /<key>Ansi 1 Color<\/key><dict>[\s\S]*?<\/dict>/,
+        `<key>Ansi 1 Color</key>${itermColor("#808080", "P3")}`,
       );
       // Greys are the same in both spaces.
-      expect(parseOne("p3.itermcolors", mid).palette.background).toBe("#808080");
+      expect(parseOne("p3.itermcolors", mid).ansi.red).toBe("#808080");
     });
 
     test("names the colors a file lacks", () => {
@@ -141,11 +137,7 @@ describe("parseTerminalSchemeFile", () => {
     test("reads a scheme object, with purple as magenta and colors normalized", () => {
       const scheme = parseOne("c.json", JSON.stringify(windowsTerminalScheme()));
       expect(scheme.name).toBe("Campbell");
-      expect(ANSI_COLOR_NAMES.map((c) => scheme.palette[c])).toEqual(HEX);
-      expect(scheme.palette.background).toBe("#0c0c0c");
-      expect(scheme.palette.foreground).toBe("#cccccc");
-      expect(scheme.palette.cursor).toBe("#ffffff");
-      expect(scheme.palette.selection).toBe("#ffffff80");
+      expect(ANSI_COLOR_NAMES.map((c) => scheme.ansi[c])).toEqual(HEX);
     });
 
     test("reads every scheme of a settings.json, comments and trailing commas included", () => {
@@ -170,13 +162,6 @@ describe("parseTerminalSchemeFile", () => {
       expect(skipped).toEqual(["Broken is missing colors: red."]);
     });
 
-    test("defaults the cursor to the foreground and the selection to a translucent foreground", () => {
-      const { cursorColor: _, selectionBackground: __, ...rest } = windowsTerminalScheme();
-      const scheme = parseOne("c.json", JSON.stringify(rest));
-      expect(scheme.palette.cursor).toBe("#cccccc");
-      expect(scheme.palette.selection).toBe("#cccccc4d");
-    });
-
     test("names the file when the scheme has no name", () => {
       const { name: _, ...rest } = windowsTerminalScheme();
       const scheme = parseOne("/x/Night Owl.json", JSON.stringify(rest));
@@ -184,9 +169,9 @@ describe("parseTerminalSchemeFile", () => {
     });
 
     test("rejects a scheme missing colors or with invalid ones", () => {
-      const scheme = { ...windowsTerminalScheme(), red: "not-a-color", background: undefined };
+      const scheme = { ...windowsTerminalScheme(), red: "not-a-color", blue: undefined };
       expect(() => parseTerminalSchemeFile("c.json", JSON.stringify(scheme))).toThrow(
-        "Campbell is missing colors: red, background.",
+        "Campbell is missing colors: red, blue.",
       );
     });
   });
@@ -214,30 +199,7 @@ describe("parseTerminalSchemeFile", () => {
         }),
       );
       expect(scheme.name).toBe("Quiet Light");
-      expect(ANSI_COLOR_NAMES.map((c) => scheme.palette[c])).toEqual(HEX);
-      expect(scheme.palette).toMatchObject({
-        foreground: "#333333",
-        background: "#f5f5f5",
-        cursor: "#5f5f5f",
-        selection: "#c9d0d9aa",
-      });
-    });
-
-    test("falls back to the editor's foreground, background and selection", () => {
-      const scheme = parseOne(
-        "t.json",
-        vscodeTheme({
-          ...ansi,
-          "editor.foreground": "#111",
-          "editor.background": "#eee",
-          "editor.selectionBackground": "#add6ff",
-        }),
-      );
-      expect(scheme.palette).toMatchObject({
-        foreground: "#111111",
-        background: "#eeeeee",
-        selection: "#add6ff",
-      });
+      expect(ANSI_COLOR_NAMES.map((c) => scheme.ansi[c])).toEqual(HEX);
     });
 
     test("rejects a theme without terminal colors", () => {
@@ -269,7 +231,7 @@ describe("parseTerminalSchemeFile", () => {
       });
       const { schemes, skipped } = parseTerminalSchemeFile("settings.json", settings);
       expect(skipped).toEqual([]);
-      expect(schemes.map((s) => [s.name, s.palette.red])).toEqual([
+      expect(schemes.map((s) => [s.name, s.ansi.red])).toEqual([
         ["settings", hexAt(1)],
         ["Light+", "#cd3131"],
       ]);

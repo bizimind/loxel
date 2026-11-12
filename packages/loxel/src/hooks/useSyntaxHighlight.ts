@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
-import {
-  detectLanguage,
-  escapeHtml,
-  highlightCode,
-  type HighlightedLine,
-  readOnlyCodeTheme,
-} from "@/lib/highlighter";
+import { detectLanguage, escapeHtml, highlightCode, type HighlightedLine } from "@/lib/highlighter";
+import { useReadOnlyCodeTheme } from "@/lib/syntax-theme";
 import { useUIStore } from "@/store/ui";
 
 export interface HighlightedHunk {
@@ -31,6 +26,8 @@ export interface HighlightedFile {
  */
 export function useSyntaxHighlight(file: FileDiff | null): HighlightedFile | null {
   const darkMode = useUIStore((s) => s.darkMode);
+  // `revision` reruns the highlighting when the theme's colors change under the same name.
+  const { theme, revision } = useReadOnlyCodeTheme(darkMode);
   const [highlighted, setHighlighted] = useState<HighlightedFile | null>(null);
   const currentFileRef = useRef<string | null>(null);
 
@@ -67,7 +64,6 @@ export function useSyntaxHighlight(file: FileDiff | null): HighlightedFile | nul
       return;
     }
 
-    const theme = readOnlyCodeTheme(darkMode);
     const lang = language; // Capture for async closure
     let cancelled = false;
 
@@ -115,7 +111,7 @@ export function useSyntaxHighlight(file: FileDiff | null): HighlightedFile | nul
     return () => {
       cancelled = true;
     };
-  }, [file, darkMode]);
+  }, [file, theme, revision]);
 
   return highlighted;
 }

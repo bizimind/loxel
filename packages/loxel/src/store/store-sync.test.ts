@@ -4,6 +4,10 @@ import { useSettingsStore } from "./settings-store";
 import { applyStoreUpdate } from "./store-sync";
 import { useUIStore } from "./ui";
 
+function persistedSlice() {
+  return useSettingsStore.persist.getOptions().partialize?.(useSettingsStore.getState());
+}
+
 describe("applyStoreUpdate", () => {
   test("settings: an update matching the persisted slice is a no-op", () => {
     const { partialize } = useSettingsStore.persist.getOptions();
@@ -25,17 +29,19 @@ describe("applyStoreUpdate", () => {
     expect(useSettingsStore.getState().theme).toBe("dark");
   });
 
-  test("settings: synced color schemes are checked, and kept as is when only the theme changes", () => {
-    const { terminal } = useSettingsStore.getState();
-    applyStoreUpdate("settings", { terminal: { ...terminal, colorSchemes: { light: 1 } } });
-    const { colorSchemes } = useSettingsStore.getState().terminal;
-    expect(colorSchemes).toEqual({ light: "loxel-light", dark: "loxel-dark", imported: [] });
+  test("settings: synced themes are checked, and kept as is when only the mode changes", () => {
+    applyStoreUpdate("settings", {
+      ...JSON.parse(JSON.stringify(persistedSlice())),
+      themes: { light: 1 },
+    });
+    const { themes } = useSettingsStore.getState();
+    expect(themes).toEqual({ light: "loxel-light", dark: "loxel-dark", custom: [] });
 
-    const persisted = useSettingsStore.persist
-      .getOptions()
-      .partialize?.(useSettingsStore.getState());
-    applyStoreUpdate("settings", { ...JSON.parse(JSON.stringify(persisted)), theme: "light" });
-    expect(useSettingsStore.getState().terminal.colorSchemes).toBe(colorSchemes);
+    applyStoreUpdate("settings", {
+      ...JSON.parse(JSON.stringify(persistedSlice())),
+      theme: "light",
+    });
+    expect(useSettingsStore.getState().themes).toBe(themes);
   });
 
   test("ui: darkMode from an older window is ignored", () => {

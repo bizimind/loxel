@@ -9,13 +9,16 @@ import {
 } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
 import {
-  BUILTIN_TERMINAL_COLOR_SCHEMES,
-  DEFAULT_TERMINAL_COLOR_SCHEMES,
-  parseTerminalColorSchemeSettings,
-  type TerminalColorSchemeSettings,
-  type TerminalSchemeTheme,
-} from "@/lib/terminal-color-schemes";
-import type { ParsedTerminalScheme } from "@/lib/terminal-scheme-import";
+  allThemes,
+  BUILTIN_THEMES,
+  DEFAULT_THEME_SETTINGS,
+  isBuiltinTheme,
+  type LoxelTheme,
+  parseThemeSettings,
+  type ThemeBase,
+  type ThemeSettings,
+} from "@/lib/loxel-theme";
+import type { ParsedTheme } from "@/lib/theme-file";
 import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
@@ -31,18 +34,13 @@ export type SidebarZone = "left" | "bottom" | "right";
 
 /**
  * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
- * (hand-edited, or from a newer version) falls back to the default, dark, and the terminal's color
- * schemes are parsed, which also fills them in for settings saved before they existed.
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
   if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
-  const { terminal } = valid;
-  if (typeof terminal === "object" && terminal !== null) {
-    const stored = "colorSchemes" in terminal ? terminal.colorSchemes : undefined;
-    const colorSchemes = parseTerminalColorSchemeSettings(stored);
-    if (colorSchemes !== stored) valid.terminal = { ...terminal, colorSchemes };
-  }
+  if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
   // Only fields already in the slice were replaced, each with a valid value of its type.
   return valid as T;
 }
@@ -54,8 +52,6 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
-  /** The color scheme each theme uses, and the imported schemes. */
-  colorSchemes: TerminalColorSchemeSettings;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -539,6 +535,8 @@ type SettingsSection =
 export interface SettingsState {
   /** Color theme. Dark by default. */
   theme: ThemePreference;
+  /** The color theme each mode uses, and the user's own themes. */
+  themes: ThemeSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
@@ -560,14 +558,21 @@ export interface SettingsState {
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
-  setTerminalColorScheme: (theme: TerminalSchemeTheme, schemeId: string) => void;
+
+  // Color theme actions
+  /** Use a theme for the mode of its base. */
+  setModeTheme: (base: ThemeBase, themeId: string) => void;
   /**
-   * Add imported schemes; one named like a scheme imported before replaces it and keeps its id, so
-   * a theme using it switches to the new colors. One named like a built-in gets " (imported)".
+   * Add a theme from a file and use it for its mode. One with the name and base of a custom theme
+   * replaces it and keeps its id; one named like a built-in gets " (imported)". Returns its id.
    */
-  importTerminalColorSchemes: (schemes: ParsedTerminalScheme[]) => void;
-  /** Remove an imported scheme; a theme using it goes back to its default. */
-  removeTerminalColorScheme: (schemeId: string) => void;
+  importTheme: (theme: ParsedTheme) => string;
+  /** Copy a theme as a new custom one and use it for its mode. Returns its id. */
+  duplicateTheme: (themeId: string) => string | null;
+  /** Change a custom theme's name or colors; built-ins do not change. */
+  updateTheme: (themeId: string, patch: Partial<Omit<LoxelTheme, "id" | "base">>) => void;
+  /** Remove a custom theme; a mode using it goes back to its built-in. */
+  removeTheme: (themeId: string) => void;
 
   // Layout actions
   updateLayout: (partial: Partial<LayoutSettings>) => void;
@@ -670,10 +675,15 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
   }
 }
 
+function newThemeId(): string {
+  return `custom:${crypto.randomUUID()}`;
+}
+
 /** The persisted slice of the settings store; cross-window sync applies the same slice. */
 export function persistedSettings(state: SettingsState) {
   return {
     theme: state.theme,
+    themes: state.themes,
     layout: state.layout,
     terminal: state.terminal,
     editor: state.editor,
@@ -691,15 +701,15 @@ export function persistedSettings(state: SettingsState) {
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       theme: "dark",
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
-        colorSchemes: structuredClone(DEFAULT_TERMINAL_COLOR_SCHEMES),
       },
+      themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
@@ -716,44 +726,58 @@ export const useSettingsStore = create<SettingsState>()(
 
       updateTerminal: (partial) => set((s) => ({ terminal: { ...s.terminal, ...partial } })),
 
-      setTerminalColorScheme: (theme, schemeId) =>
-        set((s) => ({
-          terminal: {
-            ...s.terminal,
-            colorSchemes: { ...s.terminal.colorSchemes, [theme]: schemeId },
-          },
-        })),
+      // -- Color themes --
 
-      importTerminalColorSchemes: (schemes) =>
+      setModeTheme: (base, themeId) => set((s) => ({ themes: { ...s.themes, [base]: themeId } })),
+
+      importTheme: (parsed) => {
+        const { custom } = get().themes;
+        const name = BUILTIN_THEMES.some((b) => b.name === parsed.name)
+          ? `${parsed.name} (imported)`
+          : parsed.name;
+        const previous = custom.find((t) => t.name === name && t.base === parsed.base);
+        const theme: LoxelTheme = { ...parsed, name, id: previous?.id ?? newThemeId() };
+        set((s) => ({
+          themes: {
+            ...s.themes,
+            [theme.base]: theme.id,
+            custom: previous
+              ? s.themes.custom.map((t) => (t.id === theme.id ? theme : t))
+              : [...s.themes.custom, theme],
+          },
+        }));
+        return theme.id;
+      },
+
+      duplicateTheme: (themeId) => {
+        const { themes } = get();
+        const source = allThemes(themes).find((t) => t.id === themeId);
+        if (!source) return null;
+        const names = new Set(allThemes(themes).map((t) => t.name));
+        let name = `${source.name} copy`;
+        for (let n = 2; names.has(name); n++) name = `${source.name} copy ${n}`;
+        const theme: LoxelTheme = { ...structuredClone(source), id: newThemeId(), name };
+        set((s) => ({
+          themes: { ...s.themes, [theme.base]: theme.id, custom: [...s.themes.custom, theme] },
+        }));
+        return theme.id;
+      },
+
+      updateTheme: (themeId, patch) =>
         set((s) => {
-          const imported = [...s.terminal.colorSchemes.imported];
-          for (const scheme of schemes) {
-            const { palette } = scheme;
-            // Kept apart from the built-in it is named after, in the scheme pickers.
-            const name = BUILTIN_TERMINAL_COLOR_SCHEMES.some((b) => b.name === scheme.name)
-              ? `${scheme.name} (imported)`
-              : scheme.name;
-            const index = imported.findIndex((existing) => existing.name === name);
-            const previous = imported[index];
-            if (previous) imported[index] = { id: previous.id, name, palette };
-            else imported.push({ id: `imported:${crypto.randomUUID()}`, name, palette });
-          }
-          return {
-            terminal: { ...s.terminal, colorSchemes: { ...s.terminal.colorSchemes, imported } },
-          };
+          if (isBuiltinTheme(themeId)) return {};
+          const custom = s.themes.custom.map((t) => (t.id === themeId ? { ...t, ...patch } : t));
+          return { themes: { ...s.themes, custom } };
         }),
 
-      removeTerminalColorScheme: (schemeId) =>
+      removeTheme: (themeId) =>
         set((s) => {
-          const { light, dark, imported } = s.terminal.colorSchemes;
+          const { light, dark, custom } = s.themes;
           return {
-            terminal: {
-              ...s.terminal,
-              colorSchemes: {
-                light: light === schemeId ? DEFAULT_TERMINAL_COLOR_SCHEMES.light : light,
-                dark: dark === schemeId ? DEFAULT_TERMINAL_COLOR_SCHEMES.dark : dark,
-                imported: imported.filter((scheme) => scheme.id !== schemeId),
-              },
+            themes: {
+              light: light === themeId ? DEFAULT_THEME_SETTINGS.light : light,
+              dark: dark === themeId ? DEFAULT_THEME_SETTINGS.dark : dark,
+              custom: custom.filter((t) => t.id !== themeId),
             },
           };
         }),

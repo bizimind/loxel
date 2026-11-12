@@ -6,6 +6,7 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
+import type { Highlighter } from "shiki";
 
 import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
@@ -13,8 +14,10 @@ import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
+import { followEditorThemes } from "./editor-themes";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
+import { BUILTIN_THEMES } from "./loxel-theme";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
@@ -80,11 +83,23 @@ for (const register of Object.values(
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
 // CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark and loxel-light are
 // loaded as Shiki themes so shikiToMonaco recognizes them natively.
-void getHighlighter().then((highlighter) => {
+// shikiToMonaco wraps `setTheme` and `create` and captures each loaded theme's colors. A custom
+// theme's syntax colors load later as a theme of their own (editor-themes.ts) and need bridging
+// again: restoring Monaco's own functions first replaces the wrappers instead of nesting them.
+const monacoSetTheme = monaco.editor.setTheme;
+const monacoCreate = monaco.editor.create;
+function bridgeShiki(highlighter: Highlighter): void {
+  monaco.editor.setTheme = monacoSetTheme;
+  monaco.editor.create = monacoCreate;
   shikiToMonaco(highlighter, monaco);
-  enhanceMonacoThemes(highlighter);
+}
+
+void getHighlighter().then((highlighter) => {
+  bridgeShiki(highlighter);
+  enhanceMonacoThemes(highlighter, BUILTIN_THEMES);
   // shikiToMonaco activates the first loaded theme (loxel-dark); Monaco themes are global.
   monaco.editor.setTheme(getMonacoThemeName(useUIStore.getState().darkMode));
+  followEditorThemes(highlighter, bridgeShiki);
 });
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive

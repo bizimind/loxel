@@ -1,55 +1,42 @@
 import type { SemanticTokenStyling } from "@bizimind/monaco-lsp-client";
 import { textmateThemeToMonacoTheme } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
-import type { Highlighter, ThemeRegistrationRaw } from "shiki";
+import type { Highlighter } from "shiki";
 
-import { loxelDark, loxelLight } from "./loxel-themes";
-
-/** A 1x1 canvas for `toHexColor`, created on first use; null where 2D canvas is unavailable. */
-let colorContext: CanvasRenderingContext2D | null | undefined;
-
-/** Resolve any CSS color (hex, rgb(), oklch(), color-mix(), ...) to the hex form Monaco parses. */
-function toHexColor(raw: string): string {
-  if (/^#[\da-f]{3,8}$/i.test(raw)) return raw;
-  if (colorContext === undefined) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    colorContext = canvas.getContext("2d", { willReadFrequently: true });
-  }
-  const ctx = colorContext;
-  if (!ctx) return raw;
-  ctx.clearRect(0, 0, 1, 1);
-  ctx.fillStyle = raw;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r = 0, g = 0, b = 0, a = 255] = ctx.getImageData(0, 0, 1, 1).data;
-  const hex = [r, g, b, ...(a === 255 ? [] : [a])].map((c) => c.toString(16).padStart(2, "0"));
-  return `#${hex.join("")}`;
-}
+import { toHexColor } from "./css-color";
+import { BUILTIN_THEMES, type LoxelTheme, type ThemeBase } from "./loxel-theme";
+import {
+  BASE_TEXTMATE,
+  semanticOverrideRules,
+  syntaxThemeName,
+  useSyntaxThemeStore,
+} from "./syntax-theme";
+import { readThemeTokens } from "./theme-stylesheet";
 
 /**
- * The editor chrome colors that follow the app's CSS tokens, read from a probe element carrying the
- * mode's class (`.dark` tokens, or the `:root` tokens that `.light` restates under a `.dark` root).
+ * The editor chrome colors that follow a theme's UI tokens (`readThemeTokens`), plus its default
+ * text color when its syntax colors set one: Monaco paints unscoped text in `editor.foreground`.
  */
-function readThemeColors(mode: ThemeMode): Record<string, string> {
-  const probe = document.createElement("div");
-  probe.className = mode;
-  document.documentElement.appendChild(probe);
-  const style = getComputedStyle(probe);
-  const color = (name: string) => toHexColor(style.getPropertyValue(name).trim());
-  const editorBg = color("--editor-surface");
-  const colors = {
+function themeChromeColors(theme: LoxelTheme): Record<string, string> {
+  const tokens = readThemeTokens(theme, [
+    "editor-surface",
+    "foreground",
+    "editor-line-number",
+    "editor-line-number-active",
+  ]);
+  const color = (name: string) => toHexColor(tokens[name] ?? "");
+  const editorBg = color("editor-surface");
+  const text = theme.syntax.text;
+  return {
     "editor.background": editorBg,
-    "editor.foreground": color("--foreground"),
-    "editorLineNumber.foreground": color("--editor-line-number"),
-    "editorLineNumber.activeForeground": color("--editor-line-number-active"),
+    "editor.foreground": text ? toHexColor(text) : color("foreground"),
+    "editorLineNumber.foreground": color("editor-line-number"),
+    "editorLineNumber.activeForeground": color("editor-line-number-active"),
     "editorGutter.background": editorBg,
     // Dark keeps no current-line fill; light paints JetBrains' faint blue caret row (#E9EFF9 on
     // white), translucent so the band keeps showing a line's diff or search tint beneath it.
-    "editor.lineHighlightBackground": mode === "dark" ? editorBg : "#5F87D726",
+    "editor.lineHighlightBackground": theme.base === "dark" ? editorBg : "#5F87D726",
   };
-  probe.remove();
-  return colors;
 }
 
 // Semantic token rules from LSPs — these layer on top of TextMate syntax tokens and are
@@ -205,43 +192,33 @@ const LIGHT_CHROME_COLORS: Record<string, string> = {
   "peekViewResult.matchHighlightBackground": "#FFE99A99",
 };
 
-type ThemeMode = "dark" | "light";
-
-const THEMES: Record<
-  ThemeMode,
-  {
-    name: string;
-    textmate: ThemeRegistrationRaw;
-    semanticRules: monaco.editor.ITokenThemeRule[];
-    chrome: Record<string, string>;
-  }
+/** What each base adds to its TextMate theme in Monaco. */
+const BASE_EDITOR: Record<
+  ThemeBase,
+  { semanticRules: monaco.editor.ITokenThemeRule[]; chrome: Record<string, string> }
 > = {
-  dark: { name: "loxel-dark", textmate: loxelDark, semanticRules: DARK_SEMANTIC_RULES, chrome: {} },
-  light: {
-    name: "loxel-light",
-    textmate: loxelLight,
-    semanticRules: LIGHT_SEMANTIC_RULES,
-    chrome: LIGHT_CHROME_COLORS,
-  },
+  dark: { semanticRules: DARK_SEMANTIC_RULES, chrome: {} },
+  light: { semanticRules: LIGHT_SEMANTIC_RULES, chrome: LIGHT_CHROME_COLORS },
 };
 
-const THEME_MODES: ThemeMode[] = ["dark", "light"];
+const THEME_BASES: ThemeBase[] = ["dark", "light"];
 
 /**
- * What the theme styles, for language clients: the union over both themes, which style the same
+ * What the theme styles, for language clients: the union over both bases, which style the same
  * types. A type counts only with a rule of its own: Monaco paints `punctuation` in the default
- * foreground even with a `punctuation.definition.comment` rule.
+ * foreground even with a `punctuation.definition.comment` rule. Custom themes recolor these types
+ * and add none.
  */
 export const SEMANTIC_TOKEN_STYLING: SemanticTokenStyling = {
   types: new Set(
-    THEME_MODES.flatMap((mode) => [
-      ...THEMES[mode].semanticRules.map((rule) => rule.token),
-      ...THEMES[mode].textmate.settings.flatMap((setting) => setting.scope ?? []),
+    THEME_BASES.flatMap((base) => [
+      ...BASE_EDITOR[base].semanticRules.map((rule) => rule.token),
+      ...BASE_TEXTMATE[base].settings.flatMap((setting) => setting.scope ?? []),
     ]),
   ),
   modifiers: new Set(
-    THEME_MODES.flatMap((mode) =>
-      THEMES[mode].semanticRules.flatMap((rule) => rule.token.split(".").slice(1)),
+    THEME_BASES.flatMap((base) =>
+      BASE_EDITOR[base].semanticRules.flatMap((rule) => rule.token.split(".").slice(1)),
     ),
   ),
 };
@@ -253,38 +230,41 @@ export const SEMANTIC_TOKEN_STYLING: SemanticTokenStyling = {
  * that include full TextMate scope rules + CSS variable editor chrome colors.
  */
 export function registerMonacoThemes(): void {
-  for (const mode of THEME_MODES) {
-    const theme = THEMES[mode];
-    monaco.editor.defineTheme(theme.name, {
-      base: mode === "dark" ? "vs-dark" : "vs",
+  for (const theme of BUILTIN_THEMES) {
+    const { semanticRules, chrome } = BASE_EDITOR[theme.base];
+    monaco.editor.defineTheme(syntaxThemeName(theme), {
+      base: theme.base === "dark" ? "vs-dark" : "vs",
       inherit: true,
-      rules: theme.semanticRules,
-      colors: { ...theme.textmate.colors, ...theme.chrome, ...readThemeColors(mode) },
+      rules: semanticRules,
+      colors: { ...BASE_TEXTMATE[theme.base].colors, ...chrome, ...themeChromeColors(theme) },
     });
   }
 }
 
 /**
- * Re-define Monaco themes using Shiki-converted TextMate rules, overlaying
- * CSS variable editor chrome colors and semantic token rules. Called after
- * `shikiToMonaco` registers its tokenizer-internal theme data.
+ * Define the Monaco themes of `themes` from their Shiki-converted TextMate rules (which the
+ * highlighter must have loaded), overlaying the theme's editor chrome colors and semantic token
+ * rules. Called after `shikiToMonaco` registers its tokenizer-internal theme data.
  */
-export function enhanceMonacoThemes(highlighter: Highlighter): void {
-  for (const mode of THEME_MODES) {
-    const theme = THEMES[mode];
-    const base = textmateThemeToMonacoTheme(
-      highlighter.getTheme(theme.name),
+export function enhanceMonacoThemes(highlighter: Highlighter, themes: readonly LoxelTheme[]): void {
+  for (const theme of themes) {
+    const name = syntaxThemeName(theme);
+    const { semanticRules, chrome } = BASE_EDITOR[theme.base];
+    const textmate = textmateThemeToMonacoTheme(
+      highlighter.getTheme(name),
     ) as monaco.editor.IStandaloneThemeData;
-    monaco.editor.defineTheme(theme.name, {
-      ...base,
-      rules: [...base.rules, ...theme.semanticRules],
-      colors: { ...base.colors, ...theme.chrome, ...readThemeColors(mode) },
+    monaco.editor.defineTheme(name, {
+      ...textmate,
+      rules: [...textmate.rules, ...semanticRules, ...semanticOverrideRules(theme, toHexColor)],
+      colors: { ...textmate.colors, ...chrome, ...themeChromeColors(theme) },
     });
   }
 }
 
+/** The Monaco theme of the current light-mode or dark-mode theme. */
 export function getMonacoThemeName(darkMode: boolean): string {
-  return THEMES[darkMode ? "dark" : "light"].name;
+  const names = useSyntaxThemeStore.getState();
+  return darkMode ? names.dark : names.light;
 }
 
 /** Map from Shiki/highlighter language IDs that differ in Monaco */
