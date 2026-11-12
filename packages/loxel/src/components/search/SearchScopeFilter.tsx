@@ -461,7 +461,9 @@ export function SearchScopeFilter({
                           {item.detail}
                         </span>
                       )}
-                      {isSelected && <CheckIcon className="text-link size-3 shrink-0" />}
+                      {isSelected && (
+                        <CheckIcon className="text-link dark:text-foreground size-3 shrink-0" />
+                      )}
                     </button>
                   );
                 })}
