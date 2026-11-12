@@ -112,6 +112,8 @@ describe("mermaid rendering", () => {
     expect(diagram.style.getPropertyValue("--loxel-mermaid-width")).toBe("640px");
     const actions = [...diagram.querySelectorAll(".loxel-mermaid-toolbar [data-mermaid-action]")];
     expect(actions.map((b) => b.getAttribute("data-mermaid-action"))).toEqual([
+      "edit",
+      "hide",
       "zoom-out",
       "zoom-in",
       "reset",

@@ -19,6 +19,7 @@ export const BUNDLED_LANGUAGES = [
   "css",
   "scss",
   "markdown",
+  "mermaid",
   "yaml",
   "toml",
   "ini",

@@ -4,6 +4,33 @@
  * handled in mermaid-preview-controls.tsx.
  */
 
+/*
+ * A block showing its diagram, or rendering its first one, shows only the preview unless its
+ * source is being edited (`loxel-code-block-editing`, code-block-source.ts). A block with an
+ * error or no text has no diagram, so it keeps its source. Crepe's own preview toggle would hide
+ * the source while the caret is in it, so the diagram toolbar's Edit and Hide replace it.
+ */
+.milkdown
+  .milkdown-code-block:not(.loxel-code-block-editing):has(
+    > .preview-panel :is(.loxel-mermaid, .loxel-code-preview-loading)
+  )
+  > :is(.tools, .codemirror-host),
+.milkdown
+  .milkdown-code-block:not(.loxel-code-block-editing):has(
+    > .preview-panel :is(.loxel-mermaid, .loxel-code-preview-loading)
+  )
+  > .preview-panel
+  > :is(.preview-divider, .preview-label),
+.milkdown
+  .milkdown-code-block:has(
+    > .preview-panel :is(.loxel-mermaid, .loxel-mermaid-error, .loxel-code-preview-loading)
+  )
+  .preview-toggle-button,
+.milkdown .milkdown-code-block.loxel-code-block-editing [data-mermaid-action="edit"],
+.milkdown .milkdown-code-block:not(.loxel-code-block-editing) [data-mermaid-action="hide"] {
+  display: none;
+}
+
 .milkdown .loxel-mermaid-dark,
 .milkdown.dark .loxel-mermaid-light {
   display: none;

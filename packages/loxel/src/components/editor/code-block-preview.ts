@@ -14,7 +14,18 @@ import { renderMermaidPreview } from "@/components/editor/mermaid-preview";
 export type RenderPreview = CodeBlockConfig["renderPreview"];
 export type PreviewValue = Exclude<ReturnType<RenderPreview>, void>;
 
-/** Preview renderers by lowercase fence language (a Map, so `constructor` or `__proto__` fences miss). */
+/**
+ * What an asynchronous preview shows until its first render lands (Crepe's `previewLoading`). Only
+ * mermaid renders asynchronously; its CSS keeps the source hidden while this shows, so a diagram's
+ * source does not flash up while the file opens.
+ */
+export const PREVIEW_LOADING_HTML = '<div class="loxel-code-preview-loading">Rendering…</div>';
+
+/**
+ * Preview renderers by lowercase fence language (a Map, so `constructor` or `__proto__` fences
+ * miss). A renderer that answers asynchronously shows {@link PREVIEW_LOADING_HTML} first, which
+ * mermaid-preview.css treats as a diagram on its way: only mermaid may render asynchronously.
+ */
 const previewRenderers = new Map<string, RenderPreview>([
   ["diff", renderDiffPreview],
   ["mermaid", renderMermaidPreview],
