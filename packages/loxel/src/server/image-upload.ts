@@ -131,9 +131,11 @@ export async function writeWithUniqueName(
 export function extractRelativeImageRefs(markdown: string): string[] {
   const refs = new Set<string>();
   // Destination is either `<...>` (may contain spaces) or a bare path (no whitespace or
-  // unescaped parens; `\(` / `\)` escapes allowed), optionally followed by a title.
+  // unescaped parens; `\(` / `\)` escapes allowed), optionally followed by a title. The alt
+  // and quoted titles accept backslash escapes too: the serializer writes `]` in alt text as `\]`
+  // (an uploaded `image[1].png` gets alt `image[1]`).
   const pattern =
-    /!\[[^\]]*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>"\\]|\\.)+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+    /!\[(?:[^\]\\]|\\.)*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>"\\]|\\.)+))(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\([^)]*\)))?\s*\)/g;
   for (const match of markdown.matchAll(pattern)) {
     const raw = (match[1] ?? match[2] ?? "").replace(/\\(.)/g, "$1");
     if (!raw || /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(raw)) continue;

@@ -85,6 +85,14 @@ describe("extractRelativeImageRefs", () => {
     expect(extractRelativeImageRefs("![a](./a\\(1\\).png)")).toEqual(["a(1).png"]);
   });
 
+  test("accepts escaped brackets in alt text and escaped quotes in titles", () => {
+    // The serializer escapes `[`/`]` in alt text, e.g. for an uploaded `image[1].png`.
+    expect(extractRelativeImageRefs("![image\\[1\\]](./image-1-20260922-192130.png)")).toEqual([
+      "image-1-20260922-192130.png",
+    ]);
+    expect(extractRelativeImageRefs('![a](x.png "say \\"hi\\"")')).toEqual(["x.png"]);
+  });
+
   test("keeps nested relative paths", () => {
     expect(extractRelativeImageRefs("![x](./assets/y.png) ![z](../up.png)")).toEqual([
       "assets/y.png",
