@@ -105,11 +105,11 @@
 /* Dark mode. Excalidraw's dark palette is `.excalidraw.theme--dark` in the same lazy-loaded
    stylesheet, so this block needs the `:root` prefix to win. Values follow the app's JetBrains New
    UI Dark tokens: the dark selection blue with a light blue icon for checked tools (the light
-   block's pale-blue-and-deep-blue pairing, inverted), JetBrains' dark link blue for Excalidraw's
-   accent (slider, radio, primary buttons, which draw near-black text on it), and Loxel's neutral
-   panel greys instead of Excalidraw's violet-tinted ones. */
+   block's pale-blue-and-deep-blue pairing, inverted), the dark link blue (`--link`) for
+   Excalidraw's accent (slider, radio, primary buttons, which draw near-black text on it), and
+   Loxel's neutral panel greys instead of Excalidraw's violet-tinted ones. */
 :root .excalidraw.theme--dark {
-  --color-primary: #548af7;
+  --color-primary: var(--link);
   --color-primary-darker: #6c9bf8;
   --color-primary-darkest: #85acf9;
   --color-primary-hover: #6c9bf8;

@@ -129,6 +129,59 @@ export interface RecommendationRequest {
 Read more in the [catalog module](src/catalog.ts) and keep *latency* under **50 ms**.
 `;
 
+/** Long labels in several diagram types, for the Mermaid preview and viewer shots. */
+const CHECKOUT_MD = `# Checkout architecture
+
+How an order moves from the cart to fulfilment.
+
+\`\`\`mermaid
+flowchart LR
+  Cart[Shopping cart with saved items] --> Checkout{Is the customer signed in?}
+  Checkout -->|yes| Payment[Charge the stored payment method]
+  Checkout -->|no| Guest[Collect guest email and shipping address]
+  Guest --> Payment
+  Payment --> Inventory[(Reserve stock in the inventory service)]
+  Inventory --> Fulfilment[Queue the order for warehouse fulfilment]
+  Fulfilment --> Email[Send the order confirmation email]
+\`\`\`
+
+\`\`\`mermaid
+sequenceDiagram
+  participant Browser
+  participant API as Orbit Shop API
+  participant Pay as Payment gateway
+  Browser->>API: POST /orders with cart contents
+  API->>Pay: Authorize the card for the order total
+  Pay-->>API: Authorization approved
+  API-->>Browser: 201 Created with the order number
+  Note over API,Pay: Retries use the same idempotency key
+\`\`\`
+
+\`\`\`mermaid
+classDiagram
+  class OrderService {
+    +placeOrder(cart: Cart) Order
+    +cancelOrder(orderId: string) void
+    -reserveInventory(items: LineItem[]) boolean
+  }
+  class Cart {
+    +items: LineItem[]
+    +totalPrice() number
+  }
+  OrderService --> Cart : reads the customer's cart
+\`\`\`
+
+\`\`\`mermaid
+stateDiagram-v2
+  [*] --> Pending
+  Pending --> Paid: payment authorized
+  Paid --> Shipped: handed to the carrier
+  Shipped --> Delivered: carrier confirms delivery
+  Paid --> Refunded: customer cancels before shipping
+  Delivered --> [*]
+\`\`\`
+`;
+
 const REVIEW_MD = `# Search review
 
 The request flow:
@@ -278,6 +331,7 @@ export async function buildFixture(root: string): Promise<string> {
   write(root, {
     "docs/plan.md": PLAN_MD,
     "docs/review.md": REVIEW_MD,
+    "docs/checkout.md": CHECKOUT_MD,
     "docs/architecture.excalidraw": DRAWING,
   });
   await commit(root, "docs: recommendations plan and architecture", 3);

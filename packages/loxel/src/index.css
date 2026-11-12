@@ -273,10 +273,13 @@
   --popover: var(--surface-1);
   --popover-foreground: #dfe1e5;
 
-  /* Primary accent - matches selection */
+  /* Selection fill (rows, menus, active items) — keeps foreground text */
   --primary: #214283;
   --primary-foreground: #ffffff;
-  --link: #214283;
+  /* Accent text: links, check marks, active filters. JetBrains' dark link blue: the selection navy
+     is a fill color and too dark to read as text on the dark panels. */
+  --link: #548af7;
+  /* Solid accent for primary buttons and on switches */
   --button-primary: #214283;
   --button-primary-foreground: #ffffff;
   --accent: var(--surface-0);

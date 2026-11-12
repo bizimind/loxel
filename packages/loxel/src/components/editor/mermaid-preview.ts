@@ -4,12 +4,17 @@
  * The preview is view-only: it never touches the code block's text, so the markdown source (and
  * the source-preserving save) is unaffected. Mermaid is large, so it is imported on the first
  * mermaid block and cached. Repositories can be untrusted, so it runs with
- * `securityLevel: "strict"` (labels escaped, no click handlers or scripts) and the panel
- * sanitizes the SVG again before inserting it.
+ * `securityLevel: "strict"` (labels escaped, no click handlers or scripts), and its SVG is
+ * sanitized again before insertion: by the panel for the preview, here for the full-size viewer.
+ *
+ * The preview's toolbar, zoom, pan and click-to-open are in mermaid-preview-controls.tsx.
  */
+import DOMPurify from "dompurify";
 import type { Mermaid, MermaidConfig } from "mermaid";
 
 import type { PreviewValue, RenderPreview } from "@/components/editor/code-block-preview";
+import { MERMAID_CLASSES, mermaidToolbarHtml } from "@/components/editor/mermaid-preview-controls";
+import type { Dimensions } from "@/components/pan-zoom/pan-zoom";
 import { frontendLog } from "@/lib/frontend-logger";
 
 import "@/styles/mermaid-preview.css";
@@ -64,6 +69,41 @@ interface RenderedSvg {
   className: string;
   id: string;
   svg: string;
+  /** The diagram's natural size, from its `viewBox`; null if it has none. */
+  size: Dimensions | null;
+}
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+let purify: ReturnType<typeof DOMPurify> | null = null;
+
+/** The code block panel's sanitizer config (Crepe's `createSvgAwareSanitizer`). */
+function sanitizeSvg(svg: string): string {
+  if (!purify) {
+    purify = DOMPurify();
+    purify.addHook("uponSanitizeElement", (node, data) => {
+      if (data.tagName !== "foreignobject") return;
+      if (node.parentElement?.namespaceURI !== SVG_NAMESPACE) node.parentNode?.removeChild(node);
+    });
+  }
+  return purify.sanitize(svg, {
+    ADD_TAGS: ["foreignObject"],
+    ADD_ATTR: ["xmlns"],
+    HTML_INTEGRATION_POINTS: { foreignobject: true },
+  });
+}
+
+/** The width and height of the root `<svg>`'s `viewBox`. */
+function viewBoxSize(svg: string): Dimensions | null {
+  const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? "";
+  const box = /\bviewBox="([^"]*)"/
+    .exec(root)?.[1]
+    ?.trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const width = box?.[2];
+  const height = box?.[3];
+  if (width === undefined || height === undefined || !(width > 0) || !(height > 0)) return null;
+  return { width, height };
 }
 
 /**
@@ -87,7 +127,7 @@ async function renderSvg(
   const id = nextId();
   try {
     const { svg } = await mermaid.render(id, source);
-    return { className, id, svg };
+    return { className, id, svg, size: viewBoxSize(svg) };
   } finally {
     // Mermaid removes its temp container on success but can leave it behind when rendering throws.
     document.getElementById(`d${id}`)?.remove();
@@ -135,6 +175,10 @@ function errorPreview(error: unknown): HTMLElement {
   return el;
 }
 
+/**
+ * The preview: the toolbar, and both theme variants on a canvas inside a clipping viewport. The
+ * natural width lets CSS keep the diagram from shrinking below a readable size.
+ */
 async function renderDiagram(source: string): Promise<PreviewValue> {
   let rendered: RenderedSvg[];
   try {
@@ -145,7 +189,35 @@ async function renderDiagram(source: string): Promise<PreviewValue> {
   const variants = rendered.map(
     ({ className, id, svg }) => `<div class="${className}">${withFreshId(id, svg)}</div>`,
   );
-  return `<div class="loxel-mermaid">${variants.join("")}</div>`;
+  const width = rendered[0]?.size?.width;
+  const style = width === undefined ? "" : ` style="--loxel-mermaid-width: ${width}px"`;
+  return (
+    `<div class="${MERMAID_CLASSES.diagram}"${style}>${mermaidToolbarHtml()}` +
+    `<div class="${MERMAID_CLASSES.viewport}" title="Click to open full size, drag to pan, pinch to zoom">` +
+    `<div class="${MERMAID_CLASSES.canvas}">${variants.join("")}</div></div></div>`
+  );
+}
+
+/** A diagram's light and dark SVGs (sanitized, under fresh ids) and its natural size. */
+export interface MermaidDiagram {
+  light: string;
+  dark: string;
+  size: Dimensions | null;
+}
+
+/** Renders `source` for the full-size viewer; usually a cache hit, as its preview rendered it. */
+export async function renderMermaidDiagram(source: string): Promise<MermaidDiagram> {
+  const rendered = await enqueue(() => renderVariants(source));
+  const svgFor = (className: string) => {
+    const variant = rendered.find((r) => r.className === className);
+    if (!variant) throw new Error(`Missing the ${className} variant`);
+    return sanitizeSvg(withFreshId(variant.id, variant.svg));
+  };
+  return {
+    light: svgFor("loxel-mermaid-light"),
+    dark: svgFor("loxel-mermaid-dark"),
+    size: rendered[0]?.size ?? null,
+  };
 }
 
 /**
