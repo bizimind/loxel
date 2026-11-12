@@ -58,6 +58,20 @@ const XTERM_WEBGL_CONTRAST_PATCHES = [
   { find: "if(f<l){let I=t(r,a,l),L=", replace: "if(f<l){let I=t(r,a,21),L=" },
 ];
 
+/**
+ * Give upright text in the glyph atlas an explicit `normal` style. The addon builds the canvas
+ * font as `${italic} ${weight} ...`, which starts with a space for upright text; Electron 45's
+ * Chromium rejects that value (electron/electron#55616) and the atlas stays on the canvas default
+ * of 10px sans-serif. Upstream fix: xtermjs/xterm.js#6312. The addon's `_getFont` builds the same
+ * string but only for `_fillCharTrueColor`, which nothing calls, so it is left as is.
+ */
+const XTERM_WEBGL_FONT_PATCHES = [
+  {
+    find: 'ue=I?"italic":"";this._tmpCtx.font=`${ue} ${G} ',
+    replace: 'ue=I?"italic":"normal";this._tmpCtx.font=`${ue} ${G} ',
+  },
+];
+
 function xtermWebglPixelGrid(): Plugin {
   let isBuild = false;
   let patched = false;
@@ -78,6 +92,7 @@ function xtermWebglPixelGrid(): Plugin {
       for (const { find, replace } of [
         ...XTERM_WEBGL_PIXEL_GRID_PATCHES,
         ...XTERM_WEBGL_CONTRAST_PATCHES,
+        ...XTERM_WEBGL_FONT_PATCHES,
       ]) {
         if (source.split(find).length !== 2) {
           throw new Error(`xterm-webgl-pixel-grid: expected one match in ${id} for: ${find}`);
