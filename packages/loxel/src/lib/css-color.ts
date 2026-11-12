@@ -9,7 +9,10 @@ let colorContext: CanvasRenderingContext2D | null | undefined;
  * or it cannot parse `raw`.
  */
 export function toHexColor(raw: string): string {
-  if (/^#[\da-f]{3,8}$/i.test(raw)) return raw;
+  const color = raw.trim();
+  if (/^#(?:[\da-f]{6}|[\da-f]{8})$/i.test(color)) return color;
+  // Monaco's token colors take only 6 or 8 digits: expand the short forms.
+  if (/^#[\da-f]{3,4}$/i.test(color)) return color.replaceAll(/[\da-f]/gi, "$&$&");
   if (colorContext === undefined) {
     const canvas = document.createElement("canvas");
     canvas.width = 1;

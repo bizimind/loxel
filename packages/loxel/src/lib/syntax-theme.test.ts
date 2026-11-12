@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { toHexColor } from "./css-color";
 import type { LoxelTheme } from "./loxel-theme";
 import { loxelDark } from "./loxel-themes";
 import {
@@ -59,6 +60,13 @@ describe("syntax themes", () => {
         scope: ["comment.block.documentation"],
         settings: { foreground: "#00ff00", fontStyle: "italic" },
       },
+    ]);
+  });
+
+  test("short hex reaches Monaco's semantic rules as 6 digits", () => {
+    const short: LoxelTheme = { ...plain, syntax: { keyword: "#f00" } };
+    expect(semanticOverrideRules(short, toHexColor)).toEqual([
+      { token: "keyword", foreground: "ff0000" },
     ]);
   });
 

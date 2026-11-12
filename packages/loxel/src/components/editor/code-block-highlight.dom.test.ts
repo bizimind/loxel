@@ -4,6 +4,8 @@ import { LanguageDescription } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 
 import { getHighlighter } from "@/lib/highlighter";
+import type { LoxelTheme } from "@/lib/loxel-theme";
+import { syntaxTextmateTheme, syntaxThemeName, useSyntaxThemeStore } from "@/lib/syntax-theme";
 import { useUIStore } from "@/store/ui";
 
 import { codeBlockLanguages } from "./code-block-highlight";
@@ -103,6 +105,37 @@ describe("code block colors", () => {
     expect(colorOf(chars, "(", 1)).toBe(colorOf(chars, "x"));
     expect(colorOf(chars, "(", 1)).not.toBe(call);
     expect(colorOf(chars, "(", 2)).toBe(colorOf(chars, "y"));
+  });
+
+  test("keeps brackets in strings as text after a theme's string color changes", async () => {
+    const highlighter = await getHighlighter();
+    const initial = { ...useSyntaxThemeStore.getState(), darkMode: useUIStore.getState().darkMode };
+    const theme = (string: string): LoxelTheme => ({
+      id: "custom:test",
+      name: "Test",
+      base: "dark",
+      colors: {},
+      terminal: {},
+      syntax: { string },
+    });
+    try {
+      useUIStore.setState({ darkMode: true });
+      await highlighter.loadTheme(syntaxTextmateTheme(theme("#ff00aa"), (c) => c));
+      useSyntaxThemeStore.setState({ dark: syntaxThemeName(theme("#ff00aa")), revision: 1 });
+      await colors("typescript", 'f("(x)");');
+      // The same name with new colors, as editor-themes.ts reloads an edited theme.
+      await highlighter.loadTheme(syntaxTextmateTheme(theme("#00aaff"), (c) => c));
+      useSyntaxThemeStore.setState({ revision: 2 });
+      const chars = [...view!.contentDOM.querySelectorAll("span")].flatMap((span) =>
+        (span.textContent ?? "").split("").map((char) => ({ char, color: span.style.color })),
+      );
+      expect(colorOf(chars, "(", 1)).toBe(colorOf(chars, "x"));
+      expect(colorOf(chars, "(", 1)).not.toBe(colorOf(chars, "(", 0));
+    } finally {
+      const { darkMode, ...names } = initial;
+      useSyntaxThemeStore.setState(names);
+      useUIStore.setState({ darkMode });
+    }
   });
 
   test("declares every color variable the fallback palette reads", async () => {
