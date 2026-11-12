@@ -687,8 +687,9 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     const svgContent = await file.text();
     bodyContent = `${svgContent}
     <script>
-      // Sizes the SVG the way the viewer's zoom math expects (MediaSize in media-scale.ts). Its
-      // scripts share this window, so keep our names out of the globals.
+      // Sizes the SVG the way the viewer's zoom math expects (ContentSize in
+      // components/pan-zoom/pan-zoom.ts). Its scripts share this window, so keep our names out of
+      // the globals.
       (function () {
         var el = document.querySelector("svg");
         if (!el) return;

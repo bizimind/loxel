@@ -17,7 +17,9 @@ let currentConfig: Record<string, unknown> = {};
 let renderImpl: (id: string, source: string) => Promise<{ svg: string }>;
 
 function defaultRender(id: string, source: string): Promise<{ svg: string }> {
-  return Promise.resolve({ svg: `<svg id="${id}"><text>${source.length}</text></svg>` });
+  return Promise.resolve({
+    svg: `<svg id="${id}" viewBox="0 0 640 480"><text>${source.length}</text></svg>`,
+  });
 }
 
 /** happy-dom never reports intersections; code blocks only mount once they are visible. */
@@ -45,6 +47,7 @@ void mock.module("mermaid", () => ({
 }));
 
 const { renderCodeBlockPreview } = await import("./code-block-preview");
+const { renderMermaidDiagram } = await import("./mermaid-preview");
 const { serializeBody, setSourceBaseline } = await import("./MarkdownEditor");
 
 type PreviewValue = string | HTMLElement | null;
@@ -100,9 +103,28 @@ describe("mermaid rendering", () => {
       },
       { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: "dark" },
     ]);
-    expect(preview).toMatch(
-      /^<div class="loxel-mermaid"><div class="loxel-mermaid-light"><svg id="(loxel-mermaid-\d+)"><text>15<\/text><\/svg><\/div><div class="loxel-mermaid-dark"><svg id="(loxel-mermaid-\d+)"><text>15<\/text><\/svg><\/div><\/div>$/,
+    if (typeof preview !== "string") throw new Error("expected an SVG preview");
+    const host = document.createElement("div");
+    host.innerHTML = preview;
+    const diagram = host.querySelector(":scope > .loxel-mermaid");
+    if (!(diagram instanceof HTMLElement)) throw new Error("expected the diagram wrapper");
+    // The natural width, from the viewBox, keeps CSS from shrinking it below a readable size.
+    expect(diagram.style.getPropertyValue("--loxel-mermaid-width")).toBe("640px");
+    const actions = [...diagram.querySelectorAll(".loxel-mermaid-toolbar [data-mermaid-action]")];
+    expect(actions.map((b) => b.getAttribute("data-mermaid-action"))).toEqual([
+      "zoom-out",
+      "zoom-in",
+      "reset",
+      "copy-svg",
+      "copy-png",
+      "open",
+    ]);
+    const canvas = diagram.querySelector(
+      ":scope > .loxel-mermaid-viewport > .loxel-mermaid-canvas",
     );
+    const variants = [...(canvas?.children ?? [])].map((el) => el.className);
+    expect(variants).toEqual(["loxel-mermaid-light", "loxel-mermaid-dark"]);
+    expect(canvas?.querySelectorAll("svg text")[0]?.textContent).toBe("15");
     expect(new Set(svgIds(preview)).size).toBe(2);
   });
 
@@ -112,6 +134,23 @@ describe("mermaid rendering", () => {
     expect(renderCalls).toHaveLength(2);
     expect(second).not.toBe(first);
     expect(new Set([...svgIds(first), ...svgIds(second)]).size).toBe(4);
+  });
+
+  test("the full-size viewer reuses the preview's render, sanitized and with its size", async () => {
+    renderImpl = (id) =>
+      Promise.resolve({
+        svg: `<svg id="${id}" viewBox="0 0 320 200"><script>alert(1)</script><text onclick="alert(2)">Hi</text></svg>`,
+      });
+    await renderAsync("mermaid", "graph LR; X-->Y");
+    const diagram = await renderMermaidDiagram("graph LR; X-->Y");
+    expect(renderCalls).toHaveLength(2);
+    expect(diagram.size).toEqual({ width: 320, height: 200 });
+    // happy-dom's DOMPurify also drops the root <svg> itself (Chromium keeps it), so only what
+    // must be gone is checked here.
+    for (const svg of [diagram.light, diagram.dark]) {
+      expect(svg).not.toContain("<script");
+      expect(svg).not.toContain("onclick");
+    }
   });
 
   test("a parse error shows as plain text and the temp node is removed", async () => {
