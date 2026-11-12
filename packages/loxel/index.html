@@ -14,6 +14,16 @@
         } catch {}
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        // The custom theme colors, likewise (src/lib/theme-stylesheet.ts keeps them).
+        try {
+          const css = localStorage.getItem("loxel-theme-css");
+          if (css) {
+            const style = document.createElement("style");
+            style.id = "loxel-theme";
+            style.textContent = css;
+            document.head.append(style);
+          }
+        } catch {}
       })();
     </script>
   </head>

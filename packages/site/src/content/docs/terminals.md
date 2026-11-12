@@ -71,7 +71,7 @@ Your shell's startup runs after that, so it can still change what you get. A `JA
 
 ## Theme and font
 
-Terminal colors follow the theme you choose in **Settings > Appearance > Theme**. No manual configuration needed.
+Terminal colors come from the theme of the current mode, which you choose in **Settings > Appearance > Color Themes**: its 16 ANSI colors, text, cursor and selection, on the theme's editor surface. Open terminals switch at once when you change themes or the mode switches between light and dark. To use other terminal colors, make a theme of your own and take its ANSI colors from an iTerm2, Windows Terminal or VS Code file. See [Themes](/docs/themes).
 
 Terminals use the code font until you pick a terminal font of their own in **Settings > Appearance**, and open terminals switch to a new font at once. See [Fonts](/docs/editor#fonts).
 

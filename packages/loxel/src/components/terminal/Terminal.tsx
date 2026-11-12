@@ -8,7 +8,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import * as api from "@/api/client";
@@ -18,8 +18,11 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { toHexColor } from "@/lib/css-color";
 import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
+import { resolveTheme, xtermColorOptions } from "@/lib/loxel-theme";
+import { readThemeTokens } from "@/lib/theme-stylesheet";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
 import { useSettingsStore } from "@/store/settings-store";
@@ -36,45 +39,12 @@ import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
 
-/** Read a CSS variable from :root. */
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-/** Build xterm.js theme from CSS variables defined in index.css. */
-function getTerminalTheme() {
-  const bg = cssVar("--editor-surface");
-  return {
-    background: bg,
-    foreground: cssVar("--term-foreground"),
-    cursor: cssVar("--term-cursor"),
-    cursorAccent: bg,
-    selectionBackground: cssVar("--term-selection"),
-    black: cssVar("--term-black"),
-    red: cssVar("--term-red"),
-    green: cssVar("--term-green"),
-    yellow: cssVar("--term-yellow"),
-    blue: cssVar("--term-blue"),
-    magenta: cssVar("--term-magenta"),
-    cyan: cssVar("--term-cyan"),
-    white: cssVar("--term-white"),
-    brightBlack: cssVar("--term-bright-black"),
-    brightRed: cssVar("--term-bright-red"),
-    brightGreen: cssVar("--term-bright-green"),
-    brightYellow: cssVar("--term-bright-yellow"),
-    brightBlue: cssVar("--term-bright-blue"),
-    brightMagenta: cssVar("--term-bright-magenta"),
-    brightCyan: cssVar("--term-bright-cyan"),
-    brightWhite: cssVar("--term-bright-white"),
-  };
-}
-
 /**
- * The theme's minimum foreground/background contrast (`--term-min-contrast`). Light themes raise
- * it so colors meant for dark backgrounds (white, bright white, dim) stay readable on white.
+ * A theme color in a form xterm.js parses: it reads hex and comma-separated `rgb()`/`rgba()` on
+ * its own, and other forms only through a canvas, which drops their alpha.
  */
-function getTerminalMinimumContrast(): number {
-  return Number(cssVar("--term-min-contrast")) || 1;
+function xtermColor(color: string): string {
+  return /^#[\da-f]{3,8}$|^rgba?\(\s*[\d.]+\s*,/i.test(color) ? color : toHexColor(color);
 }
 
 const RESIZE_DEBOUNCE_MS = 100;
@@ -282,6 +252,18 @@ interface TerminalProps {
 export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
+  // A built-in or stored theme object, so the reference only changes when the colors do.
+  const colorTheme = useSettingsStore((s) => resolveTheme(s.themes, darkMode));
+  const colors = useMemo(() => {
+    const surface = readThemeTokens(colorTheme, ["editor-surface"])["editor-surface"] ?? "";
+    const { theme, minimumContrastRatio } = xtermColorOptions(colorTheme, toHexColor(surface));
+    const xtermTheme = Object.fromEntries(
+      Object.entries(theme).map(([key, color]) => [key, xtermColor(color)]),
+    ) as typeof theme;
+    return { theme: xtermTheme, minimumContrastRatio };
+  }, [colorTheme]);
+  const colorsRef = useRef(colors);
+  colorsRef.current = colors;
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const font = useSettingsStore(useShallow((s) => resolveFont(s.fonts, "terminal")));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -340,8 +322,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       allowProposedApi: true,
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
-      theme: getTerminalTheme(),
-      minimumContrastRatio: getTerminalMinimumContrast(),
+      ...colorsRef.current,
     });
 
     const fitAddon = new FitAddon();
@@ -620,17 +601,13 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     };
   }, [terminalId, panelApi]);
 
-  // Update terminal theme when dark mode changes
+  // Switch colors when the theme changes: another one picked or edited, or the mode switched.
   useEffect(() => {
-    if (!xtermRef.current) return;
-    const id = requestAnimationFrame(() => {
-      if (xtermRef.current) {
-        xtermRef.current.options.theme = getTerminalTheme();
-        xtermRef.current.options.minimumContrastRatio = getTerminalMinimumContrast();
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, [darkMode]);
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    terminal.options.theme = colors.theme;
+    terminal.options.minimumContrastRatio = colors.minimumContrastRatio;
+  }, [colors]);
 
   // Update scrollback buffer when setting changes
   useEffect(() => {
@@ -663,7 +640,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       <div
         ref={containerRef}
         className="h-full w-full overflow-hidden p-2"
-        style={{ backgroundColor: "var(--editor-surface)" }}
+        style={{ backgroundColor: colors.theme.background }}
         onMouseDown={handleClick}
       />
       {findBarProps && <FindBar label="Find in terminal" {...findBarProps} />}

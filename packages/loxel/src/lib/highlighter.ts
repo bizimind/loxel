@@ -364,16 +364,8 @@ export function detectLanguage(filePath: string): string | null {
   return EXT_TO_LANG[ext] ?? null;
 }
 
-/** Themes `highlightCode` can paint with: those `getHighlighter` loads. */
-export type CodeTheme = "github-dark" | "loxel-light";
-
-/**
- * Theme for read-only highlighted code (diff hunks, file previews, log context). Light uses the
- * editor's own loxel-light; dark keeps github-dark.
- */
-export function readOnlyCodeTheme(darkMode: boolean): CodeTheme {
-  return darkMode ? "github-dark" : "loxel-light";
-}
+/** A theme `highlightCode` can paint with: one `getHighlighter` has loaded. */
+export type CodeTheme = string;
 
 export interface HighlightedLine {
   html: string;

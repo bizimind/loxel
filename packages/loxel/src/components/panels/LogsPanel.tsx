@@ -23,8 +23,10 @@ import { stringify as yamlStringify } from "yaml";
 import type { LogEntry, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES } from "@/api/log-entry-model";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
-import { highlightCode, readOnlyCodeTheme } from "@/lib/highlighter";
+import { downloadTextFile } from "@/lib/download-file";
+import { highlightCode } from "@/lib/highlighter";
 import { lazyLspClients } from "@/lib/lsp-clients";
+import { useReadOnlyCodeTheme } from "@/lib/syntax-theme";
 import { cn } from "@/lib/utils";
 import { useLogStore } from "@/store/logs";
 import { useUIStore } from "@/store/ui";
@@ -131,10 +133,12 @@ function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
   const [html, setHtml] = useState<string | null>(null);
   const yaml = useMemo(() => yamlStringify(ctx, { lineWidth: 0 }).trimEnd(), [ctx]);
   const darkMode = useUIStore((s) => s.darkMode);
+  // `revision` reruns the highlighting when the theme's colors change under the same name.
+  const { theme, revision } = useReadOnlyCodeTheme(darkMode);
 
   useEffect(() => {
     let cancelled = false;
-    highlightCode(yaml, "yaml", readOnlyCodeTheme(darkMode))
+    highlightCode(yaml, "yaml", theme)
       .then((lines) => {
         if (!cancelled) setHtml(lines.map((l) => l.html).join("\n"));
       })
@@ -142,7 +146,7 @@ function HighlightedYaml({ ctx }: { ctx: Record<string, unknown> }) {
     return () => {
       cancelled = true;
     };
-  }, [yaml, darkMode]);
+  }, [yaml, theme, revision]);
 
   return (
     <pre
@@ -381,21 +385,13 @@ export function LogsPanel() {
   const handleExport = useCallback(() => {
     if (filteredEntries.length === 0) return;
     const ndjson = filteredEntries.map((e) => JSON.stringify(e)).join("\n") + "\n";
-    const blob = new Blob([ndjson], { type: "application/x-ndjson" });
-    const url = URL.createObjectURL(blob);
     // Local ISO timestamp with filename-safe separators.
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, "0");
     const stamp =
       `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
       `T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `loxel-logs-${stamp}.ndjson`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadTextFile(`loxel-logs-${stamp}.ndjson`, ndjson, "application/x-ndjson");
   }, [filteredEntries]);
 
   if (!initialized) {

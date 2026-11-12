@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings-store";
 
 import { FontSettings } from "./FontSettings";
+import { ThemeSettings } from "./ThemeSettings";
 
 const THEME_ICONS: Record<ThemePreference, LucideIcon> = {
   dark: MoonIcon,
@@ -68,6 +69,8 @@ export function AppearanceSection() {
           })}
         </div>
       </div>
+
+      <ThemeSettings />
 
       <FontSettings />
     </div>

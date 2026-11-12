@@ -248,34 +248,6 @@
   --diff-collapse-line-hover: #808080;
   /* Edges of the side-by-side diff's line-number gutter */
   --diff-gutter-border: #c6c9d1;
-
-  /* Terminal ANSI colors (light mode). Normal colors are deep (7-9:1 on white); bright colors
-   * are vivid and light, so as backgrounds they carry black text and as text the minimum contrast
-   * below darkens them to 4.5:1, which keeps each one lighter than its normal color. Bright black
-   * is a dark grey; white a light grey and bright white an off-white, both still visible as
-   * swatches. */
-  --term-foreground: #1e1f22;
-  --term-cursor: #1e1f22;
-  --term-selection: rgba(53, 116, 240, 0.22);
-  --term-black: #1e1f22;
-  --term-red: #a31621;
-  --term-green: #0e5a26;
-  --term-yellow: #7f4300;
-  --term-blue: #06449a;
-  --term-magenta: #7e2a98;
-  --term-cyan: #08525a;
-  --term-white: #b6bac2;
-  --term-bright-black: #40444d;
-  --term-bright-red: #f2453d;
-  --term-bright-green: #1cc24f;
-  --term-bright-yellow: #f5a623;
-  --term-bright-blue: #4a8cff;
-  --term-bright-magenta: #b56cff;
-  --term-bright-cyan: #2bb5e0;
-  --term-bright-white: #e6e8ec;
-  /* xterm.js minimumContrastRatio: lifts white-on-white and light brights to readable; vite.config.ts
-   * patches the WebGL renderer so dim text meets it as drawn too */
-  --term-min-contrast: 4.5;
 }
 
 .dark {
@@ -380,28 +352,6 @@
   --diff-collapse-line: #4e5157;
   --diff-collapse-line-hover: #9da0a8;
   --diff-gutter-border: #303438;
-
-  /* Terminal ANSI colors (dark mode — Darcula console palette, inherited by New UI Dark) */
-  --term-foreground: #a9b7c6;
-  --term-cursor: #ced0d6;
-  --term-selection: rgba(255, 255, 255, 0.18);
-  --term-black: #000000;
-  --term-red: #ff6b68;
-  --term-green: #a8c023;
-  --term-yellow: #d6bf55;
-  --term-blue: #5394ec;
-  --term-magenta: #ae8abe;
-  --term-cyan: #299999;
-  --term-white: #999999;
-  --term-bright-black: #555555;
-  --term-bright-red: #ff8785;
-  --term-bright-green: #a8c023;
-  --term-bright-yellow: #d6bf55;
-  --term-bright-blue: #7eaef1;
-  --term-bright-magenta: #ff99ff;
-  --term-bright-cyan: #6cdada;
-  --term-bright-white: #ffffff;
-  --term-min-contrast: 1;
 }
 
 @theme inline {

@@ -8,6 +8,17 @@ import {
   type NotificationSequences,
 } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import {
+  allThemes,
+  BUILTIN_THEMES,
+  DEFAULT_THEME_SETTINGS,
+  isBuiltinTheme,
+  type LoxelTheme,
+  parseThemeSettings,
+  type ThemeBase,
+  type ThemeSettings,
+} from "@/lib/loxel-theme";
+import type { ParsedTheme } from "@/lib/theme-file";
 import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
@@ -22,12 +33,16 @@ export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
 /**
- * A stored or synced settings slice with its `theme`, when it has one, checked: an unknown value
- * (hand-edited, or from a newer version) falls back to the default, dark.
+ * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet.
  */
-export function withValidTheme<T extends object>(slice: T): T {
-  if (!("theme" in slice)) return slice;
-  return { ...slice, theme: parseThemePreference(slice.theme) };
+export function withValidSettings<T extends object>(slice: T): T {
+  const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
+  if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
+  if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
+  // Only fields already in the slice were replaced, each with a valid value of its type.
+  return valid as T;
 }
 
 export interface TerminalSettings {
@@ -520,6 +535,8 @@ type SettingsSection =
 export interface SettingsState {
   /** Color theme. Dark by default. */
   theme: ThemePreference;
+  /** The color theme each mode uses, and the user's own themes. */
+  themes: ThemeSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
@@ -541,6 +558,21 @@ export interface SettingsState {
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
+
+  // Color theme actions
+  /** Use a theme for the mode of its base. */
+  setModeTheme: (base: ThemeBase, themeId: string) => void;
+  /**
+   * Add a theme from a file and use it for its mode. One with the name and base of a custom theme
+   * replaces it and keeps its id; one named like a built-in gets " (imported)". Returns its id.
+   */
+  importTheme: (theme: ParsedTheme) => string;
+  /** Copy a theme as a new custom one and use it for its mode. Returns its id. */
+  duplicateTheme: (themeId: string) => string | null;
+  /** Change a custom theme's name or colors; built-ins do not change. */
+  updateTheme: (themeId: string, patch: Partial<Omit<LoxelTheme, "id" | "base">>) => void;
+  /** Remove a custom theme; a mode using it goes back to its built-in. */
+  removeTheme: (themeId: string) => void;
 
   // Layout actions
   updateLayout: (partial: Partial<LayoutSettings>) => void;
@@ -643,10 +675,15 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
   }
 }
 
+function newThemeId(): string {
+  return `custom:${crypto.randomUUID()}`;
+}
+
 /** The persisted slice of the settings store; cross-window sync applies the same slice. */
 export function persistedSettings(state: SettingsState) {
   return {
     theme: state.theme,
+    themes: state.themes,
     layout: state.layout,
     terminal: state.terminal,
     editor: state.editor,
@@ -664,7 +701,7 @@ export function persistedSettings(state: SettingsState) {
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       theme: "dark",
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
@@ -672,6 +709,7 @@ export const useSettingsStore = create<SettingsState>()(
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
       },
+      themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
@@ -687,6 +725,62 @@ export const useSettingsStore = create<SettingsState>()(
       // -- Terminal --
 
       updateTerminal: (partial) => set((s) => ({ terminal: { ...s.terminal, ...partial } })),
+
+      // -- Color themes --
+
+      setModeTheme: (base, themeId) => set((s) => ({ themes: { ...s.themes, [base]: themeId } })),
+
+      importTheme: (parsed) => {
+        const { custom } = get().themes;
+        const name = BUILTIN_THEMES.some((b) => b.name === parsed.name)
+          ? `${parsed.name} (imported)`
+          : parsed.name;
+        const previous = custom.find((t) => t.name === name && t.base === parsed.base);
+        const theme: LoxelTheme = { ...parsed, name, id: previous?.id ?? newThemeId() };
+        set((s) => ({
+          themes: {
+            ...s.themes,
+            [theme.base]: theme.id,
+            custom: previous
+              ? s.themes.custom.map((t) => (t.id === theme.id ? theme : t))
+              : [...s.themes.custom, theme],
+          },
+        }));
+        return theme.id;
+      },
+
+      duplicateTheme: (themeId) => {
+        const { themes } = get();
+        const source = allThemes(themes).find((t) => t.id === themeId);
+        if (!source) return null;
+        const names = new Set(allThemes(themes).map((t) => t.name));
+        let name = `${source.name} copy`;
+        for (let n = 2; names.has(name); n++) name = `${source.name} copy ${n}`;
+        const theme: LoxelTheme = { ...structuredClone(source), id: newThemeId(), name };
+        set((s) => ({
+          themes: { ...s.themes, [theme.base]: theme.id, custom: [...s.themes.custom, theme] },
+        }));
+        return theme.id;
+      },
+
+      updateTheme: (themeId, patch) =>
+        set((s) => {
+          if (isBuiltinTheme(themeId)) return {};
+          const custom = s.themes.custom.map((t) => (t.id === themeId ? { ...t, ...patch } : t));
+          return { themes: { ...s.themes, custom } };
+        }),
+
+      removeTheme: (themeId) =>
+        set((s) => {
+          const { light, dark, custom } = s.themes;
+          return {
+            themes: {
+              light: light === themeId ? DEFAULT_THEME_SETTINGS.light : light,
+              dark: dark === themeId ? DEFAULT_THEME_SETTINGS.dark : dark,
+              custom: custom.filter((t) => t.id !== themeId),
+            },
+          };
+        }),
 
       // -- Layout --
 
@@ -919,7 +1013,9 @@ export const useSettingsStore = create<SettingsState>()(
       partialize: persistedSettings,
       merge: (persisted, current) => ({
         ...current,
-        ...(typeof persisted === "object" && persisted !== null ? withValidTheme(persisted) : {}),
+        ...(typeof persisted === "object" && persisted !== null
+          ? withValidSettings(persisted)
+          : {}),
       }),
       version: 17,
       migrate: (persisted, version) => {

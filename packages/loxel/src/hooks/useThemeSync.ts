@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 
+import { resolveTheme } from "@/lib/loxel-theme";
 import { cacheDarkMode } from "@/lib/theme-cache";
+import { applyThemeStylesheet } from "@/lib/theme-stylesheet";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
@@ -30,10 +32,12 @@ function getSettingsHydrated(): boolean {
  * settings load, the page keeps the theme index.html applied from the last session's cache, which
  * this keeps current. In Electron the setting also goes to `nativeTheme`, for native UI, browser
  * panels and window backgrounds. With an explicit theme that makes this page's own
- * `prefers-color-scheme` match the setting too, which is why only "system" reads it.
+ * `prefers-color-scheme` match the setting too, which is why only "system" reads it. The color
+ * themes chosen for each mode restyle the page through their stylesheet (theme-stylesheet.ts).
  */
 export function useThemeSync(): void {
   const theme = useSettingsStore((s) => s.theme);
+  const themes = useSettingsStore((s) => s.themes);
   const hydrated = useSyncExternalStore(subscribeSettingsHydration, getSettingsHydrated);
   const systemDark = useSyncExternalStore(subscribeSystemDark, getSystemDark);
   const darkMode = theme === "system" ? systemDark : theme === "dark";
@@ -46,6 +50,11 @@ export function useThemeSync(): void {
     root.style.colorScheme = darkMode ? "dark" : "light";
     cacheDarkMode(darkMode);
   }, [hydrated, darkMode]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    applyThemeStylesheet(resolveTheme(themes, false), resolveTheme(themes, true));
+  }, [hydrated, themes]);
 
   useEffect(() => {
     if (!hydrated) return;

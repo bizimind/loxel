@@ -29,6 +29,7 @@ import { type Highlighter, bundledLanguagesInfo } from "shiki";
 import { frontendLog } from "@/lib/frontend-logger";
 import { BUNDLED_LANGUAGES, getHighlighter } from "@/lib/highlighter";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
+import { useSyntaxThemeStore } from "@/lib/syntax-theme";
 import { useUIStore } from "@/store/ui";
 
 const log = frontendLog.child("ui");
@@ -205,7 +206,11 @@ function normalizeColor(color: string): string {
 
 const colorStyleKey = (color: string, style: number) => `${normalizeColor(color)}|${style}`;
 
-const scopesByTheme = new Map<string, Map<string, string>>();
+/**
+ * Per theme name, the scope for each color and style, and the revision it was built at: a custom
+ * theme's colors change under the same name, with a new `useSyntaxThemeStore` revision.
+ */
+const scopesByTheme = new Map<string, { revision: number; scopes: Map<string, string> }>();
 
 /**
  * Whether Monaco treats a token of this color and style as a string, comment or regex, whose
@@ -214,7 +219,9 @@ const scopesByTheme = new Map<string, Map<string, string>>();
  * `STANDARD_TOKEN_TYPE_REGEXP`; this mirrors both so blocks color the same brackets.
  */
 function isTextToken(highlighter: Highlighter, themeName: string, color: string, style: number) {
-  let scopes = scopesByTheme.get(themeName);
+  const { revision } = useSyntaxThemeStore.getState();
+  const cached = scopesByTheme.get(themeName);
+  let scopes = cached?.revision === revision ? cached.scopes : undefined;
   if (!scopes) {
     scopes = new Map();
     for (const rule of highlighter.getTheme(themeName).settings) {
@@ -225,7 +232,7 @@ function isTextToken(highlighter: Highlighter, themeName: string, color: string,
       const key = colorStyleKey(foreground, fontStyleBits(rule.settings.fontStyle));
       if (!scopes.has(key)) scopes.set(key, scope);
     }
-    scopesByTheme.set(themeName, scopes);
+    scopesByTheme.set(themeName, { revision, scopes });
   }
   const scope = scopes.get(colorStyleKey(color, style)) ?? "";
   return /\b(comment|string|regex|regexp)\b/.test(scope);
@@ -283,10 +290,11 @@ function shikiHighlight(lang: string): Extension {
       decorations: DecorationSet = Decoration.none;
       private destroyed = false;
       private timer: ReturnType<typeof setTimeout> | undefined;
-      /** Recolors the block for the new theme when the app theme changes. */
-      private readonly unsubscribe = useUIStore.subscribe((state, prev) => {
+      /** Recolors the block for the new theme when the mode or a theme's syntax colors change. */
+      private readonly unsubscribeMode = useUIStore.subscribe((state, prev) => {
         if (state.darkMode !== prev.darkMode) this.repaint();
       });
+      private readonly unsubscribeSyntax = useSyntaxThemeStore.subscribe(() => this.repaint());
 
       constructor(private readonly view: EditorView) {
         if (loadedHighlighter) {
@@ -326,7 +334,8 @@ function shikiHighlight(lang: string): Extension {
       destroy() {
         this.destroyed = true;
         clearTimeout(this.timer);
-        this.unsubscribe();
+        this.unsubscribeMode();
+        this.unsubscribeSyntax();
       }
     },
     { decorations: (value) => value.decorations },

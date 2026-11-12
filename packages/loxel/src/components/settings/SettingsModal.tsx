@@ -61,6 +61,7 @@ export function SettingsModal() {
 
   // Live state for dirty tracking
   const theme = useSettingsStore((s) => s.theme);
+  const themes = useSettingsStore((s) => s.themes);
   const layout = useSettingsStore((s) => s.layout);
   const terminal = useSettingsStore((s) => s.terminal);
   const editor = useSettingsStore((s) => s.editor);
@@ -73,10 +74,11 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (isOpen) {
-      const { theme, layout, terminal, editor, fonts, schemas, fileAssociations } =
+      const { theme, themes, layout, terminal, editor, fonts, schemas, fileAssociations } =
         useSettingsStore.getState();
       snapshotRef.current = JSON.stringify({
         theme,
+        themes,
         layout,
         terminal,
         editor,
@@ -92,10 +94,18 @@ export function SettingsModal() {
   const isSettingsDirty = useMemo(() => {
     if (!snapshotRef.current) return false;
     return (
-      JSON.stringify({ theme, layout, terminal, editor, fonts, schemas, fileAssociations }) !==
-      snapshotRef.current
+      JSON.stringify({
+        theme,
+        themes,
+        layout,
+        terminal,
+        editor,
+        fonts,
+        schemas,
+        fileAssociations,
+      }) !== snapshotRef.current
     );
-  }, [theme, layout, terminal, editor, fonts, schemas, fileAssociations]);
+  }, [theme, themes, layout, terminal, editor, fonts, schemas, fileAssociations]);
 
   const saveDisabled = !isSettingsDirty;
 
@@ -114,7 +124,14 @@ export function SettingsModal() {
         useSettingsStore.setState(
           parsed as Pick<
             SettingsState,
-            "theme" | "layout" | "terminal" | "editor" | "fonts" | "schemas" | "fileAssociations"
+            | "theme"
+            | "themes"
+            | "layout"
+            | "terminal"
+            | "editor"
+            | "fonts"
+            | "schemas"
+            | "fileAssociations"
           >,
         );
       }
