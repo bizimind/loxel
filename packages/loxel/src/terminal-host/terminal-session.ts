@@ -217,11 +217,6 @@ export class TerminalSession {
     return this.attachment !== null;
   }
 
-  /** Whether the client attached under `attachment` is still the session's client. */
-  isAttachedAs(attachment: number): boolean {
-    return this.attachment === attachment;
-  }
-
   /** Bytes of output the resume ring holds. */
   get retainedBytes(): number {
     return this.ring.end - this.ring.start;
@@ -231,9 +226,11 @@ export class TerminalSession {
    * Bind a client under `attachment`. With a `since` point from this epoch still covered by the
    * resume ring, the client keeps its xterm and only receives the bytes it missed; otherwise it gets
    * a snapshot of the emulator. Replaces any previously attached client. The session counts as
-   * attached from this call on, even while the snapshot is still being produced.
+   * attached from this call on, even while the snapshot is still being produced. Resolves to
+   * whether this attach is still the session's current one: not superseded by another attach (one
+   * re-sent with the same attachment number included), a detach or a destroy.
    */
-  async attach(attachment: number, since?: { epoch: string; offset: number }): Promise<void> {
+  async attach(attachment: number, since?: { epoch: string; offset: number }): Promise<boolean> {
     const generation = ++this.attachGeneration;
     this.attachment = attachment;
     this.streaming = false;
@@ -248,7 +245,7 @@ export class TerminalSession {
         );
         this.sendState(attachment, this.state("resume", since.offset));
         this.goLive(since.offset, missed);
-        return;
+        return true;
       }
     }
 
@@ -257,6 +254,7 @@ export class TerminalSession {
     });
     this.snapshotSync = sync;
     await sync;
+    return generation === this.attachGeneration && !this.disposed;
   }
 
   /** Stop streaming to the attached client. The program keeps running. */
