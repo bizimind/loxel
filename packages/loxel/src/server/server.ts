@@ -16,7 +16,7 @@ import type {
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
-import type { ShutdownTerminals } from "@/parent-channel-protocol";
+import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
@@ -105,8 +105,12 @@ let stoppingInStartup = false;
  */
 const terminalHostsReached =
   Promise.withResolvers<(terminals: ShutdownTerminals) => Promise<void>>();
-/** How long a stop during startup waits for startup to reach the terminal hosts. */
-const STARTUP_STOP_WAIT_MS = 30_000;
+/**
+ * How long a stop during startup holds the port while it waits for startup to reach the terminal
+ * hosts and leaves them: well within the time a relaunched app waits for it, so the app never
+ * gives up on it and fails to launch.
+ */
+const STARTUP_STOP_WAIT_MS = STOPPING_SERVER_WAIT_MS - 5000;
 
 /**
  * Stop the server as the app asks, or once the app is gone. One still starting has nothing else to

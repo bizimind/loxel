@@ -62,15 +62,13 @@ const SERVER_MAX_CRASH_RESTARTS = 3;
 /** A server that stayed up this long before crashing gets a fresh retry budget. */
 const SERVER_STABLE_UPTIME_MS = 60_000;
 
-/** How long launch waits for a server a previous run of the app left shutting down. */
-const STALE_SERVER_WAIT_MS = 15_000;
-
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
 import { type OpenRequest, requestOpen } from "../open-request";
 import {
   PARENT_CHANNEL_FD,
+  STOPPING_SERVER_WAIT_MS,
   type ShutdownTerminals,
   encodeParentMessage,
 } from "../parent-channel-protocol";
@@ -738,7 +736,7 @@ function startAppServer(): Promise<void> {
 }
 
 async function waitForServerToStop(): Promise<void> {
-  const deadline = Date.now() + STALE_SERVER_WAIT_MS;
+  const deadline = Date.now() + STOPPING_SERVER_WAIT_MS;
   while (await isServerRunning()) {
     if (Date.now() > deadline) {
       throw new Error(

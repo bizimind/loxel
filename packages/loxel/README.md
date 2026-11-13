@@ -30,7 +30,7 @@ The user documentation lives in the site package ([`packages/site/src/content/do
 
 Three processes:
 
-- **Server** (Bun, `src/server/`, entry `src/server/index.ts`) — REST API and WebSocket (file watching, terminal I/O, log streaming, LSP proxies), git commands, PTY sessions, language server subprocesses, SQLite storage, and static serving of the built renderer. One server per mode (port 7433 prod, 7434 dev, 7435 + n for demo instance n) is shared by every window.
+- **Server** (Bun, `src/server/`, entry `src/server/index.ts`) — REST API and WebSocket (file watching, terminal I/O, log streaming, LSP proxies), git commands, terminal policy over the sessions its detached terminal hosts run, language server subprocesses, SQLite storage, and static serving of the built renderer. One server per mode (port 7433 prod, 7434 dev, 7435 + n for demo instance n) is shared by every window.
 - **Renderer** (React 19, Vite, `src/`) — Zustand stores (`src/store/`) persisted to the server, TanStack Query for server data (`src/queries/`), shared request/response and WebSocket models (`src/api/`), Monaco, xterm.js, Dockview, Milkdown and Excalidraw components (`src/components/`).
 - **Electron shell** (`src/electron/`) — runs the server for as long as the app runs, opens windows on its URL, handles native integrations and updates the app. See [docs/ELECTRON.md](docs/ELECTRON.md).
 
