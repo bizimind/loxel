@@ -5,20 +5,32 @@ import {
   DownloadIcon,
   LoaderIcon,
   RefreshCwIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import * as api from "@/api/client";
 import type { DefaultBrowserStatus } from "@/api/default-browser-model";
+import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
 import { Button } from "@/components/ui/button";
+import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { Switch } from "@/components/ui/switch";
 import { frontendLog } from "@/lib/frontend-logger";
+import type { TerminalRestartConfirmation } from "@/lib/update-terminal-restart";
+import {
+  restartsTerminalsOf,
+  terminalRestartConfirmation,
+  terminalRestartWarning,
+} from "@/lib/update-terminal-restart";
 import { queryKeys } from "@/queries/query-keys";
+import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { useUpdateStatus } from "@/queries/use-update-status";
+import { queryClient } from "@/query-client";
 import { useSettingsStore } from "@/store/settings-store";
 
 const settingsLog = frontendLog.child("ui");
+const updateLog = frontendLog.child("update");
 
 /** The site's download page, for installing by hand when an update cannot install itself. */
 const DOWNLOAD_PAGE_URL = "https://bizimind.io/download";
@@ -68,6 +80,8 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
   const setAutoCheck = useSettingsStore((s) => s.setAutoCheckForUpdates);
   const status = useUpdateStatus();
   const state = status?.state ?? "idle";
+  /** Install & Restart is listing the terminals to ask about. */
+  const [listing, setListing] = useState(false);
 
   return (
     <div className="space-y-3">
@@ -102,8 +116,13 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
           </Button>
         )}
 
-        {state === "ready" && (
-          <Button size="xs" onClick={() => electronAPI.installUpdate()}>
+        {status?.state === "ready" && (
+          <Button
+            size="xs"
+            disabled={listing}
+            onClick={() => void installWithConfirmation(electronAPI, status, setListing)}
+          >
+            {listing && <LoaderIcon className="mr-1.5 size-3 animate-spin" />}
             Install & Restart
           </Button>
         )}
@@ -204,6 +223,86 @@ function DefaultBrowserSetting({
   );
 }
 
+/**
+ * Install & Restart, once the user confirmed restarting the terminals if the update restarts any.
+ * The terminals are read fresh, with their foreground programs, so the list is current.
+ */
+async function installWithConfirmation(
+  electronAPI: NonNullable<Window["electronAPI"]>,
+  status: Extract<UpdateState, { state: "ready" }>,
+  setListing: (listing: boolean) => void,
+): Promise<void> {
+  if (status.restartsTerminals !== false) {
+    let running: readonly RunningTerminal[];
+    setListing(true);
+    try {
+      running = await api.getRunningTerminals({ programs: true });
+    } catch (err) {
+      updateLog.warn("Could not list the running terminals; counting the last known ones", {
+        error: err,
+      });
+      running = queryClient.getQueryData<RunningTerminal[]>(queryKeys.runningTerminals()) ?? [];
+    } finally {
+      setListing(false);
+    }
+    const confirmation = terminalRestartConfirmation(
+      status.version,
+      status.restartsTerminals,
+      running,
+    );
+    if (confirmation) {
+      const confirmed = await requestConfirmation({
+        title: confirmation.title,
+        description: <TerminalRestartDescription confirmation={confirmation} />,
+        confirmLabel: "Install & Restart",
+        destructive: status.restartsTerminals === true,
+      });
+      if (!confirmed) return;
+    }
+  }
+  electronAPI.installUpdate();
+}
+
+function TerminalRestartDescription({
+  confirmation,
+}: {
+  confirmation: TerminalRestartConfirmation;
+}) {
+  const { message, busy } = confirmation;
+  return (
+    <div className="space-y-2">
+      <p>{message}</p>
+      {busy.length > 0 && (
+        <div>
+          <p>{busy.length === 1 ? "A program is running in:" : "Programs are running in:"}</p>
+          <ul className="mt-1 space-y-0.5">
+            {busy.map((terminal) => (
+              <li key={terminal.id} className="text-foreground">
+                <span className="font-mono">{terminal.program}</span>
+                <span className="text-muted-foreground"> in {terminal.worktree}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "This update restarts N terminals", for an update that does. */
+function TerminalRestartNotice({ status }: { status: UpdateState }) {
+  const restartsTerminals = restartsTerminalsOf(status);
+  const running = useRunningTerminals({ enabled: restartsTerminals !== false });
+  const warning = terminalRestartWarning(restartsTerminals, running?.length ?? 0);
+  if (!warning) return null;
+  return (
+    <div className="text-warning flex items-center gap-2 text-xs">
+      <TriangleAlertIcon className="size-3.5 shrink-0" />
+      <span>{warning}</span>
+    </div>
+  );
+}
+
 function UpdateStatusDisplay({ status }: { status: UpdateState | undefined }) {
   if (!status || status.state === "idle") return null;
 
@@ -221,18 +320,27 @@ function UpdateStatusDisplay({ status }: { status: UpdateState | undefined }) {
 
   if (status.state === "available") {
     return (
-      <div className="text-foreground flex items-center gap-2 text-xs">
-        <DownloadIcon className="size-3.5 shrink-0" />
-        <span>Version {status.version} is available</span>
+      <div className="space-y-1.5">
+        <div className="text-foreground flex items-center gap-2 text-xs">
+          <DownloadIcon className="size-3.5 shrink-0" />
+          <span>Version {status.version} is available</span>
+        </div>
+        <TerminalRestartNotice status={status} />
       </div>
     );
   }
 
+  // The progress is on the button; the warning stays.
+  if (status.state === "downloading") return <TerminalRestartNotice status={status} />;
+
   if (status.state === "ready") {
     return (
-      <div className="text-foreground flex items-center gap-2 text-xs">
-        <CheckCircleIcon className="size-3.5 shrink-0" />
-        <span>Version {status.version} ready to install</span>
+      <div className="space-y-1.5">
+        <div className="text-foreground flex items-center gap-2 text-xs">
+          <CheckCircleIcon className="size-3.5 shrink-0" />
+          <span>Version {status.version} ready to install</span>
+        </div>
+        <TerminalRestartNotice status={status} />
       </div>
     );
   }

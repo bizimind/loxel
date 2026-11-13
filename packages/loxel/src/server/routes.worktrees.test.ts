@@ -84,6 +84,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       activeWindow: () => null,
       homeDrafts: {} as never,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

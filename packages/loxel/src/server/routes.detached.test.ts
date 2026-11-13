@@ -57,6 +57,7 @@ describe("detached file project destinations", () => {
       activeWindow: () => null,
       homeDrafts,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

@@ -5,6 +5,7 @@ import { createNoopLogger } from "@bizimind/logger";
 import type { TerminalState } from "@/api/terminal-stream";
 import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 import type {
+  ForegroundProcesses,
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
@@ -557,6 +558,9 @@ class FakeTerminalHost implements TerminalHost {
   ack(): void {}
   destroy(id: string): void {
     this.destroyed.push(id);
+  }
+  foregroundProcesses(): Promise<ForegroundProcesses> {
+    return Promise.resolve({});
   }
   setMeta(): void {}
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {

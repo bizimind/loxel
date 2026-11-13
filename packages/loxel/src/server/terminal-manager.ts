@@ -14,6 +14,7 @@ import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 import type {
+  ForegroundProcesses,
   OscNotificationCode,
   TerminalHost,
   TerminalHostEvent,
@@ -93,6 +94,8 @@ export interface TerminalManagerHooks {
   onExit: (id: string, exitCode: number) => void;
   /** What contributes to a new shell's environment, applied in this order. */
   toolchainEnvs: readonly ToolchainEnvContributor[];
+  /** A session was added (spawned or adopted) or removed, for whoever lists them. */
+  onSessionsChanged?: () => void;
 }
 
 /** The setting that enables each notification sequence, and how its payload is read. */
@@ -214,6 +217,17 @@ export class TerminalManager {
         live: false,
       });
     }
+    this.hooks.onSessionsChanged?.();
+  }
+
+  /** Every session running in the host, or being spawned there, with its meta. */
+  running(): { id: string; meta: TerminalMeta }[] {
+    return [...this.sessions].map(([id, session]) => ({ id, meta: session.meta }));
+  }
+
+  /** The foreground program of each session whose host can tell; see `TerminalHost`. */
+  foregroundProcesses(): Promise<ForegroundProcesses> {
+    return this.host.foregroundProcesses();
   }
 
   get(id: string): TerminalSessionView | undefined {
@@ -385,10 +399,14 @@ export class TerminalManager {
       live: false,
     };
     this.sessions.set(id, session);
+    this.hooks.onSessionsChanged?.();
     try {
       await session.ready;
     } catch (err) {
-      if (this.sessions.get(id) === session) this.sessions.delete(id);
+      if (this.sessions.get(id) === session) {
+        this.sessions.delete(id);
+        this.hooks.onSessionsChanged?.();
+      }
       throw err;
     }
     return this.sessions.get(id) === session ? session : null;
@@ -416,6 +434,7 @@ export class TerminalManager {
         this.sessions.delete(event.id);
         session.sink?.sendExit(event.exitCode);
         this.hooks.onExit(event.id, event.exitCode);
+        this.hooks.onSessionsChanged?.();
         return;
       }
       case "osc": {
@@ -470,6 +489,7 @@ export class TerminalManager {
     this.starting.delete(id);
     if (!this.sessions.delete(id)) return;
     this.host.destroy(id);
+    this.hooks.onSessionsChanged?.();
   }
 
   /**

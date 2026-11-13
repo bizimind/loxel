@@ -459,6 +459,10 @@ export function useWsBridge(): void {
           applyStoreUpdate(message.key, message.state);
           break;
 
+        case "terminals_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
+          break;
+
         case "terminal_exit":
         case "terminal_state":
         case "error":

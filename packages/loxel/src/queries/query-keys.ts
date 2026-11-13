@@ -48,6 +48,8 @@ export const queryKeys = {
   repoTrustList: () => ["repoTrust", "list"] as const,
   /** Prefix key for every worktree's repository trust, and the list of every repository's. */
   repoTrustAll: () => ["repoTrust"] as const,
+  /** `GET /api/terminals`; invalidated by `terminals_changed`. */
+  runningTerminals: () => ["runningTerminals"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

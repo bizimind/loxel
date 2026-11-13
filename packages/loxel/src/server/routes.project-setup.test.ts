@@ -100,6 +100,7 @@ describe("project conversion preflight", () => {
       activeWindow: () => null,
       homeDrafts: {} as never,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   }
 

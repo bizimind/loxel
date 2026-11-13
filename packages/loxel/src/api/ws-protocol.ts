@@ -52,6 +52,8 @@ export type WsMessage =
   | { type: "error"; message: string }
   | { type: "terminal_exit"; id: string; exitCode: number }
   | ({ type: "terminal_state" } & TerminalState)
+  /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
+  | { type: "terminals_changed" }
   | { type: "log_entries"; data: LogEntry[] }
   | { type: "log_error_count"; delta: number }
   | { type: "log_error_snapshot"; total: number }

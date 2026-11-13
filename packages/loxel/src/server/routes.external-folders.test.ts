@@ -112,6 +112,7 @@ describe("Others folders routes", () => {
       activeWindow: () => null,
       homeDrafts: {} as never,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

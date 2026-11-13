@@ -1,11 +1,18 @@
-import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import {
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  SettingsIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
 import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
+import { restartsTerminalsOf, terminalRestartWarning } from "@/lib/update-terminal-restart";
 import { cn } from "@/lib/utils";
+import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { useUpdateStatus } from "@/queries/use-update-status";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
@@ -140,6 +147,9 @@ function SidebarToggle() {
 
 function UpdateIndicator() {
   const status = useUpdateStatus();
+  const restartsTerminals = restartsTerminalsOf(status);
+  const running = useRunningTerminals({ enabled: restartsTerminals !== false });
+  const warning = terminalRestartWarning(restartsTerminals, running?.length ?? 0);
 
   const hasUpdate =
     status?.state === "available" || status?.state === "ready" || status?.state === "downloading";
@@ -147,11 +157,12 @@ function UpdateIndicator() {
 
   return (
     <button
-      className="text-link hover:text-link/80 mr-1 rounded p-1 text-[10px] font-medium"
+      className="text-link hover:text-link/80 mr-1 flex items-center gap-1 rounded p-1 text-[10px] font-medium"
       onClick={() => useSettingsStore.getState().openSettings("general")}
       style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
-      title="Update available"
+      title={warning ? `Update available. ${warning}` : "Update available"}
     >
+      {warning && <TriangleAlertIcon className="text-warning size-3" aria-label={warning} />}
       Update
     </button>
   );
