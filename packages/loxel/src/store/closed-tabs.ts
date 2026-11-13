@@ -15,7 +15,7 @@ import type {
 } from "dockview-react";
 
 import { getCenterPanelDef } from "./panel-config";
-import { getCenterApi, getCenterApiWorktree } from "./tools-bar";
+import { getCenterApi, getCenterApiLayoutKey } from "./tools-bar";
 import { createWorktreeStore } from "./worktree-store";
 
 /** Stacks are capped; the oldest tabs are dropped. */
@@ -65,12 +65,13 @@ function toClosedTab(panel: IDockviewPanel): ClosedTab | null {
 
 /** Close a center tab at the user's request, so it can be reopened. */
 export function closeCenterTab(api: DockviewPanelApi): void {
-  const worktreePath = getCenterApiWorktree();
+  // Keyed by layout, so Home keeps its own closed tabs.
+  const layoutKey = getCenterApiLayoutKey();
   const panel = getCenterApi()?.getPanel(api.id);
   const closed = panel && toClosedTab(panel);
-  if (worktreePath && closed) {
-    const { tabs } = getStore(worktreePath).getState();
-    getStore(worktreePath).setState({ tabs: [...tabs, closed].slice(-MAX_CLOSED_TABS) });
+  if (layoutKey && closed) {
+    const { tabs } = getStore(layoutKey).getState();
+    getStore(layoutKey).setState({ tabs: [...tabs, closed].slice(-MAX_CLOSED_TABS) });
   }
   api.close();
 }

@@ -8,6 +8,7 @@ import { registerTabRename } from "@/lib/tab-rename";
 
 import { applyStoreUpdate } from "../store-sync";
 import { setCenterApi } from "../tools-bar";
+import { useWorktreeStore } from "../worktrees";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
 import { findOverlappingActions, useKeybindingStore } from "./keybinding-store";
 import {
@@ -22,6 +23,7 @@ const key = normalizeKeyCombo;
 afterEach(() => {
   cancelPendingChord();
   useKeybindingStore.getState().resetAllOverrides();
+  useWorktreeStore.setState({ activeWorktreePath: null });
 });
 
 describe("resolveKeystroke", () => {
@@ -46,12 +48,19 @@ describe("resolveKeystroke", () => {
   });
 
   test("resolves a three-step typed split chord", () => {
+    useWorktreeStore.setState({ activeWorktreePath: "/wt" });
     resolveKeystroke(key("Cmd+Backslash"));
     expect(resolveKeystroke(key("T"))).toEqual({ kind: "pending" });
     expect(resolveKeystroke(key("ArrowDown"))).toEqual({
       kind: "action",
       actionId: "panel.split.terminal.down",
     });
+  });
+
+  test("leaves a chord for a panel Home can't hold unbound in Home", () => {
+    resolveKeystroke(key("Cmd+Backslash"));
+    resolveKeystroke(key("T"));
+    expect(resolveKeystroke(key("ArrowDown"))).toEqual({ kind: "cancelled" });
   });
 
   test("accepts later steps typed with ⌘ still held", () => {

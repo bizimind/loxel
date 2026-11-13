@@ -159,7 +159,8 @@ function RemoveButton({
   );
 }
 
-function hostOf(url: string): string {
+/** A URL's host, to tell bookmarks with like titles apart; the URL itself if it has none. */
+export function hostOf(url: string): string {
   try {
     return new URL(url).host || url;
   } catch {

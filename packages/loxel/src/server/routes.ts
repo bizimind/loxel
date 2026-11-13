@@ -3020,6 +3020,17 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       return error("Invalid URL — only http and https URLs are supported", 400);
     }
 
+    // A link opened with Loxel as the browser names no worktree: the window in use opens it in the
+    // worktree it shows, or in Home.
+    if (body.wtPath === undefined) {
+      const sent = ctx.sendToActiveWindow(windowId, {
+        type: "open_url",
+        wtPath: null,
+        data: { url: body.url, ...placed },
+      });
+      return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+    }
+
     const wtPath = await namedWorktree(ctx, body.wtPath);
     if (!wtPath) return error("No project found for worktree", 404);
 

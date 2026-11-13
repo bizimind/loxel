@@ -8,6 +8,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderPlusIcon,
+  HomeIcon,
   ListTreeIcon,
   PencilIcon,
   TrashIcon,
@@ -23,6 +24,7 @@ import { focusSidebarEntryForPath, handleSidebarEntryKeyDown } from "@/lib/focus
 import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { abbreviateHomePath } from "@/lib/home-path";
+import { onLoxelEvent } from "@/lib/loxel-events";
 import { cn } from "@/lib/utils";
 import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -40,7 +42,7 @@ const ROW_LEFT = 8;
 const CHEVRON_PX = 14;
 /** Puts the expanded project icon in the column of the top-level worktree icons below it. */
 const ICON_MARGIN_LEFT = iconLeftExpanded(0) - ROW_LEFT - CHEVRON_PX;
-/** The rail's Add project button (`size-8`), centered on the worktree icons' column. */
+/** The rail's Home and Add project buttons (`size-8`), centered on the worktree icons' column. */
 const RAIL_ADD_PX = 32;
 const RAIL_ADD_LEFT = iconLeft(0) - (RAIL_ADD_PX - ICON_PX) / 2;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */
@@ -64,6 +66,7 @@ export function Sidebar() {
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
+  const showHome = useWorktreeStore((s) => s.showHome);
 
   // Auto-expand newly loaded projects once so worktrees and the create action are visible.
   // The "once" marker lives in the persisted store, not a ref: the sidebar remounts when the
@@ -134,6 +137,9 @@ export function Sidebar() {
       contextMenu !== null && s.byProject[contextMenu.project.path]?.worktreeMetadata === false,
   );
   const [nestingProjectPath, setNestingProjectPath] = useState<string | null>(null);
+
+  // Home's quickstart opens the dialog here, so a panel replacing the quickstart can't close it.
+  useEffect(() => onLoxelEvent("loxel-open-add-project-wizard", () => setWizardOpen(true)), []);
 
   const handleAddProject = useCallback(async () => {
     if (window.electronAPI?.openFolderDialog) {
@@ -265,6 +271,43 @@ export function Sidebar() {
         className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
+        {/* Home, the browser panels shown with no worktree, set off from the projects like they are */}
+        <div className="mb-2">
+          {sidebarExpanded ? (
+            <button
+              type="button"
+              className={cn(
+                "text-muted-foreground hover:text-foreground hover:bg-primary/50 focus-visible:ring-ring flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors outline-none not-dark:mx-1 not-dark:w-auto not-dark:rounded-md not-dark:px-1.5 focus-visible:ring-2 focus-visible:ring-inset",
+                activeWorktreePath === null && "bg-primary text-foreground",
+              )}
+              style={{ paddingLeft: "13px" }}
+              onClick={showHome}
+              aria-current={activeWorktreePath === null ? "page" : undefined}
+            >
+              <div className="flex size-6 shrink-0 items-center justify-center">
+                <HomeIcon className="size-4" />
+              </div>
+              <span className="text-xs">Home</span>
+            </button>
+          ) : (
+            <div className="flex py-0.5" style={{ paddingLeft: `${RAIL_ADD_LEFT}px` }}>
+              <button
+                type="button"
+                className={cn(
+                  "text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors",
+                  activeWorktreePath === null && "bg-primary text-foreground",
+                  ENTRY_FOCUS_RING,
+                )}
+                onClick={showHome}
+                title="Home"
+                aria-current={activeWorktreePath === null ? "page" : undefined}
+              >
+                <HomeIcon className="size-5" />
+              </button>
+            </div>
+          )}
+        </div>
+
         {projects.map((project, index) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);

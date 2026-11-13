@@ -7,6 +7,7 @@ const { onLoxelEvent } = await import("./loxel-events");
 const { openFile, openUrl } = await import("./open-path");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
+const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
 const { getWorktreeUI } = await import("@/store/worktree-ui");
 const { useWorktreeStore } = await import("@/store/worktrees");
 
@@ -46,7 +47,8 @@ describe("opens from outside the window", () => {
 
   afterEach(() => {
     for (const cleanup of cleanups) cleanup();
-    for (const worktree of [MAIN, OTHER]) getWorktreeUI(worktree).getState().takePendingOpens();
+    for (const key of [MAIN, OTHER, HOME_LAYOUT_KEY])
+      getWorktreeUI(key).getState().takePendingOpens();
     setCenterApi(null);
   });
 
@@ -57,6 +59,34 @@ describe("opens from outside the window", () => {
 
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     expect(switched).toEqual([]);
+  });
+
+  test("a link naming no worktree opens in the worktree on screen", async () => {
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(switched).toEqual([]);
+  });
+
+  test("a link naming no worktree opens in Home when it is on screen", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(switched).toEqual([]);
+  });
+
+  test("a link waits for Home's editor area to mount, as at a launch with the link", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi(null);
+
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created).toEqual([]);
+    expect(switched).toEqual([]);
+    expect(pending(HOME_LAYOUT_KEY)).toEqual([{ kind: "url", url: URL_TARGET }]);
   });
 
   test("a page for another worktree waits for it and switches there", async () => {

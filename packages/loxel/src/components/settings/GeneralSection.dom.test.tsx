@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { UpdateState } from "@/api/update-model";
 import { stubElectronAPI } from "@/test/electron-api-stub";
@@ -93,5 +93,64 @@ describe("GeneralSection update status", () => {
     renderSection();
     const link = await screen.findByRole("link", { name: "Download the latest version" });
     expect(link.getAttribute("href")).toBe("https://bizimind.io/download");
+  });
+});
+
+describe("GeneralSection default browser", () => {
+  function onMac(overrides: Parameters<typeof stubElectronAPI>[0]) {
+    window.electronAPI = stubElectronAPI({ macOSVersion: "15.0.0", ...overrides });
+  }
+
+  test("asks macOS to make Loxel the default, and shows it once it is", async () => {
+    const setAsDefaultBrowser = jest.fn(async () => ({ isDefault: true, canSet: true }));
+    onMac({
+      getDefaultBrowserStatus: async () => ({ isDefault: false, canSet: true }),
+      setAsDefaultBrowser,
+    });
+    renderSection();
+
+    const button = await screen.findByRole("button", { name: "Set as default browser" });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(button);
+
+    expect(setAsDefaultBrowser).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Loxel is your default web browser")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Set as default browser" })).toBeNull();
+  });
+
+  test("reads the status again when the window comes back from macOS's prompt", async () => {
+    let focusChange: (focused: boolean) => void = () => {};
+    let isDefault = false;
+    onMac({
+      getDefaultBrowserStatus: async () => ({ isDefault, canSet: true }),
+      onWindowFocusChange: (callback) => {
+        focusChange = callback;
+        return () => {};
+      },
+    });
+    renderSection();
+    await screen.findByText("Open web links in Loxel");
+
+    isDefault = true;
+    act(() => focusChange(true));
+    expect(await screen.findByText("Loxel is your default web browser")).toBeDefined();
+  });
+
+  test("can't be set from a build that isn't the installed app", async () => {
+    onMac({ getDefaultBrowserStatus: async () => ({ isDefault: false, canSet: false }) });
+    renderSection();
+
+    expect(
+      await screen.findByText(/only the installed app can be the default browser/),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Set as default browser" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  test("is not offered outside macOS", () => {
+    window.electronAPI = stubElectronAPI();
+    renderSection();
+    expect(screen.queryByText("Default Browser")).toBeNull();
   });
 });

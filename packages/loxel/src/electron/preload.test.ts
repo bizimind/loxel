@@ -3,6 +3,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import {
+  DEFAULT_BROWSER_GET,
+  DEFAULT_BROWSER_SET,
   SET_THEME_SOURCE,
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
@@ -48,6 +50,16 @@ describe("window preload", () => {
     ]);
     api.installUpdate();
     expect(ipcRenderer.send).toHaveBeenLastCalledWith(UPDATE_INSTALL);
+  });
+
+  test("asks about the default browser on its channels", async () => {
+    ipcRenderer.invoke.mockClear();
+    await api.getDefaultBrowserStatus();
+    await api.setAsDefaultBrowser();
+    expect(ipcRenderer.invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      DEFAULT_BROWSER_GET,
+      DEFAULT_BROWSER_SET,
+    ]);
   });
 
   test("delivers update status changes until unsubscribed", () => {

@@ -34,6 +34,11 @@ export interface PersistedLayoutProps extends Omit<IDockviewReactProps, "onReady
   onLayoutChange?: (api: DockviewApi) => void;
   /** Custom clear logic — replaces the default `api.clear()` during layout swap. */
   performClear?: (api: DockviewApi) => void;
+  /**
+   * A swap was cut off before its restore: the layout unmounted (going Home mid-switch) or the key
+   * changed again. Undo what `performClear` set up for the restore, which will not come.
+   */
+  onSwapAbandoned?: () => void;
   /** Expose the DockviewApi to the parent. */
   apiRef?: React.MutableRefObject<DockviewApi | null>;
   /** Expose swapping state — event handlers can check this to skip destructive actions. */
@@ -171,6 +176,7 @@ export function PersistedLayoutComponent({
   onLayoutRestored,
   onLayoutChange,
   performClear,
+  onSwapAbandoned,
   apiRef: externalApiRef,
   swappingRef: externalSwappingRef,
   components,
@@ -202,6 +208,8 @@ export function PersistedLayoutComponent({
   createDefaultRef.current = createDefaultLayout;
   const performClearRef = useRef(performClear);
   performClearRef.current = performClear;
+  const onSwapAbandonedRef = useRef(onSwapAbandoned);
+  onSwapAbandonedRef.current = onSwapAbandoned;
 
   /** Drain pending writes via the normal API client (regular fetch). */
   const flushPendingSave = useCallback(() => {
@@ -266,6 +274,10 @@ export function PersistedLayoutComponent({
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);
   }, [flushPendingSaveOnUnload]);
+
+  // Unmounted with the page still up (going to or leaving Home): write the last change now, so the
+  // layout mounted next for this key reads it rather than the one before.
+  useEffect(() => () => flushPendingSave(), [flushPendingSave]);
 
   // Hydrate the initial layout before mounting DockviewReact so onReady can restore synchronously.
   useEffect(() => {
@@ -349,6 +361,7 @@ export function PersistedLayoutComponent({
     }
 
     let cancelled = false;
+    let restored = false;
     (async () => {
       const cached = cacheRef.current.get(newKey);
       let sourceWasServer = false;
@@ -370,10 +383,15 @@ export function PersistedLayoutComponent({
 
       swappingRef.current = false;
       if (externalSwappingRef) externalSwappingRef.current = false;
+      restored = true;
     })();
 
     return () => {
       cancelled = true;
+      if (restored) return;
+      swappingRef.current = false;
+      if (externalSwappingRef) externalSwappingRef.current = false;
+      onSwapAbandonedRef.current?.();
     };
   }, [
     hydrated,

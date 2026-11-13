@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
 import { ToastContainer } from "@/components/ui/toast";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -13,7 +14,9 @@ import {
 } from "@/store/projects";
 import { type CreateStarted, useWorktreeStore } from "@/store/worktrees";
 
-mock.module("../projects/AddProjectWizard", () => ({ AddProjectWizard: () => null }));
+mock.module("../projects/AddProjectWizard", () => ({
+  AddProjectWizard: ({ open }: { open: boolean }) => (open ? <div>Add project wizard</div> : null),
+}));
 
 const { Sidebar } = await import("./Sidebar");
 
@@ -638,5 +641,28 @@ describe("Sidebar resizing", () => {
 
     fireEvent.doubleClick(screen.getByRole("separator", { name: "Resize sidebar" }));
     expect(useProjectStore.getState().sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+});
+
+describe("Sidebar Home entry", () => {
+  test("goes Home and marks it current, expanded and collapsed", () => {
+    const { rerender } = render(<Sidebar />);
+    const home = screen.getByRole("button", { name: "Home" });
+    expect(home.getAttribute("aria-current")).toBeNull();
+
+    fireEvent.click(home);
+    expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
+    expect(screen.getByRole("button", { name: "Home" }).getAttribute("aria-current")).toBe("page");
+
+    useProjectStore.setState({ sidebarExpanded: false });
+    rerender(<Sidebar />);
+    expect(screen.getByTitle("Home").getAttribute("aria-current")).toBe("page");
+  });
+
+  test("shows the Add Project dialog Home's quickstart asks for", () => {
+    render(<Sidebar />);
+    expect(screen.queryByText("Add project wizard")).toBeNull();
+    act(() => dispatchLoxelEvent("loxel-open-add-project-wizard"));
+    expect(screen.getByText("Add project wizard")).toBeDefined();
   });
 });

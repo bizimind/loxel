@@ -339,7 +339,19 @@ describe("POST /api/open terminals and placement", () => {
 
   test("rejects a URL for a path in no project's worktree", async () => {
     expect((await open({ url: "https://example.com", wtPath: root })).status).toBe(404);
-    expect((await open({ url: "https://example.com" })).status).toBe(404);
+  });
+
+  test("a URL naming no worktree goes to the window in use, for what it shows", async () => {
+    expect((await open({ url: "https://example.com" })).status).toBe(200);
+    expect(sent).toEqual([
+      {
+        windowId: null,
+        msg: { type: "open_url", wtPath: null, data: { url: "https://example.com" } },
+      },
+    ]);
+
+    window = null;
+    expect((await open({ url: "https://example.com" })).status).toBe(503);
   });
 
   test("--worktree pins a file and a terminal, and any path in the worktree names it", async () => {

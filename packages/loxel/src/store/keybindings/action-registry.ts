@@ -18,6 +18,7 @@ import { canRenameActiveTab } from "@/lib/tab-rename";
 import type { ThemePreference } from "@/lib/theme-preference";
 import { THEME_PREFERENCE_LABELS, THEME_PREFERENCES } from "@/lib/theme-preference";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
+import { panelTypeNeedsWorktree } from "@/store/panel-config";
 import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -183,6 +184,11 @@ function hasActiveWorktree(): boolean {
   return useWorktreeStore.getState().activeWorktreePath !== null;
 }
 
+/** Whether a center panel of `type` can open where the window is: Home holds only some. */
+function canOpenPanelType(type: string): boolean {
+  return hasActiveWorktree() || !panelTypeNeedsWorktree(type);
+}
+
 function isBrowserPanelFocused(): boolean {
   return getFocusedBrowserPanel() !== undefined;
 }
@@ -196,12 +202,37 @@ function isFindTargetFocused(): boolean {
  * Derived lookups (by id, by category) are built below.
  */
 export const ACTIONS: readonly ActionDef[] = [
-  // Panel creation
-  { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
-  { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
-  { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
-  { id: "panel.new.browser", label: "New Browser", category: "panel" },
-  { id: "panel.open.localdb", label: "Open Database", category: "panel" },
+  // Panel creation. Home (no worktree active) has only the panels that need no worktree.
+  {
+    id: "panel.new.terminal",
+    label: "New Terminal",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("terminal"),
+  },
+  {
+    id: "panel.new.markdown",
+    label: "New Markdown Editor",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("editor"),
+  },
+  {
+    id: "panel.new.drawing",
+    label: "New Drawing",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("excalidraw"),
+  },
+  {
+    id: "panel.new.browser",
+    label: "New Browser",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("browser"),
+  },
+  {
+    id: "panel.open.localdb",
+    label: "Open Database",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("localDb"),
+  },
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
@@ -250,6 +281,7 @@ export const ACTIONS: readonly ActionDef[] = [
       id: `panel.split.${type}.${dir}`,
       label: `Split ${label} ${DIRECTION_LABELS[dir]}`,
       category: "panel",
+      isEnabled: () => canOpenPanelType(type),
     })),
   ),
 

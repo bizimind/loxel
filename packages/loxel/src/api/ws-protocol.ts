@@ -30,8 +30,9 @@ export type WsMessage =
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | ToolchainChangedMessage
-  // Worktree-scoped, or for the window in use when no window shows the worktree.
-  | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
+  // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
+  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
+  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
   | { type: "open_file"; data: OpenFilePanel }
   | { type: "open_folder"; data: { path: string } }

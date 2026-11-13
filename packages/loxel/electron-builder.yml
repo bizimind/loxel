@@ -38,7 +38,16 @@ mac:
   # them and folders be dropped on the Dock icon or opened with `open -a Loxel`. Alternate rank:
   # Loxel never becomes a type's default app unless the user picks it with "Change All…".
   # src/electron/main.ts handles the opens.
+  # http and https make Loxel a web browser macOS can offer in Desktop & Dock > Default web browser
+  # (and Settings > General > Default Browser in Loxel). Declaring them never changes the default:
+  # macOS keeps the user's browser until they pick another, so Loxel opens links only once chosen.
+  # Alternate rank, as for the documents above, ranks it below any browser that claims more.
   extendInfo:
+    CFBundleURLTypes:
+      - CFBundleURLName: Web site URL
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        CFBundleURLSchemes: [http, https]
     CFBundleDocumentTypes:
       - CFBundleTypeName: Text Document
         CFBundleTypeRole: Editor

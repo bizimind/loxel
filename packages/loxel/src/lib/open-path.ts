@@ -4,8 +4,9 @@ import type { OpenFilePanel, OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
-import { getCenterApiWorktree, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
+import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
 import { deriveOwningWorktree, useWorktreeStore } from "@/store/worktrees";
@@ -126,17 +127,19 @@ export function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
 }
 
 /**
- * Open a page sent from outside the window (`loxel <url>`) in a browser panel of `worktreePath`,
- * switching to it if the open has focus.
+ * Open a page sent from outside the window in a browser panel: of `worktreePath` (`loxel <url>`),
+ * switching to it if the open has focus, or, for a link opened with Loxel as the browser (no
+ * worktree), of the active worktree, else of Home.
  */
 export function openUrl(
-  worktreePath: string,
+  worktreePath: string | null,
   { url, ...options }: { url: string } & PanelOpenOptions,
 ): Promise<void> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    await refreshIfUnlisted(worktreePath);
-    await openInWorktree(worktreePath, { kind: "url", url, ...options });
+    if (worktreePath) await refreshIfUnlisted(worktreePath);
+    const target = worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+    await openInWorktree(target, { kind: "url", url, ...options });
   });
 }
 
@@ -163,18 +166,20 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
  * in, or before it first mounts — queue the panel for it, behind anything already waiting there.
  * An open with focus switches to the target worktree; one without waits for the user to go there.
+ * A null target is Home, which is only targeted while it is the layout shown.
  */
-async function openInWorktree(target: string, open: PendingOpen): Promise<void> {
+async function openInWorktree(target: string | null, open: PendingOpen): Promise<void> {
   const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
-  const ui = getWorktreeUI(target).getState();
-  const centerReady = target === activeWorktreePath && getCenterApiWorktree() === target;
+  const layoutKey = target ?? HOME_LAYOUT_KEY;
+  const ui = getWorktreeUI(layoutKey).getState();
+  const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
   if (centerReady && ui.pendingOpens.length === 0) {
     dispatchPendingOpen(open);
     return;
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
-  if (focus && target !== activeWorktreePath) await switchWorktree(target);
+  if (focus && target !== null && target !== activeWorktreePath) await switchWorktree(target);
 }
 
 /**

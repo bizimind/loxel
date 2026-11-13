@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from "bun:test";
 
-import { parseBookmarks, useBrowserBookmarksStore } from "./browser-bookmarks";
+import { matchBookmarks, parseBookmarks, useBrowserBookmarksStore } from "./browser-bookmarks";
 import { applyStoreUpdate } from "./store-sync";
 
 const DOCS = { url: "https://example.com/docs", title: "Docs" };
@@ -69,5 +69,29 @@ describe("browser bookmarks", () => {
     applyStoreUpdate("browser-bookmarks", JSON.parse(JSON.stringify(persisted)));
     unsubscribe();
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("matchBookmarks", () => {
+  const bookmarks = [
+    { url: "https://github.com/acme/web/pulls", title: "Pull requests" },
+    { url: "https://docs.example.com", title: "Acme Docs" },
+    { url: "https://status.example.com", title: "Status" },
+  ];
+
+  test("matches the title or URL, ignoring case, in list order", () => {
+    expect(matchBookmarks(bookmarks, "ACME", 5).map((b) => b.title)).toEqual([
+      "Pull requests",
+      "Acme Docs",
+    ]);
+    expect(matchBookmarks(bookmarks, "example", 5).map((b) => b.title)).toEqual([
+      "Acme Docs",
+      "Status",
+    ]);
+  });
+
+  test("suggests at most the limit, and nothing for a blank query", () => {
+    expect(matchBookmarks(bookmarks, "https", 2)).toHaveLength(2);
+    expect(matchBookmarks(bookmarks, "  ", 5)).toEqual([]);
   });
 });

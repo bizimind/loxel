@@ -4,8 +4,8 @@ import type { Page } from "@playwright/test";
  * Navigate to the app and wait for it to be fully loaded and hydrated.
  * Screenshot mode (fake traffic lights, no DEV badge) is baked in at build time via VITE_SCREENSHOT=1.
  *
- * If the app shows the "No project open" empty state (because no worktree is
- * persisted as active), clicks the first project icon in the sidebar to
+ * If the app shows Home (because no worktree is persisted as active), clicks the
+ * first project icon in the sidebar to
  * activate it and waits for the main layout (LeftToolsBar) to appear.
  *
  * After this function resolves, the center dockview is mounted and the
@@ -25,7 +25,7 @@ export async function waitForLoxel(page: Page): Promise<void> {
   const gitButton = page.locator('[title="Git"]').first();
   const isReady = await gitButton.isVisible();
   if (!isReady) {
-    // Otherwise the app is showing the "No project open" empty state. The sidebar
+    // Otherwise the app is showing Home, with no worktree active. The sidebar
     // shows project icons as <button> elements whose `title` attribute is
     // `"<name>\n<path>"` (collapsed mode). The sidebar container has classes
     // `bg-card border-border flex flex-col border-r`. Scope the click to buttons
@@ -33,7 +33,7 @@ export async function waitForLoxel(page: Page): Promise<void> {
     const sidebar = page.locator(".border-border.flex.flex-col.border-r").first();
     const firstProjectBtn = sidebar
       .locator(
-        'button[title]:not([title="Add project"]):not([title="Collapse sidebar"]):not([title="Expand sidebar"])',
+        'button[title]:not([title="Home"]):not([title="Add project"]):not([title="Collapse sidebar"]):not([title="Expand sidebar"])',
       )
       .first();
     await firstProjectBtn.waitFor({ state: "visible", timeout: 10_000 });

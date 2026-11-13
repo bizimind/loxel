@@ -1,6 +1,6 @@
 ---
 title: Browser
-description: A full browser in every task, for the dev server, the PR and the docs, with bookmarks, DevTools, and one sign-in shared by every task.
+description: A full browser in every task and in Home, for the dev server, the PR and the docs, with bookmarks, DevTools, one sign-in shared by every task, and the option to be your default browser.
 section: "In the code"
 order: 5
 ---
@@ -8,6 +8,14 @@ order: 5
 Every task gets its own browser tabs. The dev server for this branch, the PR the agent just opened, the API docs you keep checking: they sit in the task's layout next to its code and terminals, and they stay with that task when you switch to another. Come back and they reopen on the pages they were showing.
 
 Press `Cmd+Shift+B` to open a browser panel. Like any panel, it can go next to an agent's terminal, under your editor, or in a group of its own (see [Panel Layout](/docs/panel-layout)). From a terminal, `loxel <url>` opens a page in the task that terminal belongs to, and an agent with the [`loxel` skill](/docs/coding-agents#teach-your-agent-about-loxel) does the same to show you what it started.
+
+An empty editor area lists what you can open, with a field under **New Browser**: type a URL or a search and press `Enter` to open it in a new browser panel. As you type, bookmarks whose title or address match are suggested below it; pick one with the arrow keys and `Enter`, or click it.
+
+---
+
+## Home
+
+**Home**, at the top of the worktree sidebar, is a place for browsing that belongs to no task. It's where Loxel opens when no worktree is selected, so it is also what a new window shows. Home has its own browser tabs and layout, kept across restarts like a task's, and when no tab is open it shows the same address field, with **Add Project** next to it. Editors, terminals and the Git panels belong to a worktree, so Home has browser panels only.
 
 ---
 
@@ -37,6 +45,16 @@ A plain click on a link opens it in the same tab. Links you open in a new tab or
 Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab or popup.
 
 `Cmd`-clicking a URL in terminal output opens it in a browser panel too; a plain click opens it in your default browser.
+
+---
+
+## Loxel as your default browser
+
+Loxel can be your Mac's default web browser, so links you open in other apps, such as Slack, Mail or a terminal outside Loxel, open in a browser panel. Click **Set as default browser** in **Settings > General > Default Browser**, or choose Loxel under **System Settings > Desktop & Dock > Default web browser**; macOS asks you to confirm. Settings shows whether Loxel already is the default.
+
+A link opens straight in a new browser panel, at the address you clicked: in the task the frontmost Loxel window shows, or in [Home](#home) when it shows none. A link that launches Loxel opens once the window is up. Loxel never becomes the default unless you choose it.
+
+While Loxel is your default browser, what Loxel itself sends to your default browser opens in a browser panel too: **Open Link in External Browser** from a link's right-click menu, and a plain click on a URL in terminal output. To open a page in another browser, choose that browser as the default in System Settings.
 
 ---
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { DockviewApi, DockviewComponent } from "dockview-react";
 
@@ -50,6 +50,7 @@ const {
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
+const { useWorktreeStore } = await import("@/store/worktrees");
 
 /** A center dockview with two groups: `left` (a.ts, b.ts) and `right` (c.ts). */
 function setup() {
@@ -82,7 +83,11 @@ function tabIds(api: DockviewApi, groupIndex: number) {
   return api.groups[groupIndex]!.panels.map((p) => p.id);
 }
 
+// Most panels belong to a worktree, so the tests run in one; Home's test leaves it.
+beforeEach(() => useWorktreeStore.setState({ activeWorktreePath: "/repo" }));
+
 afterEach(() => {
+  useWorktreeStore.setState({ activeWorktreePath: null });
   setCenterApi(null);
   document.body.innerHTML = "";
   useEditorStateStore.setState({ files: new Map() });
@@ -326,6 +331,21 @@ describe("handleFileMoved", () => {
 
 describe("placement", () => {
   const ids = (panels: { id: string }[]) => panels.map((p) => p.id);
+
+  test("only panels that need no worktree open in Home", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    const { api } = setup();
+
+    createTerminal({ terminalId: "t" });
+    openCompareFiles("/repo/a.ts", "/repo/b.ts");
+    openFileBacked("codeEditor", "/repo/d.ts");
+    createBrowser("https://example.com");
+
+    expect(api.getPanel("terminal-t")).toBeUndefined();
+    expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
+    expect(api.getPanel("codeeditor-/repo/d.ts")).toBeUndefined();
+    expect(api.panels.some((p) => p.id.startsWith("browser-"))).toBe(true);
+  });
 
   test("a new panel opens as a tab in the active tab's group by default", () => {
     const { api, a } = setup();

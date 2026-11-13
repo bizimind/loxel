@@ -72,6 +72,15 @@ interface Window {
     onUpdateStatusChange: (
       callback: (status: import("@/api/update-model").UpdateState) => void,
     ) => () => void;
+    /** Whether Loxel is the default web browser, and whether this build can become it. */
+    getDefaultBrowserStatus: () => Promise<
+      import("@/api/default-browser-model").DefaultBrowserStatus
+    >;
+    /**
+     * Ask macOS to make Loxel the default web browser. macOS confirms with its own prompt, so the
+     * status returned may not show the user's answer yet.
+     */
+    setAsDefaultBrowser: () => Promise<import("@/api/default-browser-model").DefaultBrowserStatus>;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */
