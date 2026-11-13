@@ -8,7 +8,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderPlusIcon,
-  HomeIcon,
   ListTreeIcon,
   PencilIcon,
   TrashIcon,
@@ -32,6 +31,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { EnableNestingDialog } from "./EnableNestingDialog";
+import { LoxelMark } from "./LoxelMark";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { ICON_PX, iconLeft, iconLeftExpanded, railDepth, railWidth } from "./worktree-geometry";
 import { WorktreeTree } from "./WorktreeTree";
@@ -285,24 +285,30 @@ export function Sidebar() {
               aria-current={activeWorktreePath === null ? "page" : undefined}
             >
               <div className="flex size-6 shrink-0 items-center justify-center">
-                <HomeIcon className="size-4" />
+                <LoxelMark className="h-3.5" />
               </div>
               <span className="text-xs">Home</span>
             </button>
           ) : (
-            <div className="flex py-0.5" style={{ paddingLeft: `${RAIL_ADD_LEFT}px` }}>
+            // In the column of the worktree icons, drawn like them: no tile, and the project icons'
+            // ring while it is the layout shown.
+            <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
               <button
                 type="button"
-                className={cn(
-                  "text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors",
-                  activeWorktreePath === null && "bg-primary text-foreground",
-                  ENTRY_FOCUS_RING,
-                )}
+                className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
                 onClick={showHome}
                 title="Home"
                 aria-current={activeWorktreePath === null ? "page" : undefined}
               >
-                <HomeIcon className="size-5" />
+                <span
+                  className={cn(
+                    "text-muted-foreground hover:text-foreground corner-superellipse flex size-6 items-center justify-center rounded-2xl transition-colors",
+                    activeWorktreePath === null &&
+                      "text-foreground shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
+                  )}
+                >
+                  <LoxelMark className="h-4" />
+                </span>
               </button>
             </div>
           )}
