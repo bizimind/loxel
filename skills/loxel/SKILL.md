@@ -18,12 +18,12 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 - **One layout per worktree.** In each window, every worktree keeps its own panel layout (open editors, terminals, browser tabs). The window shows one worktree at a time. Switching swaps the whole layout, and terminals in the other worktrees keep running, so the user may be looking at a different worktree than yours. Removing a worktree ends its terminals, even if you run `wt rm` from one of them: the removal finishes, and your terminal ends about a minute later, so finish anything else first and make it among your last commands.
 - **Your terminal's environment.** Loxel sets these variables in every terminal it opens:
 
-| Variable          | Value                                                          |
-| ----------------- | -------------------------------------------------------------- |
-| `LOXEL`           | `1`                                                            |
-| `LOXEL_WORKTREE`  | Absolute path of the worktree whose layout holds this terminal |
-| `LOXEL_PORT`      | Port of the running Loxel; the CLI connects through it         |
-| `LOXEL_WINDOW_ID` | The Loxel window this terminal is in; the CLI targets it       |
+| Variable          | Value                                                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `LOXEL`           | `1`                                                                                                                        |
+| `LOXEL_WORKTREE`  | Absolute path of the worktree whose layout holds this terminal; not set in a terminal in Home, the layout with no worktree |
+| `LOXEL_PORT`      | Port of the running Loxel; the CLI connects through it                                                                     |
+| `LOXEL_WINDOW_ID` | The Loxel window this terminal is in; the CLI targets it                                                                   |
 
 ## The `loxel` CLI
 
@@ -66,10 +66,10 @@ Files, folders and URLs can be mixed in one command, and shell patterns work. Th
 ### URLs
 
 - Only `http://` and `https://` URLs count as URLs. Anything else is treated as a path.
-- The URL opens in a browser panel in the worktree that contains your current directory. If you aren't in a git repository, Loxel uses `LOXEL_WORKTREE`. If no window is showing that worktree, it opens there in your terminal's window, and without focus it is waiting when the user switches there.
+- The URL opens in a browser panel in the worktree that contains your current directory. If you aren't in a git repository, Loxel uses `LOXEL_WORKTREE`, and in a Home terminal, which has none, the page opens in whatever your terminal's window shows. If no window is showing that worktree, it opens there in your terminal's window, and without focus it is waiting when the user switches there.
 - If another window is showing that worktree, the page opens there and not in your terminal's window.
 - Files in the same command as a URL open in the URL's worktree too. A command of only files opens each in its own worktree.
-- Inside a git repository that isn't one of the user's projects (a cloned dependency, a temp repo), it fails with `No project found for worktree`. Run it from your worktree instead: `(cd "$LOXEL_WORKTREE" && loxel http://localhost:5173)`.
+- Inside a git repository that isn't one of the user's projects (a cloned dependency, a temp repo), it fails with `No project found for worktree`. Run it from your worktree instead: `(cd "$LOXEL_WORKTREE" && loxel http://localhost:5173)`, or with `--worktree <path>` from a Home terminal, where `LOXEL_WORKTREE` is unset.
 - Good uses: the dev server you just started, a PR you just opened, a deploy preview, the docs page you're citing.
 
 ### Terminals

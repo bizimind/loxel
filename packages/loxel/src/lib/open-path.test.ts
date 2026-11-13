@@ -4,7 +4,7 @@ const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
 const { onLoxelEvent } = await import("./loxel-events");
-const { openFile, openUrl } = await import("./open-path");
+const { openFile, openPath, openUrl } = await import("./open-path");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
 const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
@@ -87,6 +87,29 @@ describe("opens from outside the window", () => {
     expect(created).toEqual([]);
     expect(switched).toEqual([]);
     expect(pending(HOME_LAYOUT_KEY)).toEqual([{ kind: "url", url: URL_TARGET }]);
+  });
+
+  test("a file link in Home opens in the worktree holding it, switching there", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath(`${OTHER}/a.md`, { line: 3, column: 1 });
+
+    expect(switched).toEqual([OTHER]);
+    expect(pending(OTHER)).toEqual([
+      { kind: "file", path: `${OTHER}/a.md`, location: { line: 3, column: 1 } },
+    ]);
+  });
+
+  test("a file link in Home to a file in no worktree opens nothing", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath("/elsewhere/notes.md");
+
+    expect(openedFiles).toEqual([]);
+    expect(switched).toEqual([]);
+    expect(pending(HOME_LAYOUT_KEY)).toEqual([]);
   });
 
   test("a page for another worktree waits for it and switches there", async () => {

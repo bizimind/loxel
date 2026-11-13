@@ -191,7 +191,7 @@ async function openInWorktree(target: string | null, open: PendingOpen): Promise
 export function dispatchPendingOpen(open: PendingOpen): void {
   switch (open.kind) {
     case "file":
-      dispatchOpenFile(open.path, undefined, open);
+      dispatchOpenFile(open.path, open.location, open);
       break;
     case "url":
       dispatchLoxelEvent("loxel-create-browser", {
@@ -212,7 +212,8 @@ export function dispatchPendingOpen(open: PendingOpen): void {
 
 /**
  * Open a path whose type is unknown (e.g. a terminal link): folders go to {@link openFolder},
- * files to their editor. Missing paths still open an editor, which reports the error.
+ * files to their editor. Missing paths still open an editor, which reports the error. In Home,
+ * which shows no worktree's files, a file opens in the worktree holding it, switching there.
  */
 export async function openPath(path: string, location?: FileLocation): Promise<void> {
   const info = await api.getPathInfo(path).catch(() => null);
@@ -220,5 +221,23 @@ export async function openPath(path: string, location?: FileLocation): Promise<v
     await openFolder(info.path);
     return;
   }
-  dispatchOpenFile(info?.path ?? path, location);
+  const filePath = info?.path ?? path;
+  if (useWorktreeStore.getState().activeWorktreePath === null) {
+    await openFileFromHome(filePath, location);
+    return;
+  }
+  dispatchOpenFile(filePath, location);
+}
+
+function openFileFromHome(path: string, location: FileLocation | undefined): Promise<void> {
+  return inOrder(async () => {
+    await whenProjectsLoaded();
+    const { projects } = useProjectStore.getState();
+    const owner = deriveOwningWorktree(path, projects, useWorktreeStore.getState().byProject);
+    if (!owner) {
+      showToast("Open a project before opening other files");
+      return;
+    }
+    await openInWorktree(owner, { kind: "file", path, ...(location ? { location } : {}) });
+  });
 }

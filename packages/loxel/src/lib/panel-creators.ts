@@ -562,7 +562,10 @@ export function openFileBacked(
   { params, slot, placement, focus = true }: OpenFileBackedOptions = {},
 ): IDockviewPanel | undefined {
   const cApi = centerApiFor(type);
-  if (!cApi) return undefined;
+  if (!cApi) {
+    uiLog.warn("No editor area here can show the file", { panelType: type, filePath });
+    return undefined;
+  }
   const def = getCenterPanelDefByType(type);
   if (!def) return undefined;
   const panelId = `${def.idPrefix}${filePath}`;

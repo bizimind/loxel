@@ -4,6 +4,7 @@
  */
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type { OpenTerminalPanel } from "@/api/ws-protocol";
+import type { FileLocation } from "@/lib/open-file";
 
 import { createWorktreeStore } from "./worktree-store";
 
@@ -44,7 +45,7 @@ export interface PendingReveal {
 
 /** A panel waiting for its worktree's editor area to mount: a file, a page or a terminal. */
 export type PendingOpen =
-  | ({ kind: "file"; path: string } & PanelOpenOptions)
+  | ({ kind: "file"; path: string; location?: FileLocation } & PanelOpenOptions)
   | ({ kind: "url"; url: string } & PanelOpenOptions)
   | { kind: "terminal"; terminal: OpenTerminalPanel };
 

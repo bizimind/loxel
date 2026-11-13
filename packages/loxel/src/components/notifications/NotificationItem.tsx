@@ -17,8 +17,8 @@ const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
 function sourceLabel(notification: ServerNotification): string {
   const { source } = notification;
   if (source.worktreePath) return source.worktreePath.split("/").pop() ?? "terminal";
-  // A Home terminal's
-  return source.worktreePath === null ? "Home" : source.kind;
+  // A Home terminal's notification names no worktree.
+  return "Home";
 }
 
 export function NotificationItem({

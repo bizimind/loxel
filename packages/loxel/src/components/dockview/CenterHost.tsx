@@ -188,7 +188,7 @@ function CenterLayout({
   );
 }
 
-/** Rebuild the worktree's terminal bookkeeping from its layout. Home has no terminals. */
+/** Rebuild the worktree's terminal bookkeeping from its layout. Home's terminals are in no tools bar. */
 function syncTerminals(api: DockviewApi, layoutKey: string): void {
   if (layoutKey !== HOME_LAYOUT_KEY) syncTerminalsFromLayout(api);
 }
