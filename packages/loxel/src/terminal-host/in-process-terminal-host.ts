@@ -18,6 +18,8 @@ import { TerminalSession } from "./terminal-session";
 interface HostedSession {
   session: TerminalSession;
   meta: TerminalSessionMeta;
+  /** The program the session spawned, `argv[0]`. */
+  program: string;
 }
 
 export class InProcessTerminalHost implements TerminalHost {
@@ -50,7 +52,7 @@ export class InProcessTerminalHost implements TerminalHost {
       return Promise.reject(new Error(`Could not start terminal ${id}`, { cause: err }));
     }
     // Registered before returning, so commands sent right after spawn() reach this session.
-    const hosted = { session, meta };
+    const hosted = { session, meta, program: request.argv[0]! };
     this.sessions.set(id, hosted);
     if (input && input.byteLength > 0) session.write(input);
     return Promise.resolve(this.info(hosted));
@@ -97,10 +99,12 @@ export class InProcessTerminalHost implements TerminalHost {
   }
 
   async foregroundProcesses(): Promise<ForegroundProcesses> {
-    const sessions = [...this.sessions.values()].map(({ session }) => session);
-    const programs = await foregroundPrograms(sessions.map((session) => session.pid));
+    const hosted = [...this.sessions.values()];
+    const programs = await foregroundPrograms(
+      hosted.map(({ session, program }) => ({ pid: session.pid, program })),
+    );
     const result: ForegroundProcesses = {};
-    for (const session of sessions) {
+    for (const { session } of hosted) {
       const program = programs.get(session.pid);
       // Ended meanwhile, or its program could not be named.
       if (program !== undefined && this.sessions.get(session.id)?.session === session) {

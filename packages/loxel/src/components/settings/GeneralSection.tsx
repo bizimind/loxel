@@ -7,6 +7,7 @@ import {
   RefreshCwIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { useState } from "react";
 
 import * as api from "@/api/client";
 import type { RunningTerminal } from "@/api/running-terminals-model";
@@ -16,7 +17,11 @@ import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { Switch } from "@/components/ui/switch";
 import { frontendLog } from "@/lib/frontend-logger";
 import type { TerminalRestartConfirmation } from "@/lib/update-terminal-restart";
-import { terminalRestartConfirmation, terminalRestartWarning } from "@/lib/update-terminal-restart";
+import {
+  restartsTerminalsOf,
+  terminalRestartConfirmation,
+  terminalRestartWarning,
+} from "@/lib/update-terminal-restart";
 import { queryKeys } from "@/queries/query-keys";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { useUpdateStatus } from "@/queries/use-update-status";
@@ -69,6 +74,8 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
   const setAutoCheck = useSettingsStore((s) => s.setAutoCheckForUpdates);
   const status = useUpdateStatus();
   const state = status?.state ?? "idle";
+  /** Install & Restart is listing the terminals to ask about. */
+  const [listing, setListing] = useState(false);
 
   return (
     <div className="space-y-3">
@@ -104,7 +111,12 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
         )}
 
         {status?.state === "ready" && (
-          <Button size="xs" onClick={() => void installWithConfirmation(electronAPI, status)}>
+          <Button
+            size="xs"
+            disabled={listing}
+            onClick={() => void installWithConfirmation(electronAPI, status, setListing)}
+          >
+            {listing && <LoaderIcon className="mr-1.5 size-3 animate-spin" />}
             Install & Restart
           </Button>
         )}
@@ -135,9 +147,11 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
 async function installWithConfirmation(
   electronAPI: NonNullable<Window["electronAPI"]>,
   status: Extract<UpdateState, { state: "ready" }>,
+  setListing: (listing: boolean) => void,
 ): Promise<void> {
   if (status.restartsTerminals !== false) {
     let running: readonly RunningTerminal[];
+    setListing(true);
     try {
       running = await api.getRunningTerminals({ programs: true });
     } catch (err) {
@@ -145,6 +159,8 @@ async function installWithConfirmation(
         error: err,
       });
       running = queryClient.getQueryData<RunningTerminal[]>(queryKeys.runningTerminals()) ?? [];
+    } finally {
+      setListing(false);
     }
     const confirmation = terminalRestartConfirmation(
       status.version,
@@ -192,8 +208,7 @@ function TerminalRestartDescription({
 
 /** "This update restarts N terminals", for an update that does. */
 function TerminalRestartNotice({ status }: { status: UpdateState }) {
-  const restartsTerminals =
-    status.state === "available" || status.state === "ready" ? status.restartsTerminals : false;
+  const restartsTerminals = restartsTerminalsOf(status);
   const running = useRunningTerminals({ enabled: restartsTerminals !== false });
   const warning = terminalRestartWarning(restartsTerminals, running?.length ?? 0);
   if (!warning) return null;
@@ -231,6 +246,9 @@ function UpdateStatusDisplay({ status }: { status: UpdateState | undefined }) {
       </div>
     );
   }
+
+  // The progress is on the button; the warning stays.
+  if (status.state === "downloading") return <TerminalRestartNotice status={status} />;
 
   if (status.state === "ready") {
     return (

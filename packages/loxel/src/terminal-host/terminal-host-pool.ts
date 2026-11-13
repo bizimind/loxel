@@ -236,17 +236,24 @@ export class TerminalHostPool implements TerminalHost {
   /** Every host's answer, from the hosts that can tell; see `SocketTerminalHost.supports`. */
   async foregroundProcesses(): Promise<ForegroundProcesses> {
     const answers = await Promise.all(
-      [...this.hosts].map((host) =>
-        host.foregroundProcesses().catch((err: unknown) => {
+      [...this.hosts].map(async (host) => {
+        try {
+          return { host, programs: await host.foregroundProcesses() };
+        } catch (err) {
           this.log.warn(`Terminal host ${host.hostId} could not tell its foreground programs`, {
             error: err,
           });
-          return {};
-        }),
-      ),
+          return { host, programs: {} };
+        }
+      }),
     );
+    // Each session's from the host it is routed to, should another host run one by the same ID.
     const programs: ForegroundProcesses = {};
-    for (const answer of answers) Object.assign(programs, answer);
+    for (const { host, programs: answer } of answers) {
+      for (const [id, program] of Object.entries(answer)) {
+        if (this.owners.get(id)?.host === host) programs[id] = program;
+      }
+    }
     return programs;
   }
 

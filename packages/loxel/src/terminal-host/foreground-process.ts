@@ -8,46 +8,67 @@ import { basename } from "node:path";
 
 import { $ } from "bun";
 
+/** A session's leader: the program the session spawned, by pid and by the name it started as. */
+export interface SessionLeader {
+  pid: number;
+  /** `argv[0]` of the spawn. */
+  program: string;
+}
+
 /**
- * The foreground program of each terminal whose session leader (the program the session spawned)
- * is in `leaders`, by leader pid: its name, or null when the leader itself is in the foreground.
- * A terminal whose foreground program cannot be named (its pid already gone) is left out.
+ * The foreground program of each session whose leader is in `leaders`, by leader pid: its name,
+ * or null when the leader itself, as spawned, is in the foreground (a shell at its prompt). A
+ * leader that `exec`'d another program counts as that program. A terminal whose foreground
+ * program cannot be named (its terminal or the group's leader already gone) is left out.
  */
 export async function foregroundPrograms(
-  leaders: readonly number[],
+  leaders: readonly SessionLeader[],
 ): Promise<Map<number, string | null>> {
   const programs = new Map<number, string | null>();
   if (leaders.length === 0) return programs;
-  const groups = parseColumns(await ps(leaders, "tpgid"));
+  const rows = await ps(leaders.map((leader) => leader.pid));
   const foreground = new Map<number, number>();
-  for (const [leader, tpgid] of groups) {
-    const group = Number(tpgid);
-    // No foreground group (the terminal is gone), or the session's own program at its prompt.
-    if (!Number.isInteger(group) || group <= 0 || group === leader) programs.set(leader, null);
-    else foreground.set(leader, group);
+  for (const { pid, program } of leaders) {
+    const row = rows.get(pid);
+    // Gone, or its terminal has no foreground group.
+    if (!row || row.tpgid <= 0) continue;
+    if (row.tpgid !== pid) {
+      foreground.set(pid, row.tpgid);
+      continue;
+    }
+    const name = programName(row.command);
+    programs.set(pid, name === programName(program) ? null : name);
   }
   if (foreground.size === 0) return programs;
-  const names = parseColumns(await ps([...new Set(foreground.values())], "comm"));
+  const groups = await ps([...new Set(foreground.values())]);
   for (const [leader, group] of foreground) {
-    const command = names.get(group);
+    const command = groups.get(group)?.command;
     // The group's leader already exited (a pipeline's first process, say): a program runs, but
-    // which one is not known, so the terminal is left out.
+    // which one is not known.
     if (command !== undefined) programs.set(leader, programName(command));
   }
   return programs;
 }
 
-/** `ps` columns `pid` and `column` of `pids`. Exits non-zero when one of them is gone: not an error. */
-function ps(pids: readonly number[], column: "tpgid" | "comm"): Promise<string> {
-  return $`ps -o pid= -o ${`${column}=`} -p ${pids.join(",")}`.nothrow().quiet().text();
+interface PsRow {
+  tpgid: number;
+  command: string;
 }
 
-/** Lines of `<pid> <value>`, by pid; the value may contain spaces (a path). */
-function parseColumns(output: string): Map<number, string> {
-  const rows = new Map<number, string>();
+/**
+ * `ps` of `pids`: each one's terminal's foreground group and its command. `ps` exits non-zero when
+ * one of them is gone, which is not an error here.
+ */
+async function ps(pids: readonly number[]): Promise<Map<number, PsRow>> {
+  const output = await $`/bin/ps -o pid= -o tpgid= -o comm= -p ${pids.join(",")}`
+    .nothrow()
+    .quiet()
+    .text();
+  const rows = new Map<number, PsRow>();
   for (const line of output.split("\n")) {
-    const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
-    if (match) rows.set(Number(match[1]), match[2]!);
+    // The command is last, and may contain spaces (a path).
+    const match = /^\s*(\d+)\s+(-?\d+)\s+(.+?)\s*$/.exec(line);
+    if (match) rows.set(Number(match[1]), { tpgid: Number(match[2]), command: match[3]! });
   }
   return rows;
 }

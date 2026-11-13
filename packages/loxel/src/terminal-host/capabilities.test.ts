@@ -186,13 +186,15 @@ describe("foregroundProcess", () => {
 
     const atPrompt = shell();
     const busy = shell();
-    await client.spawn(atPrompt);
-    await client.spawn(busy);
+    // The shell replaced by the program: the session's own process, but no longer the shell.
+    const execed = shell();
+    for (const request of [atPrompt, busy, execed]) await client.spawn(request);
     client.write(busy.id, new TextEncoder().encode("sleep 30\n"));
+    client.write(execed.id, new TextEncoder().encode("exec sleep 30\n"));
 
     const programs = await foregroundUntil(
       () => client.foregroundProcesses(),
-      (found) => found[busy.id] === "sleep",
+      (found) => found[busy.id] === "sleep" && found[execed.id] === "sleep",
     );
     expect(programs[atPrompt.id]).toBeNull();
   });

@@ -10,7 +10,7 @@ import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
 import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
-import { terminalRestartWarning } from "@/lib/update-terminal-restart";
+import { restartsTerminalsOf, terminalRestartWarning } from "@/lib/update-terminal-restart";
 import { cn } from "@/lib/utils";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { useUpdateStatus } from "@/queries/use-update-status";
@@ -166,8 +166,7 @@ function SidebarToggle() {
 
 function UpdateIndicator() {
   const status = useUpdateStatus();
-  const restartsTerminals =
-    status?.state === "available" || status?.state === "ready" ? status.restartsTerminals : false;
+  const restartsTerminals = restartsTerminalsOf(status);
   const running = useRunningTerminals({ enabled: restartsTerminals !== false });
   const warning = terminalRestartWarning(restartsTerminals, running?.length ?? 0);
 

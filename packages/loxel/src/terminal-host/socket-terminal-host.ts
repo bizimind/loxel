@@ -23,7 +23,7 @@ import type {
   InitializeResult,
   TerminalHostCapability,
 } from "./protocol";
-import { HostMessageSchema, sharedCapabilities } from "./protocol";
+import { HostMessageSchema, RESULT_SCHEMAS, sharedCapabilities } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
 import { encodeFrame, encodeJsonFrame } from "./protocol-framing";
 import type {
@@ -35,7 +35,6 @@ import type {
   TerminalSessionMeta,
   TerminalSpawnRequest,
 } from "./terminal-host";
-import { ForegroundProcessesSchema, TerminalSessionInfoSchema } from "./terminal-host";
 
 /**
  * The exit code reported for a session whose host is gone, or that ended while the server was not
@@ -48,8 +47,6 @@ export const STALLED_AFTER_MS = 30_000;
 
 /** Delays between attempts to restore a connection to a host that is still running. */
 const RECONNECT_DELAYS_MS = [0, 250, 1000, 5000];
-
-const SessionListSchema = TerminalSessionInfoSchema.array();
 
 interface PendingRequest {
   /** The request's frame, re-sent if it was not answered before a connection closed. */
@@ -165,7 +162,7 @@ export class SocketTerminalHost implements TerminalHost {
     this.sessions.set(spec.id, { epoch: spec.epoch, confirmed: false, attach: null });
     const spawned = this.request<TerminalSessionInfo>(
       { type: "spawn", request: spec },
-      (value) => TerminalSessionInfoSchema.parse(value),
+      (value) => RESULT_SCHEMAS.spawn.parse(value),
       { spawn: { id: spec.id, epoch: spec.epoch } },
     );
     // The input frame follows the spawn, so it is the first thing the program reads.
@@ -186,7 +183,7 @@ export class SocketTerminalHost implements TerminalHost {
   list(): Promise<TerminalSessionInfo[]> {
     if (this.state === "gone") return Promise.reject(this.goneError());
     return this.request({ type: "list" }, (value) =>
-      this.noteListed(SessionListSchema.parse(value)),
+      this.noteListed(RESULT_SCHEMAS.list.parse(value)),
     );
   }
 
@@ -210,7 +207,13 @@ export class SocketTerminalHost implements TerminalHost {
       sent: this.state === "connected",
       since: request.since && { ...request.since },
     };
-    return this.request<void>({ type: "attach", request }, () => undefined, { attach: true });
+    return this.request<void>(
+      { type: "attach", request },
+      (value) => {
+        RESULT_SCHEMAS.attach.parse(value);
+      },
+      { attach: true },
+    );
   }
 
   detach(id: string): void {
@@ -244,11 +247,17 @@ export class SocketTerminalHost implements TerminalHost {
     this.sendJson({ type: "set_meta", id, meta });
   }
 
-  /** Capability `foregroundProcess`; a host without it can tell nothing, so the answer is empty. */
+  /**
+   * Capability `foregroundProcess`. A host without it, or one this server is not connected to right
+   * now, can tell nothing, so the answer is empty.
+   */
   foregroundProcesses(): Promise<ForegroundProcesses> {
-    if (this.state === "gone" || !this.supports("foregroundProcess")) return Promise.resolve({});
+    // Only on a live connection: one being restored may never be, and the caller is waiting.
+    if (this.state !== "connected" || !this.supports("foregroundProcess")) {
+      return Promise.resolve({});
+    }
     return this.request({ type: "foreground_processes" }, (value) =>
-      ForegroundProcessesSchema.parse(value),
+      RESULT_SCHEMAS.foreground_processes.parse(value),
     );
   }
 
@@ -534,7 +543,7 @@ export class SocketTerminalHost implements TerminalHost {
         frame: new Uint8Array(0),
         resolve: (value) => resolve(value as TerminalSessionInfo[]),
         reject,
-        parse: (value) => SessionListSchema.parse(value),
+        parse: (value) => RESULT_SCHEMAS.list.parse(value),
         sent: true,
         internal: true,
       });

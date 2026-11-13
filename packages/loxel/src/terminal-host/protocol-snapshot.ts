@@ -8,6 +8,8 @@
  *   required (or optional), needs a major bump: an older peer would misread it.
  * - A new optional field, a new message or a new capability needs a minor bump, and a new message
  *   needs a new capability to gate it, since an older peer cannot parse it.
+ * - Requests' answers (`RESULT_SCHEMAS`) follow the same rules as messages. The binary frames'
+ *   layout (terminal-stream.ts) is not JSON and is not covered: it changes only with a major bump.
  *
  * protocol-schema.test.ts compares the snapshot committed next to it with the current one. See
  * docs/TERMINAL_HOST.md#versioning.
@@ -22,6 +24,7 @@ import {
   DisconnectSchema,
   HostMessageSchema,
   InitializeResultSchema,
+  RESULT_SCHEMAS,
   InitializeSchema,
   ServerMessageSchema,
   SupersededSchema,
@@ -40,6 +43,8 @@ export interface ProtocolSnapshot {
   /** The versioned layer's messages, by type, per direction. */
   server: Record<string, JsonSchema>;
   host: Record<string, JsonSchema>;
+  /** What each request is answered with, by request type. */
+  answers: Record<string, JsonSchema>;
 }
 
 const BOOTSTRAP = {
@@ -75,6 +80,12 @@ export function currentProtocolSnapshot(): ProtocolSnapshot {
     ),
     server: messageSchemas(ServerMessageSchema),
     host: messageSchemas(HostMessageSchema),
+    answers: Object.fromEntries(
+      Object.entries(RESULT_SCHEMAS).map(([type, schema]) => [
+        type,
+        z.toJSONSchema(schema, { io: "input" }),
+      ]),
+    ),
   };
   return JSON.parse(JSON.stringify(snapshot)) as ProtocolSnapshot;
 }
@@ -98,6 +109,16 @@ function stringSet(value: unknown): Set<string> {
 /** The changes from `before` to `after`, one schema of a message or of one of its fields. */
 function compareSchemas(path: string, before: unknown, after: unknown, changes: Change[]): void {
   if (isDeepStrictEqual(before, after)) return;
+  // A list: what changed is in its items.
+  if (isRecord(before) && isRecord(after) && before.type === "array" && after.type === "array") {
+    const { items: beforeItems, ...beforeRest } = before;
+    const { items: afterItems, ...afterRest } = after;
+    if (!isDeepStrictEqual(beforeRest, afterRest)) {
+      changes.push({ bump: "major", what: `${path} changed` });
+    }
+    compareSchemas(`${path}[]`, beforeItems, afterItems, changes);
+    return;
+  }
   const objects =
     isRecord(before) &&
     isRecord(after) &&
@@ -189,8 +210,13 @@ export function snapshotVerdict(
   if (isDeepStrictEqual(before, after)) return { status: "current" };
 
   const frozen: Change[] = [];
-  compareMessages("bootstrap", before.bootstrap, after.bootstrap, frozen);
-  const broken = frozen.filter((change) => change.bump === "major");
+  const newBootstrap = compareMessages("bootstrap", before.bootstrap, after.bootstrap, frozen);
+  // A peer from before a new bootstrap message could not parse it: only new optional fields.
+  const broken = frozen.filter(
+    (change) =>
+      change.bump === "major" ||
+      newBootstrap.some((type) => change.what === `bootstrap ${type} is a new message`),
+  );
   if (broken.length > 0) {
     return {
       status: "invalid",
@@ -203,6 +229,7 @@ export function snapshotVerdict(
     ...compareMessages("server", before.server, after.server, changes),
     ...compareMessages("host", before.host, after.host, changes),
   ];
+  compareMessages("answer of", before.answers, after.answers, changes);
   const hadCapability = new Set(before.capabilities);
   const newCapabilities = after.capabilities.filter((name) => !hadCapability.has(name));
   for (const name of before.capabilities) {

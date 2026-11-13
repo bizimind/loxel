@@ -8,7 +8,7 @@ export type UpdateState =
       releasedAt: string;
       restartsTerminals: RestartsTerminals;
     }
-  | { state: "downloading"; version: string; percent: number }
+  | { state: "downloading"; version: string; percent: number; restartsTerminals: RestartsTerminals }
   | { state: "ready"; version: string; restartsTerminals: RestartsTerminals }
   | { state: "installing" }
   | { state: "error"; message: string };

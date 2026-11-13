@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
@@ -11,23 +12,52 @@ mock.module("@/api/client", () => ({
   ...originalClient,
   getVersion: jest.fn(async () => ({ version: "1.0.0", isDev: false })),
   putStore: jest.fn(async () => ({ success: true })),
+  getRunningTerminals: jest.fn(async ({ programs }: { programs: boolean }) =>
+    running.map((terminal) => (programs ? terminal : { ...terminal, program: undefined })),
+  ),
 }));
 
+/** What the server runs, as `GET /api/terminals?programs` reports it. */
+let running: RunningTerminal[] = [];
+
 const { GeneralSection } = await import("./GeneralSection");
+const { ConfirmDialogHost } = await import("@/components/ui/confirm-dialog-host");
 const { useSettingsStore } = await import("@/store/settings-store");
 
 const checkForUpdates = jest.fn(async () => {});
+const installUpdate = jest.fn(() => {});
 
 function inDesktopApp(status: UpdateState = { state: "idle" }) {
-  window.electronAPI = stubElectronAPI({ checkForUpdates, getUpdateStatus: async () => status });
+  window.electronAPI = stubElectronAPI({
+    checkForUpdates,
+    installUpdate,
+    getUpdateStatus: async () => status,
+  });
 }
 
 function renderSection() {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <GeneralSection />
+      <ConfirmDialogHost />
     </QueryClientProvider>,
   );
+}
+
+function terminal(program: string | null): RunningTerminal {
+  return {
+    id: crypto.randomUUID(),
+    worktreePath: "/projects/shop/feat-cart",
+    cwd: "/projects/shop/feat-cart",
+    otherHostBuild: false,
+    program,
+  };
+}
+
+function openDialog(): HTMLElement {
+  const dialog = document.querySelector<HTMLElement>("dialog[open]");
+  if (!dialog) throw new Error("No confirmation is open");
+  return dialog;
 }
 
 function autoCheckSwitch(): HTMLElement {
@@ -39,6 +69,8 @@ function autoCheckSwitch(): HTMLElement {
 
 beforeEach(() => {
   checkForUpdates.mockClear();
+  installUpdate.mockClear();
+  running = [];
   useSettingsStore.setState({ autoCheckForUpdates: true });
 });
 
@@ -83,7 +115,7 @@ describe("GeneralSection update status", () => {
   });
 
   test("shows download progress", async () => {
-    inDesktopApp({ state: "downloading", version: "1.0.1", percent: 42 });
+    inDesktopApp({ state: "downloading", version: "1.0.1", percent: 42, restartsTerminals: false });
     renderSection();
     expect(await screen.findByRole("button", { name: "Downloading... 42%" })).toBeTruthy();
   });
@@ -93,5 +125,44 @@ describe("GeneralSection update status", () => {
     renderSection();
     const link = await screen.findByRole("link", { name: "Download the latest version" });
     expect(link.getAttribute("href")).toBe("https://bizimind.io/download");
+  });
+});
+
+describe("GeneralSection update that restarts terminals", () => {
+  const ready: UpdateState = { state: "ready", version: "1.2.0", restartsTerminals: true };
+
+  test("warns, and installs only once the user confirms, naming the programs running", async () => {
+    running = [terminal("claude"), terminal(null)];
+    inDesktopApp(ready);
+    renderSection();
+    expect(await screen.findByText("This update restarts 2 terminals")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install & Restart" }));
+    await waitFor(() => openDialog());
+    expect(within(openDialog()).getByText("claude")).toBeTruthy();
+    fireEvent.click(within(openDialog()).getByRole("button", { name: "Cancel" }));
+    expect(installUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Install & Restart" }));
+    await waitFor(() => openDialog());
+    fireEvent.click(within(openDialog()).getByRole("button", { name: "Install & Restart" }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  test("installs at once when no terminal is running", async () => {
+    inDesktopApp(ready);
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Install & Restart" }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+    expect(document.querySelector("dialog[open]")).toBeNull();
+  });
+
+  test("an update that keeps the terminals installs without asking or warning", async () => {
+    running = [terminal("claude")];
+    inDesktopApp({ state: "ready", version: "1.0.1", restartsTerminals: false });
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Install & Restart" }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/This update/)).toBeNull();
   });
 });

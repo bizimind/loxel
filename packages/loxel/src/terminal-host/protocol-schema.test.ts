@@ -110,6 +110,38 @@ describe("snapshotVerdict", () => {
     expect(snapshotVerdict(removed, withProtocol(base, "1.2.0"))).toEqual({ status: "outdated" });
   });
 
+  test("a new bootstrap message is refused: a peer from before it could not parse it", () => {
+    const after = {
+      ...base,
+      bootstrap: { ...base.bootstrap, ping: { type: "object", properties: {}, required: [] } },
+    };
+    expect(refusal(snapshotVerdict(base, withProtocol(after, "1.2.0")))).toContain(
+      "bootstrap layer is frozen",
+    );
+  });
+
+  test("an answer's schema is guarded like a message's, a list's items included", () => {
+    const list = base.answers.list as { items: { properties: object; required: string[] } };
+    const after = {
+      ...base,
+      answers: {
+        ...base.answers,
+        list: {
+          ...list,
+          items: {
+            ...list.items,
+            properties: { ...list.items.properties, title: { type: "string" } },
+            required: [...list.items.required, "title"],
+          },
+        },
+      },
+    };
+    expect(refusal(snapshotVerdict(base, withProtocol(after, "1.2.0")))).toContain(
+      "answer of list[].title is a new required field",
+    );
+    expect(snapshotVerdict(base, withProtocol(after, "2.0.0"))).toEqual({ status: "outdated" });
+  });
+
   test("a version that goes down or is not semver is refused", () => {
     expect(refusal(snapshotVerdict(base, withProtocol(base, "1.0.9")))).toContain("only go up");
     expect(bumpBetween("1.1.0", "1.1")).toBeNull();

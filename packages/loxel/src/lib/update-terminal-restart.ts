@@ -3,10 +3,22 @@
  * Settings > General, and the confirmation before Install & Restart. See docs/ELECTRON.md#updates.
  */
 import type { RunningTerminal } from "@/api/running-terminals-model";
-import type { RestartsTerminals } from "@/api/update-model";
+import type { RestartsTerminals, UpdateState } from "@/api/update-model";
 
 function terminals(count: number): string {
   return count === 1 ? "1 terminal" : `${count} terminals`;
+}
+
+/** Whether the update `status` is about restarts the terminals; false when there is none. */
+export function restartsTerminalsOf(status: UpdateState | undefined): RestartsTerminals {
+  if (
+    status?.state === "available" ||
+    status?.state === "downloading" ||
+    status?.state === "ready"
+  ) {
+    return status.restartsTerminals;
+  }
+  return false;
 }
 
 /** The warning for an update, or null when it restarts no terminal. */

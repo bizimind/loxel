@@ -18,9 +18,11 @@ import { z } from "zod";
 import { protocolMajor } from "@/api/terminal-host-protocol-version";
 
 import {
+  ForegroundProcessesSchema,
   TerminalAttachRequestSchema,
   TerminalExitEventSchema,
   TerminalOscEventSchema,
+  TerminalSessionInfoSchema,
   TerminalSessionMetaSchema,
   TerminalSpawnSpecSchema,
   TerminalStateEventSchema,
@@ -160,6 +162,17 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   ForegroundProcessesRequestSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
+
+/**
+ * What each request is answered with: the `value` of its `result`, which the requester parses with
+ * this schema. Part of the versioned layer like the messages, so the schema guard covers them.
+ */
+export const RESULT_SCHEMAS = {
+  spawn: TerminalSessionInfoSchema,
+  list: TerminalSessionInfoSchema.array(),
+  attach: z.null(),
+  foreground_processes: ForegroundProcessesSchema,
+} as const satisfies Record<Extract<ServerMessage, { requestId: number }>["type"], z.ZodType>;
 
 /** A request's answer; the requester parses `value` with the schema of what it asked for. */
 const ResultSchema = z.object({

@@ -59,7 +59,12 @@ async function checkForUpdates(): Promise<void> {
 
 async function downloadUpdate(): Promise<void> {
   if (status.state !== "available") return;
-  setStatus({ state: "downloading", version: status.version, percent: 0 });
+  setStatus({
+    state: "downloading",
+    version: status.version,
+    percent: 0,
+    restartsTerminals: status.restartsTerminals,
+  });
   try {
     await autoUpdater.downloadUpdate();
   } catch (err) {

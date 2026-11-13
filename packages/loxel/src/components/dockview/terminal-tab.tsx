@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { NotificationDot } from "@/components/ui/notification-dot";
-import { restartTerminal } from "@/lib/restart-terminal";
+import { confirmRestartTerminal } from "@/lib/restart-terminal";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { hasPanelNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 
@@ -59,7 +59,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps<{ terminalId: strin
       }
       contextMenuItems={
         otherHostBuild ? (
-          <ContextMenuItem onClick={() => restartTerminal(props.api, terminalId)}>
+          <ContextMenuItem onClick={() => void confirmRestartTerminal(props.api, terminalId)}>
             Restart Terminal
           </ContextMenuItem>
         ) : undefined
