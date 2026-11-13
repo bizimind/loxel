@@ -58,16 +58,19 @@ function outsideCodeBlocks(doc: Node, from: number, dir: 1 | -1): Selection | nu
 
 /**
  * Moves a caret out of a mermaid block it sits in unmarked (placed there programmatically), to the
- * nearest textblock before it, or else after it, outside code blocks.
+ * nearest textblock after it, or else before it, outside code blocks: the caret placed at the end
+ * of a file that ends in a diagram lands in the trailing paragraph. An empty block never hides its
+ * source, so its caret stays. A block whose text fails to parse is still rendering when a file
+ * opens, so it counts as hidden then.
  */
 function releaseCaret(state: EditorState): Transaction | null {
   const block = codeBlockAt(state.selection);
-  if (block === null || sourceKey.getState(state) !== null) return null;
+  if (block === null || !state.selection.empty || sourceKey.getState(state) !== null) return null;
   const node = state.doc.nodeAt(block);
-  if (!node || !isMermaid(node)) return null;
+  if (!node || !isMermaid(node) || node.textContent.trim() === "") return null;
   const target =
-    outsideCodeBlocks(state.doc, block, -1) ??
-    outsideCodeBlocks(state.doc, block + node.nodeSize, 1);
+    outsideCodeBlocks(state.doc, block + node.nodeSize, 1) ??
+    outsideCodeBlocks(state.doc, block, -1);
   return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
 }
 

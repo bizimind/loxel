@@ -224,8 +224,16 @@ describe("mermaid source visibility", () => {
     view.dispatch(keepSourcesClosed(tr));
     expect(editing()).toEqual(NONE_EDITING);
     expect(sourceShown(LAST)).toBe(false);
-    // The caret moves to the text before the diagram, where typing shows.
-    expect(view.state.selection.$head.parent.textContent).toBe("End");
+    // The caret moves to the trailing paragraph after the diagram, where typing shows.
+    const { $head } = view.state.selection;
+    expect($head.parent.type.name).toBe("paragraph");
+    expect($head.pos).toBeGreaterThan(codeEnd(LAST));
+  });
+
+  test("a caret placed in an empty mermaid block stays, as its source shows", () => {
+    const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, codeStart(EMPTY)));
+    view.dispatch(keepSourcesClosed(tr));
+    expect(view.state.selection.from).toBe(codeStart(EMPTY));
   });
 
   test("a disk change applied outside history opens no source", () => {
