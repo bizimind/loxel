@@ -213,6 +213,10 @@ jobs:
       - name: Check the updater config is packaged
         run: ls packages/loxel/release/mac*/Loxel.app/Contents/Resources/app-update.yml
 
+      # Without it the server cannot start terminals (packages/loxel/docs/TERMINAL_HOST.md).
+      - name: Check the terminal host is packaged
+        run: ls packages/loxel/release/mac*/Loxel.app/Contents/Resources/loxel-terminal-host
+
       - name: Calculate checksums
         id: sha
         run: |

@@ -8,31 +8,7 @@
 
 import { postLogEntry } from "@/api/client";
 import type { ChildLogger, LogCategory, LogLevel } from "@/api/log-entry-model";
-
-// --- Error serialization (matches server logger helpers) ---
-
-function serializeErrorValue(err: unknown): Record<string, unknown> {
-  if (err instanceof Error) {
-    const result: Record<string, unknown> = { message: err.message, stack: err.stack };
-    if (err.cause) {
-      result.cause = serializeErrorValue(err.cause);
-    }
-    return result;
-  }
-  return { message: String(err) };
-}
-
-function serializeContext(ctx: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(ctx)) {
-    if (key === "error" && value instanceof Error) {
-      result[key] = serializeErrorValue(value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
+import { serializeLogContext } from "@/api/log-entry-model";
 
 // --- Core ---
 
@@ -41,7 +17,7 @@ function emit(level: LogLevel, cat: LogCategory, msg: string, ctx?: Record<strin
     level,
     cat,
     msg,
-    ctx: ctx && Object.keys(ctx).length > 0 ? serializeContext(ctx) : undefined,
+    ctx: ctx && Object.keys(ctx).length > 0 ? serializeLogContext(ctx) : undefined,
   });
 }
 

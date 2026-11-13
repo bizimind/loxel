@@ -13,6 +13,9 @@ files:
 extraResources:
   - from: build/loxel-server
     to: loxel-server
+  # Never run from here: the server clones it out of the bundle first (docs/TERMINAL_HOST.md)
+  - from: build/loxel-terminal-host
+    to: loxel-terminal-host
   # Every language server's files, staged from scripts/language-servers/*.json
   - from: build/language-servers
     to: .

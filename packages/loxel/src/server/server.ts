@@ -8,19 +8,14 @@ import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
-import {
-  BIN_HEADER_SIZE,
-  BIN_MSG_INPUT,
-  encodeOutputFrame,
-  parseBinaryHeader,
-} from "@/api/terminal-stream";
+import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
 import type {
   FileMoveSource,
   TerminalSpawnTarget,
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
-import { InProcessTerminalHost } from "@/terminal-host";
+import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
@@ -78,6 +73,7 @@ import { TerminalManager } from "./terminal-manager";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
 import { toolchainStatusModules } from "./toolchain-statuses";
+import { getCurrentVersion } from "./version";
 import { deleteRowsOfMissingWorktrees, deleteWorktreeRows } from "./worktree-rows";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
@@ -851,12 +847,17 @@ let shuttingDown = false;
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
 const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
-const terminalHost = new InProcessTerminalHost({
+/** The terminal hosts, which run every terminal in processes that outlive this server. */
+const terminalHosts = new TerminalHostPool({
+  stateDir: config.stateDir,
+  serverBuild: getCurrentVersion(),
+  hostBuildId: await currentHostBuildId(),
   log: logger.child("terminal"),
-  measureSpawn: (spawn) => measureSpawn("terminal", spawn),
-  onOutputChunk: () => stress.track("pty-output"),
 });
-const terminalManager = new TerminalManager(terminalHost, {
+terminalHosts.onEvent((event) => {
+  if (event.type === "output") stress.track("pty-output");
+});
+const terminalManager = new TerminalManager(terminalHosts, {
   isSequenceEnabled: isNotificationSequenceEnabled,
   toolchainEnvs,
   onNotification: (id, meta, payload) => {
@@ -1105,9 +1106,7 @@ function detachClientTerminals(ws: ServerWebSocket<WsData>) {
 function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSink {
   return {
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
-    sendOutput: (offset, data) => {
-      ws.send(encodeOutputFrame(id, offset, data));
-    },
+    sendOutput: ({ frame }) => ws.send(frame),
     sendExit: (exitCode) => sendTo(ws, { type: "terminal_exit", id, exitCode }),
   };
 }
@@ -1212,6 +1211,21 @@ const routeContext: RouteContext = {
     });
   },
 };
+
+// A server that cannot have the port must fail before it touches the terminal hosts: taking them
+// over would cut the running server off from its terminals.
+try {
+  Bun.listen({ hostname: "127.0.0.1", port: config.port, socket: { data: () => {} } }).stop(true);
+} catch (err) {
+  throw new Error(`Port ${config.port} is in use; not starting`, { cause: err });
+}
+
+// Terminals that outlived the previous server are this one's before any client can attach to them.
+try {
+  await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+} catch (err) {
+  log.error("Could not reach the running terminal hosts", { error: err });
+}
 
 // Clients spawn language servers and terminals as soon as they connect, so let the login-shell PATH
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
@@ -1369,6 +1383,10 @@ logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count",
 // Server start implies no live renderers — any session rows are leftovers.
 recoverOrphanLayoutSessions();
 
+// Terminals from before a restart are orphans until their windows reattach: the same rule as when
+// the last window closes gives them time to.
+if (terminalManager.hasOrphanSessions()) startIdleTimer();
+
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 log.info(`State directory: ${config.stateDir}${config.isDev ? " (dev)" : ""}`);
 if (projects.size === 0) log.info("No projects registered, waiting for project selection");
@@ -1443,10 +1461,17 @@ async function drainApiRequests(): Promise<void> {
 }
 
 /**
+ * What a shutdown does to the terminals: `end` them, as a quit or an idle shutdown does, or `drop`
+ * the connections to their hosts as a crash would, so they get the hosts' grace period to be
+ * reattached by the next server.
+ */
+type TerminalsOnShutdown = "end" | "drop";
+
+/**
  * Stop the server: let API requests finish first (saves, store writes, layout promotes), so a quit
  * loses nothing the app already sent, then tear everything down and exit.
  */
-function shutdown(exitCode = 0) {
+function shutdown(exitCode = 0, terminals: TerminalsOnShutdown = "end") {
   if (shuttingDown) return;
   shuttingDown = true;
   if (idleTimer) {
@@ -1454,10 +1479,10 @@ function shutdown(exitCode = 0) {
     idleTimer = null;
   }
   log.info("Server shutting down");
-  void drainApiRequests().finally(() => tearDown(exitCode));
+  void drainApiRequests().finally(() => tearDown(exitCode, terminals));
 }
 
-function tearDown(exitCode: number) {
+function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);
@@ -1468,7 +1493,11 @@ function tearDown(exitCode: number) {
     teardownProject(cwd);
   }
 
-  terminalManager.destroyAll();
+  // The hosts must have the disconnect before this process exits, or they take it for a crash.
+  const terminalsLeft =
+    terminals === "end"
+      ? terminalHosts.disconnectAll("end")
+      : Promise.resolve(terminalHosts.dropAll());
   formatService.destroy();
   const lspServersStopped = Promise.all(
     [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
@@ -1479,7 +1508,10 @@ function tearDown(exitCode: number) {
   server.stop();
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
-  void Promise.race([lspServersStopped, Bun.sleep(SHUTDOWN_LSP_WAIT_MS)]).finally(() => {
+  void Promise.race([
+    Promise.all([lspServersStopped, terminalsLeft]),
+    Bun.sleep(SHUTDOWN_LSP_WAIT_MS),
+  ]).finally(() => {
     logger.shutdown();
     process.exit(exitCode);
   });
@@ -1500,13 +1532,15 @@ if (config.parentPid !== null) {
   setInterval(() => {
     if (process.ppid === parentPid) return;
     log.info("The desktop app that started this server is gone, shutting down");
-    shutdown();
+    // As after a crash: the terminals wait out the hosts' grace period for the app to come back.
+    shutdown(0, "drop");
   }, PARENT_CHECK_MS).unref();
 }
 
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });
-  shutdown(1);
+  // A crash: the terminals wait out the hosts' grace period for the restarted server.
+  shutdown(1, "drop");
 });
 
 process.on("unhandledRejection", (reason) => {

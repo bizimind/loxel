@@ -1,0 +1,199 @@
+/**
+ * Terminals outlive their server: a real server process is killed while a shell runs, and the next
+ * server reattaches the panel to the same shell, resuming its stream or, for a fresh xterm, with a
+ * snapshot. A quit (SIGTERM) still ends them. `LOXEL_DEV=1` keeps the server off the keychain, and
+ * a temporary state directory and port keep it and its terminal host apart from any real one.
+ */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import path from "node:path";
+
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
+import type { WsMessage } from "@/api/ws-protocol";
+import { hostRunDir } from "@/terminal-host/host-files";
+import { retryUntil } from "@/test/git-sync-harness";
+import { until } from "@/test/until";
+
+// The package's test preload replaces `fetch` and `WebSocket` with browser ones that enforce CORS.
+if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+
+const LOXEL_ROOT = path.resolve(import.meta.dir, "../..");
+const TEST_TIMEOUT_MS = 60_000;
+
+function freePort(): number {
+  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: () => {} } });
+  const { port } = listener;
+  listener.stop(true);
+  return port;
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A panel's view of one terminal over its own socket: states, output and the offset it is at. */
+async function openPanel(baseUrl: string) {
+  const states: Array<Extract<WsMessage, { type: "terminal_state" }>> = [];
+  let text = "";
+  let offset: number | null = null;
+  const socket = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+  socket.binaryType = "arraybuffer";
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") {
+      const frame = parseOutputFrame(new Uint8Array(event.data as ArrayBuffer));
+      if (!frame) return;
+      text += new TextDecoder().decode(frame.payload);
+      offset = frame.offset + frame.payload.byteLength;
+      return;
+    }
+    const message = JSON.parse(event.data) as WsMessage;
+    if (message.type !== "terminal_state") return;
+    states.push(message);
+    offset = message.offset;
+  });
+  await new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve);
+    socket.addEventListener("error", reject);
+  });
+  return {
+    states,
+    text: () => text,
+    offset: () => offset,
+    attach: (id: string, since?: { epoch: string; offset: number }) =>
+      socket.send(
+        JSON.stringify({
+          type: "terminal_attach",
+          id,
+          cols: 80,
+          rows: 24,
+          cwd: "/tmp",
+          worktreePath: "/tmp",
+          ...(since && { sinceEpoch: since.epoch, sinceOffset: since.offset }),
+        }),
+      ),
+    type: (id: string, line: string) =>
+      socket.send(new Uint8Array(encodeInputFrame(id, new TextEncoder().encode(`${line}\n`)))),
+    close: () => socket.close(),
+  };
+}
+
+describe("terminals across server restarts", () => {
+  let stateDir: string;
+  let baseUrl: string;
+  let port: number;
+  let server: ReturnType<typeof Bun.spawn> | null = null;
+
+  async function startServer(): Promise<void> {
+    const started = Bun.spawn(["bun", "src/server/index.ts"], {
+      cwd: LOXEL_ROOT,
+      env: {
+        ...process.env,
+        LOXEL_DEV: "1",
+        LOXEL_STATE_DIR: stateDir,
+        LOXEL_SERVE_PORT: String(port),
+        SHELL: "/bin/sh",
+      },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    server = started;
+    await retryUntil(
+      () => {},
+      async (timeoutMs) => {
+        if (started.exitCode !== null) throw new Error(`Server exited: ${started.exitCode}`);
+        if ((await fetch(`${baseUrl}/api/version`).catch(() => null))?.ok) return true;
+        await Bun.sleep(timeoutMs);
+        return false;
+      },
+      "the server to listen",
+    );
+  }
+
+  /** The PIDs of the running terminal hosts, from their entries. */
+  function hostPids(): number[] {
+    const runDir = hostRunDir(stateDir);
+    if (!existsSync(runDir)) return [];
+    return readdirSync(runDir)
+      .filter((name) => name.endsWith(".json"))
+      .map(
+        (name) =>
+          (JSON.parse(readFileSync(path.join(runDir, name), "utf8")) as { pid: number }).pid,
+      );
+  }
+
+  beforeAll(() => {
+    // Short, so the host's socket path fits the platform limit without the fallback.
+    stateDir = realpathSync(mkdtempSync("/tmp/lx-restart-"));
+    port = freePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(async () => {
+    server?.kill("SIGKILL");
+    await server?.exited;
+    // Whatever the test left running ends with its host.
+    for (const pid of hostPids()) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Already gone.
+      }
+    }
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  test(
+    "a killed server leaves the shell running, and the next server resumes it",
+    async () => {
+      await startServer();
+      const id = crypto.randomUUID();
+      const first = await openPanel(baseUrl);
+      first.attach(id);
+      await until(() => first.states.length > 0, TEST_TIMEOUT_MS);
+      const pidFile = path.join(stateDir, "shell.pid");
+      first.type(id, `echo $$ > ${pidFile}; echo before-crash`);
+      await until(() => first.text().includes("before-crash\r\n"), TEST_TIMEOUT_MS);
+      const shellPid = Number(readFileSync(pidFile, "utf8"));
+      const epoch = first.states[0]!.epoch;
+
+      // A crash: no shutdown, no disconnect.
+      server!.kill("SIGKILL");
+      await server!.exited;
+      expect(isAlive(shellPid)).toBe(true);
+      const since = { epoch, offset: first.offset()! };
+
+      await startServer();
+      const resumed = await openPanel(baseUrl);
+      resumed.attach(id, since);
+      await until(() => resumed.states.length > 0, TEST_TIMEOUT_MS);
+      expect(resumed.states[0]).toMatchObject({ epoch, mode: "resume", offset: since.offset });
+      resumed.type(id, "echo $$ after-restart");
+      await until(() => resumed.text().includes(`${shellPid} after-restart`), TEST_TIMEOUT_MS);
+      resumed.close();
+
+      // A fresh xterm gets the screen as a snapshot, with what the shell printed before the crash.
+      const fresh = await openPanel(baseUrl);
+      fresh.attach(id);
+      await until(() => fresh.states.length > 0, TEST_TIMEOUT_MS);
+      expect(fresh.states[0]).toMatchObject({ epoch, mode: "snapshot" });
+      expect(fresh.states[0]!.snapshot).toContain("before-crash");
+      fresh.close();
+
+      // A quit still ends the terminals, and the host with them.
+      const hosts = hostPids();
+      expect(hosts.length).toBe(1);
+      server!.kill("SIGTERM");
+      await server!.exited;
+      await until(() => !isAlive(shellPid) && hosts.every((pid) => !isAlive(pid)), TEST_TIMEOUT_MS);
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+});

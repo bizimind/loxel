@@ -98,6 +98,8 @@ Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.
 - `detached/{project-hash}/{worktree-hash}/` — Drafts
 - `localdb/{project-hash}/localdb.db` — data behind `:::localdb` blocks in markdown files
 - `logs/server-{instanceId}.log` — server logs (NDJSON, rotated at 5 MB, stale files removed after 24 h)
+- `logs/terminal-host-{hostId}.log` — terminal host logs (NDJSON, rotated at 5 MB, removed a day after the host is gone)
+- `terminal-host/run/` — running terminal hosts' sockets and entries; `terminal-host/bin/` — the host binaries they run from
 
 ## Internal docs
 
@@ -125,7 +127,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), repository trust and the trust policy for what runs untrusted, URI schemes, formatting, toolchain status items, JSON/YAML/TOML schemas, highlighting and editing behavior; per-language detail in docs/languages/ ([Python](docs/languages/python.md): environment, interpreter choice and trust rule, mypy in place of basedpyright's type checks; [TypeScript](docs/languages/typescript.md): its manager and diagnostics; [JavaScript](docs/languages/javascript.md): Node version, formatters, ESLint, oxlint and Biome; [Go](docs/languages/go.md): gopls, its toolchain and golangci-lint; [Rust](docs/languages/rust.md): toolchain and the user's rust-analyzer; [C and C++](docs/languages/c-cpp.md): clangd and compile databases; [Java](docs/languages/java.md): jdtls on the user's JDK, Maven and Gradle import, Checkstyle diagnostics; [Kotlin](docs/languages/kotlin.md): formatters and detekt and ktlint diagnostics; [C#](docs/languages/csharp.md): the user's csharp-ls and its gate; [TOML](docs/languages/toml.md): Tombi)
 - [docs/THEMES.md](docs/THEMES.md) — color themes: the model and its storage, the UI token stylesheet, terminal colors, syntax colors in Monaco and Shiki, theme.json, ANSI colors from other terminals' scheme files
 - [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, toolchain environments (Python activation), the terminal WebSocket protocol, xterm.js client and its colors, notifications, the `loxel` CLI
-- [docs/TERMINAL_HOST.md](docs/TERMINAL_HOST.md) — the terminal host: what owns the sessions versus the server's terminal policy, the `TerminalHost` interface and its events, ordering, attachments and epochs, the import boundary
+- [docs/TERMINAL_HOST.md](docs/TERMINAL_HOST.md) — the terminal host: what owns the sessions versus the server's terminal policy, the `TerminalHost` interface and its events, ordering, the detached `loxel-terminal-host` process, its socket protocol and compatibility, generations, lifetime and grace period, reconnecting, files on disk, the import boundary
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs, file comparisons and patches, synchronized scrolling, intra-line highlights, gutter connectors
 - [docs/FILES_TREE.md](docs/FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal

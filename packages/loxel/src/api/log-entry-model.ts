@@ -79,3 +79,27 @@ export interface ChildLogger {
   /** Create a sub-child with additional default context. */
   with(defaultCtx: Record<string, unknown>): ChildLogger;
 }
+
+function serializeErrorValue(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    const result: Record<string, unknown> = { message: err.message, stack: err.stack };
+    if (err.cause) {
+      result.cause = serializeErrorValue(err.cause);
+    }
+    return result;
+  }
+  return { message: String(err) };
+}
+
+/** A log context ready for JSON: an `error` that is an `Error` becomes its message, stack and causes. */
+export function serializeLogContext(ctx: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(ctx)) {
+    if (key === "error" && value instanceof Error) {
+      result[key] = serializeErrorValue(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}

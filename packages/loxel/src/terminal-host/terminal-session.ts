@@ -12,6 +12,7 @@ import type { Subprocess } from "bun";
 import type { ChildLogger } from "@/api/log-entry-model";
 import { clampScrollbackLines, clampTerminalSize } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
+import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 
 import type { TerminalHostEvent } from "./terminal-host";
 import { OSC_NOTIFICATION_CODES } from "./terminal-host";
@@ -29,10 +30,6 @@ export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" }>;
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {
   log: ChildLogger;
-  /** Wraps each PTY spawn, for spawn accounting. */
-  measureSpawn?: <T>(spawn: () => T) => T;
-  /** Called for every output chunk, for stress detection. */
-  onOutputChunk?: () => void;
   /** Overrides for tests. */
   resumeRingBytes?: number;
   flowControl?: { highWaterBytes: number; lowWaterBytes: number };
@@ -185,8 +182,8 @@ export class TerminalSession {
     this.emulator.loadAddon(this.serializer);
     this.registerOscHandlers();
 
-    const spawn = () =>
-      Bun.spawn([...options.argv], {
+    try {
+      this.proc = Bun.spawn([...options.argv], {
         cwd: options.cwd,
         env: options.env,
         terminal: {
@@ -195,8 +192,6 @@ export class TerminalSession {
           data: (_terminal, data) => this.onPtyData(data),
         },
       });
-    try {
-      this.proc = runtime.measureSpawn ? runtime.measureSpawn(spawn) : spawn();
     } catch (err) {
       this.emulator.dispose();
       throw err;
@@ -330,7 +325,6 @@ export class TerminalSession {
     const offset = this.ring.end;
     this.ring.push(chunk);
     this.feedEmulator(chunk);
-    this.options.runtime.onOutputChunk?.();
 
     if (this.attachment === null || !this.streaming || this.paused) return;
     this.forward(offset, chunk);
@@ -338,7 +332,10 @@ export class TerminalSession {
 
   /** Send output to the client and account for it against the flow-control budget. */
   private forward(offset: number, data: Uint8Array): void {
-    this.options.emit({ type: "output", id: this.id, offset, data });
+    // Encoded once here: the frame goes to the renderer as is, and `data` is a view of it.
+    const frame = encodeOutputFrame(this.id, offset, data);
+    const payload = frame.subarray(BIN_OUTPUT_HEADER_SIZE);
+    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
     this.unacked += data.byteLength;
     if (this.unacked > this.highWater && !this.paused) {
       this.paused = true;
