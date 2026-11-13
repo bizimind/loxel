@@ -16,6 +16,7 @@ import type { LogEntry } from "./log-entry-model";
 import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
 import type {
+  AddProjectRequest,
   BrowseEntry,
   CloneProjectRequest,
   ConvertProjectRequest,
@@ -557,8 +558,8 @@ export async function getProjects() {
   return fetchJson<ProjectsResponse>("/projects");
 }
 
-export async function addProject(path: string, name?: string) {
-  return fetchJson<Project>("/projects", { method: "POST", body: JSON.stringify({ path, name }) });
+export async function addProject(req: AddProjectRequest) {
+  return fetchJson<ProjectSetupResult>("/projects", { method: "POST", body: JSON.stringify(req) });
 }
 
 export async function removeProject(id: string) {

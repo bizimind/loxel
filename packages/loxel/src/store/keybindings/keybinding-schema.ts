@@ -187,6 +187,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "codeAction.refactor": ["Ctrl+Alt+R"],
   "language.restartServers": [],
   "worktree.manageRepoTrust": [],
+  "project.add": [],
   "app.settings": ["Cmd+Comma"],
   ...Object.fromEntries(THEME_PREFERENCES.map((theme) => [`theme.${theme}`, []])),
 });

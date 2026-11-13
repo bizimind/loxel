@@ -14,7 +14,7 @@ Loxel tracks your repositories as **projects**, and every task you work on is a 
 
 ## Adding a project
 
-Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below.
+Click **Add project** in the worktree sidebar, **Add Project** on the start screen when no project is open, or run **Add Project** from the command palette. Each opens the same dialog, with two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below. Once the project is added, Loxel switches to it.
 
 When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook. Hooks run in [trusted](/docs/repository-trust) repositories. A new project starts trusted, so its hook runs right away; for a repository you import, Loxel asks before running it in the first worktree.
 
@@ -41,12 +41,14 @@ Enter a path or browse to a folder on disk and Loxel will inspect it. The result
 
 After detection, confirm to register the repo with Loxel. The project is added to Loxel's project list in the worktree sidebar. This is the path for repos you've already set up locally.
 
+For a repository Loxel adds as it is, the dialog also shows what `wt doctor` finds in its setup, such as a bare clone that fetches no `origin/*` branches, no worktree for the default branch, or worktrees git lost track of. Each fix is a checkbox with the exact commands it runs, and the ones `wt init` recommends start checked. Loxel applies the checked fixes when you add the project; if one fails, for example because origin can't be reached, the project is still added and a notification says which fix failed. A worktree a fix creates runs the repository's `init.wt.sh` only once you [trust](/docs/repository-trust) the repository.
+
 ### Clone
 
 Paste a remote URL and Loxel clones it for you. Before cloning, you choose the workspace mode:
 
 - **Single-workspace** — clones as a regular repo. One working tree, one branch checked out at a time. Good for solo projects or repos where you don't need parallel tasks.
-- **Multi-workspace** — clones as a bare repo and creates the first worktree. The right choice if you plan to run multiple agents in parallel on the same codebase.
+- **Multi-workspace** — clones as a bare repo set up the way `wt init <url>` does it: origin's branches fetched as `origin/*` and its default branch recorded, so new worktrees start from it, and that branch checked out as the first worktree. The right choice if you plan to run multiple agents in parallel on the same codebase.
 
 ### Init
 
