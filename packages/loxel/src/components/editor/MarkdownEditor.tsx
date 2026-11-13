@@ -24,10 +24,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  PREVIEW_LOADING_HTML,
-  renderCodeBlockPreview,
-} from "@/components/editor/code-block-preview";
+import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { codeBlockSourcePlugin, keepSourcesClosed } from "@/components/editor/code-block-source";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
@@ -424,7 +421,6 @@ export function MarkdownEditor({
           theme: codeTheme(),
           languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
-          previewLoading: PREVIEW_LOADING_HTML,
         },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {

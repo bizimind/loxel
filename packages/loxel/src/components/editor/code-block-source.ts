@@ -1,19 +1,24 @@
 /**
- * Which code block's source the user is editing, for previews that replace their block's source
- * (mermaid diagrams, see mermaid-preview.css).
+ * Whether a mermaid block shows its source or only its diagram: one decision, made here from the
+ * editor state and read by the preview CSS (mermaid-preview.css), the arrow keys and the caret.
  *
- * The state is derived from the caret: the code block holding a text selection is marked with
- * {@link EDITING_CLASS}, once a transaction has put the selection there (typing, a click, the
- * arrow keys, undo, search navigation, the preview's Edit button) or has created or changed the
- * block around it (the ```mermaid input rule, a block-type menu). Programmatic placements never
- * open a source: the initial selection, the caret the editor places when a file opens
- * ({@link keepSourcesClosed}), and disk changes applied outside history. So a file opens showing
- * its diagrams, wherever its first and last blocks are. A caret such a placement leaves in a
- * mermaid block could not be typed with, as the source it sits in is not displayed, so it moves to
- * the nearest textblock outside code blocks. A node selection (the block handle) is not editing. Leaving the block, or its preview's Hide button, which moves the caret out, unmarks it.
- * The mark is a node decoration, so it lives on the block's node view and survives CodeMirror being
- * torn down off-screen; a recreated editor starts unmarked, and its restored caret marks the block
- * it lands in.
+ * A block hides its source ({@link hidesSource}) when it has text and that text's last render did
+ * not fail (mermaid-render-results.ts; a render still pending counts as a diagram, so a file opens
+ * showing diagrams, and a block whose diagram fails expands once its error arrives). It is
+ * collapsed ({@link COLLAPSED_CLASS}) when it hides its source and is not open.
+ *
+ * A code block is open while it holds a text selection that a transaction put there (typing, a
+ * click, the arrow keys, undo, search navigation, the preview's Edit button) or that sits in a
+ * block the transaction created or changed (the ```mermaid input rule, a block-type menu). Open
+ * does not depend on the render result, so a parse error while typing never collapses the block.
+ * Programmatic placements open nothing: the initial selection, the caret the editor places when a
+ * file opens ({@link keepSourcesClosed}), and disk changes applied outside history. A caret such a
+ * placement leaves in a collapsed block could not type into its hidden source, so it moves to the
+ * nearest textblock outside code blocks. A node selection (the block handle) is not editing.
+ *
+ * The classes are node decorations, so they live on the block's node view and survive CodeMirror's
+ * off-screen teardown; a recreated editor opens nothing, and its restored caret opens the block it
+ * lands in.
  */
 import type { Node } from "@milkdown/kit/prose/model";
 import {
@@ -27,12 +32,39 @@ import {
 import { Decoration, DecorationSet, type EditorView } from "@milkdown/kit/prose/view";
 import { $prose } from "@milkdown/kit/utils";
 
-/** Class on the node view (`.milkdown-code-block`) of the code block being edited. */
-export const EDITING_CLASS = "loxel-code-block-editing";
+import {
+  mermaidRenderFailed,
+  onMermaidRenderResult,
+} from "@/components/editor/mermaid-render-results";
+
+/** Class on the node view (`.milkdown-code-block`) of every mermaid block. */
+export const MERMAID_BLOCK_CLASS = "loxel-mermaid-block";
+/** Class on the node view of a mermaid block showing only its diagram. */
+export const COLLAPSED_CLASS = "loxel-code-block-collapsed";
 
 const CODE_BLOCK = "code_block";
 
-const sourceKey = new PluginKey<number | null>("loxel-code-block-source");
+interface SourceState {
+  /** The start position of the open code block, or null. */
+  open: number | null;
+  decorations: DecorationSet;
+}
+
+type SourceMeta = "keep-closed" | "rendered";
+
+const sourceKey = new PluginKey<SourceState>("loxel-code-block-source");
+
+function isMermaid(node: Node): boolean {
+  const language: unknown = node.attrs.language;
+  return typeof language === "string" && language.toLowerCase() === "mermaid";
+}
+
+/** Whether a mermaid block shows its diagram in place of its source when it is not open. */
+function hidesSource(node: Node): boolean {
+  if (node.type.name !== CODE_BLOCK || !isMermaid(node)) return false;
+  const text = node.textContent;
+  return text.trim() !== "" && !mermaidRenderFailed(text);
+}
 
 /** The start position of the code block holding a text selection's head, or null. */
 function codeBlockAt(selection: Selection): number | null {
@@ -41,42 +73,9 @@ function codeBlockAt(selection: Selection): number | null {
   return $head.parent.type.name === CODE_BLOCK ? $head.before() : null;
 }
 
-function isMermaid(node: Node): boolean {
-  const language: unknown = node.attrs.language;
-  return typeof language === "string" && language.toLowerCase() === "mermaid";
-}
-
-/** The nearest text position from `from` in direction `dir` that is not inside a code block. */
-function outsideCodeBlocks(doc: Node, from: number, dir: 1 | -1): Selection | null {
-  let found = TextSelection.findFrom(doc.resolve(from), dir, true);
-  while (found && found.$head.parent.type.name === CODE_BLOCK) {
-    const next = dir > 0 ? found.$head.after() : found.$head.before();
-    found = TextSelection.findFrom(doc.resolve(next), dir, true);
-  }
-  return found;
-}
-
-/**
- * Moves a caret out of a mermaid block it sits in unmarked (placed there programmatically), to the
- * nearest textblock after it, or else before it, outside code blocks: the caret placed at the end
- * of a file that ends in a diagram lands in the trailing paragraph. An empty block never hides its
- * source, so its caret stays. A block whose text fails to parse is still rendering when a file
- * opens, so it counts as hidden then.
- */
-function releaseCaret(state: EditorState): Transaction | null {
-  const block = codeBlockAt(state.selection);
-  if (block === null || !state.selection.empty || sourceKey.getState(state) !== null) return null;
-  const node = state.doc.nodeAt(block);
-  if (!node || !isMermaid(node) || node.textContent.trim() === "") return null;
-  const target =
-    outsideCodeBlocks(state.doc, block + node.nodeSize, 1) ??
-    outsideCodeBlocks(state.doc, block, -1);
-  return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
-}
-
 /** Marks a transaction that places the caret for the user, so it opens no source. */
 export function keepSourcesClosed(tr: Transaction): Transaction {
-  return tr.setMeta(sourceKey, true);
+  return tr.setMeta(sourceKey, "keep-closed" satisfies SourceMeta);
 }
 
 /** Whether `tr` created or changed the node at `pos` (a position in `tr.doc`). */
@@ -92,26 +91,56 @@ function changesNodeAt(tr: Transaction, pos: number): boolean {
   });
 }
 
-function editingDecorations(state: EditorState): DecorationSet {
-  const pos = sourceKey.getState(state);
-  const node = pos === null || pos === undefined ? null : state.doc.nodeAt(pos);
-  if (pos === null || pos === undefined || !node) return DecorationSet.empty;
-  return DecorationSet.create(state.doc, [
-    Decoration.node(pos, pos + node.nodeSize, { class: EDITING_CLASS }),
-  ]);
+/** The open code block after `tr`. */
+function openBlock(tr: Transaction, prev: number | null, state: EditorState): number | null {
+  const block = codeBlockAt(state.selection);
+  if (block === null) return null;
+  if (prev !== null && tr.mapping.map(prev) === block) return block;
+  const programmatic =
+    tr.getMeta(sourceKey) === "keep-closed" || tr.getMeta("addToHistory") === false;
+  if (programmatic) return null;
+  return tr.selectionSet || changesNodeAt(tr, block) ? block : null;
+}
+
+function blockDecorations(doc: Node, open: number | null): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== CODE_BLOCK) return !node.isTextblock;
+    if (!isMermaid(node)) return false;
+    const collapsed = pos !== open && hidesSource(node);
+    const className = collapsed ? `${MERMAID_BLOCK_CLASS} ${COLLAPSED_CLASS}` : MERMAID_BLOCK_CLASS;
+    decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: className }));
+    return false;
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+/** The nearest text position from `from` in direction `dir` that is not inside a code block. */
+function outsideCodeBlocks(doc: Node, from: number, dir: 1 | -1): Selection | null {
+  let found = TextSelection.findFrom(doc.resolve(from), dir, true);
+  while (found && found.$head.parent.type.name === CODE_BLOCK) {
+    const next = dir > 0 ? found.$head.after() : found.$head.before();
+    found = TextSelection.findFrom(doc.resolve(next), dir, true);
+  }
+  return found;
 }
 
 /**
- * Whether the code block at `pos` shows its preview in place of its source by mermaid-preview.css.
- * A source hidden by Crepe's own preview toggle (its `hidden` class, still used by diff blocks)
- * stays hidden with the caret in it, so it does not count.
+ * Moves a caret out of a collapsed block it sits in (placed there programmatically), to the
+ * nearest textblock after it, or else before it, outside code blocks: the caret placed at the end
+ * of a file that ends in a diagram lands in the trailing paragraph.
  */
-function isSourceHidden(view: EditorView, pos: number): boolean {
-  const dom = view.nodeDOM(pos);
-  const host = dom instanceof HTMLElement ? dom.querySelector(".codemirror-host") : null;
-  return (
-    host instanceof HTMLElement && !host.classList.contains("hidden") && !host.checkVisibility()
-  );
+function releaseCaret(state: EditorState): Transaction | null {
+  const block = codeBlockAt(state.selection);
+  if (block === null || !state.selection.empty || sourceKey.getState(state)?.open !== null) {
+    return null;
+  }
+  const node = state.doc.nodeAt(block);
+  if (!node || !hidesSource(node)) return null;
+  const target =
+    outsideCodeBlocks(state.doc, block + node.nodeSize, 1) ??
+    outsideCodeBlocks(state.doc, block, -1);
+  return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
 }
 
 const ARROWS: Record<string, { dir: 1 | -1; edge: "up" | "down" | "left" | "right" }> = {
@@ -126,9 +155,9 @@ const RTL_TEXT = /[\u0590-\u08ac]/;
 
 /**
  * The browser cannot move the caret into a source that is not displayed, so an arrow key at the
- * edge of a textblock steps into a neighboring code block with a hidden source explicitly: at the
- * start of its text going forward, at the end going back. The neighbor is the next selection
- * ProseMirror itself would reach, so an atom block in between (a rule) is selected first.
+ * edge of a textblock steps into a neighboring collapsed block explicitly: at the start of its text
+ * going forward, at the end going back. The neighbor is the next selection ProseMirror itself would
+ * reach, so an atom block in between (a rule) is selected first.
  */
 function enterHiddenSource(view: EditorView, event: KeyboardEvent): boolean {
   const arrow = ARROWS[event.key];
@@ -142,7 +171,7 @@ function enterHiddenSource(view: EditorView, event: KeyboardEvent): boolean {
   const beyond = doc.resolve(arrow.dir > 0 ? $head.after() : $head.before());
   const next = Selection.findFrom(beyond, arrow.dir);
   const blockPos = next ? codeBlockAt(next) : null;
-  if (!next || blockPos === null || !isSourceHidden(view, blockPos)) return false;
+  if (!next || blockPos === null || !hidesSource(next.$head.parent)) return false;
   // Measured last: it reads the layout.
   if (!view.endOfTextblock(arrow.edge)) return false;
   const block = next.$head.parent;
@@ -155,30 +184,35 @@ function enterHiddenSource(view: EditorView, event: KeyboardEvent): boolean {
 
 export const codeBlockSourcePlugin = $prose(
   () =>
-    new Plugin<number | null>({
+    new Plugin<SourceState>({
       key: sourceKey,
       state: {
-        init: () => null,
+        init: (_config, state) => ({ open: null, decorations: blockDecorations(state.doc, null) }),
         apply(tr, prev, _old, state) {
-          const block = codeBlockAt(state.selection);
-          if (block === null) return null;
-          if (prev !== null && tr.mapping.map(prev) === block) return block;
-          const programmatic =
-            tr.getMeta(sourceKey) === true || tr.getMeta("addToHistory") === false;
-          if (programmatic) return null;
-          return tr.selectionSet || changesNodeAt(tr, block) ? block : null;
+          const open = openBlock(tr, prev.open, state);
+          const rendered = tr.getMeta(sourceKey) === "rendered";
+          if (!tr.docChanged && !rendered && open === prev.open) return prev;
+          return { open, decorations: blockDecorations(state.doc, open) };
         },
       },
       appendTransaction: (_trs, _old, state) => releaseCaret(state),
-      // The initial selection comes with no transaction, so its caret is released once mounted.
       view: (view) => {
+        // The initial selection comes with no transaction, so its caret is released once mounted.
         queueMicrotask(() => {
           const tr = view.isDestroyed ? null : releaseCaret(view.state);
           if (tr) view.dispatch(tr);
         });
-        return {};
+        const unsubscribe = onMermaidRenderResult(() => {
+          if (!view.isDestroyed) {
+            view.dispatch(view.state.tr.setMeta(sourceKey, "rendered" satisfies SourceMeta));
+          }
+        });
+        return { destroy: unsubscribe };
       },
-      props: { decorations: editingDecorations, handleKeyDown: enterHiddenSource },
+      props: {
+        decorations: (state) => sourceKey.getState(state)?.decorations,
+        handleKeyDown: enterHiddenSource,
+      },
     }),
 );
 

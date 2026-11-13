@@ -78,9 +78,14 @@ describe("renderCodeBlockPreview routing", () => {
     expect(renderCalls).toHaveLength(0);
   });
 
-  test("empty mermaid blocks clear their preview without rendering", async () => {
-    expect(await renderAsync("mermaid", "")).toBeNull();
-    expect(await renderAsync("mermaid", "  \n\t\n")).toBeNull();
+  test("empty mermaid blocks have no preview at once, and clear it through the queue", async () => {
+    for (const content of ["", "  \n\t\n"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one render at a time, like the queue
+      const applied = await new Promise<PreviewValue>((resolve) => {
+        expect(renderCodeBlockPreview("mermaid", content, resolve)).toBeNull();
+      });
+      expect(applied).toBeNull();
+    }
     expect(renderCalls).toHaveLength(0);
   });
 
