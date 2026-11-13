@@ -42,7 +42,7 @@ const ROW_LEFT = 8;
 const CHEVRON_PX = 14;
 /** Puts the expanded project icon in the column of the top-level worktree icons below it. */
 const ICON_MARGIN_LEFT = iconLeftExpanded(0) - ROW_LEFT - CHEVRON_PX;
-/** The rail's Home and Add project buttons (`size-8`), centered on the worktree icons' column. */
+/** The rail's Add project button (`size-8`), centered on the worktree icons' column. */
 const RAIL_ADD_PX = 32;
 const RAIL_ADD_LEFT = iconLeft(0) - (RAIL_ADD_PX - ICON_PX) / 2;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */

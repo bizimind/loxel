@@ -46,7 +46,7 @@ export function LoxelLogo({
 export function LoxelLogoTile({ className }: { className?: string }) {
   return (
     <span className={cn("corner-superellipse block shrink-0 rounded-2xl bg-current", className)}>
-      <svg viewBox="0 0 100 100" fill="none" className="size-full">
+      <svg viewBox="0 0 100 100" fill="none" aria-hidden className="size-full">
         <LoxelGlyph />
       </svg>
     </span>
