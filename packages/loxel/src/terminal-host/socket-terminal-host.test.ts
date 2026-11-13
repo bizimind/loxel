@@ -111,10 +111,17 @@ describe("SocketTerminalHost against the host service", () => {
       attachment: 7,
       state: { id: spawned.id, epoch: spawned.epoch },
     });
-    await until(() => outputText(spawned.id).includes("got:typed"));
+    // Printed before the attach, it is in the snapshot; after, in the output.
+    const screen = () => {
+      const state = events.find((event) => event.type === "state");
+      return (state?.type === "state" ? (state.state.snapshot ?? "") : "") + outputText(spawned.id);
+    };
+    await until(() => screen().includes("got:typed"));
 
+    // Output from now on: the frame is passed on as it arrived, with the payload a view of it.
+    client.write(spawned.id, textEncoder.encode("more\n"));
+    await until(() => events.some((event) => event.type === "output"));
     const output = events.find((event) => event.type === "output");
-    // The frame is passed on as it arrived, with the payload a view of it.
     expect(output?.type === "output" && output.data.buffer === output.frame.buffer).toBe(true);
 
     client.setMeta(spawned.id, { worktreePath: "/wt/b" });
