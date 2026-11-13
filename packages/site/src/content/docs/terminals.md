@@ -27,6 +27,15 @@ To rename a terminal, double-click its tab title, right-click the tab and choose
 
 Terminal sessions survive task switches. When you switch to another task — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-tasks#the-worktree-sidebar), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again. A crash doesn't end them either: if Loxel or its background server stops unexpectedly, your shells keep running, and reconnect with their scrollback when Loxel is back, as long as that is within 10 minutes.
 
+### Quitting without ending your terminals
+
+To leave agents and long-running commands working while Loxel is closed, quit with one of these instead of **Quit Loxel** (`Cmd+Q`):
+
+- **Quit and Keep Terminals** (`Cmd+Alt+Q`, in the Loxel menu and the command palette): Loxel quits, and every terminal keeps running, for as long as it takes you to open Loxel again. Each panel then reconnects to its terminal, scrollback included.
+- **Restart Loxel** (in the Loxel menu and the command palette): Loxel quits and opens again, and your terminals keep running through it.
+
+Installing an update with **Install & Restart** keeps your terminals running the same way.
+
 Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 
 ---

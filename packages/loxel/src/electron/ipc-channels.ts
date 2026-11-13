@@ -67,3 +67,7 @@ export const PASSKEY_QR_HIDE = "passkey:qr-hide";
 export const DEFAULT_BROWSER_GET = "default-browser:get";
 /** Renderer → main (invoke): ask macOS to make Loxel the default web browser. */
 export const DEFAULT_BROWSER_SET = "default-browser:set";
+/** Renderer → main: Quit and Keep Terminals, from the command palette. */
+export const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
+/** Renderer → main: Restart Loxel, from the command palette. */
+export const APP_RESTART = "app:restart";

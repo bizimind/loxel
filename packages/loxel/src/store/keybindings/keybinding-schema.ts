@@ -189,6 +189,9 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "worktree.manageRepoTrust": [],
   "project.add": [],
   "app.settings": ["Cmd+Comma"],
+  // ⌥⌘Q is the app menu's, like ⌘Q: macOS menus take their keys before the page.
+  "app.quitKeepingTerminals": [],
+  "app.restart": [],
   ...Object.fromEntries(THEME_PREFERENCES.map((theme) => [`theme.${theme}`, []])),
 });
 

@@ -1,7 +1,8 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, type StdioOptions, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -41,6 +42,9 @@ const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
  */
 let serverProcess: ChildProcess | null = null;
 
+/** The app's channel to `serverProcess` (parent-channel-protocol.ts). */
+let serverChannel: Writable | null = null;
+
 /** Set once the app quits, so the server's exit is not taken for a crash. */
 let stoppingServer = false;
 
@@ -65,11 +69,23 @@ const STALE_SERVER_WAIT_MS = 15_000;
 let metaKeyHeld = false;
 
 import { type OpenRequest, requestOpen } from "../open-request";
+import {
+  PARENT_CHANNEL_FD,
+  type ShutdownTerminals,
+  encodeParentMessage,
+} from "../parent-channel-protocol";
 import { isHttpUrl } from "../url-utils";
-import { installAppUpdater, isInstallingUpdate, scheduleAutomaticUpdateCheck } from "./app-updater";
+import {
+  installAppUpdater,
+  isInstallingUpdate,
+  scheduleAutomaticUpdateCheck,
+  terminalsForUpdateInstall,
+} from "./app-updater";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installDefaultBrowser } from "./default-browser";
 import {
+  APP_QUIT_KEEPING_TERMINALS,
+  APP_RESTART,
   GET_WINDOW_FULL_SCREEN,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
@@ -89,6 +105,13 @@ import {
   installNativeTheme,
   windowBackgroundColor,
 } from "./native-theme";
+import {
+  QUIT_KEEPING_TERMINALS,
+  type QuitPlan,
+  QuitPlans,
+  RESTART,
+  planAtWillQuit,
+} from "./quit-plan";
 import {
   type BrowserPanelFrame,
   configurePasskeys,
@@ -131,6 +154,11 @@ async function isServerRunning(): Promise<boolean> {
   return (await probeServer()) !== null;
 }
 
+/** Stdin for the key, stdout, stderr, and the app's channel to the server (`PARENT_CHANNEL_FD`). */
+function serverStdio(): StdioOptions {
+  return ["pipe", "pipe", "pipe", "pipe"];
+}
+
 function startServer(): void {
   serverStartedAt = Date.now();
   // The server exits on its own if this process dies without stopping it.
@@ -140,32 +168,40 @@ function startServer(): void {
       spawn("bun", ["run", "src/server/index.ts"], {
         cwd: path.resolve(import.meta.dirname, "../.."),
         env: { ...env, LOXEL_DEV: "1" },
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: serverStdio(),
       })
     : IS_DEMO && !app.isPackaged
       ? // A demo from the source tree: the server's source, serving the renderer built beside this file
         spawn("bun", ["run", "src/server/index.ts"], {
           cwd: path.resolve(import.meta.dirname, "../.."),
           env: { ...env, LOXEL_STATIC_DIR: path.resolve(import.meta.dirname, "../renderer") },
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: serverStdio(),
         })
       : spawn(path.join(process.resourcesPath, "loxel-server"), [], {
           env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: serverStdio(),
         });
+  const { stdin, stdout, stderr } = child;
+  const channel = child.stdio[PARENT_CHANNEL_FD];
+  if (!stdin || !stdout || !stderr || !(channel instanceof Writable)) {
+    child.kill();
+    throw new Error("The server was started without its pipes");
+  }
   serverProcess = child;
+  serverChannel = channel;
+  channel.on("error", () => {});
 
   // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
   const dekBase64 = IS_DEMO ? null : getDek();
-  child.stdin.on("error", () => {});
+  stdin.on("error", () => {});
   // Closing stdin without a key tells the server that secret storage is unavailable.
-  if (dekBase64) child.stdin.write(dekBase64 + "\n");
-  child.stdin.end();
+  if (dekBase64) stdin.write(dekBase64 + "\n");
+  stdin.end();
 
-  child.stdout.on("data", (data: Buffer) => {
+  stdout.on("data", (data: Buffer) => {
     process.stdout.write(data);
   });
-  child.stderr.on("data", (data: Buffer) => {
+  stderr.on("data", (data: Buffer) => {
     process.stderr.write(data);
   });
   child.on("exit", (code, signal) => {
@@ -173,6 +209,7 @@ function startServer(): void {
     // Only the current server's exit counts: an earlier one's must not drop its replacement.
     if (serverProcess !== child) return;
     serverProcess = null;
+    serverChannel = null;
     if (!stoppingServer) scheduleServerRestart();
   });
 }
@@ -404,16 +441,28 @@ async function createWindow(): Promise<BrowserWindow> {
   return win;
 }
 
-/** Stop the server as the app quits. It finishes shutting down on its own after the app exits. */
-function stopServer(): void {
+/**
+ * Stop the server as the app quits, ending or keeping the terminals. It finishes shutting down on
+ * its own after the app exits: the message is in the pipe before the app closes its end.
+ */
+function stopServer(terminals: ShutdownTerminals): void {
   stoppingServer = true;
   cancelServerRestart();
-  try {
-    serverProcess?.kill("SIGTERM");
-  } catch {
-    // Already dead
-  }
+  const channel = serverChannel;
   serverProcess = null;
+  serverChannel = null;
+  if (!channel) return;
+  console.log(`[electron] Stopping the server (terminals: ${terminals})`);
+  channel.end(encodeParentMessage({ type: "shutdown", terminals }));
+}
+
+/** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */
+const quitPlans = new QuitPlans();
+
+/** Quit the app following `plan`. */
+function quitApp(plan: QuitPlan): void {
+  quitPlans.request(plan);
+  app.quit();
 }
 
 /**
@@ -488,7 +537,16 @@ function buildAppMenu(): void {
               { role: "hideOthers" as const },
               { role: "unhide" as const },
               { type: "separator" as const },
+              { label: "Restart Loxel", click: () => quitApp(RESTART) },
+              // A plain quit, like every quit nothing planned (the Dock, logout): see QuitPlans.
               { role: "quit" as const },
+              // Electron's menus have no NSMenuItem alternate (macOS's ⌥ "Quit and Keep Windows"),
+              // so this is an item of its own, on the same key with ⌥.
+              {
+                label: "Quit and Keep Terminals",
+                accelerator: "Alt+Cmd+Q",
+                click: () => quitApp(QUIT_KEEPING_TERMINALS),
+              },
             ],
           },
         ]
@@ -700,6 +758,10 @@ ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {
   app.dock?.setBadge(count > 0 ? String(count) : "");
 });
 
+// The command palette's Quit and Keep Terminals and Restart Loxel, the same as the app menu's.
+ipcMain.on(APP_QUIT_KEEPING_TERMINALS, () => quitApp(QUIT_KEEPING_TERMINALS));
+ipcMain.on(APP_RESTART, () => quitApp(RESTART));
+
 // macOS: support native window tabbing (View > Merge All Windows / "+" tab button)
 app.on("new-window-for-tab", () => {
   openNewWindow();
@@ -879,7 +941,7 @@ function showStartupError(err: unknown): void {
     return;
   }
   console.error("[electron] Startup error:", err);
-  stopServer();
+  stopServer("end");
   app.exit(1);
 }
 
@@ -939,7 +1001,7 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     showStartupError(err);
-    stopServer();
+    stopServer("end");
     app.quit();
   }
 });
@@ -954,18 +1016,30 @@ app.on("window-all-closed", () => {
 const QUIT_PROMOTE_WAIT_MS = 2000;
 let promotesSettledForQuit = false;
 
+app.on("before-quit", () => {
+  quitPlans.begin();
+});
+
 // The server lives as long as the app. Windows are closed by now, and each sent its layout promote
 // on close; quitting waits for those before stopping the server, which then finishes the API
 // requests it has received before exiting. Not while Squirrel quits to install an update: a promote
 // that did not land is recovered when the next server starts.
 app.on("will-quit", (event) => {
-  if (promotesSettledForQuit || pendingPromotes.size === 0 || isInstallingUpdate()) {
-    stopServer();
+  const installing = isInstallingUpdate();
+  if (promotesSettledForQuit || pendingPromotes.size === 0 || installing) {
+    const plan = planAtWillQuit(
+      quitPlans.current(),
+      installing ? terminalsForUpdateInstall() : null,
+    );
+    // Here rather than before `app.quit()`: a relaunch is armed only for a quit that happens.
+    if (plan.relaunch) app.relaunch();
+    stopServer(plan.terminals);
     return;
   }
   event.preventDefault();
   promotesSettledForQuit = true;
+  const plan = quitPlans.current();
   void Promise.race([Promise.allSettled(pendingPromotes), sleep(QUIT_PROMOTE_WAIT_MS)]).then(() =>
-    app.quit(),
+    quitApp(plan),
   );
 });

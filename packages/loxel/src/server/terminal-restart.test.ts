@@ -1,17 +1,34 @@
 /**
  * Terminals outlive their server: a real server process is killed while a shell runs, and the next
  * server reattaches the panel to the same shell, resuming its stream or, for a fresh xterm, with a
- * snapshot. A quit (SIGTERM) still ends them. `LOXEL_DEV=1` keeps the server off the keychain, and
- * a temporary state directory and port keep it and its terminal host apart from any real one.
+ * snapshot. A quit (SIGTERM) still ends them. A server started as the desktop app starts it, with
+ * the app's channel, keeps them on a shutdown with `keep` (Quit and Keep Terminals, Restart
+ * Loxel, an update) and when the app goes away, and ends them on one with `end`. `LOXEL_DEV=1`
+ * keeps the server off the keychain, and a temporary state directory and port keep it and its
+ * terminal host apart from any real one.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
+import {
+  PARENT_CHANNEL_FD,
+  type ShutdownTerminals,
+  encodeParentMessage,
+} from "@/parent-channel-protocol";
 import { hostRunDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
 import { until } from "@/test/until";
@@ -88,9 +105,15 @@ describe("terminals across server restarts", () => {
   let stateDir: string;
   let baseUrl: string;
   let port: number;
-  let server: ReturnType<typeof Bun.spawn> | null = null;
+  let server: { exited: Promise<number>; kill: (signal: NodeJS.Signals) => void } | null = null;
+  /** The descriptor of the app's channel to the server, for one started as the app starts it. */
+  let appChannel: number | null = null;
 
-  async function startServer(): Promise<void> {
+  /**
+   * Start a server: on its own, or `asApp`, as the desktop app does (this process its parent, with
+   * the app's channel).
+   */
+  async function startServer({ asApp = false } = {}): Promise<void> {
     const started = Bun.spawn(["bun", "src/server/index.ts"], {
       cwd: LOXEL_ROOT,
       env: {
@@ -99,12 +122,13 @@ describe("terminals across server restarts", () => {
         LOXEL_STATE_DIR: stateDir,
         LOXEL_SERVE_PORT: String(port),
         SHELL: "/bin/sh",
+        ...(asApp && { LOXEL_PARENT_PID: String(process.pid) }),
       },
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "ignore",
+      stdio: ["ignore", "ignore", "ignore", asApp ? "pipe" : "ignore"],
     });
     server = started;
+    const channel = started.stdio[PARENT_CHANNEL_FD];
+    appChannel = typeof channel === "number" ? channel : null;
     await retryUntil(
       () => {},
       async (timeoutMs) => {
@@ -135,6 +159,42 @@ describe("terminals across server restarts", () => {
     port = freePort();
     baseUrl = `http://127.0.0.1:${port}`;
   });
+
+  /** What the app sends as it quits: the server shuts down, doing `terminals` to the terminals. */
+  async function quitApp(terminals: ShutdownTerminals): Promise<void> {
+    writeSync(appChannel!, encodeParentMessage({ type: "shutdown", terminals }));
+    closeSync(appChannel!);
+    expect(await server!.exited).toBe(0);
+  }
+
+  /** A panel with a shell in a new terminal, whose PID it has read. */
+  async function openShell() {
+    const id = crypto.randomUUID();
+    const panel = await openPanel(baseUrl);
+    panel.attach(id);
+    await until(() => panel.states.length > 0, TEST_TIMEOUT_MS);
+    const pidFile = path.join(stateDir, `${id}.pid`);
+    panel.type(id, `echo $$ > ${pidFile}; echo started`);
+    await until(() => panel.text().includes("started\r\n"), TEST_TIMEOUT_MS);
+    const shellPid = Number(readFileSync(pidFile, "utf8"));
+    return { id, panel, shellPid, epoch: panel.states[0]!.epoch };
+  }
+
+  /** Reattach the panel of `shell` to a new server, which resumes its stream at the same shell. */
+  async function expectResumed(shell: Awaited<ReturnType<typeof openShell>>): Promise<void> {
+    const since = { epoch: shell.epoch, offset: shell.panel.offset()! };
+    const resumed = await openPanel(baseUrl);
+    resumed.attach(shell.id, since);
+    await until(() => resumed.states.length > 0, TEST_TIMEOUT_MS);
+    expect(resumed.states[0]).toMatchObject({
+      epoch: shell.epoch,
+      mode: "resume",
+      offset: since.offset,
+    });
+    resumed.type(shell.id, "echo $$ resumed");
+    await until(() => resumed.text().includes(`${shell.shellPid} resumed`), TEST_TIMEOUT_MS);
+    resumed.close();
+  }
 
   afterAll(async () => {
     server?.kill("SIGKILL");
@@ -193,6 +253,49 @@ describe("terminals across server restarts", () => {
       server!.kill("SIGTERM");
       await server!.exited;
       await until(() => !isAlive(shellPid) && hosts.every((pid) => !isAlive(pid)), TEST_TIMEOUT_MS);
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+
+  test(
+    "Quit and Keep Terminals and Restart Loxel keep the shell running for the next server",
+    async () => {
+      await startServer({ asApp: true });
+      const shell = await openShell();
+      const hosts = hostPids();
+
+      await quitApp("keep");
+      expect(isAlive(shell.shellPid)).toBe(true);
+      expect(hosts.every(isAlive)).toBe(true);
+
+      await startServer({ asApp: true });
+      await expectResumed(shell);
+
+      // A Quit ends the terminals, and the host with them.
+      await quitApp("end");
+      await until(
+        () => !isAlive(shell.shellPid) && hosts.every((pid) => !isAlive(pid)),
+        TEST_TIMEOUT_MS,
+      );
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+
+  test(
+    "an app that goes away without a word leaves the shell to the next server",
+    async () => {
+      await startServer({ asApp: true });
+      const shell = await openShell();
+
+      // Electron crashed: its end of the channel closes with no shutdown message.
+      closeSync(appChannel!);
+      expect(await server!.exited).toBe(0);
+      expect(isAlive(shell.shellPid)).toBe(true);
+
+      await startServer({ asApp: true });
+      await expectResumed(shell);
+      await quitApp("end");
+      await until(() => !isAlive(shell.shellPid), TEST_TIMEOUT_MS);
     },
     TEST_TIMEOUT_MS * 3,
   );

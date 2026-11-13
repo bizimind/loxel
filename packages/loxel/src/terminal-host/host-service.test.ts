@@ -223,6 +223,30 @@ describe("TerminalHostService", () => {
     expect(forwarding.at(-1)).toBe(true);
   });
 
+  // Restart Loxel and an update overlap two servers: the old one disconnects with keep as it shuts
+  // down, and the new one may initialize before or after that lands. Either way the shells run on.
+  test("a restart keeps the sessions whether the old server's keep lands first or last", async () => {
+    const { socketPath, host } = await startService();
+    const old = await rawClient(socketPath);
+    await old.initialize();
+    const { id } = await spawnSleep(host);
+    old.send({ type: "disconnect", sessions: "keep" });
+    await old.closed;
+    const next = await rawClient(socketPath);
+    await next.initialize();
+    expect(host.sessionIds()).toEqual([id]);
+
+    // The next restart's new server initializes first; what the replaced one sends after that,
+    // even an `end`, is ignored.
+    const newest = await rawClient(socketPath);
+    await newest.initialize();
+    next.send({ type: "disconnect", sessions: "end" });
+    await next.closed;
+    newest.send({ type: "list", requestId: 1 });
+    expect(await newest.message("result")).toMatchObject({ requestId: 1 });
+    expect(host.sessionIds()).toEqual([id]);
+  });
+
   test("a new host with no server waits the grace period for one, then exits", async () => {
     jest.useFakeTimers();
     const { done } = await startService();

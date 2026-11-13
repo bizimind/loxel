@@ -16,6 +16,7 @@ import type {
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
+import type { ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
@@ -35,6 +36,7 @@ import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-s
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
+import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
@@ -82,6 +84,56 @@ import { worktreesChangedMessage } from "./ws-messages";
 import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
+
+// --- Exit with the desktop app ---
+// The app stops its server when it quits with a shutdown message on its channel, which says what
+// happens to the terminals. The channel closing without one, or the server being reparented,
+// means the app crashed or was killed. Set up first, so a quit while the server is still starting
+// stops it too.
+
+const PARENT_CHECK_MS = 2000;
+
+/** Set once startup is done, and a shutdown has a server to tear down. */
+let serving = false;
+
+/**
+ * Stop the server as the app asks, or once the app is gone. One still starting has nothing to tear
+ * down, and exits at once, as SIGTERM's default action did before it handled the signal; the
+ * terminal hosts it reached take the closed connections as a crash, and keep the shells for the
+ * grace period.
+ */
+function leaveWithApp(terminals: TerminalsOnShutdown): void {
+  if (serving) {
+    shutdown(0, terminals);
+    return;
+  }
+  log.info("Stopping before startup finished");
+  logger.shutdown();
+  process.exit(0);
+}
+
+if (config.parentPid !== null) {
+  listenToParent(parentChannelInput(), {
+    shutdown: (terminals) => {
+      log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
+      leaveWithApp(terminals);
+    },
+    closed: () => {
+      log.info("The desktop app that started this server closed its channel, shutting down");
+      // As after a crash: the terminals wait out the hosts' grace period for the app to come back.
+      leaveWithApp("drop");
+    },
+  });
+
+  // A backstop for the channel: the app spawns this process directly, so when the app dies the
+  // server is reparented (to launchd on macOS), which a reused process ID cannot fake.
+  const parentPid = config.parentPid;
+  setInterval(() => {
+    if (process.ppid === parentPid) return;
+    log.info("The desktop app that started this server is gone, shutting down");
+    leaveWithApp("drop");
+  }, PARENT_CHECK_MS).unref();
+}
 
 // --- Multi-project state (no "active" or "focused" concept) ---
 
@@ -1481,11 +1533,12 @@ async function drainApiRequests(): Promise<void> {
 }
 
 /**
- * What a shutdown does to the terminals: `end` them, as a quit or an idle shutdown does, or `drop`
- * the connections to their hosts as a crash would, so they get the hosts' grace period to be
- * reattached by the next server.
+ * What a shutdown does to the terminals: `end` them, as a quit or an idle shutdown does, `keep`
+ * them running until a server comes back (Quit and Keep Terminals, Restart Loxel, an update), or
+ * `drop` the connections to their hosts as a crash would, so they get the hosts' grace period to
+ * be reattached by the next server.
  */
-type TerminalsOnShutdown = "end" | "drop";
+type TerminalsOnShutdown = ShutdownTerminals | "drop";
 
 /**
  * Stop the server: let API requests finish first (saves, store writes, layout promotes), so a quit
@@ -1516,9 +1569,9 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
 
   // The hosts must have the disconnect before this process exits, or they take it for a crash.
   const terminalsLeft =
-    terminals === "end"
-      ? terminalHosts.disconnectAll("end")
-      : Promise.resolve(terminalHosts.dropAll());
+    terminals === "drop"
+      ? Promise.resolve(terminalHosts.dropAll())
+      : terminalHosts.disconnectAll(terminals);
   formatService.destroy();
   const lspServersStopped = Promise.all(
     [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
@@ -1541,22 +1594,8 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
 
-// --- Exit with the desktop app ---
-// The app stops its server when it quits. This covers an app that crashed or was killed.
-
-const PARENT_CHECK_MS = 2000;
-
-// The app spawns this process directly. When the app dies, the server is reparented (to launchd
-// on macOS), which a reused process ID cannot fake.
-if (config.parentPid !== null) {
-  const parentPid = config.parentPid;
-  setInterval(() => {
-    if (process.ppid === parentPid) return;
-    log.info("The desktop app that started this server is gone, shutting down");
-    // As after a crash: the terminals wait out the hosts' grace period for the app to come back.
-    shutdown(0, "drop");
-  }, PARENT_CHECK_MS).unref();
-}
+// Only now can a shutdown tear the server down: see `leaveWithApp`.
+serving = true;
 
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });

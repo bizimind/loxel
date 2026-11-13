@@ -80,6 +80,10 @@ interface Window {
      * status returned may not show the user's answer yet.
      */
     setAsDefaultBrowser: () => Promise<import("@/api/default-browser-model").DefaultBrowserStatus>;
+    /** Quit, leaving the terminals running for the next launch to reattach. */
+    quitKeepingTerminals: () => void;
+    /** Quit, leaving the terminals running, and open the app again. */
+    restartApp: () => void;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */

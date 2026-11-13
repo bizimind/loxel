@@ -26,6 +26,8 @@ const UPDATE_INSTALL = "update:install";
 const UPDATE_STATUS_CHANGED = "update:status-changed";
 const DEFAULT_BROWSER_GET = "default-browser:get";
 const DEFAULT_BROWSER_SET = "default-browser:set";
+const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
+const APP_RESTART = "app:restart";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -112,4 +114,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getDefaultBrowserStatus: () => ipcRenderer.invoke(DEFAULT_BROWSER_GET),
   setAsDefaultBrowser: () => ipcRenderer.invoke(DEFAULT_BROWSER_SET),
+  quitKeepingTerminals: () => ipcRenderer.send(APP_QUIT_KEEPING_TERMINALS),
+  restartApp: () => ipcRenderer.send(APP_RESTART),
 });

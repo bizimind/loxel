@@ -26,6 +26,8 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     onUpdateStatusChange: () => () => {},
     getDefaultBrowserStatus: async () => ({ isDefault: false, canSet: false }),
     setAsDefaultBrowser: async () => ({ isDefault: false, canSet: false }),
+    quitKeepingTerminals: () => {},
+    restartApp: () => {},
     ...overrides,
   };
 }
