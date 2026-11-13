@@ -1,12 +1,10 @@
 import { FolderOpenIcon } from "lucide-react";
-import { useState } from "react";
 
-import { AddProjectWizard } from "./projects/AddProjectWizard";
+import { openAddProjectWizard } from "@/store/add-project-wizard";
+
 import { Button } from "./ui/button";
 
 export function EmptyState() {
-  const [wizardOpen, setWizardOpen] = useState(false);
-
   return (
     <div className="bg-background flex h-full items-center justify-center">
       <div className="flex max-w-sm flex-col items-center gap-6 text-center">
@@ -18,12 +16,10 @@ export function EmptyState() {
           </p>
         </div>
 
-        <Button onClick={() => setWizardOpen(true)}>
+        <Button onClick={openAddProjectWizard}>
           <FolderOpenIcon className="mr-2 size-4" />
           Add Project
         </Button>
-
-        <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
       </div>
     </div>
   );

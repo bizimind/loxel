@@ -259,14 +259,33 @@ describe("executeInit", () => {
     repo = await createTestRepo({ bare: true });
     const result = await executeInit(repo.root, { apply: ["main-worktree"] });
 
-    expect(result.outcomes[0]).toEqual({
+    const main = join(repo.root, ".worktrees", "main");
+    expect(result.outcomes[0]).toMatchObject({
       id: "main-worktree",
       status: "applied",
       commands: ["wt add main -b main"],
+      worktree: { path: main, branch: "main", created: true },
     });
-    const main = join(repo.root, ".worktrees", "main");
     expect(await git(["rev-parse", "--abbrev-ref", "HEAD"], main)).toBe("main");
     expect(statusOf(result.checks, "main-worktree")).toBe("ok");
+  });
+
+  test("asks allowHook before running init.wt.sh in the worktree it adds", async () => {
+    repo = await createTestRepo({ bare: true });
+    await Bun.write(join(repo.root, "init.wt.sh"), "#!/bin/sh\ntouch ran\n");
+    const asked: string[] = [];
+    const result = await executeInit(repo.root, {
+      apply: ["main-worktree"],
+      allowHook: (path) => {
+        asked.push(path);
+        return false;
+      },
+    });
+
+    const main = join(repo.root, ".worktrees", "main");
+    expect(asked).toEqual([main]);
+    expect(result.outcomes[0]?.worktree).toMatchObject({ path: main, hookSkipped: true });
+    expect(await pathExists(join(main, "ran"))).toBe(false);
   });
 
   test("prunes stale worktrees before re-creating the default branch's", async () => {

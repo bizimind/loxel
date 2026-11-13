@@ -70,7 +70,6 @@ import { installAppUpdater, isInstallingUpdate, scheduleAutomaticUpdateCheck } f
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
   GET_WINDOW_FULL_SCREEN,
-  OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
   WINDOW_FOCUS_CHANGE,
@@ -683,17 +682,6 @@ if (process.platform === "darwin") {
     ]),
   );
 }
-
-// Native folder picker — invoked by renderer when running in Electron
-ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return null;
-  const result = await dialog.showOpenDialog(win, {
-    properties: ["openDirectory"],
-    title: "Select Project Folder",
-  });
-  return result.canceled ? null : (result.filePaths[0] ?? null);
-});
 
 installWebviewKeystrokeForwarding();
 installWebviewCopyImage();

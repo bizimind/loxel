@@ -14,7 +14,7 @@ Loxel tracks your repositories as **projects**, and every task you work on is a 
 
 ## Adding a project
 
-Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below.
+Click **Add project** in the worktree sidebar, **Add Project** on the start screen when no project is open, or run **Add Project** from the command palette. Each opens the same dialog, with two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below. Once the project is added, Loxel switches to it.
 
 When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook. Hooks run in [trusted](/docs/repository-trust) repositories. A new project starts trusted, so its hook runs right away; for a repository you import, Loxel asks before running it in the first worktree.
 
@@ -41,12 +41,14 @@ Enter a path or browse to a folder on disk and Loxel will inspect it. The result
 
 After detection, confirm to register the repo with Loxel. The project is added to Loxel's project list in the worktree sidebar. This is the path for repos you've already set up locally.
 
+For a repository Loxel adds as it is, the dialog also shows what `wt doctor` finds in its setup, such as a bare clone that fetches no `origin/*` branches, no worktree for the default branch, or worktrees git lost track of. Each fix is a checkbox with the exact commands it runs, and the ones `wt init` recommends start checked. Loxel applies the checked fixes when you add the project; if one fails, for example because origin can't be reached, the project is still added and a notification says which fix failed. A worktree a fix creates runs the repository's `init.wt.sh` only once you [trust](/docs/repository-trust) the repository.
+
 ### Clone
 
 Paste a remote URL and Loxel clones it for you. Before cloning, you choose the workspace mode:
 
 - **Single-workspace** — clones as a regular repo. One working tree, one branch checked out at a time. Good for solo projects or repos where you don't need parallel tasks.
-- **Multi-workspace** — clones as a bare repo and creates the first worktree. The right choice if you plan to run multiple agents in parallel on the same codebase.
+- **Multi-workspace** — clones as a bare repo set up the way `wt init <url>` does it: origin's branches fetched as `origin/*` and its default branch recorded, so new worktrees start from it, and that branch checked out as the first worktree. The right choice if you plan to run multiple agents in parallel on the same codebase.
 
 ### Init
 
@@ -106,7 +108,7 @@ With nesting on, the worktree menu has:
 
 Drag a worktree onto the middle of another worktree's row to nest it there, or onto the top or bottom edge of a row to place it before or after that row, at that row's level: dragging a nested worktree next to a top-level one moves it to the top level. Dragging works the same on the collapsed rail. Removing a worktree that has nested worktrees asks whether to keep them, nested under the removed worktree's own parent (or at the top level), or to remove them too.
 
-Nesting and titles are stored with each worktree in the repository's git config, so tools such as `wt` see them too: `wt add <name> --meta loxel-parent-wt=<wt-id>` creates a worktree nested under the one with that id (`wt meta get` shows a worktree's `wt-id`). This needs per-worktree git config, which repositories don't have on by default. Until it is on, the sidebar is flat and the worktree and project menus offer **Enable worktree nesting**, which shows what it changes in the repository and turns it on (the same as `wt init --worktree-metadata on`) once you confirm.
+Nesting and titles are stored with each worktree in the repository's git config, so tools such as `wt` see them too: `wt add <name> --meta loxel-parent-wt=<wt-id>` creates a worktree nested under the one with that id (`wt meta get` shows a worktree's `wt-id`). This needs per-worktree git config. Loxel turns it on for every multi-workspace project you create, clone, initialize or convert, and the add dialog offers it, checked, for a repository you import. Repositories you set up some other way don't have it by default: until it is on, the sidebar is flat and the worktree and project menus offer **Enable worktree nesting**, which shows what it changes in the repository and turns it on (the same as `wt init --worktree-metadata on`) once you confirm.
 
 ---
 

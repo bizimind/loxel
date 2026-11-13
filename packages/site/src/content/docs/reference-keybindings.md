@@ -97,6 +97,7 @@ macOS window tiling shortcuts (macOS 15 and later) work in the editor, terminals
 | New worktree                             | `Ctrl+Alt+N`                                            |
 | Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
 | Delete worktree                          | unbound — command palette or right-click menu           |
+| Add project                              | unbound — command palette or worktree sidebar           |
 
 Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip archived worktrees.
 

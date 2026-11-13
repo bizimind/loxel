@@ -13,8 +13,6 @@ import {
 } from "@/store/projects";
 import { type CreateStarted, useWorktreeStore } from "@/store/worktrees";
 
-mock.module("../projects/AddProjectWizard", () => ({ AddProjectWizard: () => null }));
-
 const { Sidebar } = await import("./Sidebar");
 
 const project: EnrichedProject = {
