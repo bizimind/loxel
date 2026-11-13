@@ -2,8 +2,8 @@
  * The terminal host protocol: the messages a server and a terminal host exchange over the host's
  * Unix socket, framed by protocol-framing.ts. Two layers:
  *
- * - The bootstrap layer (`initialize`, `initialize_result`, `disconnect`, `terminate`, and the
- *   framing) is frozen: it never changes, so any server can identify and stop any host, even one
+ * - The bootstrap layer (`initialize`, `initialize_result`, `disconnect`, `terminate`,
+ *   `superseded`, and the framing) is frozen: it never changes, so any server can identify and stop any host, even one
  *   of an incompatible major version.
  * - The versioned layer carries the `TerminalHost` interface (terminal-host.ts) and changes with
  *   {@link TERMINAL_HOST_PROTOCOL}: a major bump for any incompatible change, a minor one for a new
@@ -63,6 +63,12 @@ export type DisconnectMode = z.infer<typeof DisconnectSchema>["sessions"];
 
 /** End every session and exit. */
 export const TerminateSchema = z.object({ type: z.literal("terminate") });
+
+/**
+ * From the host to a server another server has taken it over from, right before it closes that
+ * connection: the server is done with the host and must not reconnect to it.
+ */
+export const SupersededSchema = z.object({ type: z.literal("superseded") });
 
 // --- Versioned layer, v1 ---
 
@@ -153,6 +159,7 @@ export type HostLogMessage = z.infer<typeof LogSchema>;
 /** Every JSON message a host sends. Output is a binary output frame. */
 export const HostMessageSchema = z.discriminatedUnion("type", [
   InitializeResultSchema,
+  SupersededSchema,
   ResultSchema,
   ErrorSchema,
   TerminalStateEventSchema,

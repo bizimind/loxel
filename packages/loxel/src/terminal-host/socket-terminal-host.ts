@@ -36,6 +36,9 @@ import { TerminalSessionInfoSchema } from "./terminal-host";
  */
 export const HOST_LOST_EXIT_CODE = 129;
 
+/** How long a host may be unreachable before new sessions stop going to it. */
+export const STALLED_AFTER_MS = 30_000;
+
 /** Delays between attempts to restore a connection to a host that is still running. */
 const RECONNECT_DELAYS_MS = [0, 250, 1000, 5000];
 
@@ -93,6 +96,8 @@ export class SocketTerminalHost implements TerminalHost {
   private readonly listeners = new Set<(event: TerminalHostEvent) => void>();
   private readonly goneListeners = new Set<() => void>();
   private lastRequestId = 0;
+  /** When the current run of reconnect attempts started, while there is one. */
+  private reconnectingSince: number | null = null;
   private readonly log: ChildLogger;
 
   /**
@@ -123,6 +128,16 @@ export class SocketTerminalHost implements TerminalHost {
 
   get isGone(): boolean {
     return this.state === "gone";
+  }
+
+  /**
+   * False once the host is gone, or has been unreachable for {@link STALLED_AFTER_MS} while its
+   * process runs: new sessions then go to another host, and this one keeps its own.
+   */
+  get acceptsNewSessions(): boolean {
+    if (this.state === "gone") return false;
+    if (this.reconnectingSince === null) return true;
+    return Date.now() - this.reconnectingSince < STALLED_AFTER_MS;
   }
 
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
@@ -169,7 +184,13 @@ export class SocketTerminalHost implements TerminalHost {
   attach(request: TerminalAttachRequest): Promise<void> {
     const known = this.sessions.get(request.id);
     if (!known || this.state === "gone") return Promise.resolve();
-    known.attach = { attachment: request.attachment, sent: this.state === "connected" };
+    // The client's own point, until the attach's state replaces it: a connection restored before
+    // then resumes it too.
+    known.attach = {
+      attachment: request.attachment,
+      sent: this.state === "connected",
+      since: request.since && { ...request.since },
+    };
     return this.request<void>({ type: "attach", request }, () => undefined, { attach: true });
   }
 
@@ -220,12 +241,12 @@ export class SocketTerminalHost implements TerminalHost {
    * so the message reached it. Reports no exits: the caller is done with these sessions.
    */
   disconnect(sessions: DisconnectMode): Promise<void> {
-    return this.leave({ type: "disconnect", sessions });
+    return this.leave({ type: "disconnect", sessions }, sessions === "end");
   }
 
   /** End every session and the host, which may speak a protocol this server does not. */
   terminate(): Promise<void> {
-    return this.leave({ type: "terminate" });
+    return this.leave({ type: "terminate" }, true);
   }
 
   /** Close the connection without a `disconnect`, as a crash would: the host's grace period runs. */
@@ -235,12 +256,19 @@ export class SocketTerminalHost implements TerminalHost {
     connection?.destroy();
   }
 
-  private leave(message: object): Promise<void> {
+  /** `ends`: the message ends the sessions, which a SIGTERM does too when it cannot be sent. */
+  private leave(message: object, ends: boolean): Promise<void> {
     if (this.state === "gone") return Promise.resolve();
-    this.sendJson(message);
-    const connection = this.connection;
+    const connection = this.state === "connected" ? this.connection : null;
+    const pid = this.hello?.pid;
+    if (connection) connection.send(encodeJsonFrame(message));
     this.finish();
-    if (!connection) return Promise.resolve();
+    if (!connection) {
+      // Reconnecting to it: the host takes SIGTERM as an order to end its sessions. A host still
+      // starting has none yet, and exits once its first connection closes.
+      if (ends && pid !== undefined) signalHost(pid);
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
       connection.start({ onBody: () => {}, onClose: () => resolve() });
       connection.end();
@@ -382,6 +410,9 @@ export class SocketTerminalHost implements TerminalHost {
         this.log[message.level](message.msg, ctx);
         return;
       }
+      case "superseded":
+        this.markGone("another server took it over");
+        return;
       case "initialize_result":
         this.log.warn("Ignoring an initialize_result after the handshake");
         return;
@@ -400,6 +431,7 @@ export class SocketTerminalHost implements TerminalHost {
     if (this.connection !== connection || this.state !== "connected") return;
     this.connection = null;
     this.state = "reconnecting";
+    this.reconnectingSince ??= Date.now();
     this.log.warn("The connection to the terminal host closed, reconnecting", { error });
     // Answered by the restored connection's list() (spawns) or not at all (attaches: the host
     // detached every session, and the attaches to restore are re-sent below).
@@ -488,7 +520,10 @@ export class SocketTerminalHost implements TerminalHost {
     }
     if (this.connection !== connection) return;
     this.reconcile(connection, new Map(sessions.map((info) => [info.id, info])));
+    // The exits reconcile reported may have led the caller to leave the host.
+    if (this.state !== "reconnecting" || this.connection !== connection) return;
     this.state = "connected";
+    this.reconnectingSince = null;
     // Requests the closed connection did not answer, then what was sent meanwhile, in order.
     for (const request of this.pending.values()) {
       if (request.sent) connection.send(request.frame);
@@ -504,7 +539,18 @@ export class SocketTerminalHost implements TerminalHost {
       this.pending.delete(requestId);
       const info = running.get(request.spawn.id);
       if (info?.epoch === request.spawn.epoch) request.resolve(info);
-      else request.reject(new Error("The terminal host restarted before the spawn was answered"));
+      else
+        request.reject(
+          new Error("The connection to the terminal host closed before the spawn was answered"),
+        );
+    }
+    // A destroy the closed connection lost: the host still runs a session nobody knows of.
+    for (const id of running.keys()) {
+      if (this.sessions.has(id)) continue;
+      this.log.warn(
+        `Ending terminal ${id.slice(0, 8)}, whose destroy was lost with the connection`,
+      );
+      connection.send(encodeJsonFrame({ type: "destroy", id }));
     }
     for (const [id, known] of this.sessions) {
       if (running.get(id)?.epoch === known.epoch) continue;
@@ -544,5 +590,13 @@ export class SocketTerminalHost implements TerminalHost {
 
   private goneError(): Error {
     return new Error(`Terminal host ${this.hostId} is not available`);
+  }
+}
+
+function signalHost(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already gone.
   }
 }

@@ -1212,6 +1212,14 @@ const routeContext: RouteContext = {
   },
 };
 
+// A server that cannot have the port must fail before it touches the terminal hosts: taking them
+// over would cut the running server off from its terminals.
+try {
+  Bun.listen({ hostname: "127.0.0.1", port: config.port, socket: { data: () => {} } }).stop(true);
+} catch (err) {
+  throw new Error(`Port ${config.port} is in use; not starting`, { cause: err });
+}
+
 // Terminals that outlived the previous server are this one's before any client can attach to them.
 try {
   await terminalHosts.start((sessions) => terminalManager.adopt(sessions));

@@ -30,10 +30,6 @@ export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" }>;
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {
   log: ChildLogger;
-  /** Wraps each PTY spawn, for spawn accounting. */
-  measureSpawn?: <T>(spawn: () => T) => T;
-  /** Called for every output chunk, for stress detection. */
-  onOutputChunk?: () => void;
   /** Overrides for tests. */
   resumeRingBytes?: number;
   flowControl?: { highWaterBytes: number; lowWaterBytes: number };
@@ -186,8 +182,8 @@ export class TerminalSession {
     this.emulator.loadAddon(this.serializer);
     this.registerOscHandlers();
 
-    const spawn = () =>
-      Bun.spawn([...options.argv], {
+    try {
+      this.proc = Bun.spawn([...options.argv], {
         cwd: options.cwd,
         env: options.env,
         terminal: {
@@ -196,8 +192,6 @@ export class TerminalSession {
           data: (_terminal, data) => this.onPtyData(data),
         },
       });
-    try {
-      this.proc = runtime.measureSpawn ? runtime.measureSpawn(spawn) : spawn();
     } catch (err) {
       this.emulator.dispose();
       throw err;
@@ -331,7 +325,6 @@ export class TerminalSession {
     const offset = this.ring.end;
     this.ring.push(chunk);
     this.feedEmulator(chunk);
-    this.options.runtime.onOutputChunk?.();
 
     if (this.attachment === null || !this.streaming || this.paused) return;
     this.forward(offset, chunk);

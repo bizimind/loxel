@@ -3,8 +3,9 @@
  * server at a time and decides when the process is done. See docs/TERMINAL_HOST.md#lifetime.
  *
  * - A connection must start with `initialize`, which is always answered; the connection that sent
- *   it becomes the host's server, replacing any earlier one, and the sessions are detached so a
- *   state or output meant for the earlier server's clients never reaches the new one.
+ *   it becomes the host's server, replacing any earlier one, which is sent `superseded` and closed,
+ *   and whose messages no longer apply. The sessions are detached so a state or output meant for
+ *   the earlier server's clients never reaches the new one.
  * - Events go to the current server; answers go to the connection that asked.
  * - When the server leaves with `disconnect {sessions: "end"}`, or a `terminate`, every session
  *   ends. With `keep`, they keep running until a server comes back. When its connection closes
@@ -123,7 +124,9 @@ export class TerminalHostService {
       return;
     }
     for (const body of bodies) {
-      if (!connection.open) return;
+      // A connection the host closed is no longer its server: what it sent before it saw the close
+      // must not apply, or a replaced server could end the sessions its successor just took over.
+      if (!connection.open || connection.retired) return;
       if (body.kind === "binary") this.onBinary(connection, body.bytes);
       else this.onJson(connection, body.value);
     }
@@ -251,6 +254,8 @@ export class TerminalHostService {
     this.current = connection;
     if (previous) {
       this.log.warn("A new server took over the terminal host from the connected one");
+      // Told why, so it does not take the close for a drop and take the host back.
+      previous.sendJson({ type: "superseded" });
       this.retire(previous);
     }
     // Whatever the earlier server's clients were attached to, the new server attaches afresh.

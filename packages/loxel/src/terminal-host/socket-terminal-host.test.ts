@@ -203,4 +203,39 @@ describe("SocketTerminalHost against the host service", () => {
     expect(host.sessionIds()).toEqual([]);
     expect(done).toEqual(["no sessions left"]);
   });
+
+  test("a server another one took the host over from stops using it, and does not take it back", async () => {
+    const { socketPath, host } = await startService();
+    const first = connect(socketPath);
+    const spawned = request("exec sleep 30");
+    await first.client.spawn(spawned);
+    const firstGone = new Promise<void>((resolve) => {
+      first.client.onGone(resolve);
+    });
+
+    const second = connect(socketPath);
+    expect(await second.client.list()).toEqual([expect.objectContaining({ id: spawned.id })]);
+    await firstGone;
+
+    // The first server sees its terminals end; the session runs on for the second.
+    expect(first.events.filter((event) => event.type === "exit")).toEqual([
+      { type: "exit", id: spawned.id, epoch: spawned.epoch, exitCode: HOST_LOST_EXIT_CODE },
+    ]);
+    first.client.destroy(spawned.id);
+    expect(await second.client.list()).toHaveLength(1);
+    expect(host.sessionIds()).toEqual([spawned.id]);
+  });
+
+  test("a restored connection ends a session the host runs that the client does not know", async () => {
+    const { socketPath, host } = await startService();
+    const { client } = connect(socketPath);
+    const known = request("exec sleep 30");
+    await client.spawn(known);
+    // As if the client's destroy of it had been lost with the connection.
+    const unknown = await host.spawn(request("exec sleep 30"));
+
+    (client as unknown as { connection: { destroy(): void } }).connection.destroy();
+    await until(() => !host.sessionIds().includes(unknown.id));
+    expect(host.sessionIds()).toEqual([known.id]);
+  });
 });

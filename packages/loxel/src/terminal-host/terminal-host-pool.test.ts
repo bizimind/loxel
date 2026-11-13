@@ -276,4 +276,20 @@ describe("TerminalHostPool", () => {
     expect(existsSync(hostEntryPath(runDir, "12121212"))).toBe(true);
     expect(existsSync(join(hostBinDir(stateDir), "purged"))).toBe(true);
   });
+
+  test("events flow even when adopting the sessions found at startup failed", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const running = await startHost(runDir, "34343434", "current");
+    await running.host.spawn(spawnRequest("exec sleep 30"));
+    const { pool, events } = createPool(stateDir, runDir);
+    await expect(
+      pool.start(() => {
+        throw new Error("adopt failed");
+      }),
+    ).rejects.toThrow("adopt failed");
+
+    const spawned = spawnRequest("exit 0");
+    await pool.spawn(spawned);
+    await until(() => events.some((event) => event.type === "exit" && event.id === spawned.id));
+  });
 });

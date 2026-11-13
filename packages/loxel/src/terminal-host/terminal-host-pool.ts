@@ -104,9 +104,27 @@ export class TerminalHostPool implements TerminalHost {
    * delivered only after `adopt` returns, so none arrives for a session the caller does not know yet.
    */
   async start(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<void> {
+    try {
+      await this.discoverAll(adopt);
+    } finally {
+      // Delivered even when discovery failed, or every later session would stay mute.
+      const held = this.held ?? [];
+      this.held = null;
+      for (const event of held) this.deliver(event);
+    }
+  }
+
+  private async discoverAll(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<void> {
     ensureRunDir(this.runDir);
     ensureRunDir(this.socketDir);
-    const found = await Promise.all(this.knownHostIds().map((hostId) => this.discover(hostId)));
+    const found = await Promise.all(
+      this.knownHostIds().map((hostId) =>
+        this.discover(hostId).catch((err: unknown) => {
+          this.log.error(`Could not check terminal host ${hostId}`, { error: err });
+          return { hostId, build: "", host: null };
+        }),
+      ),
+    );
     const sessions: TerminalSessionInfo[] = [];
     const keepBuilds = new Set([this.options.hostBuildId]);
     const liveHostIds = new Set<string>();
@@ -127,9 +145,6 @@ export class TerminalHostPool implements TerminalHost {
     }
     for (const host of this.hosts) this.retireIfDone(host);
     adopt(sessions);
-    const held = this.held ?? [];
-    this.held = null;
-    for (const event of held) this.deliver(event);
     if (sessions.length > 0) {
       this.log.info(`Reattached ${sessions.length} terminal(s) from ${this.hosts.size} host(s)`);
     }
@@ -303,7 +318,12 @@ export class TerminalHostPool implements TerminalHost {
 
   /** The host new sessions go to, started when there is none. */
   private currentHost(): SocketTerminalHost {
-    if (this.current && !this.current.isGone) return this.current;
+    if (this.current?.acceptsNewSessions) return this.current;
+    if (this.current && !this.current.isGone) {
+      this.log.warn(
+        `Terminal host ${this.current.hostId} has been unreachable too long; starting another for new terminals`,
+      );
+    }
     const hostId = newHostId();
     const socketPath = hostSocketPath(this.socketDir, hostId);
     const { hostBuildId, stateDir } = this.options;
