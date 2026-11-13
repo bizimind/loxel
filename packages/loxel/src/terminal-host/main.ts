@@ -2,9 +2,10 @@
  * Entry point of `loxel-terminal-host`, the detached process that owns terminal sessions so they
  * outlive the server. Started by host-launcher.ts:
  *
- *   loxel-terminal-host --run-dir <dir> --host-id <id> --log-file <path> [--build-id <id>]
+ *   loxel-terminal-host --run-dir <dir> --socket-dir <dir> --host-id <id> --log-file <path>
+ *                       [--build-id <id>]
  *
- * It listens on `<run-dir>/<host-id>.sock`, writes its entry next to it, prints `ready` on stdout
+ * It listens on `<socket-dir>/<host-id>.sock`, writes its entry to `<run-dir>/<host-id>.json`, prints `ready` on stdout
  * once both exist, and exits once it has neither a server nor sessions. `--build-id` is for a host
  * run from source; a built host has its ID embedded. See docs/TERMINAL_HOST.md#the-process.
  */
@@ -22,24 +23,26 @@ import { TERMINAL_HOST_PROTOCOL } from "./protocol";
 const { values } = parseArgs({
   options: {
     "run-dir": { type: "string" },
+    "socket-dir": { type: "string" },
     "host-id": { type: "string" },
     "log-file": { type: "string" },
     "build-id": { type: "string" },
   },
 });
 const runDir = values["run-dir"];
+const socketDir = values["socket-dir"];
 const hostId = values["host-id"];
 const logFile = values["log-file"];
 const hostBuildId = embeddedHostBuildId() ?? values["build-id"];
-if (!runDir || !hostId || !isHostId(hostId) || !logFile || !hostBuildId) {
+if (!runDir || !socketDir || !hostId || !isHostId(hostId) || !logFile || !hostBuildId) {
   throw new Error(
-    "Usage: loxel-terminal-host --run-dir <dir> --host-id <id> --log-file <path> [--build-id <id>]",
+    "Usage: loxel-terminal-host --run-dir <dir> --socket-dir <dir> --host-id <id> --log-file <path> [--build-id <id>]",
   );
 }
 
 const hostLog = new HostLog(logFile);
 const log = hostLog.logger({ hostId });
-const socketPath = hostSocketPath(runDir, hostId);
+const socketPath = hostSocketPath(socketDir, hostId);
 const entryPath = hostEntryPath(runDir, hostId);
 
 process.on("uncaughtException", (err) => {
@@ -81,9 +84,15 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 process.on("SIGHUP", () => log.warn("Ignoring SIGHUP"));
 
 ensureRunDir(runDir);
+ensureRunDir(socketDir);
 await service.listen(socketPath);
 chmodSync(socketPath, 0o600);
-const entry: HostEntry = { pid: process.pid, build: hostBuildId, protocol: TERMINAL_HOST_PROTOCOL };
+const entry: HostEntry = {
+  pid: process.pid,
+  build: hostBuildId,
+  protocol: TERMINAL_HOST_PROTOCOL,
+  socket: socketPath,
+};
 writeFileSync(entryPath, JSON.stringify(entry), { mode: 0o600 });
 log.info(`Terminal host ${hostBuildId} listening (pid ${process.pid})`);
 

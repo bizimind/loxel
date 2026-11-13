@@ -3,7 +3,14 @@ import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureRunDir, hostRunDir, hostSocketPath, isHostId, newHostId } from "./host-files";
+import {
+  ensureRunDir,
+  hostRunDir,
+  hostSocketDir,
+  hostSocketPath,
+  isHostId,
+  newHostId,
+} from "./host-files";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -17,19 +24,20 @@ describe("host files", () => {
     expect(isHostId("../evil")).toBe(false);
   });
 
-  test("the run directory is under the state directory while a socket path in it fits", () => {
-    expect(hostRunDir("/Users/me/.local/state/loxel/loxel", "/tmp")).toBe(
-      "/Users/me/.local/state/loxel/loxel/terminal-host/run",
-    );
+  test("sockets are in the run directory while a socket path there fits", () => {
+    const stateDir = "/Users/me/.local/state/loxel/loxel";
+    expect(hostRunDir(stateDir)).toBe("/Users/me/.local/state/loxel/loxel/terminal-host/run");
+    expect(hostSocketDir(stateDir, "/tmp")).toBe(hostRunDir(stateDir));
   });
 
-  test("a state directory too deep for a socket path gets a run directory in the temp dir", () => {
+  test("a state directory too deep for a socket path keeps its sockets in the temp dir", () => {
     const deep = `/Users/me/${"nested/".repeat(12)}state`;
-    const runDir = hostRunDir(deep, "/var/tmp-user");
-    expect(runDir).toMatch(/^\/var\/tmp-user\/loxel-terminal-host-[0-9a-f]{12}$/);
-    // The same state directory always finds the same one.
-    expect(hostRunDir(deep, "/var/tmp-user")).toBe(runDir);
-    expect(Buffer.byteLength(hostSocketPath(runDir, newHostId()))).toBeLessThanOrEqual(103);
+    const socketDir = hostSocketDir(deep, "/var/tmp-user");
+    expect(socketDir).toMatch(/^\/var\/tmp-user\/loxel-terminal-host-[0-9a-f]{12}$/);
+    // The same state directory always finds the same one, and its entries stay in it.
+    expect(hostSocketDir(deep, "/var/tmp-user")).toBe(socketDir);
+    expect(hostRunDir(deep)).toBe(`${deep}/terminal-host/run`);
+    expect(Buffer.byteLength(hostSocketPath(socketDir, newHostId()))).toBeLessThanOrEqual(103);
   });
 
   test("the run directory is made private, also when it already exists", () => {

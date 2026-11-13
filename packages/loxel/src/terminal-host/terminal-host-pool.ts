@@ -20,13 +20,16 @@ import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection } from "./host-connection";
 import {
   HOST_LOG_PREFIX,
+  type HostEntry,
   HostEntrySchema,
   ensureRunDir,
   hostBinDir,
   hostEntryPath,
   hostLogsDir,
   hostRunDir,
+  hostSocketDir,
   hostSocketPath,
+  isProcessRunning,
   isHostId,
   newHostId,
 } from "./host-files";
@@ -59,12 +62,14 @@ export interface TerminalHostPoolOptions {
   log: ChildLogger;
   /** Starts a host; tests replace it. */
   launch?: (launch: HostLaunch) => Promise<LaunchedHost>;
-  /** Overrides the run directory, for tests. */
+  /** Override the run and socket directories, for tests. */
   runDir?: string;
+  socketDir?: string;
 }
 
 export class TerminalHostPool implements TerminalHost {
   private readonly runDir: string;
+  private readonly socketDir: string;
   private readonly log: ChildLogger;
   private readonly initialize: InitializeMessage;
   private readonly hosts = new Set<SocketTerminalHost>();
@@ -79,7 +84,13 @@ export class TerminalHostPool implements TerminalHost {
 
   constructor(private readonly options: TerminalHostPoolOptions) {
     this.runDir = options.runDir ?? hostRunDir(options.stateDir);
+    this.socketDir = options.socketDir ?? hostSocketDir(options.stateDir);
     this.log = options.log;
+    if (this.socketDir !== this.runDir) {
+      this.log.warn(
+        `The state directory is too deep for a socket path; terminal host sockets are in ${this.socketDir}, where the system may purge them after a few days unused`,
+      );
+    }
     this.initialize = {
       type: "initialize",
       protocol: TERMINAL_HOST_PROTOCOL,
@@ -94,7 +105,8 @@ export class TerminalHostPool implements TerminalHost {
    */
   async start(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<void> {
     ensureRunDir(this.runDir);
-    const found = await Promise.all(this.hostIdsInRunDir().map((hostId) => this.discover(hostId)));
+    ensureRunDir(this.socketDir);
+    const found = await Promise.all(this.knownHostIds().map((hostId) => this.discover(hostId)));
     const sessions: TerminalSessionInfo[] = [];
     const keepBuilds = new Set([this.options.hostBuildId]);
     const liveHostIds = new Set<string>();
@@ -192,9 +204,10 @@ export class TerminalHostPool implements TerminalHost {
     for (const host of this.hosts) host.drop();
   }
 
-  private hostIdsInRunDir(): string[] {
+  /** Every host with an entry or a socket. */
+  private knownHostIds(): string[] {
     const ids = new Set<string>();
-    for (const name of readdirSync(this.runDir)) {
+    for (const name of [...readdirSync(this.runDir), ...readdirSync(this.socketDir)]) {
       const match = /^(.+)\.(sock|json)$/.exec(name);
       if (match && isHostId(match[1]!)) ids.add(match[1]!);
     }
@@ -212,19 +225,30 @@ export class TerminalHostPool implements TerminalHost {
     | { hostId: string; build: string; host: null }
     | null
   > {
-    const socketPath = hostSocketPath(this.runDir, hostId);
+    const entry = this.readEntry(hostId);
+    const socketPath = entry?.socket ?? hostSocketPath(this.socketDir, hostId);
     let connection: HostConnection;
     try {
       connection = await openHostConnection(socketPath, this.initialize);
     } catch (err) {
-      if (err instanceof HostConnectError && err.refused) {
-        this.log.info(`Removing the entry of terminal host ${hostId}, which is gone`);
-        rmSync(socketPath, { force: true });
-        rmSync(hostEntryPath(this.runDir, hostId), { force: true });
-        return null;
+      if (!(err instanceof HostConnectError && err.refused)) {
+        this.log.warn(`Terminal host ${hostId} did not answer; leaving it be`, { error: err });
+        return { hostId, build: entry?.build ?? "", host: null };
       }
-      this.log.warn(`Terminal host ${hostId} did not answer; leaving it be`, { error: err });
-      return { hostId, build: this.entryBuild(hostId) ?? "", host: null };
+      // Its socket was removed under it (a purge of the temporary directory): the host runs, but
+      // nothing can reach it or its sessions again.
+      if (err.missing && entry && isProcessRunning(entry.pid)) {
+        this.log.error(`Terminal host ${hostId} is unreachable: its socket is gone`, {
+          pid: entry.pid,
+          hostBuildId: entry.build,
+          socketPath,
+        });
+        return { hostId, build: entry.build, host: null };
+      }
+      this.log.info(`Removing the entry of terminal host ${hostId}, which is gone`);
+      rmSync(socketPath, { force: true });
+      rmSync(hostEntryPath(this.runDir, hostId), { force: true });
+      return null;
     }
 
     const { result } = connection;
@@ -240,14 +264,17 @@ export class TerminalHostPool implements TerminalHost {
       return { hostId, build: result.hostBuildId, host, sessions };
     } catch (err) {
       this.log.warn(`Could not list the sessions of terminal host ${hostId}`, { error: err });
+      // Left be: closing the connection without a disconnect gives it its grace period.
+      host.drop();
       return { hostId, build: result.hostBuildId, host: null };
     }
   }
 
-  private entryBuild(hostId: string): string | null {
+  /** The host's entry, or null when it has none or it cannot be read. */
+  private readEntry(hostId: string): HostEntry | null {
     try {
       const raw: unknown = JSON.parse(readFileSync(hostEntryPath(this.runDir, hostId), "utf8"));
-      return HostEntrySchema.parse(raw).build;
+      return HostEntrySchema.parse(raw);
     } catch {
       return null;
     }
@@ -278,21 +305,25 @@ export class TerminalHostPool implements TerminalHost {
   private currentHost(): SocketTerminalHost {
     if (this.current && !this.current.isGone) return this.current;
     const hostId = newHostId();
-    const socketPath = hostSocketPath(this.runDir, hostId);
+    const socketPath = hostSocketPath(this.socketDir, hostId);
     const { hostBuildId, stateDir } = this.options;
     const launch = this.options.launch ?? launchHost;
     this.log.info(`Starting terminal host ${hostId} (${hostBuildId})`);
-    const connection = launch({ stateDir, runDir: this.runDir, hostId, hostBuildId }).then(
-      async (launched) => {
-        const opened = await openHostConnection(launched.socketPath, this.initialize);
-        if (opened.result.hostBuildId !== hostBuildId) {
-          this.log.warn(
-            `Terminal host ${hostId} reports build ${opened.result.hostBuildId}, not ${hostBuildId}`,
-          );
-        }
-        return opened;
-      },
-    );
+    const connection = launch({
+      stateDir,
+      runDir: this.runDir,
+      socketDir: this.socketDir,
+      hostId,
+      hostBuildId,
+    }).then(async (launched) => {
+      const opened = await openHostConnection(launched.socketPath, this.initialize);
+      if (opened.result.hostBuildId !== hostBuildId) {
+        this.log.warn(
+          `Terminal host ${hostId} reports build ${opened.result.hostBuildId}, not ${hostBuildId}`,
+        );
+      }
+      return opened;
+    });
     connection.catch((err: unknown) => {
       this.log.error(`Could not start terminal host ${hostId}`, { error: err });
     });

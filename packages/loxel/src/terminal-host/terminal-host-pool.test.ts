@@ -44,7 +44,7 @@ async function startHost(runDir: string, hostId: string, build: string) {
   await service.listen(socketPath);
   writeFileSync(
     hostEntryPath(runDir, hostId),
-    JSON.stringify({ pid: process.pid, build, protocol: "1.0.0" }),
+    JSON.stringify({ pid: process.pid, build, protocol: "1.0.0", socket: socketPath }),
   );
   /** As the process exiting would: the sessions, socket and entry go. */
   const stop = () => {
@@ -80,6 +80,7 @@ function createPool(
   const pool = new TerminalHostPool({
     stateDir,
     runDir,
+    socketDir: runDir,
     serverBuild: "test",
     hostBuildId: "current",
     log: createNoopLogger(),
@@ -150,9 +151,15 @@ describe("TerminalHostPool", () => {
 
   test("removes the entries of hosts that are gone, and ends hosts of another major", async () => {
     const { stateDir, runDir } = tempStateDir();
+    // Gone: its process is not running and its socket is gone.
     writeFileSync(
       hostEntryPath(runDir, "dddddddd"),
-      JSON.stringify({ pid: 1, build: "x", protocol: "1.0.0" }),
+      JSON.stringify({
+        pid: 999_999,
+        build: "x",
+        protocol: "1.0.0",
+        socket: hostSocketPath(runDir, "dddddddd"),
+      }),
     );
     const received: unknown[] = [];
     const incompatible: Server = createServer((socket) => {
@@ -240,5 +247,33 @@ describe("TerminalHostPool", () => {
 
     await pool.spawn(spawnRequest("exec sleep 30"));
     expect(launches).toHaveLength(1);
+  });
+
+  test("a running host whose socket is gone is reported unreachable, not forgotten", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const entry = {
+      pid: process.pid,
+      build: "purged",
+      protocol: "1.0.0",
+      socket: hostSocketPath(runDir, "12121212"),
+    };
+    writeFileSync(hostEntryPath(runDir, "12121212"), JSON.stringify(entry));
+    mkdirSync(join(hostBinDir(stateDir), "purged"), { recursive: true });
+    const errors: string[] = [];
+    const pool = new TerminalHostPool({
+      stateDir,
+      runDir,
+      socketDir: runDir,
+      serverBuild: "test",
+      hostBuildId: "current",
+      log: { ...createNoopLogger(), error: (msg: string) => errors.push(msg) },
+    });
+    cleanups.push(() => pool.dropAll());
+
+    expect(await startPool(pool)).toEqual([]);
+    expect(errors).toEqual(["Terminal host 12121212 is unreachable: its socket is gone"]);
+    // Its entry and binary stay, for the process that still runs from it.
+    expect(existsSync(hostEntryPath(runDir, "12121212"))).toBe(true);
+    expect(existsSync(join(hostBinDir(stateDir), "purged"))).toBe(true);
   });
 });

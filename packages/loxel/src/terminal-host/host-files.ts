@@ -2,9 +2,10 @@
  * Where terminal hosts keep their files under a state directory, shared by the host that writes
  * them and the server that reads them:
  *
- * - `terminal-host/run/` (0700): each running host's socket `<hostId>.sock` (0600) and its entry
- *   `<hostId>.json`. The socket's handshake is the truth about a host; the entry is a hint, for
- *   finding a host that does not answer.
+ * - `terminal-host/run/` (0700): each running host's entry `<hostId>.json` and socket
+ *   `<hostId>.sock` (0600). The socket's handshake is the truth about a host; the entry names its
+ *   socket and process, for finding a host that does not answer. A state directory too deep for a
+ *   socket path keeps its sockets in the temporary directory instead (see {@link hostSocketDir}).
  * - `terminal-host/bin/<hostBuildId>/loxel-terminal-host`: the copy of the bundled binary a
  *   packaged host runs from, so no host runs from the app bundle.
  * - `logs/terminal-host-<hostId>.log`: each host's log.
@@ -35,6 +36,8 @@ export const HostEntrySchema = z.object({
   pid: z.number().int(),
   build: z.string(),
   protocol: z.string(),
+  /** The host's socket: in the run directory, or in the temporary directory's fallback. */
+  socket: z.string(),
 });
 export type HostEntry = z.infer<typeof HostEntrySchema>;
 
@@ -46,25 +49,31 @@ export function isHostId(value: string): boolean {
   return HOST_ID.test(value);
 }
 
+/** The run directory for `stateDir`, where every host's entry is. */
+export function hostRunDir(stateDir: string): string {
+  return join(stateDir, "terminal-host", "run");
+}
+
 /**
- * The run directory for `stateDir`. A state directory so deep that a socket in it would pass the
- * socket path limit gets one in the temporary directory instead, named by a hash of its path, so
- * every server for that state directory finds the same one.
+ * Where the hosts' sockets are: the run directory, unless a socket there would pass the socket
+ * path limit, which only a deep `LOXEL_STATE_DIR` override does. Then it is a directory in the
+ * temporary directory named by a hash of the state directory, so every server for that state
+ * directory finds the same one. The entries stay in the run directory either way.
  */
-export function hostRunDir(stateDir: string, tempDir = tmpdir()): string {
-  const preferred = join(stateDir, "terminal-host", "run");
-  if (fitsSocketPath(preferred)) return preferred;
+export function hostSocketDir(stateDir: string, tempDir = tmpdir()): string {
+  const runDir = hostRunDir(stateDir);
+  if (fitsSocketPath(runDir)) return runDir;
   const hash = createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
   return join(tempDir, `loxel-terminal-host-${hash}`);
 }
 
-function fitsSocketPath(runDir: string): boolean {
-  const longest = hostSocketPath(runDir, "0".repeat(HOST_ID_LENGTH));
+function fitsSocketPath(dir: string): boolean {
+  const longest = hostSocketPath(dir, "0".repeat(HOST_ID_LENGTH));
   return Buffer.byteLength(longest) <= MAX_SOCKET_PATH_BYTES;
 }
 
-export function hostSocketPath(runDir: string, hostId: string): string {
-  return join(runDir, `${hostId}.sock`);
+export function hostSocketPath(socketDir: string, hostId: string): string {
+  return join(socketDir, `${hostId}.sock`);
 }
 
 export function hostEntryPath(runDir: string, hostId: string): string {
@@ -96,4 +105,14 @@ export function ensureRunDir(runDir: string): void {
     throw new Error(`Terminal host run directory ${runDir} is not a directory of this user's`);
   }
   if ((stat.mode & 0o777) !== 0o700) chmodSync(runDir, 0o700);
+}
+
+/** True while process `pid` runs (EPERM: it runs, as another user). */
+export function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }

@@ -15,6 +15,7 @@ import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 
 import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection } from "./host-connection";
+import { isProcessRunning } from "./host-files";
 import type { DisconnectMode, HostMessage, InitializeMessage, InitializeResult } from "./protocol";
 import { HostMessageSchema } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
@@ -416,7 +417,7 @@ export class SocketTerminalHost implements TerminalHost {
 
   private async reconnect(): Promise<void> {
     const pid = this.hello?.pid;
-    const isAlive = this.options.isProcessAlive ?? processAlive;
+    const isAlive = this.options.isProcessAlive ?? isProcessRunning;
     for (let attempt = 0; ; attempt++) {
       const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]!;
       if (delay > 0)
@@ -434,7 +435,8 @@ export class SocketTerminalHost implements TerminalHost {
       } catch (err) {
         if (this.state !== "reconnecting") return;
         if (err instanceof HostConnectError && err.refused) {
-          this.markGone("its socket refuses connections", err);
+          const reason = err.missing ? "its socket is gone" : "its socket refuses connections";
+          this.markGone(reason, err);
           return;
         }
         this.log.warn("Could not reconnect to the terminal host yet", { error: err, attempt });
@@ -542,15 +544,5 @@ export class SocketTerminalHost implements TerminalHost {
 
   private goneError(): Error {
     return new Error(`Terminal host ${this.hostId} is not available`);
-  }
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM: it runs, as another user.
-    return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 }

@@ -42,6 +42,7 @@ describe("launchHost", () => {
     const launch = launchHost({
       stateDir,
       runDir: hostRunDir(stateDir),
+      socketDir: hostRunDir(stateDir),
       hostId,
       hostBuildId: "b",
       command: ["/bin/sh", "-c", "echo broken >&2; exit 3", "host"],

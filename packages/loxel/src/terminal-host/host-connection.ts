@@ -19,11 +19,14 @@ export class HostConnectError extends Error {
    * is not running. False when it may be, but did not answer.
    */
   readonly refused: boolean;
+  /** True when the socket file itself is gone, which `refused` includes. */
+  readonly missing: boolean;
 
-  constructor(message: string, options: { refused: boolean; cause?: unknown }) {
+  constructor(message: string, options: { refused: boolean; missing?: boolean; cause?: unknown }) {
     super(message, { cause: options.cause });
     this.name = "HostConnectError";
     this.refused = options.refused;
+    this.missing = options.missing ?? false;
   }
 }
 
@@ -135,9 +138,11 @@ export function openHostConnection(
     socket.on("connect", () => socket.write(encodeJsonFrame(initialize)));
     socket.on("error", (err: NodeJS.ErrnoException) => {
       const refused = err.code !== undefined && REFUSED_CODES.has(err.code);
+      const missing = err.code === "ENOENT";
       fail(
         new HostConnectError(`Could not connect to the terminal host at ${socketPath}`, {
           refused,
+          missing,
           cause: err,
         }),
       );

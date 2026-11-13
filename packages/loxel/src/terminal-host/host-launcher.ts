@@ -41,7 +41,10 @@ export const TERMINAL_HOST_BUNDLE = "terminal-host.js";
 
 export interface HostLaunch {
   stateDir: string;
+  /** Where the host writes its entry. */
   runDir: string;
+  /** Where the host listens; see `hostSocketDir`. */
+  socketDir: string;
   hostId: string;
   hostBuildId: string;
   /** The command that starts the host, before its arguments; defaults to {@link hostCommand}. */
@@ -55,9 +58,10 @@ export interface LaunchedHost {
 
 /** Start a host and resolve once its socket accepts connections. */
 export async function launchHost(launch: HostLaunch): Promise<LaunchedHost> {
-  const { stateDir, runDir, hostId, hostBuildId } = launch;
+  const { stateDir, runDir, socketDir, hostId, hostBuildId } = launch;
   const command = launch.command ?? hostCommand(stateDir, hostBuildId);
   ensureRunDir(runDir);
+  ensureRunDir(socketDir);
   mkdirSync(hostLogsDir(stateDir), { recursive: true });
   const logFile = hostLogPath(stateDir, hostId);
   // What the host itself cannot log (a crash of the runtime) lands next to its log.
@@ -70,6 +74,8 @@ export async function launchHost(launch: HostLaunch): Promise<LaunchedHost> {
         ...command,
         "--run-dir",
         runDir,
+        "--socket-dir",
+        socketDir,
         "--host-id",
         hostId,
         "--log-file",
@@ -92,7 +98,7 @@ export async function launchHost(launch: HostLaunch): Promise<LaunchedHost> {
       `Terminal host did not start (exit code ${exitCode ?? "none yet"}); see ${stderrPath}`,
     );
   }
-  return { pid: proc.pid, socketPath: hostSocketPath(runDir, hostId) };
+  return { pid: proc.pid, socketPath: hostSocketPath(socketDir, hostId) };
 }
 
 /**
