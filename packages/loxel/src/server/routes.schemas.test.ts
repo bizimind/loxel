@@ -170,6 +170,7 @@ describe("POST /api/schemas/sync", () => {
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts: {} as never,
       startTerminal: async () => {},
     };
 

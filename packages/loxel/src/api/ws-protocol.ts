@@ -141,13 +141,14 @@ export interface TerminalState {
 export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelOpenOptions;
 
 /**
- * A terminal panel the server asks a window to create (`loxel terminal`). The server has already
- * minted `terminalId` and started its shell in `cwd`, with the command typed in, so the renderer
- * only places the panel in `worktreePath`, the worktree the session belongs to.
+ * A terminal panel the server asks a window to create (`loxel terminal`, the quickstart's command
+ * field). The server has already minted `terminalId` and started its shell in `cwd`, with the
+ * command typed in, so the renderer only places the panel in `worktreePath`, the worktree the
+ * session belongs to, or in Home when it is null.
  */
 export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
   terminalId: string;
-  worktreePath: string;
+  worktreePath: string | null;
 } & PanelOpenOptions;
 
 /** A terminal session and where its shell starts, as the panel sends it when attaching. */
@@ -155,7 +156,7 @@ export interface TerminalSpawnTarget {
   id: string;
   /** Directory the shell starts in. */
   cwd: string;
-  /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; defaults to `cwd`. */
+  /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; absent for a Home terminal. */
   worktreePath?: string;
   scrollbackLines?: number;
   /** The panel's window, exposed to the shell as `LOXEL_WINDOW_ID`. */

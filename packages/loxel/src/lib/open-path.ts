@@ -115,13 +115,14 @@ export function openFile({
 }
 
 /**
- * Open a terminal sent from outside the window (`loxel terminal`). The server has already started
- * its shell and picked its worktree; the panel goes there, switching to it if the open has focus.
+ * Open a terminal sent from outside the window (`loxel terminal`, the quickstart's command field).
+ * The server has already started its shell and picked its worktree, or Home (null); the panel goes
+ * there, switching to the worktree if the open has focus.
  */
 export function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    await refreshIfUnlisted(terminal.worktreePath);
+    if (terminal.worktreePath) await refreshIfUnlisted(terminal.worktreePath);
     await openInWorktree(terminal.worktreePath, { kind: "terminal", terminal });
   });
 }

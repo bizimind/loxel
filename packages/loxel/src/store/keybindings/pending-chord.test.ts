@@ -58,8 +58,9 @@ describe("resolveKeystroke", () => {
   });
 
   test("leaves a chord for a panel Home can't hold unbound in Home", () => {
+    // A drawing needs a worktree for its draft.
     resolveKeystroke(key("Cmd+Backslash"));
-    resolveKeystroke(key("T"));
+    resolveKeystroke(key("D"));
     expect(resolveKeystroke(key("ArrowDown"))).toEqual({ kind: "cancelled" });
   });
 

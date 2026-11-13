@@ -1,10 +1,12 @@
+import { HOME_KEY } from "@/api/home-model";
+
 import { useWorktreeStore } from "./worktrees";
 
 /**
  * The layout key of Home, the layout a window shows while no worktree is active. Worktree layouts
  * are keyed by absolute path, so this never names one.
  */
-export const HOME_LAYOUT_KEY = "home";
+export const HOME_LAYOUT_KEY = HOME_KEY;
 
 /** Read the active worktree path synchronously. Throws if none is set. */
 export function getActiveWt(): string {

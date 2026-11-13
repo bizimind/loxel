@@ -23,7 +23,7 @@ The variables you set are read from the environment Loxel starts in; a Loxel lau
 | `LOXEL_STATE_DIR`  | Override the state directory                                                                                                 | See [File Locations](#file-locations) |
 | `LOXEL_STATIC_DIR` | Override the frontend assets directory                                                                                       | Auto-detect                           |
 | `LOXEL_PORT`       | Auto-injected in terminals: port of the running Loxel server                                                                 | (injected)                            |
-| `LOXEL_WORKTREE`   | Auto-injected in terminals: worktree path for that terminal                                                                  | (injected)                            |
+| `LOXEL_WORKTREE`   | Auto-injected in terminals: worktree path for that terminal (not set in Home's terminals)                                    | (injected)                            |
 | `LOXEL_WINDOW_ID`  | Auto-injected in terminals: ID of the Loxel window                                                                           | (injected)                            |
 | `LOXEL`            | Auto-injected in terminals: always `1`                                                                                       | (injected)                            |
 

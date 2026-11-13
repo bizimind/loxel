@@ -5,6 +5,7 @@ import type { IWatermarkPanelProps } from "dockview-react";
 
 import type { OpenRequest } from "@/open-request";
 import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
+import { useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
 const openRequests: OpenRequest[] = [];
@@ -69,13 +70,25 @@ describe("quickstart page", () => {
     useWorktreeStore.setState({ activeWorktreePath: null });
     watermark();
 
-    expect(rowLabels()).toEqual(["New Browser", "Add Project"]);
-    expect(screen.queryByPlaceholderText("Run a command…")).toBeNull();
+    expect(rowLabels()).toEqual(["New Terminal", "New Browser", "New Plan", "Add Project"]);
     let wizardRequests = 0;
     const stop = onLoxelEvent("loxel-open-add-project-wizard", () => wizardRequests++);
     fireEvent.click(screen.getByRole("button", { name: "Add Project" }));
     stop();
     expect(wizardRequests).toBe(1);
+  });
+
+  test("makes Add Project the main action before the first project, and only once known", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ projects: [], projectsFetched: false });
+    const { rerender } = watermark();
+    const addProject = () => screen.getByRole("button", { name: "Add Project" });
+    expect(addProject().className).not.toContain("bg-button-primary");
+
+    useProjectStore.setState({ projectsFetched: true });
+    rerender(<CenterWatermark {...watermarkProps} />);
+    expect(addProject().className).toContain("bg-button-primary");
+    useProjectStore.setState({ projectsFetched: false });
   });
 
   test("takes no focus of its own", () => {
@@ -102,6 +115,21 @@ describe("quickstart page", () => {
       { terminal: { cwd: WT, command: "pnpm run dev" }, pinWtPath: WT, windowId: WINDOW_ID },
     ]);
     expect((field as HTMLInputElement).value).toBe("");
+  });
+
+  test("runs a command from Home in a terminal in the home directory", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ homeDir: "/Users/me" });
+    watermark();
+    const field = screen.getByPlaceholderText("Run a command…");
+
+    fireEvent.change(field, { target: { value: "ls" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    expect(openRequests).toEqual([
+      { terminal: { cwd: "/Users/me", command: "ls" }, windowId: WINDOW_ID },
+    ]);
+    useProjectStore.setState({ homeDir: null });
   });
 
   test("opens an address or searches for other text, like the address bar", () => {

@@ -22,6 +22,7 @@ import { matchBookmarks, useBrowserBookmarksStore } from "@/store/browser-bookma
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { QUICKSTART_PANELS } from "@/store/panel-config";
+import { useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
 const uiLog = frontendLog.child("ui");
@@ -57,7 +58,7 @@ export function CenterWatermark(_props: IWatermarkPanelProps) {
               onClick={() => window.dispatchEvent(new CustomEvent(def.createEvent))}
               actionId={def.actionId ?? undefined}
               field={
-                def.type === "terminal" && worktreePath ? (
+                def.type === "terminal" ? (
                   <CommandField worktreePath={worktreePath} />
                 ) : def.type === "browser" ? (
                   <AddressField />
@@ -134,14 +135,23 @@ function QuickAction({
   );
 }
 
-/** Opens the Add Project dialog the sidebar hosts. */
+/**
+ * Opens the Add Project dialog the sidebar hosts. Before the first project it is the page's main
+ * action: a filled button the size of its label, set apart from the rows above it.
+ */
 function AddProjectAction() {
+  const isFirstProject = useProjectStore((s) => s.projectsFetched && s.projects.length === 0);
+  const open = () => dispatchLoxelEvent("loxel-open-add-project-wizard");
+  const icon = <FolderPlusIcon className="size-4" />;
+  if (!isFirstProject) return <QuickAction icon={icon} label="Add Project" onClick={open} />;
   return (
-    <QuickAction
-      icon={<FolderPlusIcon className="size-4" />}
-      label="Add Project"
-      onClick={() => dispatchLoxelEvent("loxel-open-add-project-wizard")}
-    />
+    <button
+      onClick={open}
+      className="bg-button-primary text-button-primary-foreground hover:bg-button-primary/85 col-span-3 mt-3 flex items-center gap-2.5 justify-self-start rounded-md py-1.5 pr-4 pl-3 text-sm transition-colors"
+    >
+      {icon}
+      <span>Add Project</span>
+    </button>
   );
 }
 
@@ -153,18 +163,22 @@ const FIELD_CLASS =
   "text-foreground placeholder:text-muted-foreground/45 w-full bg-transparent py-1.5 text-sm outline-none";
 
 /** On the New Terminal row: Enter opens a terminal that runs the command, as `loxel terminal` does. */
-function CommandField({ worktreePath }: { worktreePath: string }) {
+function CommandField({ worktreePath }: { worktreePath: string | null }) {
   const [command, setCommand] = useState("");
+  const homeDir = useProjectStore((s) => s.homeDir);
 
   const run = () => {
     const line = command.trim();
-    if (!line) return;
+    // Home's terminals start in the home directory.
+    const cwd = worktreePath ?? homeDir;
+    if (!line || !cwd) return;
     setCommand("");
-    // The server starts the shell with the command typed in, then this window opens its panel.
+    // The server starts the shell with the command typed in, then this window opens its panel:
+    // in the worktree, or in Home, since the home directory is in none.
     api
       .postOpenRequest({
-        terminal: { cwd: worktreePath, command: line },
-        pinWtPath: worktreePath,
+        terminal: { cwd, command: line },
+        ...(worktreePath ? { pinWtPath: worktreePath } : {}),
         windowId: WINDOW_ID,
       })
       .catch((err: unknown) => {

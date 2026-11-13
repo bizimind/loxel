@@ -82,6 +82,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts: {} as never,
       startTerminal: async () => {},
     };
   });

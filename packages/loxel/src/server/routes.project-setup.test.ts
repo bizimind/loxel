@@ -98,6 +98,7 @@ describe("project conversion preflight", () => {
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts: {} as never,
       startTerminal: async () => {},
     };
   }

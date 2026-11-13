@@ -123,8 +123,9 @@ export interface CenterPanelDef {
   /** Whether only one instance of this panel type can exist. */
   readonly singleton: boolean;
   /**
-   * Whether the panel belongs to a worktree (its files, shell or project). Home, the layout shown
-   * with no worktree active, holds only panels that don't.
+   * Whether the panel needs a worktree (its files or project). Home, the layout shown with no
+   * worktree active, holds only panels that don't: browsers, terminals in the home directory, and
+   * plans saved as Home drafts.
    */
   readonly needsWorktree: boolean;
 }
@@ -153,7 +154,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Terminal",
     kind: "connected-process" as const,
     singleton: false,
-    needsWorktree: true,
+    needsWorktree: false,
   },
   {
     type: "browser",
@@ -183,7 +184,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Note",
     kind: "file-editor" as const,
     singleton: false,
-    needsWorktree: true,
+    needsWorktree: false,
   },
   {
     type: "excalidraw",

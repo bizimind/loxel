@@ -87,9 +87,10 @@ describe("TerminalManager commands", () => {
     expect(manager.get(id)?.cwd).toBe("/tmp");
     expect(manager.get(id)?.worktreePath).toBe("/");
 
-    const plain = crypto.randomUUID();
-    await manager.attach(plain, createRecordingSink().sink, attachOptions);
-    expect(manager.get(plain)?.worktreePath).toBe("/tmp");
+    // A Home terminal belongs to no worktree, wherever its shell starts.
+    const home = crypto.randomUUID();
+    await manager.attach(home, createRecordingSink().sink, attachOptions);
+    expect(manager.get(home)?.worktreePath).toBeNull();
   });
 
   test("a shell spawned with no client runs its command, and a later attach binds to it", async () => {

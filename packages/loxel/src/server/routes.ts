@@ -31,6 +31,7 @@ import {
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
+import { HOME_KEY } from "@/api/home-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelPlacement } from "@/api/panel-placement-model";
@@ -62,6 +63,7 @@ import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
+import type { DetachedFilesService } from "./detached-files-service";
 import { getDiagnostics } from "./diagnostics";
 import { resolveEditorConfig } from "./editorconfig";
 import { describeError } from "./error-message";
@@ -196,6 +198,8 @@ export interface RouteContext {
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
   /** The window `sendToActiveWindow` delivers to, or null when no window is connected. */
   activeWindow: (windowId: string | null) => ActiveWindow | null;
+  /** Drafts made in Home, which belong to no worktree; the drafts routes take `HOME_KEY` for them. */
+  homeDrafts: DetachedFilesService;
   /**
    * Start a terminal's shell with no panel attached, typing `command` into it; the panel's first
    * attach binds to the running session. Resolves once the shell is running.
@@ -537,9 +541,7 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
       return error("File not found in any active worktree", 404);
     }
     if (resolved.type === "detached") {
-      return readFileContentResponse(() =>
-        resolved.resources.detachedFilesService.readFileContent(resolved.name),
-      );
+      return readFileContentResponse(() => resolved.service.readFileContent(resolved.name));
     }
     if (resolved.type === "external") {
       return readFileContentResponse(() =>
@@ -1053,7 +1055,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     );
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
-      await resolved.resources.detachedFilesService.writeFileContent(resolved.name, content, nonce);
+      await resolved.service.writeFileContent(resolved.name, content, nonce);
       return json({ success: true });
     }
     if (resolved.type === "external") {
@@ -1614,14 +1616,17 @@ async function handleFileCopy(req: Request, ctx: RouteContext): Promise<Response
 // Service-dependent routes: detached files
 // ---------------------------------------------------------------------------
 
+/** The drafts `wt` names: an active worktree's, or Home's (`HOME_KEY`). */
+function draftsFor(ctx: RouteContext, wt: string): DetachedFilesService | undefined {
+  return wt === HOME_KEY ? ctx.homeDrafts : ctx.getWorktreeResources(wt)?.detachedFilesService;
+}
+
 // GET /api/detached-files?wt=
 function handleDetachedFiles(req: Request, ctx: RouteContext): Response {
   const url = new URL(req.url);
   const wt = url.searchParams.get("wt");
   if (!wt) return error("Missing wt parameter", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return json([]);
-  return json(resources.detachedFilesService.listFiles());
+  return json(draftsFor(ctx, wt)?.listFiles() ?? []);
 }
 
 // GET /api/external-files?wt= — list the Others section (open folders, then open files)
@@ -1639,13 +1644,13 @@ async function handleDetachedFileContent(req: Request, ctx: RouteContext): Promi
   const url = new URL(req.url);
   const wt = url.searchParams.get("wt");
   if (!wt) return error("Missing wt parameter", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const name = url.searchParams.get("name");
   if (!name) return error("Missing name parameter", 400);
   if (name.includes("/") || name.includes("..")) return error("Invalid file name", 400);
   try {
-    const content = await resources.detachedFilesService.readFileContent(name);
+    const content = await drafts.readFileContent(name);
     return json({ content });
   } catch {
     return error("File not found", 404);
@@ -1657,15 +1662,15 @@ async function handleDetachedFileCreate(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const prefix = requireString(body, "prefix");
   const ext = typeof body.ext === "string" ? body.ext : undefined;
   if (prefix.includes("/") || prefix.includes("..")) return error("Invalid prefix", 400);
   if (ext && (ext.includes("/") || ext.includes(".."))) return error("Invalid extension", 400);
   const content = typeof body.content === "string" ? body.content : undefined;
-  const name = await resources.detachedFilesService.createFile(prefix, ext, content);
-  return json({ name, path: join(resources.detachedFilesService.dir, name) });
+  const name = await drafts.createFile(prefix, ext, content);
+  return json({ name, path: join(drafts.dir, name) });
 }
 
 // POST /api/detached-file-move
@@ -1673,6 +1678,7 @@ async function handleDetachedFileMove(req: Request, ctx: RouteContext): Promise<
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
+  if (wt === HOME_KEY) return error("Home's drafts belong to no project", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
@@ -1697,14 +1703,14 @@ async function handleDetachedFileDelete(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
   const path = typeof body.path === "string" ? body.path : undefined;
   const name = path?.startsWith("/") ? basename(path) : rawName;
   if (!name) return error("Missing name or path in body", 400);
   if (name.includes("/") || name.includes("..")) return error("Invalid file name", 400);
-  await resources.detachedFilesService.deleteFile(name);
+  await drafts.deleteFile(name);
   return json({ success: true });
 }
 
@@ -1713,8 +1719,8 @@ async function handleDetachedFileRename(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const rawOldName = typeof body.oldName === "string" ? body.oldName : undefined;
   const oldPath = typeof body.path === "string" ? body.path : undefined;
   const oldName = oldPath?.startsWith("/") ? basename(oldPath) : rawOldName;
@@ -1724,8 +1730,8 @@ async function handleDetachedFileRename(req: Request, ctx: RouteContext): Promis
   if (newName.includes("/") || newName.includes("..")) return error("Invalid new file name", 400);
 
   try {
-    await resources.detachedFilesService.renameFile(oldName, newName);
-    return json({ success: true, path: join(resources.detachedFilesService.dir, newName) });
+    await drafts.renameFile(oldName, newName);
+    return json({ success: true, path: join(drafts.dir, newName) });
   } catch (err) {
     return error(err instanceof Error ? err.message : "Rename failed", 500);
   }
@@ -1736,6 +1742,7 @@ async function handleDetachedFileCopyToProject(req: Request, ctx: RouteContext):
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
+  if (wt === HOME_KEY) return error("Home's drafts belong to no project", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
@@ -2981,14 +2988,11 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
     // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
-    // window shows.
+    // window shows, else to Home (null), which a window shows with no worktree.
     const owner = pinned ?? (await owningWorktree(ctx, cwd));
     const window = ctx.activeWindow(windowId);
     if (!window) return error("No Loxel window is open", 503);
     const worktreePath = owner ?? window.worktreePath;
-    // 503 like no window at all: a window that is still launching shows its worktree in a moment,
-    // and the CLI retries a 503 for a while.
-    if (!worktreePath) return error("Open a project in Loxel before opening terminals", 503);
 
     const terminalId = crypto.randomUUID();
     const sent = ctx.sendToActiveWindow(windowId, {
@@ -3003,7 +3007,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       await ctx.startTerminal({
         id: terminalId,
         cwd,
-        worktreePath,
+        ...(worktreePath ? { worktreePath } : {}),
         ...(window.windowId ? { windowId: window.windowId } : {}),
         ...(command ? { command } : {}),
       });

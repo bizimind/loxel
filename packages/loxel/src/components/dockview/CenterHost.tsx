@@ -124,7 +124,9 @@ function CenterLayout({
           wsClient.send({ type: "terminal_destroy", id: terminalId });
           usePanelNotificationStore.getState().unregisterPanel(terminalId);
         }
-        getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
+        if (layoutKeyRef.current !== HOME_LAYOUT_KEY) {
+          getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
+        }
       }
 
       // Notify server when the last panel showing an external file closes, so its watcher can

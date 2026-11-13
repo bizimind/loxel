@@ -21,7 +21,8 @@ function extractPanelId(n: ServerNotification): string | undefined {
 }
 
 function extractWorktreePath(n: ServerNotification): string | undefined {
-  if (n.source.kind === "terminal") return n.source.worktreePath;
+  // A Home terminal's (null) marks no worktree.
+  if (n.source.kind === "terminal") return n.source.worktreePath ?? undefined;
   return undefined;
 }
 

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { HOME_KEY } from "@/api/home-model";
 import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
@@ -45,7 +46,7 @@ function invalidateEditorConfigBelow(dir: string): void {
  */
 export function refreshOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   nonces: string[],
 ): void {
@@ -100,7 +101,7 @@ export function refreshOpenFile(
  */
 async function fetchIntoOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   path: string,
   nonces: string[],
@@ -132,7 +133,7 @@ async function fetchIntoOpenFile(
  */
 export async function checkOpenFileExists(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
 ): Promise<void> {
   const initial = useEditorStateStore.getState().files.get(editorKey);
@@ -250,15 +251,17 @@ export function useWsBridge(): void {
             invalidateEditorConfigBelow(changedPath.slice(0, -EDITORCONFIG_SUFFIX.length + 1));
           }
 
+          // Home's drafts belong to no worktree, like the editors that show them.
+          const editorWtPath = message.wtPath === HOME_KEY ? undefined : message.wtPath;
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
             if (entry.filePath === changedPath) {
-              refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
+              refreshOpenFile(projectPath, editorWtPath, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
               // file reports itself), so just re-check that, and re-read the `.editorconfig`s
               // that may have come or gone with it.
-              void checkOpenFileExists(projectPath, message.wtPath, editorKey);
+              void checkOpenFileExists(projectPath, editorWtPath, editorKey);
               queryClient.invalidateQueries({
                 queryKey: queryKeys.editorConfigPrefix(entry.filePath),
               });

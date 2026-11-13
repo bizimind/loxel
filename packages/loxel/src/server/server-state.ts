@@ -128,7 +128,8 @@ export type ResolvedFilePath =
       /** Relative to the tree root; empty only for an Others folder's root. */
       relativePath: string;
     }
-  | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
+  // A draft: of the worktree `wtPath` names, or of Home (`HOME_KEY`).
+  | { type: "detached"; wtPath: string; service: DetachedFilesService; name: string }
   | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string };
 
 /** Per-client tracking for cleanup on disconnect. */

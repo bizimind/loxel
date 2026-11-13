@@ -92,6 +92,8 @@ interface ProjectState {
    */
   autoExpandedProjectIds: string[];
 
+  /** Whether the first project list fetch has settled, so an empty `projects` means none. */
+  projectsFetched: boolean;
   fetchProjects: () => Promise<void>;
   addProject: (path: string, name?: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
@@ -113,6 +115,7 @@ export const useProjectStore = create<ProjectState>()(
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
       autoExpandedProjectIds: [],
+      projectsFetched: false,
 
       fetchProjects: async () => {
         try {
@@ -124,6 +127,7 @@ export const useProjectStore = create<ProjectState>()(
         } finally {
           // Settle even on failure, so waiting opens report "no project" instead of hanging
           projectsLoaded.resolve();
+          if (!get().projectsFetched) set({ projectsFetched: true });
         }
       },
 

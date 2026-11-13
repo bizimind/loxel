@@ -296,9 +296,12 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     },
   });
 
+  // A Home terminal has no worktree: its shell starts in `cwd` (the home directory).
   const spawnTarget: TerminalPaths | null = panelWorktreePath
     ? { cwd: cwd ?? panelWorktreePath, worktreePath: panelWorktreePath }
-    : null;
+    : cwd
+      ? { cwd }
+      : null;
   const spawnTargetRef = useRef(spawnTarget);
   spawnTargetRef.current = spawnTarget;
   const fileIndexRef = useRef<FileIndex | null>(null);

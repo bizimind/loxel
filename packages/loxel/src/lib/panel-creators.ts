@@ -16,6 +16,7 @@ import type {
 
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
+import { HOME_KEY } from "@/api/home-model";
 import type {
   PanelOpenOptions,
   PanelPlacement,
@@ -39,7 +40,7 @@ import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-d
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { activeLayoutKey } from "@/store/active-worktree";
+import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
 import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
@@ -48,6 +49,7 @@ import {
   getCenterPanelDefByType,
   panelTypeNeedsWorktree,
 } from "@/store/panel-config";
+import { useProjectStore } from "@/store/projects";
 import { getCenterApi, getCenterApiLayoutKey } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -281,18 +283,22 @@ export interface CreateTerminalOptions extends PanelOpenOptions {
 export function createTerminal({
   placement,
   focus,
-  cwd,
+  cwd: requestedCwd,
   ...options
 }: CreateTerminalOptions = {}): void {
   const cApi = centerApiFor("terminal");
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  if (!cApi) return;
+  // A Home terminal belongs to no worktree and starts in the user's home directory.
+  const cwd = requestedCwd ?? (worktreePath ? undefined : useProjectStore.getState().homeDir);
+  if (!cApi || (!worktreePath && !cwd)) return;
 
   const terminalId = options.terminalId ?? crypto.randomUUID();
   const title = options.title ?? nextPanelTitle(cApi, "Terminal");
   const panelId = `terminal-${terminalId}`;
 
-  getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  if (worktreePath) {
+    getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  }
   uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
   addPlacedPanel(
@@ -303,7 +309,11 @@ export function createTerminal({
       component: "terminal",
       tabComponent: "terminalTab",
       title,
-      params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
+      params: {
+        terminalId,
+        ...(worktreePath ? { worktreePath } : {}),
+        ...(cwd && cwd !== worktreePath ? { cwd } : {}),
+      },
     },
     focus,
   );
@@ -319,9 +329,9 @@ export async function createEditor(options?: {
   creatingEditor = true;
   try {
     const wt = useWorktreeStore.getState().activeWorktreePath;
-    if (!wt) return;
+    // In Home the plan is one of Home's drafts, which belong to no worktree.
     const { name, path: filePath } = await api.createDetachedFile({
-      wt,
+      wt: wt ?? HOME_KEY,
       prefix: "Note",
       ext: "md",
       content: options?.content ?? "# ",
@@ -338,7 +348,7 @@ export async function createEditor(options?: {
       component: "editor",
       tabComponent: "markdownEditorTab",
       title,
-      params: { filePath, worktreePath: wt },
+      params: { filePath, ...(wt ? { worktreePath: wt } : {}) },
     });
     uiLog.info("Panel created", { panelType: "editor", panelId, filePath });
 
@@ -512,7 +522,9 @@ export function reopenClosedTab(): void {
     options.params = { ...options.params, terminalId };
     const title = options.title ?? nextPanelTitle(dv, "Terminal");
     options.title = title;
-    getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+    if (layoutKey !== HOME_LAYOUT_KEY) {
+      getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+    }
   }
 
   const group = dv.getGroup(groupId);

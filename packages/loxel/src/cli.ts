@@ -93,12 +93,15 @@ async function main(): Promise<void> {
   // command of only files needs none: each file opens in its own worktree.
   const pinnedWorktree = parsed.worktree ? await detectWorktree(parsed.worktree) : null;
   let commandWorktree = pinnedWorktree;
+  // A Home terminal has a window but no worktree: its pages open in what that window shows.
+  let urlsToWindow = false;
   let urlError: string | null = null;
   if (!commandWorktree && urlCount > 0) {
     try {
       commandWorktree = await detectWorktree(process.cwd());
     } catch (err) {
       if (isInsideLoxel && envWorktree) commandWorktree = envWorktree;
+      else if (isInsideLoxel && envWindowId) urlsToWindow = true;
       // With nothing else to open, fail before launching anything.
       else if (urlCount === targets.length) throw err;
       else urlError = err instanceof Error ? err.message : String(err);
@@ -130,7 +133,13 @@ async function main(): Promise<void> {
             request: { terminal: parsed.terminal, placement: parsed.placement, ...pin, ...options },
           },
         ]
-      : planOpens(parsed, { baseDir: process.cwd(), pinnedWorktree, commandWorktree, options });
+      : planOpens(parsed, {
+          baseDir: process.cwd(),
+          pinnedWorktree,
+          commandWorktree,
+          urlsToWindow,
+          options,
+        });
   for (const { label } of opens.filter((open) => !open.request)) {
     process.stderr.write(`loxel: ${label}${urlError}\n`);
   }

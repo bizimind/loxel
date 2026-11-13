@@ -1,5 +1,6 @@
 /** Source identifies where a notification came from. Extensible for future sources. */
-export type NotificationSource = { kind: "terminal"; panelId: string; worktreePath: string };
+/** Where a notification came from: a terminal panel, in its worktree, or in Home when null. */
+export type NotificationSource = { kind: "terminal"; panelId: string; worktreePath: string | null };
 // Future additions:
 // | { kind: "ci"; pipelineId: string; worktreePath?: string }
 

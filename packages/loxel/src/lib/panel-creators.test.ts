@@ -21,8 +21,13 @@ let diskContent: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
 let failWrites = false;
 const actualClient = await import("@/api/client");
+const createdDrafts: string[] = [];
 mock.module("@/api/client", () => ({
   ...actualClient,
+  createDetachedFile: async (options: { wt: string; prefix: string; ext: string }) => {
+    createdDrafts.push(options.wt);
+    return { name: "Note 1.md", path: `/drafts/${options.wt}/Note 1.md` };
+  },
   getFileContentByPath: async (path: string) => {
     const content = diskContent[path];
     if (content === undefined) throw new actualClient.ApiError("File not found", 404, "ENOENT");
@@ -37,6 +42,7 @@ mock.module("@/api/client", () => ({
 
 const {
   createBrowser,
+  createEditor,
   createTerminal,
   duplicateComparison,
   duplicatePatchDiff,
@@ -51,6 +57,7 @@ const {
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
 const { useWorktreeStore } = await import("@/store/worktrees");
+const { useProjectStore } = await import("@/store/projects");
 
 /** A center dockview with two groups: `left` (a.ts, b.ts) and `right` (c.ts). */
 function setup() {
@@ -336,15 +343,36 @@ describe("placement", () => {
     useWorktreeStore.setState({ activeWorktreePath: null });
     const { api } = setup();
 
-    createTerminal({ terminalId: "t" });
     openCompareFiles("/repo/a.ts", "/repo/b.ts");
     openFileBacked("codeEditor", "/repo/d.ts");
     createBrowser("https://example.com");
 
-    expect(api.getPanel("terminal-t")).toBeUndefined();
     expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
     expect(api.getPanel("codeeditor-/repo/d.ts")).toBeUndefined();
     expect(api.panels.some((p) => p.id.startsWith("browser-"))).toBe(true);
+  });
+
+  test("a Home plan is one of Home's drafts, belonging to no worktree", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    const { api } = setup();
+
+    await createEditor();
+
+    expect(createdDrafts.at(-1)).toBe("home");
+    expect(api.getPanel("editor-/drafts/home/Note 1.md")?.params).toEqual({
+      filePath: "/drafts/home/Note 1.md",
+    });
+  });
+
+  test("a Home terminal starts in the home directory and belongs to no worktree", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ homeDir: "/Users/me" });
+    const { api } = setup();
+
+    createTerminal({ terminalId: "t" });
+
+    expect(api.getPanel("terminal-t")?.params).toEqual({ terminalId: "t", cwd: "/Users/me" });
+    useProjectStore.setState({ homeDir: null });
   });
 
   test("a new panel opens as a tab in the active tab's group by default", () => {

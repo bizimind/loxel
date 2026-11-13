@@ -39,7 +39,7 @@ export interface TerminalSessionOptions {
   cols: number;
   rows: number;
   cwd: string;
-  /** The worktree the panel belongs to; notifications are filed under it. Defaults to `cwd`. */
+  /** The worktree the panel belongs to; notifications are filed under it. Absent for Home's. */
   worktreePath?: string;
   scrollbackLines?: number;
   env: Record<string, string | undefined>;
@@ -135,8 +135,11 @@ export class TerminalSession {
   /** Identifies this spawn; a client may only resume with offsets it got under this epoch. */
   readonly epoch = crypto.randomUUID();
   readonly cwd: string;
-  /** The worktree this session belongs to; follows the worktree when it is moved. */
-  worktreePath: string;
+  /**
+   * The worktree this session belongs to, or null for a Home terminal; follows the worktree when it
+   * is moved.
+   */
+  worktreePath: string | null;
   cols: number;
   rows: number;
   /** Resolves with the shell's exit code once the process is gone. */
@@ -169,7 +172,7 @@ export class TerminalSession {
   constructor(private readonly options: TerminalSessionOptions) {
     this.id = options.id;
     this.cwd = options.cwd;
-    this.worktreePath = options.worktreePath ?? options.cwd;
+    this.worktreePath = options.worktreePath ?? null;
     const size = clampTerminalSize(options.cols, options.rows);
     this.cols = size.cols;
     this.rows = size.rows;

@@ -59,6 +59,7 @@ describe("POST /api/open terminals and placement", () => {
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => window,
+      homeDrafts: {} as never,
       startTerminal: async (target) => {
         started.push(target);
       },
@@ -144,15 +145,17 @@ describe("POST /api/open terminals and placement", () => {
     expect(started).toEqual([]);
   });
 
-  test("waits like for a window while the window shows no worktree and cwd is in none", async () => {
+  test("opens in Home while the window shows no worktree and cwd is in none", async () => {
     window = { windowId: "w1", worktreePath: null };
 
     const res = await open({ terminal: { cwd: root, command: "ls" } });
 
-    // 503, which the CLI retries: a launching window shows its worktree in a moment.
-    expect(res.status).toBe(503);
-    expect(sent).toEqual([]);
-    expect(started).toEqual([]);
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.msg).toMatchObject({ type: "open_terminal", data: { worktreePath: null } });
+    // Started with no worktree, so its shell gets no LOXEL_WORKTREE.
+    expect(started).toHaveLength(1);
+    expect(started[0]).not.toHaveProperty("worktreePath");
   });
 
   test("reports a shell that fails to start", async () => {

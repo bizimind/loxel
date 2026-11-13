@@ -95,7 +95,7 @@ Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.
 - `stores.db` — UI state and panel layouts per project + worktree, settings, and other client stores (SQLite)
 - `projects.db` — registered projects
 - `comments/{repo-hash}.db` — reviews and comments, shared across a repo's worktrees
-- `detached/{project-hash}/{worktree-hash}/` — Drafts
+- `detached/{project-hash}/{worktree-hash}/` — Drafts, and `detached/home/` for plans made in Home
 - `localdb/{project-hash}/localdb.db` — data behind `:::localdb` blocks in markdown files
 - `logs/server-{instanceId}.log` — server logs (NDJSON, rotated at 5 MB, stale files removed after 24 h)
 

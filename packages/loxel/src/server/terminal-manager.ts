@@ -29,7 +29,7 @@ export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   rows: number;
   /** Applied only when the session is spawned. */
   cwd: string;
-  /** The panel's worktree when the shell starts elsewhere; applied only when spawned. */
+  /** The panel's worktree, absent for a Home terminal; applied only when spawned. */
   worktreePath?: string;
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
@@ -90,7 +90,8 @@ async function resolveToolchainEnv(
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
 interface PendingStart {
-  worktreePath: string;
+  /** Null for a Home terminal, which belongs to no worktree. */
+  worktreePath: string | null;
   /** Resolves to null when the terminal was destroyed meanwhile. */
   session: Promise<TerminalSession | null>;
   /** The client to bind once spawned; cleared by a detach. */
@@ -151,12 +152,13 @@ export class TerminalManager {
       session: this.buildEnv(options).then((env) => {
         if (this.starting.get(id) !== pending) return null;
         this.starting.delete(id);
-        const session = this.spawn(id, { ...options, worktreePath: pending.worktreePath }, env);
+        const worktreePath = pending.worktreePath ?? undefined;
+        const session = this.spawn(id, { ...options, worktreePath }, env);
         if (pending.size) session.resize(pending.size.cols, pending.size.rows);
         for (const data of pending.input) session.write(data);
         return session;
       }),
-      worktreePath: options.worktreePath ?? options.cwd,
+      worktreePath: options.worktreePath ?? null,
       sink: null,
       size: null,
       input: [],
@@ -170,6 +172,7 @@ export class TerminalManager {
   ): Promise<Record<string, string | undefined>> {
     const env = buildTerminalEnv();
     if (options.envOverrides) Object.assign(env, options.envOverrides);
+    // A Home terminal's toolchains are those of the directory it starts in.
     const worktreePath = options.worktreePath ?? options.cwd;
     const contributors = this.hooks.toolchainEnvs.filter(
       (contributor) => contributor.enabledInTerminal?.(options) ?? true,

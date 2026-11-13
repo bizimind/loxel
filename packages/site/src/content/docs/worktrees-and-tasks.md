@@ -86,6 +86,18 @@ This lets you see at a glance which worktrees have pending work — without swit
 
 ---
 
+## Home
+
+**Home**, at the top of the worktree sidebar, is a place for work that belongs to no task: browsing, a quick shell, a plan you haven't placed yet. It's where Loxel opens when no worktree is selected, so it is also what a new window shows. Home has its own tabs and layout, kept across restarts like a task's, and when no tab is open it lists what you can open there:
+
+- **Browser tabs**, with the same address field as a task's empty editor area (see [Browser](/docs/browser)).
+- **Terminals**, which start in your home folder and belong to no worktree, so `loxel <url>` from one opens the page in the window's Home or task.
+- **Plans**, saved as Home's [drafts](/docs/drafts) in Loxel's state folder.
+
+Code editors, drawings, diffs and the Git and file panels need a worktree, so Home doesn't offer them. Until you add your first project, **Add Project** is Home's main button.
+
+---
+
 ## The worktree sidebar
 
 The worktree sidebar lists your projects and their worktrees, with paths in your home folder shown as `~/…` (hover for the full path). Drag worktrees to reorder them. Right-click a worktree to copy its name, branch name, or absolute path, archive it, or remove it; on macOS the menu also has **Reveal in Finder** and **Open In** (installed terminals and editors). Removing a worktree asks for confirmation, offers to delete its branch, and warns when uncommitted or untracked files would be lost. It also ends the worktree's terminals and forgets its layout and settings, so a new worktree at the same path starts fresh. The same happens when you remove it outside Loxel, with `wt rm` or `git worktree remove`, even from one of those terminals. The removal finishes, and terminals of a worktree removed outside Loxel end about a minute later. Renaming with `wt mv` is not a removal, and the programs in its terminals keep running. The left and right arrow keys fold and unfold projects and worktrees with nested ones, or move to the parent or the first nested worktree, as in the project explorer.

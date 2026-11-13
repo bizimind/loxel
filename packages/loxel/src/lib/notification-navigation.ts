@@ -32,7 +32,11 @@ export function navigateToNotification(notification: ServerNotification): void {
 
   const wtStore = useWorktreeStore.getState();
 
-  if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
+  if (worktreePath === null && wtStore.activeWorktreePath !== null) {
+    // A Home terminal's: go Home first, then activate the panel after layout settles
+    wtStore.showHome();
+    requestAnimationFrame(() => activatePanelById(panelId));
+  } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
     // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)

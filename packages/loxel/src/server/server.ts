@@ -7,6 +7,7 @@ import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
+import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
 import type {
   FileMoveSource,
@@ -21,7 +22,7 @@ import {
   parseBinaryHeader,
 } from "@/api/ws-protocol";
 
-import { config, getDetachedDir, hash12 } from "./config";
+import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
 import {
@@ -105,6 +106,10 @@ export function findProjectForPath(targetPath: string): ProjectState | undefined
  */
 function resolveFilePath(absolutePath: string, preferredWtPath?: string): ResolvedFilePath | null {
   const normalized = resolve(absolutePath);
+  // Home's drafts belong to no worktree, so no worktree's resources can resolve them.
+  if (normalized.startsWith(homeDrafts.dir + "/")) {
+    return { type: "detached", wtPath: HOME_KEY, service: homeDrafts, name: basename(normalized) };
+  }
   // A folder can be open in the Others section of several worktrees; the requester's wins.
   const preferred = preferredWtPath ? wtResources.get(preferredWtPath) : undefined;
   const candidates: Array<[string, WorktreeResources]> =
@@ -113,10 +118,9 @@ function resolveFilePath(absolutePath: string, preferredWtPath?: string): Resolv
       : [...wtResources];
   for (const [wtPath, resources] of candidates) {
     // Check detached files first (more specific path prefix)
-    const detachedDir = resources.detachedFilesService.dir;
-    if (normalized.startsWith(detachedDir + "/")) {
-      const name = basename(normalized);
-      return { type: "detached", wtPath, resources, name };
+    const service = resources.detachedFilesService;
+    if (normalized.startsWith(service.dir + "/")) {
+      return { type: "detached", wtPath, service, name: basename(normalized) };
     }
     // Check project files
     if (normalized.startsWith(wtPath + "/")) {
@@ -222,11 +226,9 @@ function broadcastAll(message: WsMessage) {
 function terminalSpawnTarget(
   msg: TerminalSpawnTarget,
 ): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides" | "activatePythonEnv"> {
-  const envOverrides: Record<string, string> = {
-    LOXEL: "1",
-    LOXEL_PORT: String(config.port),
-    LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
-  };
+  const envOverrides: Record<string, string> = { LOXEL: "1", LOXEL_PORT: String(config.port) };
+  // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
+  if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
 
   // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
@@ -408,6 +410,20 @@ const externalFolderRegistry = new ExternalFolderRegistry({
     for (const wtPath of worktrees) broadcastFileMoved(wtPath, oldPath, newPath, source);
   },
 });
+
+/**
+ * Home's drafts (plans made with no worktree active): always running, since Home belongs to no
+ * worktree subscription, and reported to every window, any of which may show Home.
+ */
+const homeDrafts = new DetachedFilesService(
+  getHomeDraftsDir(),
+  (entries) => {
+    broadcastAll({ type: "detached_files_changed", wtPath: HOME_KEY, data: { entries } });
+  },
+  (path, nonces) => {
+    broadcastAll({ type: "file_content_changed", wtPath: HOME_KEY, data: { path, nonces } });
+  },
+);
 
 function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesService {
   const dir = getDetachedDir(cwd, wtPath);
@@ -1135,6 +1151,9 @@ if (repoArg) {
 }
 
 // Initialize all projects in parallel — no worktree focus, client subscribes on connect
+await homeDrafts.start().catch((err: unknown) => {
+  log.error("Failed to start Home's drafts", { error: err });
+});
 const initResults = await Promise.allSettled(data.projects.map((p) => initializeProject(p.path)));
 
 for (let i = 0; i < initResults.length; i++) {
@@ -1191,6 +1210,7 @@ const routeContext: RouteContext = {
     formatService.format(content, filePath, wtPath, settings),
   getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
   activeWindow,
+  homeDrafts,
   startTerminal: ({ command, ...target }) => {
     const settings = terminalSpawnSettings();
     return terminalManager.ensureSpawned(target.id, {
@@ -1449,6 +1469,7 @@ function shutdown(exitCode = 0) {
 }
 
 function tearDown(exitCode: number) {
+  homeDrafts.stop();
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);

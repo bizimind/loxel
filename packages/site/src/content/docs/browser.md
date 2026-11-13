@@ -15,7 +15,7 @@ An empty editor area lists what you can open, with a field next to **New Browser
 
 ## Home
 
-**Home**, at the top of the worktree sidebar, is a place for browsing that belongs to no task. It's where Loxel opens when no worktree is selected, so it is also what a new window shows. Home has its own browser tabs and layout, kept across restarts like a task's, and when no tab is open it shows the same address field, with **Add Project** next to it. Editors, terminals and the Git panels belong to a worktree, so Home has browser panels only.
+**Home**, at the top of the worktree sidebar, is where you browse outside any task. It's where Loxel opens when no worktree is selected, and it has its own browser tabs, kept across restarts, with the same address field when none is open. Terminals and plans can go there too; see [Worktrees & Tasks](/docs/worktrees-and-tasks#home).
 
 ---
 
