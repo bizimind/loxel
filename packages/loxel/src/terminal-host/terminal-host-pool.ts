@@ -67,6 +67,12 @@ export interface TerminalHostPoolOptions {
   socketDir?: string;
 }
 
+/** The host a session runs in, and which spawn of its ID that is. */
+interface Owner {
+  host: SocketTerminalHost;
+  epoch: string;
+}
+
 export class TerminalHostPool implements TerminalHost {
   private readonly runDir: string;
   private readonly socketDir: string;
@@ -76,7 +82,7 @@ export class TerminalHostPool implements TerminalHost {
   /** The host new sessions spawn in, once there is one. */
   private current: SocketTerminalHost | null = null;
   /** The host each session runs in. */
-  private readonly owners = new Map<string, SocketTerminalHost>();
+  private readonly owners = new Map<string, Owner>();
   private readonly listeners = new Set<(event: TerminalHostEvent) => void>();
   /** Events held back until the caller has adopted the sessions found at startup. */
   private held: TerminalHostEvent[] | null = [];
@@ -138,7 +144,7 @@ export class TerminalHostPool implements TerminalHost {
           this.log.warn(`Terminal ${info.id.slice(0, 8)} runs in two hosts; using one`);
           continue;
         }
-        this.owners.set(info.id, result.host);
+        this.owners.set(info.id, { host: result.host, epoch: info.epoch });
         sessions.push(info);
       }
       if (!this.current && result.build === this.options.hostBuildId) this.current = result.host;
@@ -154,9 +160,10 @@ export class TerminalHostPool implements TerminalHost {
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
     if (this.closed) return Promise.reject(new Error("The terminal hosts are shut down"));
     const host = this.currentHost();
-    this.owners.set(request.id, host);
+    const owner: Owner = { host, epoch: request.epoch };
+    this.owners.set(request.id, owner);
     return host.spawn(request).catch((err: unknown) => {
-      if (this.owners.get(request.id) === host) this.owners.delete(request.id);
+      if (this.owners.get(request.id) === owner) this.owners.delete(request.id);
       throw err;
     });
   }
@@ -167,31 +174,31 @@ export class TerminalHostPool implements TerminalHost {
   }
 
   attach(request: TerminalAttachRequest): Promise<void> {
-    return this.owners.get(request.id)?.attach(request) ?? Promise.resolve();
+    return this.owners.get(request.id)?.host.attach(request) ?? Promise.resolve();
   }
 
   detach(id: string): void {
-    this.owners.get(id)?.detach(id);
+    this.owners.get(id)?.host.detach(id);
   }
 
   write(id: string, data: Uint8Array): void {
-    this.owners.get(id)?.write(id, data);
+    this.owners.get(id)?.host.write(id, data);
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.owners.get(id)?.resize(id, cols, rows);
+    this.owners.get(id)?.host.resize(id, cols, rows);
   }
 
   setScrollback(id: string, lines: number): void {
-    this.owners.get(id)?.setScrollback(id, lines);
+    this.owners.get(id)?.host.setScrollback(id, lines);
   }
 
   ack(id: string, syncOffset: number, bytes: number): void {
-    this.owners.get(id)?.ack(id, syncOffset, bytes);
+    this.owners.get(id)?.host.ack(id, syncOffset, bytes);
   }
 
   destroy(id: string): void {
-    const host = this.owners.get(id);
+    const host = this.owners.get(id)?.host;
     if (!host) return;
     this.owners.delete(id);
     host.destroy(id);
@@ -199,7 +206,7 @@ export class TerminalHostPool implements TerminalHost {
   }
 
   setMeta(id: string, meta: TerminalSessionMeta): void {
-    this.owners.get(id)?.setMeta(id, meta);
+    this.owners.get(id)?.host.setMeta(id, meta);
   }
 
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
@@ -310,7 +317,7 @@ export class TerminalHostPool implements TerminalHost {
       this.hosts.delete(host);
       if (this.current === host) this.current = null;
       for (const [id, owner] of this.owners) {
-        if (owner === host) this.owners.delete(id);
+        if (owner.host === host) this.owners.delete(id);
       }
     });
     return host;
@@ -353,12 +360,20 @@ export class TerminalHostPool implements TerminalHost {
   }
 
   private onHostEvent(host: SocketTerminalHost, event: TerminalHostEvent): void {
-    if (event.type === "exit" && this.owners.get(event.id) === host) {
-      this.owners.delete(event.id);
-      this.retireIfDone(host);
-    }
+    if (event.type === "exit") this.onHostExit(host, event.id, event.epoch);
     if (this.held) this.held.push(event);
     else this.deliver(event);
+  }
+
+  /**
+   * Only the exit of the spawn that is routed ends its route: a late exit of an earlier spawn under
+   * the same ID must not cut its replacement off.
+   */
+  private onHostExit(host: SocketTerminalHost, id: string, epoch: string): void {
+    const owner = this.owners.get(id);
+    if (owner?.host !== host || owner.epoch !== epoch) return;
+    this.owners.delete(id);
+    this.retireIfDone(host);
   }
 
   private deliver(event: TerminalHostEvent): void {
@@ -368,7 +383,7 @@ export class TerminalHostPool implements TerminalHost {
   /** Let go of an earlier generation's host once it has no sessions left; it then exits. */
   private retireIfDone(host: SocketTerminalHost): void {
     if (host === this.current || this.closed) return;
-    for (const owner of this.owners.values()) if (owner === host) return;
+    for (const owner of this.owners.values()) if (owner.host === host) return;
     this.hosts.delete(host);
     this.log.info(`Terminal host ${host.hostId} has no sessions left, letting it go`);
     void host.disconnect("end");

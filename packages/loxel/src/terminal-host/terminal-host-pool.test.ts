@@ -292,4 +292,21 @@ describe("TerminalHostPool", () => {
     await pool.spawn(spawned);
     await until(() => events.some((event) => event.type === "exit" && event.id === spawned.id));
   });
+
+  test("a late exit of an earlier spawn under the ID leaves its replacement routed", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const running = await startHost(runDir, "56565656", "current");
+    const { pool, events } = createPool(stateDir, runDir);
+    await startPool(pool);
+    const replacement = spawnRequest("exec sleep 30");
+    await pool.spawn(replacement);
+
+    // An exit of an earlier spawn under the ID, still on its way when the replacement started.
+    const stale = { type: "exit", id: replacement.id, epoch: "earlier", exitCode: 0 } as const;
+    (running.host as unknown as { emit(event: typeof stale): void }).emit(stale);
+    await until(() => events.some((event) => event.type === "exit" && event.epoch === "earlier"));
+
+    pool.destroy(replacement.id);
+    await until(() => running.host.sessionIds().length === 0);
+  });
 });
