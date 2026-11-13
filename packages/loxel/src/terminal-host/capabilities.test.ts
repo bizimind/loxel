@@ -114,15 +114,18 @@ async function startService() {
   return { socketPath, host };
 }
 
+/** Connect as a server; `events` gets every event, from the first one the host sends on. */
 async function connect(
   socketPath: string,
   initialize: InitializeMessage = INITIALIZE,
+  events: TerminalHostEvent[] = [],
 ): Promise<SocketTerminalHost> {
   const connection = openHostConnection(socketPath, initialize);
   const client = new SocketTerminalHost(
     { hostId: "abcdef01", socketPath, initialize, log: createNoopLogger() },
     connection,
   );
+  client.onEvent((event) => events.push(event));
   cleanups.push(() => client.drop());
   // The client took the connection in its own callback on it, registered first, so it ran first.
   await connection;
@@ -309,12 +312,12 @@ describe("endedSessions", () => {
     ]);
   });
 
-  test("an older server gets neither the ended sessions nor the notifications raised without it", async () => {
+  test("an older server gets the notifications raised without it, but not the ended sessions", async () => {
     const { socketPath, host } = await startService();
     // No server yet: the session ends, and its notification is queued, for the next one.
     const raised: TerminalHostEvent[] = [];
     host.onEvent((event) => raised.push(event));
-    await host.spawn(spawnRequest("printf '\\033]9;done\\007'; exit 3"));
+    const ended = await host.spawn(spawnRequest("printf '\\033]9;done\\007'; exit 3"));
     await until(() => raised.length > 0 && host.endedSessionCount === 1);
 
     const olderServer: InitializeMessage = {
@@ -322,12 +325,13 @@ describe("endedSessions", () => {
       protocol: "1.1.0",
       capabilities: ["foregroundProcess"],
     };
-    const client = await connect(socketPath, olderServer);
     const events: TerminalHostEvent[] = [];
-    client.onEvent((event) => events.push(event));
+    const client = await connect(socketPath, olderServer, events);
     // Answered after anything the host sent on connecting.
     expect(await client.list()).toEqual([]);
-    expect(events).toEqual([]);
+    expect(events).toEqual([
+      { type: "osc", id: ended.id, epoch: ended.epoch, code: 9, data: "done" },
+    ]);
     expect(host.endedSessionCount).toBe(0);
   });
 });

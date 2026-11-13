@@ -264,6 +264,40 @@ describe("SocketTerminalHost against the host service", () => {
     expect(restored.at(-1)?.type).toBe("exit");
   });
 
+  test("a session that ended during a reconnect with no client is reported ended at once, and drained later", async () => {
+    const service = await startService();
+    const proxy = await startProxy(service.dir, service.socketPath);
+    const { client, events, outputText } = connect(proxy.socketPath);
+    const spawned = request("read line; echo final words; exit 4");
+    await client.spawn(spawned);
+
+    // Its panel is not mounted: no client is attached when the connection drops.
+    proxy.cut();
+    await until(() => !service.hasServer());
+    service.host.write(spawned.id, textEncoder.encode("\n"));
+    await until(() => service.host.endedSessionCount === 1);
+    proxy.release();
+    await until(() => events.some((event) => event.type === "ended"));
+    expect(events.filter((event) => event.type !== "output")).toEqual([
+      { type: "ended", id: spawned.id, epoch: spawned.epoch, exitCode: 4, outputKept: true },
+    ]);
+    expect(service.host.endedSessionCount).toBe(1);
+
+    // The panel mounts later and gets what it missed, then the exit.
+    await client.attach({ id: spawned.id, attachment: 1 });
+    await until(() => events.some((event) => event.type === "exit"));
+    const state = events.find((event) => event.type === "state");
+    const screen =
+      (state?.type === "state" ? (state.state.snapshot ?? "") : "") + outputText(spawned.id);
+    expect(screen).toContain("final words");
+    expect(events.at(-1)).toEqual({
+      type: "exit",
+      id: spawned.id,
+      epoch: spawned.epoch,
+      exitCode: 4,
+    });
+  });
+
   test("reports every session lost, with no exit code, once the host is gone", async () => {
     const { socketPath, service, host } = await startService();
     const { client, events } = connect(socketPath, { isProcessAlive: () => false });

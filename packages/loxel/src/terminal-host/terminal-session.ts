@@ -25,7 +25,7 @@ export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
 
 /** The events a session sends on its own; its exit goes to `onExit`, for the host to announce. */
-export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" | "lost" }>;
+export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" | "ended" | "lost" }>;
 
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {

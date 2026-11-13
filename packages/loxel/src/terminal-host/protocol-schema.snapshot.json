@@ -369,7 +369,18 @@
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/__schema0" }
         },
-        "exitCode": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
+        "ended": {
+          "type": "object",
+          "properties": {
+            "exitCode": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "outputKept": { "type": "boolean" }
+          },
+          "required": ["exitCode", "outputKept"]
+        }
       },
       "required": ["id", "epoch", "offset", "pid", "cols", "rows", "meta"],
       "$defs": {
@@ -406,10 +417,17 @@
             "propertyNames": { "type": "string" },
             "additionalProperties": { "$ref": "#/$defs/__schema0" }
           },
-          "exitCode": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+          "ended": {
+            "type": "object",
+            "properties": {
+              "exitCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "outputKept": { "type": "boolean" }
+            },
+            "required": ["exitCode", "outputKept"]
           }
         },
         "required": ["id", "epoch", "offset", "pid", "cols", "rows", "meta"]

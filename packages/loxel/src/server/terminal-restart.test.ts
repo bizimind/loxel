@@ -356,13 +356,18 @@ describe("terminals across server restarts", () => {
       await until(() => !isAlive(shell.shellPid), TEST_TIMEOUT_MS);
 
       await startServer();
+      // Known ended before any panel reattaches: no longer listed as running.
+      const listed = RunningTerminalsSchema.parse(
+        await (await fetch(`${baseUrl}/api/terminals`)).json(),
+      );
+      expect(listed.terminals).toEqual([]);
       const resumed = await openPanel(baseUrl);
       resumed.attach(shell.id, since);
       await until(() => resumed.exits.length > 0, TEST_TIMEOUT_MS);
       expect(resumed.states[0]).toMatchObject({ epoch: shell.epoch, mode: "resume" });
       expect(resumed.text()).toContain("last-words");
       expect(resumed.exits).toEqual([
-        { type: "terminal_exit", id: shell.id, reason: "exited", exitCode: 7 },
+        { type: "terminal_exit", id: shell.id, reason: "exited", exitCode: 7, outputLost: false },
       ]);
       resumed.close();
       server!.kill("SIGTERM");

@@ -225,9 +225,13 @@ describe("InProcessTerminalHost keeping ended sessions", () => {
     const { host, events, outputText } = createHost();
     const spawned = await spawnEnded(host, "echo last words; exit 4");
     expect(events.some((event) => event.type === "exit")).toBe(false);
-    expect(await host.list()).toEqual([expect.objectContaining({ id: spawned.id, exitCode: 4 })]);
+    expect(await host.list()).toEqual([
+      expect.objectContaining({ id: spawned.id, ended: { exitCode: 4, outputKept: true } }),
+    ]);
     expect(host.sessionIds()).toEqual([]);
 
+    // A server connected, which attaches to it.
+    host.stopKeepingEndedSessions();
     await host.attach({ id: spawned.id, attachment: 1 });
     const types = events.map((event) => event.type);
     expect(types.indexOf("state")).toBeLessThan(types.indexOf("exit"));
@@ -265,14 +269,24 @@ describe("InProcessTerminalHost keeping ended sessions", () => {
     const older = await spawnEnded(host, "echo older; exit 2");
     const newest = await spawnEnded(host, "echo newest; exit 3");
 
-    expect((await host.list()).map(({ id, exitCode }) => ({ id, exitCode }))).toEqual([
-      { id: older.id, exitCode: 2 },
-      { id: newest.id, exitCode: 3 },
+    expect((await host.list()).map(({ id, ended }) => ({ id, ended }))).toEqual([
+      { id: older.id, ended: { exitCode: 2, outputKept: false } },
+      { id: newest.id, ended: { exitCode: 3, outputKept: true } },
     ]);
     // Its output let go of, an attach gets only the exit.
+    host.stopKeepingEndedSessions();
     await host.attach({ id: older.id, attachment: 1 });
     expect(events.map((event) => event.type)).toEqual(["exit"]);
     await host.attach({ id: newest.id, attachment: 2 });
     expect(events.map((event) => event.type)).toEqual(["exit", "state", "exit"]);
+  });
+
+  test("an attach that finds no server connected anymore leaves the exit for the next one", async () => {
+    const { host, events } = createHost();
+    const spawned = await spawnEnded(host, "echo kept; exit 6");
+    // Still keeping ended sessions, as while no server is connected: the drain reports nothing.
+    await host.attach({ id: spawned.id, attachment: 1 });
+    expect(events.some((event) => event.type === "exit")).toBe(false);
+    expect(host.endedSessionCount).toBe(1);
   });
 });

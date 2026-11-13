@@ -19,6 +19,7 @@ import type {
   TerminalHost,
   TerminalHostEvent,
   TerminalOutputEvent,
+  TerminalSessionEnd,
   TerminalSessionInfo,
 } from "@/terminal-host";
 
@@ -177,10 +178,11 @@ interface ManagedSession {
   /** True once the sink has received its state: output from then on is its own. */
   live: boolean;
   /**
-   * Its program ended while no server was connected, and the host kept it: the next attach shows
-   * what its client missed, then its exit. It no longer counts as running.
+   * Set once its program ended while no server was connected, and the host kept it: the next
+   * attach shows what its client missed, then its exit. It no longer counts as running, nor as an
+   * orphan to end, so a panel that mounts later still gets what it missed.
    */
-  ended: boolean;
+  ended: TerminalSessionEnd | null;
 }
 
 /** What `get()` reports about a session. */
@@ -223,7 +225,7 @@ export class TerminalManager {
         sink: null,
         attachment: 0,
         live: false,
-        ended: info.exitCode !== undefined,
+        ended: info.ended ?? null,
       });
     }
     this.hooks.onSessionsChanged?.();
@@ -408,7 +410,7 @@ export class TerminalManager {
       sink: pending.sink,
       attachment: 0,
       live: false,
-      ended: false,
+      ended: null,
     };
     this.sessions.set(id, session);
     this.hooks.onSessionsChanged?.();
@@ -440,16 +442,33 @@ export class TerminalManager {
         session.sink.sendOutput(event);
         return;
       }
-      case "exit":
-        this.onEnded(event.id, event.epoch, { reason: "exited", exitCode: event.exitCode });
+      case "exit": {
+        const outputLost = this.sessions.get(event.id)?.ended?.outputKept === false;
+        this.onEnded(event.id, event.epoch, {
+          reason: "exited",
+          exitCode: event.exitCode,
+          outputLost,
+        });
         return;
+      }
+      case "ended": {
+        const session = this.sessions.get(event.id);
+        if (!session || session.epoch !== event.epoch) return;
+        const known = session.ended;
+        if (known?.exitCode === event.exitCode && known.outputKept === event.outputKept) return;
+        // Listed again on every restored connection; the host may have let its output go since.
+        session.ended = { exitCode: event.exitCode, outputKept: event.outputKept };
+        log.info(`Terminal ${event.id.slice(0, 8)} ended with code ${event.exitCode} meanwhile`);
+        this.hooks.onSessionsChanged?.();
+        return;
+      }
       case "lost":
         this.onEnded(
           event.id,
           event.epoch,
           event.reason === "host_lost"
             ? { reason: "host_lost" }
-            : { reason: "exited", exitCode: null },
+            : { reason: "exited", exitCode: null, outputLost: true },
         );
         return;
       case "osc": {
@@ -552,17 +571,20 @@ export class TerminalManager {
     }
   }
 
-  /** True if any session has no attached client. */
+  /** True if any running session has no attached client. */
   hasOrphanSessions(): boolean {
     for (const session of this.sessions.values()) {
-      if (!session.sink) return true;
+      if (!session.sink && !session.ended) return true;
     }
     return false;
   }
 
-  /** Destroy every session without an attached client. Returns the number destroyed. */
+  /**
+   * Destroy every running session without an attached client. Ended ones are kept for their
+   * panels to show what they missed. Returns the number destroyed.
+   */
   destroyOrphans(): number {
-    const orphans = [...this.sessions].filter(([, s]) => !s.sink).map(([id]) => id);
+    const orphans = [...this.sessions].filter(([, s]) => !s.sink && !s.ended).map(([id]) => id);
     for (const id of orphans) this.destroy(id);
     return orphans.length;
   }

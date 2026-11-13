@@ -323,7 +323,7 @@ describe("TerminalHostService", () => {
     next.send({ type: "list", requestId: 1 });
     expect(await next.message("result")).toMatchObject({
       requestId: 1,
-      value: [expect.objectContaining({ id, epoch, exitCode: 4 })],
+      value: [expect.objectContaining({ id, epoch, ended: { exitCode: 4, outputKept: true } })],
     });
 
     // The attach gets the screen as the program left it, then the real exit.

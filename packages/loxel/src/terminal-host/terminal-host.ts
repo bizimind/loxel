@@ -74,6 +74,17 @@ export type TerminalSpawnRequest = z.infer<typeof TerminalSpawnSpecSchema> & {
   input?: Uint8Array;
 };
 
+/**
+ * How a session that ended while no server was connected ended: its program's exit code, and
+ * whether the host still has its output and screen for an attach, or had to let them go to stay
+ * within its limits.
+ */
+export const TerminalSessionEndSchema = z.object({
+  exitCode: z.number().int(),
+  outputKept: z.boolean(),
+});
+export type TerminalSessionEnd = z.infer<typeof TerminalSessionEndSchema>;
+
 export const TerminalSessionInfoSchema = z.object({
   id: TerminalIdSchema,
   /** The spawn's epoch; offsets and `since` points are only meaningful within one epoch. */
@@ -86,10 +97,10 @@ export const TerminalSessionInfoSchema = z.object({
   meta: TerminalSessionMetaSchema,
   /**
    * Set when the session's program has ended, while no server was connected: the host kept the
-   * session, its output and its screen, so the next server can attach once to show what it missed,
-   * after which the host sends the `exit` with this code. Capability `endedSessions` (1.2.0).
+   * session, so the next server learns how it ended and can attach once to show what its client
+   * missed, after which the host sends the `exit`. Capability `endedSessions` (1.2.0).
    */
-  exitCode: z.number().int().optional(),
+  ended: TerminalSessionEndSchema.optional(),
 });
 export type TerminalSessionInfo = z.infer<typeof TerminalSessionInfoSchema>;
 
@@ -150,6 +161,18 @@ export const TerminalOscEventSchema = z.object({
 });
 
 /**
+ * A session this side knew as running is listed ended (see {@link TerminalSessionInfo}): found
+ * when a connection to its host is restored. The host keeps it until an attach drains it, which
+ * then gets its `exit`, or a `destroy`. Reported by the client of a host in another process, never
+ * by a host itself, and never sent over the socket.
+ */
+export interface TerminalEndedEvent extends TerminalSessionEnd {
+  type: "ended";
+  id: string;
+  epoch: string;
+}
+
+/**
  * The session ended without its exit code reaching this side: its host is gone, and the program
  * with it (`host_lost`), or it ended while the server was not connected to a host that does not
  * keep ended sessions, or that had to let it go (`exit_unknown`). Reported by the client of a host
@@ -179,6 +202,7 @@ export type TerminalHostEvent =
   | z.infer<typeof TerminalStateEventSchema>
   | TerminalOutputEvent
   | z.infer<typeof TerminalExitEventSchema>
+  | TerminalEndedEvent
   | TerminalLostEvent
   | z.infer<typeof TerminalOscEventSchema>;
 
@@ -191,7 +215,7 @@ export type TerminalHostEvent =
 export interface TerminalHost {
   /** Start a session. Rejects if the ID is in use or the program cannot be started. */
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo>;
-  /** Every session, ended ones a host kept for this server included, with their `exitCode`. */
+  /** Every session, ended ones a host kept for this server included, with how they `ended`. */
   list(): Promise<TerminalSessionInfo[]>;
   /**
    * Bind the client: replaces any attached one. Resolves once the attach's `state` event has

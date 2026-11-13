@@ -8,6 +8,7 @@ import type {
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
+  TerminalSessionEnd,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,
@@ -24,8 +25,8 @@ interface HostedSession {
 
 /** A session whose program ended while ended sessions were kept, until it is attached or destroyed. */
 interface EndedSession {
-  /** As listed, with the exit code. */
-  info: TerminalSessionInfo & { exitCode: number };
+  /** As listed, with how it ended. */
+  info: TerminalSessionInfo & { ended: TerminalSessionEnd };
   /** Its ring and screen; null once let go to stay within the limits, when an attach only gets the exit. */
   session: TerminalSession | null;
 }
@@ -44,8 +45,8 @@ export interface EndedSessionLimits {
 
 export const ENDED_SESSION_LIMITS: EndedSessionLimits = {
   sessions: 1000,
-  withOutput: 16,
-  outputBytes: 16 * 1024 * 1024,
+  withOutput: 128,
+  outputBytes: 128 * 1024 * 1024,
 };
 
 export class InProcessTerminalHost implements TerminalHost {
@@ -64,7 +65,8 @@ export class InProcessTerminalHost implements TerminalHost {
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
     const { id, meta, input } = request;
     if (this.sessions.has(id) || this.ended.has(id)) {
-      return Promise.reject(new Error(`Terminal ${id} is already running`));
+      const state = this.sessions.has(id) ? "running" : "kept, ended";
+      return Promise.reject(new Error(`Terminal ${id} is already ${state}`));
     }
     let session: TerminalSession;
     try {
@@ -114,8 +116,9 @@ export class InProcessTerminalHost implements TerminalHost {
       // output was let go of meanwhile has nothing left to show, only the exit.
       if (ended.session === session && !session.isAttachedAs(attachment)) return;
     }
-    // Forgotten meanwhile, or already reported by an attach that superseded this one.
-    if (this.ended.get(id) !== ended) return;
+    // Forgotten meanwhile, or already reported by an attach that superseded this one; or its server
+    // left meanwhile, and the exit waits for the next one.
+    if (this.ended.get(id) !== ended || this.onKeptEnded) return;
     this.reportEnded(ended);
   }
 
@@ -243,7 +246,8 @@ export class InProcessTerminalHost implements TerminalHost {
     }
     session.hangUp();
     this.runtime.log.info(`Keeping terminal ${session.id.slice(0, 8)}, ended with no server`);
-    this.ended.set(session.id, { info: { ...this.info(hosted), exitCode }, session });
+    const ended = { exitCode, outputKept: true };
+    this.ended.set(session.id, { info: { ...this.info(hosted), ended }, session });
     this.enforceEndedLimits();
     onEnded();
   }
@@ -252,7 +256,7 @@ export class InProcessTerminalHost implements TerminalHost {
   private reportEnded({ info, session }: EndedSession): void {
     this.ended.delete(info.id);
     session?.destroy();
-    this.emit({ type: "exit", id: info.id, epoch: info.epoch, exitCode: info.exitCode });
+    this.emit({ type: "exit", id: info.id, epoch: info.epoch, exitCode: info.ended.exitCode });
   }
 
   private enforceEndedLimits(): void {
@@ -274,6 +278,7 @@ export class InProcessTerminalHost implements TerminalHost {
       count--;
       session.destroy();
       ended.session = null;
+      ended.info = { ...ended.info, ended: { ...ended.info.ended, outputKept: false } };
     }
   }
 }

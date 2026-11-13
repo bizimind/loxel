@@ -34,9 +34,9 @@ import {
  *
  * - `foregroundProcess` (1.1.0): `foreground_processes`, each session's foreground program.
  * - `endedSessions` (1.2.0): while no server is connected, the host keeps the sessions whose program
- *   ends, which `list` reports with their `exitCode` and an attach drains before their `exit`, and
- *   queues their `osc` events, which it sends after `initialize_result`. Without it in a server's
- *   `initialize`, the host forgets both when that server connects.
+ *   ends, which `list` reports `ended` and an attach drains before their `exit`. Without it in a
+ *   server's `initialize`, the host forgets them when that server connects. (The `osc` events
+ *   queued meanwhile, sent after `initialize_result`, go to every server.)
  */
 export const TERMINAL_HOST_CAPABILITIES = ["foregroundProcess", "endedSessions"] as const;
 export type TerminalHostCapability = (typeof TERMINAL_HOST_CAPABILITIES)[number];

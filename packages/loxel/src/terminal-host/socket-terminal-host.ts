@@ -7,9 +7,10 @@
  * - A connection that closes unasked does not mean the sessions are gone: the client reconnects,
  *   reconciles its sessions with the host's `list()` and re-sends the latest attach of every
  *   session that had a client, resuming from what that client last got. A session that ended
- *   meanwhile is listed with its exit code by a host with capability `endedSessions`, and that
- *   attach gets the output it missed and then its exit. Only when the host is confirmed gone (its
- *   socket refuses connections, or its process is not running) are its sessions reported `lost`.
+ *   meanwhile, which a host with capability `endedSessions` lists as such, is reported `ended` at
+ *   once; an attach later gets the output its client missed, then its exit. Only when the host is
+ *   confirmed gone (its socket refuses connections, or its process is not running) are its
+ *   sessions reported `lost`.
  */
 import type { ChildLogger } from "@/api/log-entry-model";
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
@@ -589,7 +590,12 @@ export class SocketTerminalHost implements TerminalHost {
       connection.send(encodeJsonFrame({ type: "destroy", id }));
     }
     for (const [id, known] of this.sessions) {
-      if (running.get(id)?.epoch === known.epoch) continue;
+      const listed = running.get(id);
+      if (listed?.epoch === known.epoch) {
+        // Ended meanwhile: whoever routes it learns how now, and an attach drains it later.
+        if (listed.ended) this.emit({ type: "ended", id, epoch: known.epoch, ...listed.ended });
+        continue;
+      }
       if (!known.confirmed) continue;
       this.sessions.delete(id);
       // A host with `endedSessions` lists such a session with its exit code; one without it, or

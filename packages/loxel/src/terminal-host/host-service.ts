@@ -10,8 +10,8 @@
  * - When the server leaves with `disconnect {sessions: "end"}`, or a `terminate`, every session
  *   ends. With `keep`, they keep running until a server comes back. When its connection closes
  *   without either, they get {@link TERMINAL_HOST_GRACE_MS} for a server to come back before they end.
- * - While no server is connected, a session whose program ends is kept, and notifications are
- *   queued, for the next server (capability `endedSessions`). With only ended sessions left, they
+ * - While no server is connected, notifications are queued for the next server, and a session whose
+ *   program ends is kept for the next one with capability `endedSessions`. With only ended sessions left, they
  *   too get the grace period.
  * - With no server and no sessions left, the host is done.
  */
@@ -302,11 +302,9 @@ export class TerminalHostService {
     this.clearGrace();
     this.host.stopKeepingEndedSessions();
     const own = { protocol: TERMINAL_HOST_PROTOCOL, capabilities: TERMINAL_HOST_CAPABILITIES };
-    if (!sharedCapabilities(initialize, own).has("endedSessions")) {
-      // A server that would take an ended session for a running one, as before the capability.
-      this.host.forgetEndedSessions();
-      this.queuedOsc.take();
-    }
+    // A server that would take an ended session for a running one, as before the capability. The
+    // queued notifications are `osc` events, which every server reads, so it still gets them.
+    if (!sharedCapabilities(initialize, own).has("endedSessions")) this.host.forgetEndedSessions();
     const previous = this.current;
     this.current = connection;
     if (previous) {
@@ -323,19 +321,19 @@ export class TerminalHostService {
   /** Close the host's side of `connection`; it is no longer the server, if it was. */
   private retire(connection: Connection): void {
     connection.retired = true;
-    if (this.current === connection) this.leftBy();
+    if (this.current === connection) this.serverGone();
     connection.socket.end();
   }
 
   private onClose(connection: Connection): void {
     if (connection.retired || this.current !== connection) return;
-    this.leftBy();
+    this.serverGone();
     this.log.warn("The server's connection closed without a disconnect");
     this.afterServerLeft("dropped");
   }
 
   /** The current server is gone: nothing more is sent to it, and what follows waits for the next. */
-  private leftBy(): void {
+  private serverGone(): void {
     this.current = null;
     this.options.setLogForward(null);
     this.host.detachAll();
@@ -353,8 +351,12 @@ export class TerminalHostService {
       this.finish("no sessions left");
       return;
     }
-    if (mode === "dropped") this.startGrace(`${running} session(s) waiting for a server`);
-    else if (running === 0) this.startGrace(`${ended} ended session(s) waiting for a server`);
+    if (running > 0) {
+      if (mode === "dropped") this.startGrace(`${running} session(s) waiting for a server`);
+      return;
+    }
+    // Only ended sessions are left: they wait no longer than a dropped server's sessions would.
+    this.startGrace(`${ended} ended session(s) waiting for a server`);
   }
 
   /** A session ended while no server was connected; the host keeps it for the next one. */
