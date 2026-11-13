@@ -234,7 +234,7 @@ export interface WorktreeState {
    */
   switchWorktree: (path: string) => Promise<void>;
 
-  /** Show Home, the layout with no worktree active (its own browser panels). */
+  /** Show Home, the layout with no worktree active (its own browsers, terminals and plans). */
   showHome: () => void;
 
   /**
