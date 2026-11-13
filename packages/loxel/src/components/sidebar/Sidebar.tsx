@@ -30,8 +30,8 @@ import { useWorktreeStore } from "@/store/worktrees";
 
 import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
+import { LoxelLogoTile } from "../ui/loxel-logo";
 import { EnableNestingDialog } from "./EnableNestingDialog";
-import { LoxelMark } from "./LoxelMark";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { ICON_PX, iconLeft, iconLeftExpanded, railDepth, railWidth } from "./worktree-geometry";
 import { WorktreeTree } from "./WorktreeTree";
@@ -248,6 +248,13 @@ export function Sidebar() {
     [activeWorktreePath, switchWorktree, toggleProjectExpanded],
   );
 
+  const isHome = activeWorktreePath === null;
+  // Muted until Home is shown, like an entry that isn't the one in use.
+  const homeTileClass = cn(
+    "size-6 transition-colors",
+    isHome ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+  );
+
   return (
     <div
       className={cn(
@@ -274,41 +281,44 @@ export function Sidebar() {
         {/* Home, the browser panels shown with no worktree, set off from the projects like they are */}
         <div className="mb-2">
           {sidebarExpanded ? (
+            // Laid out like a project row, so its logo sits in the column of the project icons.
             <button
               type="button"
               className={cn(
-                "text-muted-foreground hover:text-foreground hover:bg-primary/50 focus-visible:ring-ring flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors outline-none not-dark:mx-1 not-dark:w-auto not-dark:rounded-md not-dark:px-1.5 focus-visible:ring-2 focus-visible:ring-inset",
-                activeWorktreePath === null && "bg-primary text-foreground",
+                "hover:bg-primary/50 focus-visible:ring-ring flex w-full cursor-pointer items-center py-1.5 text-left transition-colors outline-none not-dark:mx-1 not-dark:w-[calc(100%-0.5rem)] not-dark:rounded-md not-dark:pl-1! focus-visible:ring-2 focus-visible:ring-inset",
+                isHome && "bg-primary",
               )}
-              style={{ paddingLeft: "13px" }}
+              style={{ paddingLeft: `${ROW_LEFT}px` }}
               onClick={showHome}
-              aria-current={activeWorktreePath === null ? "page" : undefined}
+              aria-current={isHome ? "page" : undefined}
             >
-              <div className="flex size-6 shrink-0 items-center justify-center">
-                <LoxelMark className="h-3.5" />
-              </div>
-              <span className="text-xs">Home</span>
+              {/* Where a project row has its fold chevron */}
+              <span className="shrink-0" style={{ width: `${CHEVRON_PX}px` }} />
+              <span className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
+                <LoxelLogoTile className={homeTileClass} />
+              </span>
+              <span className="text-foreground truncate text-xs font-medium">Home</span>
             </button>
           ) : (
-            // In the column of the worktree icons, drawn like them: no tile, and the project icons'
-            // ring while it is the layout shown.
+            // The app's logo in the column of the worktree icons, ringed like the active project
+            // icon while Home is shown.
             <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
               <button
                 type="button"
                 className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
                 onClick={showHome}
                 title="Home"
-                aria-current={activeWorktreePath === null ? "page" : undefined}
+                aria-current={isHome ? "page" : undefined}
               >
-                <span
+                <LoxelLogoTile
                   className={cn(
-                    "text-muted-foreground hover:text-foreground corner-superellipse flex size-6 items-center justify-center rounded-2xl transition-colors",
-                    activeWorktreePath === null &&
-                      "text-foreground shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
+                    homeTileClass,
+                    // The active project's ring, with a gap in the card color in both themes: its
+                    // white inner band would merge with the white tile.
+                    isHome &&
+                      "shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--primary)]",
                   )}
-                >
-                  <LoxelMark className="h-4" />
-                </span>
+                />
               </button>
             </div>
           )}
