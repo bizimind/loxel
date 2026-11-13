@@ -597,7 +597,10 @@ export async function scanSuggestions(path: string) {
 }
 
 export async function createProject(req: CreateProjectRequest) {
-  return fetchJson<Project>("/projects/create", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/create", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function cloneProject(req: CloneProjectRequest) {
@@ -615,7 +618,10 @@ export async function initProject(req: InitProjectRequest) {
 }
 
 export async function convertProject(req: ConvertProjectRequest) {
-  return fetchJson<Project>("/projects/convert", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/convert", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 // --- Schema API ---

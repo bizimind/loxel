@@ -187,6 +187,11 @@ describe("a project created from scratch", () => {
 
     expect(isRepoTrusted(firstWorktree)).toBe(true);
     expect(existsSync(join(projectDir, "setup-ran"))).toBe(true);
+    // Worktree metadata is on from the start, so worktrees can nest; the first has an id already.
+    const config = (key: string, cwd: string) =>
+      Bun.$`git -C ${cwd} config --get ${key}`.nothrow().quiet().text();
+    expect((await config("extensions.worktreeConfig", projectDir)).trim()).toBe("true");
+    expect((await config("wt-meta.wt-id", firstWorktree)).trim()).not.toBe("");
     expect(getRepoTrustStatus(firstWorktree).restrictions).toEqual([]);
   });
 
@@ -240,6 +245,8 @@ describe("setting up an existing or cloned repository like wt init", () => {
     const originHead = await Bun.$`git -C ${bareDir} symbolic-ref refs/remotes/origin/HEAD`.text();
     expect(originHead.trim()).toBe("refs/remotes/origin/main");
     expect(existsSync(main)).toBe(true);
+    expect(await gitConfig(bareDir, "extensions.worktreeConfig")).toBe("true");
+    expect(await gitConfig(main, "wt-meta.wt-id")).not.toBe("");
     expect(existsSync(join(bareDir, "setup-ran"))).toBe(false);
     expect(getRepoTrustStatus(main).restrictions).toEqual([WORKTREE_HOOKS_RESTRICTION]);
   });

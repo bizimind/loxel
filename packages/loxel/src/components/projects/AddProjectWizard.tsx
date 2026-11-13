@@ -21,7 +21,7 @@ import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useProjectStore } from "@/store/projects";
 
 import { FolderPickerContent } from "./FolderPicker";
-import { recommendedSetupActions, toggleSetupAction } from "./repo-setup";
+import { defaultSetupActions, toggleSetupAction } from "./repo-setup";
 import { RepoSetupChecks } from "./RepoSetupChecks";
 import { looksLikeGitUrl, repoNameFromUrl } from "./wizard-detection";
 import { type WorkspaceConfig, WorkspaceConfigStep } from "./WorkspaceConfigStep";
@@ -113,7 +113,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
       const result = await api.detectPath(trimmed);
       setDetection(result);
       setImportName(result.name);
-      setImportApply(result.setup ? recommendedSetupActions(result.setup) : []);
+      setImportApply(result.setup ? defaultSetupActions(result.setup) : []);
 
       switch (result.type) {
         case "git-repo-bare":

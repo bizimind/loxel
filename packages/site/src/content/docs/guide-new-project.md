@@ -25,7 +25,7 @@ Click **Add project** at the bottom of the worktree sidebar (or **Add Project** 
 
 Use this when the repo is already on disk and initialized. In **Import Existing**, enter or browse to the folder, and confirm.
 
-Loxel detects whether the folder is a bare repo or a regular repo, and lists anything `wt doctor` would flag in its setup with a checkbox for each fix, the recommended ones checked. Detection is read-only — nothing changes until you confirm, and then only the fixes you left checked.
+Loxel detects whether the folder is a bare repo or a regular repo, and lists anything `wt doctor` would flag in its setup with a checkbox for each fix, the recommended ones checked, along with worktree nesting. Detection is read-only — nothing changes until you confirm, and then only the fixes you left checked.
 
 ---
 

@@ -1885,13 +1885,20 @@ function parseInitActions(body: Record<string, unknown>): InitActionId[] {
 }
 
 /**
- * A project set up with `wt init` fixes: the first worktree whose `init.wt.sh` was held back, and
- * the fixes that failed. A repository a fix already changed is added anyway, so the user can
+ * A project set up with `wt init` fixes: the first worktree whose `init.wt.sh` was held back
+ * (`firstWorktree`, or one a fix added), and the fixes that failed. A repository a fix already changed is added anyway, so the user can
  * work in it and see what is left, rather than finding it changed and not added.
  */
-function withSetupOutcome(project: Project, results: InitResult[]): ProjectSetupResult {
-  const outcomes = results.flatMap((result) => result.outcomes);
-  const held = outcomes.find((outcome) => outcome.worktree?.hookSkipped)?.worktree;
+function withSetupOutcome(
+  project: Project,
+  results: InitResult[],
+  firstWorktree?: AddResult,
+): ProjectSetupResult {
+  const added = [
+    firstWorktree,
+    ...results.flatMap((result) => result.outcomes.map((o) => o.worktree)),
+  ];
+  const held = added.find((worktree) => worktree?.hookSkipped);
   const setupFailures = failedInitActions(results);
   if (setupFailures)
     wtLog.warn("Repository setup partly failed", { path: project.path, setupFailures });
@@ -2011,6 +2018,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
+  const setupResults: InitResult[] = [];
   // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
@@ -2023,6 +2031,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
     await createInitialCommit(projectDir);
     await ensureWorktreesDir(projectDir);
     await writeInitHook(projectDir, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(projectDir));
 
     try {
       await addFirstWorktreeOfNewRepo(
@@ -2043,14 +2052,15 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   }
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setupResults));
 }
 
-/** A set-up project, saying when its first worktree's `init.wt.sh` was held back. */
-function projectSetupResult(project: Project, firstWorktree?: AddResult): ProjectSetupResult {
-  return firstWorktree?.hookSkipped
-    ? { ...project, initHookSkippedAt: firstWorktree.path }
-    : project;
+/**
+ * Turn on worktree metadata in a multi-workspace project the wizard set up, so its worktrees can
+ * nest and have titles from the start. Before the first worktree is added, it gets its id then.
+ */
+async function turnOnWorktreeMetadata(repoPath: string): Promise<InitResult> {
+  return applyInitActions(repoPath, [METADATA_ON_ACTION], wtProgress);
 }
 
 // POST /api/projects/clone — clone a remote repo
@@ -2093,8 +2103,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return json(project);
   }
 
-  // Multi-workspace: a bare clone set up the way `wt init <url>` does it. The default branch's
-  // worktree comes after the hook is written, so the hook runs in it (when trusted).
+  // Multi-workspace: a bare clone set up the way `wt init <url>` does it, with worktree metadata on.
+  // The default branch's worktree comes after the hook is written, so the hook runs in it (when
+  // trusted).
   const repoName = repoNameFromUrl(url);
   const bareDir = join(destDir, repoName);
   let cloned: InitResult;
@@ -2109,7 +2120,11 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
 
   await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
-  const mainWorktree = await applyInitActions(bareDir, ["main-worktree"], wtProgress);
+  const mainWorktree = await applyInitActions(
+    bareDir,
+    [METADATA_ON_ACTION, "main-worktree"],
+    wtProgress,
+  );
 
   const project = await projectStore.addProject(bareDir, repoName);
   try {
@@ -2140,6 +2155,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   }
 
   let firstWorktree: AddResult | undefined;
+  const setupResults: InitResult[] = [];
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
@@ -2175,6 +2191,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     }
 
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(dirPath));
 
     const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
     if (!hasMain) {
@@ -2197,7 +2214,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(projectSetupResult(project, firstWorktree));
+  return json(withSetupOutcome(project, setupResults, firstWorktree));
 }
 
 // POST /api/projects/convert — convert regular repo to bare+wt
@@ -2240,9 +2257,11 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   // Teardown only after every non-mutating conversion preflight has passed.
   ctx.teardownProject(dirPath);
 
+  let metadata: InitResult;
   try {
     await transformToBare(dirPath, currentBranch);
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    metadata = await turnOnWorktreeMetadata(dirPath);
   } catch (err) {
     try {
       await ctx.initializeProject(dirPath);
@@ -2265,7 +2284,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, [metadata]));
 }
 
 /** Repo-root directory holding local-only files copied into new worktrees. */

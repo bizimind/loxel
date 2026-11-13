@@ -16,7 +16,7 @@ export const ProjectsDataSchema = z.object({ projects: z.array(ProjectSchema) })
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectsData = z.infer<typeof ProjectsDataSchema>;
 
-/** Response of POST /api/projects, /api/projects/clone and /api/projects/init. */
+/** Response of POST /api/projects and the wizard's create, clone, init and convert routes. */
 export interface ProjectSetupResult extends Project {
   /** The first worktree, when it was created without running its repository's `init.wt.sh` */
   initHookSkippedAt?: string;

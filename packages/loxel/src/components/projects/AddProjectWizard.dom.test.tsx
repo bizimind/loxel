@@ -97,15 +97,15 @@ describe("AddProjectWizard", () => {
     await detectBareRepo();
 
     expect(screen.getByLabelText(fetchRefspec.title)).toBeChecked();
-    expect(screen.getByLabelText(metadataOn.title)).not.toBeChecked();
-    fireEvent.click(screen.getByLabelText(metadataOn.title));
+    expect(screen.getByLabelText("Turn on worktree nesting")).toBeChecked();
+    fireEvent.click(screen.getByLabelText(fetchRefspec.title));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => expect(showAddedProject).toHaveBeenCalledWith(added));
     expect(addProject).toHaveBeenCalledWith({
       path: "/repos/shop.git",
       name: "shop",
-      apply: ["fetch-refspec", "worktree-metadata-on"],
+      apply: ["worktree-metadata-on"],
     });
     expect(useAddProjectWizardStore.getState().isOpen).toBe(false);
   });
