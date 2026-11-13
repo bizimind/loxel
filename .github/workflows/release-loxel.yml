@@ -25,6 +25,7 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
       tag: ${{ steps.bump.outputs.tag }}
+      terminal_host_protocol: ${{ steps.protocol.outputs.terminal_host_protocol }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,6 +47,20 @@ jobs:
           R2_PRIVATE_ACCESS_KEY_ID: ${{ secrets.R2_PRIVATE_ACCESS_KEY_ID }}
           R2_PRIVATE_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # The terminal host protocol the release speaks, for the manifest: the app updater compares it
+      # with the running terminal hosts' to warn before an update restarts terminals. Read before
+      # anything is committed, so a release never ships a manifest without it.
+      - name: Read terminal host protocol
+        id: protocol
+        run: |
+          set -euo pipefail
+          PROTOCOL=$(bun packages/loxel/scripts/terminal-host-protocol.ts)
+          if [ -z "$PROTOCOL" ]; then
+            echo "::error::Could not read TERMINAL_HOST_PROTOCOL"
+            exit 1
+          fi
+          echo "terminal_host_protocol=$PROTOCOL" >> "$GITHUB_OUTPUT"
 
       - name: Bump patch version
         id: bump
@@ -255,11 +270,18 @@ jobs:
       - name: Generate manifest
         run: |
           VERSION="${{ needs.check-and-bump.outputs.version }}"
+          PROTOCOL="${{ needs.check-and-bump.outputs.terminal_host_protocol }}"
           BASE="https://loxel.bizimind.io/loxel"
+          if [ -z "$PROTOCOL" ]; then
+            echo "::error::No terminal host protocol for the manifest"
+            exit 1
+          fi
 
-          # `app` holds the installers the site links to; `update` the zips the app updates from.
+          # `app` holds the installers the site links to; `update` the zips the app updates from;
+          # `terminal_host_protocol` what the app updater decides the terminals' fate by.
           jq -n \
             --arg v "$VERSION" \
+            --arg protocol "$PROTOCOL" \
             --arg base "$BASE" \
             --arg dmg_sha_arm64 "${{ needs.build-electron.outputs.sha256_dmg_arm64 }}" \
             --arg dmg_sha_x64 "${{ needs.build-electron.outputs.sha256_dmg_x64 }}" \
@@ -270,6 +292,7 @@ jobs:
             '{
               version: $v,
               released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+              terminal_host_protocol: $protocol,
               app: {
                 "darwin-arm64": {url: "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.dmg", sha256: $dmg_sha_arm64},
                 "darwin-x64": {url: "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.dmg", sha256: $dmg_sha_x64}

@@ -24,14 +24,35 @@ const ManifestSchema = z.object({
   released_at: z.string(),
   /** The app zip per `<platform>-<arch>` key, e.g. `darwin-arm64`. */
   update: z.record(z.string(), UpdateFileSchema),
+  /**
+   * The terminal host protocol the release speaks (`TERMINAL_HOST_PROTOCOL`). Releases from before
+   * terminal host versioning leave it out.
+   */
+  terminal_host_protocol: z.string().optional(),
 });
+
+/**
+ * What Loxel's manifest adds to electron-updater's update info. electron-updater hands the object
+ * the provider returns to its `update-available` event as is, so the field arrives there.
+ */
+export interface LoxelUpdateInfo extends UpdateInfo {
+  terminalHostProtocol?: string;
+}
+
+const LoxelUpdateInfoSchema = z.object({ terminalHostProtocol: z.string().optional() });
+
+/** The terminal host protocol of an update, as {@link updateInfoFromManifest} read it. */
+export function terminalHostProtocolOf(info: UpdateInfo): string | undefined {
+  const parsed = LoxelUpdateInfoSchema.safeParse(info);
+  return parsed.success ? parsed.data.terminalHostProtocol : undefined;
+}
 
 /**
  * The update info for `platform` in a parsed manifest. It lists that platform's zip for every
  * architecture: electron-updater's macOS updater picks the one for this Mac by whether its URL
  * names `arm64`, and moves an Intel build running under Rosetta to the Apple silicon one.
  */
-export function updateInfoFromManifest(data: unknown, platform: string): UpdateInfo {
+export function updateInfoFromManifest(data: unknown, platform: string): LoxelUpdateInfo {
   const manifest = ManifestSchema.parse(data);
   const files: UpdateFileInfo[] = Object.entries(manifest.update)
     .filter(([key]) => key.startsWith(`${platform}-`))
@@ -45,6 +66,9 @@ export function updateInfoFromManifest(data: unknown, platform: string): UpdateI
     // Deprecated single-file fields electron-updater still requires.
     path: first.url,
     sha512: first.sha512,
+    ...(manifest.terminal_host_protocol === undefined
+      ? {}
+      : { terminalHostProtocol: manifest.terminal_host_protocol }),
   };
 }
 

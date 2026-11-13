@@ -53,6 +53,7 @@ describe("detached file project destinations", () => {
       getDetectedFormatters: () => [],
       activeWindow: () => null,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

@@ -20,6 +20,7 @@ import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
+import { endedHostsNotice } from "./ended-hosts-notice";
 import { ExternalFilesService } from "./external-files-service";
 import {
   ExternalFolderRegistry,
@@ -921,6 +922,7 @@ const terminalManager = new TerminalManager(terminalHosts, {
     });
     broadcastAll({ type: "notification_added", data: notification });
   },
+  onSessionsChanged: () => broadcastAll({ type: "terminals_changed" }),
   onExit: (id) => {
     // The manager already sent terminal_exit to the attached client.
     const owner = terminalOwners.get(id);
@@ -1262,6 +1264,19 @@ const routeContext: RouteContext = {
       command,
     });
   },
+  listTerminals: async ({ programs }) => {
+    const running = terminalManager.running();
+    const foreground = programs ? await terminalManager.foregroundProcesses() : {};
+    return {
+      terminals: running.map(({ id, meta }) => ({
+        id,
+        worktreePath: meta.worktreePath,
+        cwd: meta.cwd,
+        otherHostBuild: terminalHosts.runsOnOtherBuild(id),
+        ...(Object.hasOwn(foreground, id) ? { program: foreground[id] } : {}),
+      })),
+    };
+  },
 };
 
 // A server that cannot have the port must fail before it touches the terminal hosts: taking them
@@ -1274,7 +1289,12 @@ try {
 
 // Terminals that outlived the previous server are this one's before any client can attach to them.
 try {
-  await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+  const { ended } = await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+  const notice = endedHostsNotice(ended);
+  // Kept in the store, so the first window to connect gets it with notifications_sync.
+  if (notice) {
+    notificationStore.add({ source: { kind: "terminal_host" }, ...notice, urgency: "high" });
+  }
 } catch (err) {
   log.error("Could not reach the running terminal hosts", { error: err });
 }

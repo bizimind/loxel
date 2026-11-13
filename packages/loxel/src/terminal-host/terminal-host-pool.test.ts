@@ -57,6 +57,49 @@ async function startHost(runDir: string, hostId: string, build: string) {
   return { host, done, socketPath, stop };
 }
 
+/**
+ * A host of protocol 2.0.0 at `<runDir>/<hostId>.sock`, which this server cannot talk to: it
+ * answers `initialize` (adding `extra` to its answer) and closes on anything else.
+ */
+async function startIncompatibleHost(
+  runDir: string,
+  hostId: string,
+  extra: { sessions?: number },
+): Promise<{ received: string[] }> {
+  const received: string[] = [];
+  const server: Server = createServer((socket) => {
+    const reader = new FrameReader();
+    socket.on("data", (chunk: Buffer) => {
+      for (const body of reader.push(chunk)) {
+        if (body.kind !== "json") continue;
+        const { type } = body.value as { type: string };
+        received.push(type);
+        if (type !== "initialize") {
+          socket.end();
+          continue;
+        }
+        socket.write(
+          encodeJsonFrame({
+            type: "initialize_result",
+            protocol: "2.0.0",
+            hostBuildId: "future",
+            pid: process.pid,
+            capabilities: [],
+            ...extra,
+          }),
+        );
+      }
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(hostSocketPath(runDir, hostId), resolve);
+  });
+  cleanups.push(() => {
+    server.close();
+  });
+  return { received };
+}
+
 function spawnRequest(script: string): TerminalSpawnRequest {
   return {
     id: crypto.randomUUID(),
@@ -131,6 +174,8 @@ describe("TerminalHostPool", () => {
     await pool.spawn(spawned);
     expect(launches.map((launch) => launch.hostBuildId)).toEqual(["current"]);
     expect(old.host.sessionIds()).toEqual([oldSession.id]);
+    expect(pool.runsOnOtherBuild(oldSession.id)).toBe(true);
+    expect(pool.runsOnOtherBuild(spawned.id)).toBe(false);
 
     // The earlier generation's last session ends: the pool reports it and lets that host go.
     pool.write(oldSession.id, new TextEncoder().encode("\n"));
@@ -161,42 +206,19 @@ describe("TerminalHostPool", () => {
         socket: hostSocketPath(runDir, "dddddddd"),
       }),
     );
-    const received: unknown[] = [];
-    const incompatible: Server = createServer((socket) => {
-      const reader = new FrameReader();
-      socket.on("data", (chunk: Buffer) => {
-        for (const body of reader.push(chunk)) {
-          if (body.kind !== "json") continue;
-          received.push(body.value);
-          if ((body.value as { type: string }).type === "initialize") {
-            socket.write(
-              encodeJsonFrame({
-                type: "initialize_result",
-                protocol: "2.0.0",
-                hostBuildId: "future",
-                pid: process.pid,
-                capabilities: [],
-              }),
-            );
-          } else {
-            socket.end();
-          }
-        }
-      });
-    });
-    await new Promise<void>((resolve) => {
-      incompatible.listen(hostSocketPath(runDir, "eeeeeeee"), resolve);
-    });
-    cleanups.push(() => {
-      incompatible.close();
-    });
+    const counted = await startIncompatibleHost(runDir, "eeeeeeee", { sessions: 3 });
+    // A 1.0.0-shaped handshake: no session count.
+    const uncounted = await startIncompatibleHost(runDir, "ffffffff", {});
     const { pool } = createPool(stateDir, runDir);
 
-    expect(await startPool(pool)).toEqual([]);
+    const { ended } = await pool.start((sessions) => expect(sessions).toEqual([]));
     expect(existsSync(hostEntryPath(runDir, "dddddddd"))).toBe(false);
-    expect(received.map((message) => (message as { type: string }).type)).toEqual([
-      "initialize",
-      "terminate",
+    for (const host of [counted, uncounted]) {
+      expect(host.received).toEqual(["initialize", "terminate"]);
+    }
+    expect(ended.toSorted((a, b) => a.hostId.localeCompare(b.hostId))).toEqual([
+      { hostId: "eeeeeeee", protocol: "2.0.0", sessions: 3 },
+      { hostId: "ffffffff", protocol: "2.0.0", sessions: null },
     ]);
   });
 

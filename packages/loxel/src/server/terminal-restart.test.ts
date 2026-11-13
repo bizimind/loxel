@@ -22,6 +22,7 @@ import path from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+import { RunningTerminalsSchema } from "@/api/running-terminals-model";
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
 import {
@@ -277,6 +278,40 @@ describe("terminals across server restarts", () => {
         () => !isAlive(shell.shellPid) && hosts.every((pid) => !isAlive(pid)),
         TEST_TIMEOUT_MS,
       );
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+
+  test(
+    "lists the running terminals, with the program in each one's foreground",
+    async () => {
+      await startServer();
+      const shell = await openShell();
+      const list = async (query = "") =>
+        RunningTerminalsSchema.parse(await (await fetch(`${baseUrl}/api/terminals${query}`)).json())
+          .terminals;
+
+      expect(await list()).toEqual([
+        { id: shell.id, worktreePath: "/tmp", cwd: "/tmp", otherHostBuild: false },
+      ]);
+      expect((await list("?programs"))[0]?.program).toBeNull();
+
+      // The shell runs it as a job, in a foreground process group of its own.
+      shell.panel.type(shell.id, "sleep 30");
+      await retryUntil(
+        () => {},
+        async (timeoutMs) => {
+          if ((await list("?programs"))[0]?.program === "sleep") return true;
+          await Bun.sleep(timeoutMs);
+          return false;
+        },
+        "the foreground program",
+      );
+
+      shell.panel.close();
+      server!.kill("SIGTERM");
+      await server!.exited;
+      await until(() => !isAlive(shell.shellPid), TEST_TIMEOUT_MS);
     },
     TEST_TIMEOUT_MS * 3,
   );

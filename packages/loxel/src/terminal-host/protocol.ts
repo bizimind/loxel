@@ -7,29 +7,46 @@
  *   of an incompatible major version.
  * - The versioned layer carries the `TerminalHost` interface (terminal-host.ts) and changes with
  *   {@link TERMINAL_HOST_PROTOCOL}: a major bump for any incompatible change, a minor one for a new
- *   capability, which code checks by name, never by comparing versions.
+ *   capability, which code checks by name, never by comparing versions. protocol-schema.test.ts
+ *   fails when the schemas change without a bump.
  *
  * Keyboard input and output travel as binary frames in the renderer's layout (terminal-stream.ts);
  * everything else is JSON. See docs/TERMINAL_HOST.md#protocol.
  */
 import { z } from "zod";
 
+import { protocolMajor } from "@/api/terminal-host-protocol-version";
+
 import {
+  ForegroundProcessesSchema,
   TerminalAttachRequestSchema,
   TerminalExitEventSchema,
   TerminalOscEventSchema,
+  TerminalSessionInfoSchema,
   TerminalSessionMetaSchema,
   TerminalSpawnSpecSchema,
   TerminalStateEventSchema,
 } from "./terminal-host";
 
-/** The protocol version this build speaks, as semver. */
-export const TERMINAL_HOST_PROTOCOL = "1.0.0";
+/**
+ * Optional features of the versioned layer this build supports, by name. Each came with a minor
+ * version, and its messages go only to a peer that advertises it too (see `compatibility()`):
+ *
+ * - `foregroundProcess` (1.1.0): `foreground_processes`, each session's foreground program.
+ */
+export const TERMINAL_HOST_CAPABILITIES = ["foregroundProcess"] as const;
+export type TerminalHostCapability = (typeof TERMINAL_HOST_CAPABILITIES)[number];
 
-/** Optional features of the versioned layer this build supports, by name; none yet. */
-export const TERMINAL_HOST_CAPABILITIES: readonly string[] = [];
+function isTerminalHostCapability(name: string): name is TerminalHostCapability {
+  return (TERMINAL_HOST_CAPABILITIES as readonly string[]).includes(name);
+}
 
 // --- Bootstrap layer (frozen) ---
+//
+// Frozen means every server must be able to read what any host sends here, and the reverse, so
+// these schemas only ever gain optional fields: none is removed, renamed or retyped, and every
+// reader tolerates an optional field's absence (a peer from before it). protocol-schema.test.ts
+// holds them to that.
 
 /** The server's first message on a connection; nothing else is valid before it. */
 export const InitializeSchema = z.object({
@@ -48,6 +65,11 @@ export const InitializeResultSchema = z.object({
   hostBuildId: z.string(),
   pid: z.number().int(),
   capabilities: z.array(z.string()),
+  /**
+   * How many sessions the host runs, so a server that cannot talk to it can still say how many
+   * terminals ending it ends. Since 1.1.0; a 1.0.0 host leaves it out.
+   */
+  sessions: z.number().int().nonnegative().optional(),
 });
 export type InitializeResult = z.infer<typeof InitializeResultSchema>;
 
@@ -114,6 +136,15 @@ const SetMetaSchema = z.object({
   meta: TerminalSessionMetaSchema,
 });
 
+/**
+ * Capability `foregroundProcess`: each session's foreground program. Answered with
+ * {@link ForegroundProcessesSchema}.
+ */
+const ForegroundProcessesRequestSchema = z.object({
+  type: z.literal("foreground_processes"),
+  requestId: RequestIdSchema,
+});
+
 /** Every JSON message a server sends. */
 export const ServerMessageSchema = z.discriminatedUnion("type", [
   InitializeSchema,
@@ -128,8 +159,20 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   AckSchema,
   DestroySchema,
   SetMetaSchema,
+  ForegroundProcessesRequestSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
+
+/**
+ * What each request is answered with: the `value` of its `result`, which the requester parses with
+ * this schema. Part of the versioned layer like the messages, so the schema guard covers them.
+ */
+export const RESULT_SCHEMAS = {
+  spawn: TerminalSessionInfoSchema,
+  list: TerminalSessionInfoSchema.array(),
+  attach: z.null(),
+  foreground_processes: ForegroundProcessesSchema,
+} as const satisfies Record<Extract<ServerMessage, { requestId: number }>["type"], z.ZodType>;
 
 /** A request's answer; the requester parses `value` with the schema of what it asked for. */
 const ResultSchema = z.object({
@@ -184,17 +227,15 @@ export type Compatibility =
   /** The server cannot talk to the host: it ends it. */
   | { status: "incompatible"; reason: string };
 
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
-
 /**
  * Whether a server can use a host. A different major (or a version that is not semver) is
  * incompatible; otherwise each side uses only the capabilities both advertise, so an older server
  * talks to a newer host and the reverse.
  */
 export function compatibility(host: ProtocolPeer, server: ProtocolPeer): Compatibility {
-  const hostMajor = SEMVER.exec(host.protocol)?.[1];
-  const serverMajor = SEMVER.exec(server.protocol)?.[1];
-  if (hostMajor === undefined || serverMajor === undefined) {
+  const hostMajor = protocolMajor(host.protocol);
+  const serverMajor = protocolMajor(server.protocol);
+  if (hostMajor === null || serverMajor === null) {
     return {
       status: "incompatible",
       reason: `unreadable protocol version (host ${host.protocol}, server ${server.protocol})`,
@@ -217,4 +258,18 @@ export function compatibility(host: ProtocolPeer, server: ProtocolPeer): Compati
   return unshared.length === 0
     ? { status: "compatible", capabilities }
     : { status: "degraded", capabilities, unshared };
+}
+
+/**
+ * The capabilities this build may use with a peer: the ones both advertise. Code checks a
+ * capability by name here before sending its messages, never by comparing versions; a name only
+ * the peer advertises is one this build does not know, and is left out.
+ */
+export function sharedCapabilities(
+  peer: ProtocolPeer,
+  own: ProtocolPeer,
+): ReadonlySet<TerminalHostCapability> {
+  const verdict = compatibility(peer, own);
+  if (verdict.status === "incompatible") return new Set();
+  return new Set([...verdict.capabilities].filter(isTerminalHostCapability));
 }

@@ -16,11 +16,18 @@ import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection } from "./host-connection";
 import { isProcessRunning } from "./host-files";
-import type { DisconnectMode, HostMessage, InitializeMessage, InitializeResult } from "./protocol";
-import { HostMessageSchema } from "./protocol";
+import type {
+  DisconnectMode,
+  HostMessage,
+  InitializeMessage,
+  InitializeResult,
+  TerminalHostCapability,
+} from "./protocol";
+import { HostMessageSchema, RESULT_SCHEMAS, sharedCapabilities } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
 import { encodeFrame, encodeJsonFrame } from "./protocol-framing";
 import type {
+  ForegroundProcesses,
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
@@ -28,7 +35,6 @@ import type {
   TerminalSessionMeta,
   TerminalSpawnRequest,
 } from "./terminal-host";
-import { TerminalSessionInfoSchema } from "./terminal-host";
 
 /**
  * The exit code reported for a session whose host is gone, or that ended while the server was not
@@ -41,8 +47,6 @@ export const STALLED_AFTER_MS = 30_000;
 
 /** Delays between attempts to restore a connection to a host that is still running. */
 const RECONNECT_DELAYS_MS = [0, 250, 1000, 5000];
-
-const SessionListSchema = TerminalSessionInfoSchema.array();
 
 interface PendingRequest {
   /** The request's frame, re-sent if it was not answered before a connection closed. */
@@ -89,6 +93,8 @@ export class SocketTerminalHost implements TerminalHost {
   private state: State = "connecting";
   private connection: HostConnection | null = null;
   private hello: InitializeResult | null = null;
+  /** What both this server and the host advertise, from the latest handshake. */
+  private capabilities: ReadonlySet<TerminalHostCapability> = new Set();
   /** Frames sent while there is no connection, in order. */
   private outbox: Uint8Array[] = [];
   private readonly pending = new Map<number, PendingRequest>();
@@ -121,6 +127,16 @@ export class SocketTerminalHost implements TerminalHost {
     return this.hello;
   }
 
+  /**
+   * Whether both this server and the host have `capability`, so its messages may be sent. False
+   * until the first handshake. A capability's caller checks it and falls back without it, so a
+   * host from before the capability, and one with capabilities this server does not know, both
+   * keep working.
+   */
+  supports(capability: TerminalHostCapability): boolean {
+    return this.capabilities.has(capability);
+  }
+
   /** Sessions known to run in this host, spawns still unanswered included. */
   get sessionCount(): number {
     return this.sessions.size;
@@ -146,7 +162,7 @@ export class SocketTerminalHost implements TerminalHost {
     this.sessions.set(spec.id, { epoch: spec.epoch, confirmed: false, attach: null });
     const spawned = this.request<TerminalSessionInfo>(
       { type: "spawn", request: spec },
-      (value) => TerminalSessionInfoSchema.parse(value),
+      (value) => RESULT_SCHEMAS.spawn.parse(value),
       { spawn: { id: spec.id, epoch: spec.epoch } },
     );
     // The input frame follows the spawn, so it is the first thing the program reads.
@@ -167,7 +183,7 @@ export class SocketTerminalHost implements TerminalHost {
   list(): Promise<TerminalSessionInfo[]> {
     if (this.state === "gone") return Promise.reject(this.goneError());
     return this.request({ type: "list" }, (value) =>
-      this.noteListed(SessionListSchema.parse(value)),
+      this.noteListed(RESULT_SCHEMAS.list.parse(value)),
     );
   }
 
@@ -191,7 +207,13 @@ export class SocketTerminalHost implements TerminalHost {
       sent: this.state === "connected",
       since: request.since && { ...request.since },
     };
-    return this.request<void>({ type: "attach", request }, () => undefined, { attach: true });
+    return this.request<void>(
+      { type: "attach", request },
+      (value) => {
+        RESULT_SCHEMAS.attach.parse(value);
+      },
+      { attach: true },
+    );
   }
 
   detach(id: string): void {
@@ -223,6 +245,20 @@ export class SocketTerminalHost implements TerminalHost {
 
   setMeta(id: string, meta: TerminalSessionMeta): void {
     this.sendJson({ type: "set_meta", id, meta });
+  }
+
+  /**
+   * Capability `foregroundProcess`. A host without it, or one this server is not connected to right
+   * now, can tell nothing, so the answer is empty.
+   */
+  foregroundProcesses(): Promise<ForegroundProcesses> {
+    // Only on a live connection: one being restored may never be, and the caller is waiting.
+    if (this.state !== "connected" || !this.supports("foregroundProcess")) {
+      return Promise.resolve({});
+    }
+    return this.request({ type: "foreground_processes" }, (value) =>
+      RESULT_SCHEMAS.foreground_processes.parse(value),
+    );
   }
 
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
@@ -324,14 +360,20 @@ export class SocketTerminalHost implements TerminalHost {
       connection.destroy();
       return;
     }
-    this.hello = connection.result;
-    this.connection = connection;
+    this.handshake(connection);
     connection.start({
       onBody: (body) => this.onBody(connection, body),
       onClose: (error) => this.onConnectionClosed(connection, error),
     });
     this.state = "connected";
     this.flushOutbox(connection);
+  }
+
+  /** Take `connection` and what its handshake says about the host. */
+  private handshake(connection: HostConnection): void {
+    this.hello = connection.result;
+    this.capabilities = sharedCapabilities(connection.result, this.options.initialize);
+    this.connection = connection;
   }
 
   /** Send what waited for the connection; from now on it counts as sent. */
@@ -485,8 +527,7 @@ export class SocketTerminalHost implements TerminalHost {
 
   /** Bring the client in line with the host over a fresh connection, then resume sending. */
   private async restore(connection: HostConnection): Promise<void> {
-    this.hello = connection.result;
-    this.connection = connection;
+    this.handshake(connection);
     connection.start({
       onBody: (body) => this.onBody(connection, body),
       onClose: (error) => {
@@ -502,7 +543,7 @@ export class SocketTerminalHost implements TerminalHost {
         frame: new Uint8Array(0),
         resolve: (value) => resolve(value as TerminalSessionInfo[]),
         reject,
-        parse: (value) => SessionListSchema.parse(value),
+        parse: (value) => RESULT_SCHEMAS.list.parse(value),
         sent: true,
         internal: true,
       });

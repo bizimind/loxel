@@ -2,7 +2,9 @@
  * A {@link TerminalHost} that runs its sessions in the calling process. Events are delivered
  * synchronously, from the PTY's callbacks or the call that caused them. See docs/TERMINAL_HOST.md.
  */
+import { foregroundPrograms } from "./foreground-process";
 import type {
+  ForegroundProcesses,
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
@@ -16,6 +18,8 @@ import { TerminalSession } from "./terminal-session";
 interface HostedSession {
   session: TerminalSession;
   meta: TerminalSessionMeta;
+  /** The program the session spawned, `argv[0]`. */
+  program: string;
 }
 
 export class InProcessTerminalHost implements TerminalHost {
@@ -48,7 +52,7 @@ export class InProcessTerminalHost implements TerminalHost {
       return Promise.reject(new Error(`Could not start terminal ${id}`, { cause: err }));
     }
     // Registered before returning, so commands sent right after spawn() reach this session.
-    const hosted = { session, meta };
+    const hosted = { session, meta, program: request.argv[0]! };
     this.sessions.set(id, hosted);
     if (input && input.byteLength > 0) session.write(input);
     return Promise.resolve(this.info(hosted));
@@ -92,6 +96,22 @@ export class InProcessTerminalHost implements TerminalHost {
   setMeta(id: string, meta: TerminalSessionMeta): void {
     const hosted = this.sessions.get(id);
     if (hosted) hosted.meta = meta;
+  }
+
+  async foregroundProcesses(): Promise<ForegroundProcesses> {
+    const hosted = [...this.sessions.values()];
+    const programs = await foregroundPrograms(
+      hosted.map(({ session, program }) => ({ pid: session.pid, program })),
+    );
+    const result: ForegroundProcesses = {};
+    for (const { session } of hosted) {
+      const program = programs.get(session.pid);
+      // Ended meanwhile, or its program could not be named.
+      if (program !== undefined && this.sessions.get(session.id)?.session === session) {
+        result[session.id] = program;
+      }
+    }
+    return result;
   }
 
   /** The IDs of the running sessions, for the host process's own bookkeeping. */

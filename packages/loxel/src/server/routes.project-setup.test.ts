@@ -99,6 +99,7 @@ describe("project conversion preflight", () => {
       getDetectedFormatters: () => [],
       activeWindow: () => null,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   }
 

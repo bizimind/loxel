@@ -46,7 +46,7 @@ export class NotificationStore {
   dismissByWorktree(worktreePath: string): string[] {
     const panelIds = new Set<string>();
     this.notifications = this.notifications.filter((n) => {
-      if (n.source.worktreePath !== worktreePath) return true;
+      if (n.source.kind !== "terminal" || n.source.worktreePath !== worktreePath) return true;
       panelIds.add(n.source.panelId);
       return false;
     });

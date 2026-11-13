@@ -5,7 +5,7 @@ import type { ProviderRuntimeOptions } from "electron-updater/out/providers/Prov
 
 // electron-updater requires `electron`, whose npm package would download Electron itself.
 void mock.module("electron", () => ({}));
-const { MANIFEST_URL, ManifestProvider, updateInfoFromManifest } =
+const { MANIFEST_URL, ManifestProvider, terminalHostProtocolOf, updateInfoFromManifest } =
   await import("./update-manifest");
 
 const BASE = "https://loxel.bizimind.io/loxel/app";
@@ -43,6 +43,12 @@ describe("updateInfoFromManifest", () => {
 
   test("fails for a platform the release has no update for", () => {
     expect(() => updateInfoFromManifest(manifest, "linux")).toThrow("has no linux update");
+  });
+
+  test("carries the release's terminal host protocol, which older manifests leave out", () => {
+    const info = updateInfoFromManifest({ ...manifest, terminal_host_protocol: "1.1.0" }, "darwin");
+    expect(terminalHostProtocolOf(info)).toBe("1.1.0");
+    expect(terminalHostProtocolOf(updateInfoFromManifest(manifest, "darwin"))).toBeUndefined();
   });
 
   test("rejects a manifest without update entries", () => {

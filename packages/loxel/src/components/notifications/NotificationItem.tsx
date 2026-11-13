@@ -16,10 +16,8 @@ const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
 
 function sourceLabel(notification: ServerNotification): string {
   const { source } = notification;
-  if ("worktreePath" in source && source.worktreePath) {
-    return source.worktreePath.split("/").pop() ?? "terminal";
-  }
-  return source.kind;
+  if (source.kind === "terminal_host") return "Loxel";
+  return source.worktreePath.split("/").pop() || "terminal";
 }
 
 export function NotificationItem({

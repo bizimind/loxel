@@ -5,13 +5,13 @@ import { join } from "node:path";
 
 import { createNoopLogger } from "@bizimind/logger";
 
+import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 
 import { openHostConnection } from "./host-connection";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { InitializeMessage } from "./protocol";
-import { TERMINAL_HOST_PROTOCOL } from "./protocol";
 import { HOST_LOST_EXIT_CODE, SocketTerminalHost } from "./socket-terminal-host";
 import type { TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
 
