@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createNoopLogger } from "@bizimind/logger";
+
 import type { WsMessage } from "@/api/ws-protocol";
+import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
 import type { ActiveWindow, RouteContext } from "./routes";
@@ -175,7 +178,7 @@ describe("POST /api/open terminals and placement", () => {
   test("runs the command for a worktree created a moment ago, with no panel attached", async () => {
     const originalShell = process.env.SHELL;
     process.env.SHELL = "/bin/sh";
-    const manager = new TerminalManager({
+    const manager = new TerminalManager(new InProcessTerminalHost({ log: createNoopLogger() }), {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},

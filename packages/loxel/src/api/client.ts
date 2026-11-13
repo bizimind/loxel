@@ -39,13 +39,13 @@ import type {
   Review,
 } from "./review-model";
 import type { SchemaConsentDecision } from "./schema-consent-model";
+import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./terminal-stream";
 import type {
   NestedRemoval,
   WorktreeRemovePlan,
   WorktreeRemoveResult,
 } from "./worktree-removal-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
-import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
 const API_BASE = "/api";
 

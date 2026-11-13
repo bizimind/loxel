@@ -9,18 +9,19 @@ import type { ServerWebSocket } from "bun";
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
+import {
+  BIN_HEADER_SIZE,
+  BIN_MSG_INPUT,
+  encodeOutputFrame,
+  parseBinaryHeader,
+} from "@/api/terminal-stream";
 import type {
   FileMoveSource,
   TerminalSpawnTarget,
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
-import {
-  BIN_HEADER_SIZE,
-  BIN_MSG_INPUT,
-  encodeOutputFrame,
-  parseBinaryHeader,
-} from "@/api/ws-protocol";
+import { InProcessTerminalHost } from "@/terminal-host";
 
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
@@ -73,9 +74,8 @@ import { measureSpawn } from "./spawn-metrics";
 import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
 import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
-import type { TerminalSpawnOptions } from "./terminal-manager";
+import type { TerminalSink, TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
-import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
 import { toolchainStatusModules } from "./toolchain-statuses";
@@ -225,7 +225,10 @@ function broadcastAll(message: WsMessage) {
  */
 function terminalSpawnTarget(
   msg: TerminalSpawnTarget,
-): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides" | "activatePythonEnv"> {
+): Pick<
+  TerminalSpawnOptions,
+  "cwd" | "worktreePath" | "windowId" | "envOverrides" | "activatePythonEnv"
+> {
   const envOverrides: Record<string, string> = { LOXEL: "1", LOXEL_PORT: String(config.port) };
   // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
   if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
@@ -241,6 +244,7 @@ function terminalSpawnTarget(
   return {
     cwd,
     worktreePath: msg.worktreePath,
+    windowId: msg.windowId,
     envOverrides,
     activatePythonEnv: msg.activatePythonEnv,
   };
@@ -863,23 +867,28 @@ let shuttingDown = false;
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
 const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
-const terminalManager = new TerminalManager({
+const terminalHost = new InProcessTerminalHost({
+  log: logger.child("terminal"),
+  measureSpawn: (spawn) => measureSpawn("terminal", spawn),
+  onOutputChunk: () => stress.track("pty-output"),
+});
+const terminalManager = new TerminalManager(terminalHost, {
   isSequenceEnabled: isNotificationSequenceEnabled,
   toolchainEnvs,
-  onNotification: (session, payload) => {
+  onNotification: (id, meta, payload) => {
     const notification = notificationStore.add({
-      source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
+      source: { kind: "terminal", panelId: id, worktreePath: meta.worktreePath },
       title: payload.title,
       body: payload.body,
       urgency: payload.urgency ?? "normal",
     });
     broadcastAll({ type: "notification_added", data: notification });
   },
-  onExit: (session) => {
-    // The session already sent terminal_exit to its attached client.
-    const owner = terminalOwners.get(session.id);
-    if (owner) clients.get(owner)?.terminals.delete(session.id);
-    terminalOwners.delete(session.id);
+  onExit: (id) => {
+    // The manager already sent terminal_exit to the attached client.
+    const owner = terminalOwners.get(id);
+    if (owner) clients.get(owner)?.terminals.delete(id);
+    terminalOwners.delete(id);
   },
 });
 const notificationStore = new NotificationStore();

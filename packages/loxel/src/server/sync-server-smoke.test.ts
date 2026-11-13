@@ -22,7 +22,8 @@ import { executeAdd, executeMove, executeRemove, setWorktreeMeta } from "@bizimi
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { WorktreeEntry } from "@/api/git-models";
-import { encodeInputFrame, type WsMessage } from "@/api/ws-protocol";
+import { encodeInputFrame } from "@/api/terminal-stream";
+import type { WsMessage } from "@/api/ws-protocol";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import {
   CaptureLog,

@@ -11,6 +11,9 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
+import { createNoopLogger } from "@bizimind/logger";
+
+import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
 // The tests choose where versions live; the machine's own manager settings must not apply.
@@ -170,7 +173,7 @@ describe("nodeToolchainEnv", () => {
     const originalShell = process.env.SHELL;
     process.env.SHELL = "/bin/sh";
     const wt = makeWorktree("22");
-    const manager = new TerminalManager({
+    const manager = new TerminalManager(new InProcessTerminalHost({ log: createNoopLogger() }), {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
