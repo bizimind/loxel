@@ -47,6 +47,15 @@ const MODE_LABELS: Record<AgentPermissionMode, string> = {
   dontAsk: "Don't ask",
 };
 
+/** `claude-haiku-5-5` as `Haiku 5.5`, the way Claude Code names it; anything else as given. */
+function modelName(id: string): string {
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/u.exec(id);
+  if (!match) return id;
+  const [, family = "", major, minor, longContext] = match;
+  const version = minor === undefined ? major : `${major}.${minor}`;
+  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}${longContext ? " (1M)" : ""}`;
+}
+
 const STATE_LABELS: Record<AgentSessionSummary["state"], string> = {
   working: "Working",
   "needs-input": "Needs input",
@@ -173,7 +182,7 @@ function ModelMenu({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5">
-        {session.model ?? "Model"}
+        {session.model ? modelName(session.model) : "Model"}
         {session.effort && <span className="opacity-70">· {session.effort}</span>}
         <ChevronDownIcon className="size-3" />
       </DropdownMenuTrigger>
@@ -260,6 +269,28 @@ function TranscriptScroller({
   );
 }
 
+const MENU_PAGE = 8;
+
+/** Where a key moves the highlight in a list of `count`: arrows wrap, Home/End/PageUp/PageDown jump. */
+function menuStep(key: string, at: number, count: number): number | null {
+  switch (key) {
+    case "ArrowDown":
+      return (at + 1) % count;
+    case "ArrowUp":
+      return (at - 1 + count) % count;
+    case "PageDown":
+      return Math.min(count - 1, at + MENU_PAGE);
+    case "PageUp":
+      return Math.max(0, at - MENU_PAGE);
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
 function matchCommands(commands: AgentCommand[], text: string): AgentCommand[] {
   const query = text.slice(1).split(/\s/u)[0]?.toLowerCase() ?? "";
   return commands
@@ -283,6 +314,7 @@ function AgentComposer({
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const menuRef = useRef<HTMLDivElement>(null);
   const slash = text.startsWith("/") && !text.includes("\n") && !/\s/u.test(text.trim().slice(1));
   const catalog = useQuery({
     queryKey: ["agent-catalog", session.terminalId],
@@ -313,10 +345,18 @@ function AgentComposer({
     }
   };
 
+  // Keep the highlighted command in view as the keyboard moves it.
+  useEffect(() => {
+    menuRef.current?.children[highlight]?.scrollIntoView({ block: "nearest" });
+  }, [highlight]);
+
   return (
     <div className="relative">
       {matches.length > 0 && (
-        <div className="border-border bg-popover absolute right-0 bottom-full left-0 mb-2 max-h-72 overflow-y-auto rounded-lg border py-1 shadow-lg">
+        <div
+          ref={menuRef}
+          className="border-border bg-popover absolute right-0 bottom-full left-0 mb-2 max-h-72 overflow-y-auto rounded-lg border py-1 shadow-lg"
+        >
           {matches.map((command, index) => (
             <button
               key={command.name}
@@ -359,10 +399,10 @@ function AgentComposer({
             setHighlight(0);
           }}
           onKeyDown={(event) => {
-            if (matches.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            const move = matches.length > 0 ? menuStep(event.key, highlight, matches.length) : null;
+            if (move !== null) {
               event.preventDefault();
-              const step = event.key === "ArrowDown" ? 1 : -1;
-              setHighlight((at) => (at + step + matches.length) % matches.length);
+              setHighlight(move);
               return;
             }
             if (matches.length > 0 && event.key === "Tab") {

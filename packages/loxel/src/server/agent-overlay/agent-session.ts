@@ -233,6 +233,27 @@ export class AgentSession {
     return change;
   }
 
+  /**
+   * What the footer shows, for what no hook has told yet: a session's mode and effort are in no
+   * hook before its first prompt. Reports whether anything was filled in.
+   */
+  fillFromFooter(mode: AgentPermissionMode | null, effort: string | null): boolean {
+    let filled = false;
+    if (mode && !this.permissionMode) {
+      this.permissionMode = mode;
+      filled = true;
+    }
+    if (effort && !this.effort) {
+      this.effort = effort;
+      filled = true;
+    }
+    return filled;
+  }
+
+  get knowsFooter(): boolean {
+    return this.permissionMode !== null && this.effort !== null;
+  }
+
   /** The mode the footer shows after the overlay switched it, which no hook reports. */
   setPermissionMode(mode: AgentPermissionMode): void {
     this.permissionMode = mode;

@@ -38,7 +38,7 @@ import {
   claudeLaunchCommand,
   writeLaunchSettings,
 } from "./claude-hooks";
-import { recognizeDialog } from "./claude-screen";
+import { effortFromScreen, permissionModeFromScreen, recognizeDialog } from "./claude-screen";
 import type { ClaudeDialogKind } from "./claude-screen";
 import { TranscriptTailer } from "./claude-transcript";
 
@@ -186,6 +186,18 @@ export class AgentOverlayService {
     if (follow) this.follow(tracked, follow);
     if (change.summary) this.publish(tracked);
     this.updateScreenWatch(tracked);
+    if (!tracked.session.knowsFooter) void this.readFooter(tracked);
+  }
+
+  /** Mode and effort from the footer, until hooks carry them. */
+  private async readFooter(tracked: Tracked): Promise<void> {
+    const screen = await this.options.terminals.screen(tracked.session.terminalId);
+    if (!screen || tracked.closed) return;
+    const filled = tracked.session.fillFromFooter(
+      permissionModeFromScreen(screen.lines),
+      effortFromScreen(screen.lines),
+    );
+    if (filled) this.publish(tracked);
   }
 
   /** Follows the session's transcript file, replacing the transcript subscribers see. */

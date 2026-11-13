@@ -119,6 +119,12 @@ export function promptBoxState(lines: readonly string[]): "empty" | "draft" | "a
   return text.length === 0 ? "empty" : "draft";
 }
 
+/** The effort level the footer shows (`◐ medium · /effort`), or null. */
+export function effortFromScreen(lines: readonly string[]): string | null {
+  const footer = lines.slice(Math.max(0, promptRow(lines))).join("\n");
+  return /\b(low|medium|high|xhigh|max)\s*·\s*\/effort\b/u.exec(footer)?.[1] ?? null;
+}
+
 /** The permission mode the footer shows; `manual` is Claude Code's name for `default`. */
 export function permissionModeFromScreen(lines: readonly string[]): AgentPermissionMode | null {
   const footer = lines.slice(Math.max(0, promptRow(lines))).join("\n");

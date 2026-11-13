@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { permissionModeFromScreen, promptBoxState, recognizeDialog } from "./claude-screen";
+import {
+  effortFromScreen,
+  permissionModeFromScreen,
+  promptBoxState,
+  recognizeDialog,
+} from "./claude-screen";
 
 /** A screen recorded from Claude Code 2.1.325 with scripts/capture-claude-tui.ts. */
 function screen(name: string): string[] {
@@ -112,5 +117,10 @@ describe("input box and footer", () => {
     expect(permissionModeFromScreen(screen("10-mode-2"))).toBe("auto");
     expect(permissionModeFromScreen(screen("10-mode-3"))).toBe("default");
     expect(permissionModeFromScreen(screen("05-question-1"))).toBeNull();
+  });
+
+  test("the effort level the footer shows", () => {
+    expect(effortFromScreen(screen("02-idle"))).toBe("medium");
+    expect(effortFromScreen(screen("05-question-1"))).toBeNull();
   });
 });
