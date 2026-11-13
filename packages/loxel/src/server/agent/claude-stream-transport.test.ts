@@ -61,6 +61,9 @@ describe("ClaudeStreamTransport", () => {
     await started;
 
     expect(state().commands.map((c) => c.name)).toEqual(["compact", "review", "context"]);
+    // The effective model and effort are known before the first turn's init.
+    expect(state().model).toBe("claude-haiku-5-5");
+    expect(state().effort).toBe("high");
     expect(state().models.find((m) => m.value === "opus")?.effortLevels).toContain("max");
     expect(state().status).toBe("idle");
     const echo = state().items.find((item) => item.kind === "tool" && item.name === "Bash");

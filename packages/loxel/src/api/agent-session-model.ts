@@ -34,6 +34,47 @@ export interface AgentCommand {
   argumentHint: string;
 }
 
+/** The pickable models: the catalog without its "default" alias, which repeats one of them. */
+export function pickableModels(models: readonly AgentModel[]): readonly AgentModel[] {
+  return models.filter((m) => m.value !== "default");
+}
+
+/** The catalog entry the session's model is: matched by alias or by the id an alias stands for. */
+export function currentModel(state: AgentState): AgentModel | null {
+  const id = state.model;
+  if (!id) return null;
+  // A pickable entry first, so the menu can check it; then any, the "default" alias included.
+  for (const models of [pickableModels(state.models), state.models]) {
+    const found = models.find((m) => m.value === id) ?? models.find((m) => m.resolvedModel === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * A model's concrete name, such as "Opus 5.5": the catalog's description starts with it
+ * ("Opus 5.5 · Best for everyday, complex tasks"), where its display name may be an alias.
+ */
+export function modelName(model: AgentModel): string {
+  const named = model.description.split(" · ")[0]?.trim();
+  return named || model.displayName;
+}
+
+/** The session's model as the composer shows it, or null until it is known. */
+export function modelLabel(state: AgentState): string | null {
+  const model = currentModel(state);
+  if (model) return modelName(model);
+  return state.model ? modelIdName(state.model) : null;
+}
+
+/** A name for a model id before the catalog arrives: `claude-opus-5-5` → "Opus 5.5". */
+export function modelIdName(id: string): string {
+  const match = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
+  if (match)
+    return `${match[1]!.charAt(0).toUpperCase()}${match[1]!.slice(1)} ${match[2]}.${match[3]}`;
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
 export interface AgentModel {
   /** What `set_model` takes: an alias (`opus`) or a full model id. */
   value: string;

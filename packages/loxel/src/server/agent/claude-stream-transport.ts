@@ -194,17 +194,29 @@ export class ClaudeStreamTransport implements AgentTransport {
     void Promise.all([proc.exited, this.drained]).then(([code]) => this.exited(proc, code));
     // No systemPrompt: the CLI then uses Claude Code's own prompt, as in the terminal.
     const response = await this.request({ subtype: "initialize", hooks: {} });
+    // The model and effort the session starts with, after the user's and the project's settings
+    // and env overrides; the init message only comes with the first turn. Older CLIs refuse
+    // get_settings, and the values then arrive with that init.
+    const applied = await this.request({ subtype: "get_settings" }).then(
+      (settings) => (isRecord(settings.applied) ? settings.applied : {}),
+      () => ({}) as Record<string, unknown>,
+    );
     this.handlers.onEvents([
       {
         type: "catalog",
         commands: parseCommands(response.commands),
         models: parseModels(response.models),
       },
-      { type: "status", status: initialStatus(response) },
-      // The mode the user's settings start in; the init message only comes with the first turn.
+      ...(typeof applied.model === "string"
+        ? [{ type: "model" as const, model: applied.model }]
+        : []),
+      ...(typeof applied.effort === "string"
+        ? [{ type: "effort" as const, effort: applied.effort }]
+        : []),
       ...(isAgentPermissionMode(response.current_permission_mode)
         ? [{ type: "permission_mode" as const, mode: response.current_permission_mode }]
         : []),
+      { type: "status", status: initialStatus(response) },
     ]);
   }
 

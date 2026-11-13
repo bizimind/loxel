@@ -51,9 +51,15 @@ export function isExternalWebUrl(href: string): boolean {
   }
 }
 
-export const AgentMarkdown = memo(function AgentMarkdown({ text }: { text: string }) {
+export const AgentMarkdown = memo(function AgentMarkdown({
+  text,
+  compact = false,
+}: {
+  text: string;
+  compact?: boolean;
+}) {
   return (
-    <div className="agent-prose">
+    <div className={compact ? "agent-prose agent-prose-compact" : "agent-prose"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

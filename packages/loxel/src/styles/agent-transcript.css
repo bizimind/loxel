@@ -1,10 +1,10 @@
-/* Agent panel transcript: the markdown editor's prose (milkdown-theme.css) for agent messages, so
-   a conversation reads like a plan in Loxel rather than like a terminal. Sizes are multiples of
-   the prose size from Settings > Fonts, as there. */
+/* Agent panel transcript: the markdown editor's prose proportions (milkdown-theme.css) in the UI
+   face, Inter 15/26, so a conversation reads like a document in Loxel rather than like a terminal
+   and matches the panels around it. */
 
 .agent-prose {
-  --u: var(--loxel-font-prose-size);
-  font-family: var(--loxel-font-prose);
+  --u: 15px;
+  font-family: var(--font-sans);
   font-size: var(--u);
   line-height: calc(var(--u) * 26 / 15);
   /* Body text a little dimmer than headings and strong text, as in the editor. */
@@ -61,7 +61,7 @@
 .agent-prose :not(pre) > code {
   color: color-mix(in oklch, var(--foreground) 85%, var(--muted-foreground));
   background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  font-family: var(--loxel-font-code);
+  font-family: var(--font-mono);
   font-size: 0.85em;
   padding: 0.05em 0.35em;
   border-radius: 3px;
@@ -70,13 +70,14 @@
 }
 
 .agent-prose pre {
-  background: var(--surface-1);
+  /* A tint of the text color, so a block reads on either theme's editor surface. */
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
   border-radius: 6px;
   padding: 16px 20px;
   margin: calc(var(--u) * 0.9) 0;
   overflow-x: auto;
-  font-family: var(--loxel-font-code);
-  font-size: var(--loxel-font-code-size);
+  font-family: var(--font-mono);
+  font-size: 13px;
   line-height: 1.5;
   color: var(--foreground);
 }
@@ -145,4 +146,9 @@
 .agent-prose input[type="checkbox"] {
   margin-right: 0.5em;
   accent-color: var(--ring);
+}
+
+/* Compact prose for subagent output and cards. */
+.agent-prose.agent-prose-compact {
+  --u: 13px;
 }

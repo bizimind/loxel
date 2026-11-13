@@ -5,6 +5,7 @@ import {
   agentDisplayStatus,
   applyAgentEvent,
   INITIAL_AGENT_STATE,
+  modelLabel,
   parseAgentClientMessage,
 } from "./agent-session-model";
 
@@ -97,5 +98,34 @@ describe("parseAgentClientMessage", () => {
     expect(
       parseAgentClientMessage({ type: "send", id: "x", text: "", delivery: "queue" }),
     ).toBeNull();
+  });
+});
+
+describe("model labels", () => {
+  const models = [
+    {
+      value: "default",
+      resolvedModel: "claude-opus-5-5",
+      displayName: "Default (recommended)",
+      description: "Opus 5.5 · Best for everyday, complex tasks",
+      effortLevels: ["high"],
+    },
+    {
+      value: "haiku",
+      resolvedModel: "claude-haiku-5-5",
+      displayName: "Haiku",
+      description: "Haiku 5.5 · Fastest for quick answers",
+      effortLevels: ["high"],
+    },
+  ];
+
+  test("an alias or a resolved id shows the model's concrete name, never 'default'", () => {
+    const state = { ...INITIAL_AGENT_STATE, models };
+    expect(modelLabel({ ...state, model: "claude-haiku-5-5" })).toBe("Haiku 5.5");
+    expect(modelLabel({ ...state, model: "haiku" })).toBe("Haiku 5.5");
+    expect(modelLabel({ ...state, model: "claude-opus-5-5" })).toBe("Opus 5.5");
+    expect(modelLabel({ ...state, model: null })).toBeNull();
+    // Before the catalog: named from the id.
+    expect(modelLabel({ ...INITIAL_AGENT_STATE, model: "claude-sonnet-5-5" })).toBe("Sonnet 5.5");
   });
 });

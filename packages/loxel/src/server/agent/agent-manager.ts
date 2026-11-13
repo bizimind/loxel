@@ -13,6 +13,8 @@ export interface AgentManagerDeps {
    * the agent has no such session (it never got a message, so there is nothing to resume).
    */
   loadHistory(sessionId: string): Promise<readonly AgentEvent[] | null>;
+  /** What a session in this worktree starts with (model, effort, mode), before its process answers. */
+  startingEvents(worktreePath: string): Promise<readonly AgentEvent[]>;
 }
 
 /**
@@ -102,13 +104,16 @@ export class AgentManager {
     worktreePath: string,
     resumeId: string | undefined,
   ): Promise<{ session: AgentSession; resume: boolean }> {
-    const history = resumeId ? await this.deps.loadHistory(resumeId) : null;
+    const [history, starting] = await Promise.all([
+      resumeId ? this.deps.loadHistory(resumeId) : null,
+      this.deps.startingEvents(worktreePath).catch(() => []),
+    ]);
     // A session that never got a message has no transcript; it starts afresh under its own id.
     const resume = history !== null;
     const session = new AgentSession(
       { worktreePath, sessionId: resumeId ?? crypto.randomUUID(), resume },
       this.deps.createTransport,
-      history ?? [],
+      [...starting, ...(history ?? [])],
     );
     return { session, resume };
   }

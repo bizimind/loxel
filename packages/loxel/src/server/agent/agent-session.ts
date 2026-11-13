@@ -174,7 +174,12 @@ export class AgentSession {
       { ...this.launch, resume },
       {
         onEvents: (events) => {
-          if (this.transport === transport) this.emit(events);
+          if (this.transport !== transport) return;
+          this.emit(events);
+          // Context usage after each turn, from the CLI's own count: no model call.
+          if (events.some((event) => event.type === "turn_result") && !this.stopping) {
+            transport.refreshContextUsage().catch(() => {});
+          }
         },
         onExit: (error) => {
           if (this.transport !== transport) return;

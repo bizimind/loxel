@@ -1,3 +1,5 @@
+import type { AgentEvent } from "@/api/agent-session-model";
+
 /**
  * Agent panels' server side: sessions, their manager, and the Claude Code stream-json transport.
  * See docs/AGENT_PANEL.md.
@@ -5,6 +7,7 @@
 import { isRepoTrusted, reportRepoRestriction } from "../repo-trust";
 import { buildSpawnEnv } from "../shell-env";
 import { AgentManager } from "./agent-manager";
+import { readStartingSettings, startingEvents } from "./claude-settings";
 import { ClaudeStreamTransport, spawnClaudeProcess } from "./claude-stream-transport";
 import { claudeConfigDir, findTranscript, transcriptEvents } from "./claude-transcript";
 
@@ -13,8 +16,24 @@ export { AgentManager };
 
 /** The manager for Claude Code sessions, driven through the user's installed `claude`. */
 export function createClaudeAgentManager(loxelEnv: Record<string, string>): AgentManager {
+  // The catalog the last session reported, so the next one names its models from its first frame.
+  let lastCatalog: Extract<AgentEvent, { type: "catalog" }> | null = null;
   return new AgentManager({
-    createTransport: (launch, handlers) => {
+    startingEvents: async (worktreePath) => {
+      const env = buildSpawnEnv();
+      const settings = await readStartingSettings(claudeConfigDir(env), worktreePath, env);
+      return startingEvents(settings, lastCatalog);
+    },
+    createTransport: (launch, sessionHandlers) => {
+      const handlers: typeof sessionHandlers = {
+        ...sessionHandlers,
+        onEvents: (events) => {
+          for (const event of events) {
+            if (event.type === "catalog" && event.models) lastCatalog = event;
+          }
+          sessionHandlers.onEvents(events);
+        },
+      };
       const env = buildSpawnEnv();
       const binary = Bun.which("claude", { PATH: env.PATH ?? "" });
       const spawn = spawnClaudeProcess(binary ?? "claude", env, loxelEnv);

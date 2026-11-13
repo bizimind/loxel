@@ -17,6 +17,7 @@ describe("AgentManager", () => {
     let releaseHistory: (events: []) => void = () => {};
     const started: string[] = [];
     const manager = new AgentManager({
+      startingEvents: async () => [],
       loadHistory: () =>
         new Promise((resolve) => {
           releaseHistory = resolve;
@@ -54,6 +55,7 @@ describe("AgentManager", () => {
 
   test("an attach that fails tells the client", async () => {
     const manager = new AgentManager({
+      startingEvents: async () => [],
       loadHistory: () => Promise.reject(new Error("EACCES")),
       createTransport: () => {
         throw new Error("unreachable");
