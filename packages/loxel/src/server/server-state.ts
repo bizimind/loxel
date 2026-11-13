@@ -168,4 +168,8 @@ export interface WorktreeLspData {
 }
 
 /** WS data tag for routing app vs language-server connections. */
-export type WsData = { type: "app" } | { type: "yaml-lsp" } | WorktreeLspData;
+export type WsData =
+  | { type: "app" }
+  | { type: "yaml-lsp" }
+  | { type: "agent"; agentId: string }
+  | WorktreeLspData;

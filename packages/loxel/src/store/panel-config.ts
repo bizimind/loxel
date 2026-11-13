@@ -11,6 +11,7 @@ import {
   MessageSquareIcon,
   PencilRulerIcon,
   ScrollTextIcon,
+  BotIcon,
   SquareTerminalIcon,
 } from "lucide-react";
 
@@ -159,6 +160,20 @@ export const CENTER_PANELS = [
     createEvent: "loxel-create-terminal",
     openEvent: null,
     titlePrefix: "Terminal",
+    kind: "connected-process" as const,
+    singleton: false,
+  },
+  {
+    type: "agent",
+    idPrefix: "agent-",
+    component: "agent",
+    tabComponent: "agentTab",
+    icon: BotIcon,
+    quickstartLabel: "New Claude Session",
+    actionId: null,
+    createEvent: "loxel-create-agent",
+    openEvent: null,
+    titlePrefix: "Claude",
     kind: "connected-process" as const,
     singleton: false,
   },

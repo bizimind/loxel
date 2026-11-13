@@ -295,6 +295,28 @@ export function createTerminal({
   );
 }
 
+/** A new Claude Code session in an agent panel, in the active worktree. */
+export function createAgent({ placement, focus }: PanelOpenOptions = {}): void {
+  const cApi = getCenterApi();
+  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  if (!cApi || !worktreePath) return;
+  const agentId = crypto.randomUUID();
+  const panelId = `agent-${agentId}`;
+  uiLog.info("Panel created", { panelType: "agent", panelId });
+  addPlacedPanel(
+    cApi,
+    placement,
+    {
+      id: panelId,
+      component: "agent",
+      tabComponent: "agentTab",
+      title: nextPanelTitle(cApi, "Claude"),
+      params: { agentId, worktreePath },
+    },
+    focus,
+  );
+}
+
 export async function createEditor(options?: {
   content?: string;
   title?: string;

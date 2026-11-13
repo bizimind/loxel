@@ -34,6 +34,7 @@ export const LOG_CATEGORIES = [
   "keychain",
   "secret-store",
   "perf",
+  "agent",
 ] as const;
 
 export type LogCategory = (typeof LOG_CATEGORIES)[number] | LspName;

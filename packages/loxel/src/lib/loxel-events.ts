@@ -13,6 +13,7 @@ type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
   "loxel-create-terminal": CreateTerminalOptions;
+  "loxel-create-agent": PanelOpenOptions | undefined;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
   "loxel-create-browser": { url?: string } & PanelOpenOptions;

@@ -6,6 +6,7 @@ import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
+import { parseAgentClientMessage } from "@/api/agent-session-model";
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
@@ -15,8 +16,10 @@ import type {
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
+import { isUuid } from "@/lib/uuid";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
+import { type AgentClient, createClaudeAgentManager } from "./agent";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
@@ -907,6 +910,36 @@ const schemaDownloads = new SchemaDownloads({
 });
 tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
 const yamlLspManager = new YamlLspManager({}, (url) => schemaDownloads.contentFor(url));
+// Agent panels: Claude Code sessions driven over stream-json (see docs/AGENT_PANEL.md). The agent's own
+// commands get the `LOXEL_*` variables a terminal's shell gets, so `loxel` works from them.
+const agentManager = createClaudeAgentManager({ LOXEL: "1", LOXEL_PORT: String(config.port) });
+const agentClients = new WeakMap<ServerWebSocket<WsData>, AgentClient>();
+
+/** The socket's client handle, the same object for every message so detach can match it. */
+function agentClient(ws: ServerWebSocket<WsData>): AgentClient {
+  let client = agentClients.get(ws);
+  if (!client) {
+    client = { send: (message) => ws.send(JSON.stringify(message)) };
+    agentClients.set(ws, client);
+  }
+  return client;
+}
+
+function handleAgentMessage(ws: ServerWebSocket<WsData>, agentId: string, message: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return;
+  }
+  const result = parseAgentClientMessage(parsed);
+  if (!result) {
+    log.warn("Ignored a malformed agent message");
+    return;
+  }
+  void agentManager.handle(agentId, agentClient(ws), result);
+}
+
 // A chosen toolchain reaches everything that shares the worktree's resolution (language servers,
 // terminals, format on save, the status bar) without a restart.
 for (const { onOverrideChange, refresh } of toolchainStatusModules) onOverrideChange(refresh);
@@ -1247,6 +1280,14 @@ const server = Bun.serve<WsData>({
       return error(rejection.reason, rejection.status);
     }
 
+    if (url.pathname === "/ws/agent") {
+      const agentId = url.searchParams.get("id");
+      if (!agentId || !isUuid(agentId)) return new Response("Invalid agent id", { status: 400 });
+      const upgraded = server.upgrade(req, { data: { type: "agent" as const, agentId } });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+      return undefined;
+    }
+
     if (url.pathname === "/ws/yaml-lsp") {
       const upgraded = server.upgrade(req, { data: { type: "yaml-lsp" as const } });
       if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
@@ -1295,6 +1336,7 @@ const server = Bun.serve<WsData>({
 
   websocket: {
     open(ws) {
+      if (ws.data?.type === "agent") return;
       if (ws.data?.type === "yaml-lsp") {
         yamlLspManager.attach(ws);
         return;
@@ -1320,6 +1362,10 @@ const server = Bun.serve<WsData>({
     },
 
     close(ws) {
+      if (ws.data?.type === "agent") {
+        agentManager.detach(ws.data.agentId, agentClient(ws));
+        return;
+      }
       if (ws.data?.type === "yaml-lsp") {
         yamlLspManager.detach(ws);
         return;
@@ -1342,6 +1388,10 @@ const server = Bun.serve<WsData>({
     message(ws, message) {
       // Shutdown waits for language servers to exit: nothing may start again behind its teardown.
       if (shuttingDown) return;
+      if (ws.data?.type === "agent") {
+        if (typeof message === "string") handleAgentMessage(ws, ws.data.agentId, message);
+        return;
+      }
       if (ws.data?.type === "yaml-lsp") {
         if (typeof message === "string") yamlLspManager.handleMessage(ws, message);
         return;
@@ -1499,9 +1549,10 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
       ? terminalHosts.disconnectAll("end")
       : Promise.resolve(terminalHosts.dropAll());
   formatService.destroy();
-  const lspServersStopped = Promise.all(
-    [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
-  );
+  const lspServersStopped = Promise.all([
+    ...[yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
+    agentManager.destroyAll(),
+  ]);
   gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();

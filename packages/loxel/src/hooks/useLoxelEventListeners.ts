@@ -8,6 +8,7 @@ import { useEffect } from "react";
 
 import { onLoxelEvent } from "@/lib/loxel-events";
 import {
+  createAgent,
   createBrowser,
   createCodeEditor,
   createDrawing,
@@ -31,6 +32,7 @@ export function useLoxelEventListeners(): void {
     const cleanups = [
       // A CustomEvent dispatched without a detail carries null, which the default parameter does not cover.
       onLoxelEvent("loxel-create-terminal", (d) => createTerminal(d ?? {})),
+      onLoxelEvent("loxel-create-agent", (d) => createAgent(d ?? {})),
       onLoxelEvent("loxel-create-editor", (d) => createEditor({ placement: d?.placement })),
       onLoxelEvent("loxel-create-drawing", (d) => createDrawing(d?.placement)),
       onLoxelEvent("loxel-create-browser", (d) => createBrowser(d?.url, d ?? {})),
