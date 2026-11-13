@@ -289,7 +289,7 @@ function AddressField() {
           id={listId}
           role="listbox"
           aria-label="Bookmarks"
-          className="bg-popover border-border absolute top-full -right-2 -left-2 z-10 mt-1.5 rounded-md border py-1 shadow-md"
+          className="bg-popover border-border absolute top-full -right-2 -left-2 z-10 mt-1.5 rounded-md border p-1 shadow-md"
         >
           {suggestions.map((bookmark, index) => (
             <li
@@ -304,16 +304,22 @@ function AddressField() {
                 open(bookmark.url);
               }}
               onMouseEnter={() => setPicked(index)}
+              // Highlighted like the app's menus and pickers.
               className={cn(
-                "flex cursor-pointer items-center gap-2 px-2 py-1 text-xs",
-                index === picked && "bg-muted",
+                "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs",
+                index === picked && "bg-primary",
               )}
             >
               <Favicon url={bookmark.faviconUrl} />
               <span className="text-foreground min-w-0 truncate">
                 {bookmark.title || bookmark.url}
               </span>
-              <span className="text-muted-foreground ml-auto shrink-0 truncate text-[11px]">
+              <span
+                className={cn(
+                  "text-muted-foreground ml-auto shrink-0 truncate text-[11px]",
+                  index === picked && "not-dark:text-foreground/70",
+                )}
+              >
                 {hostOf(bookmark.url)}
               </span>
             </li>
