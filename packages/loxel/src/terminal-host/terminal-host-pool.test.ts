@@ -259,12 +259,12 @@ describe("TerminalHostPool", () => {
     await startPool(pool);
 
     running.stop();
-    await until(() => events.some((event) => event.type === "exit"));
+    await until(() => events.some((event) => event.type === "lost"));
     expect(events).toContainEqual({
-      type: "exit",
+      type: "lost",
       id: survivor.id,
       epoch: survivor.epoch,
-      exitCode: 129,
+      reason: "host_lost",
     });
 
     await pool.spawn(spawnRequest("exec sleep 30"));

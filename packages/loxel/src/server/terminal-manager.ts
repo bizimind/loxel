@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
-import type { NotificationSequence } from "@/api/ws-protocol";
+import type { NotificationSequence, TerminalEnd } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
@@ -44,7 +44,7 @@ export interface TerminalSink {
   sendState(state: TerminalState): void;
   /** Output from the host, with the renderer frame to forward as is. */
   sendOutput(output: TerminalOutput): void;
-  sendExit(exitCode: number): void;
+  sendExit(end: TerminalEnd): void;
 }
 
 /** What the server keeps in a session's host meta, read back from the host after a restart. */
@@ -90,8 +90,11 @@ export interface TerminalAttachOptions extends TerminalSpawnOptions {
 export interface TerminalManagerHooks {
   isSequenceEnabled: (sequence: NotificationSequence) => boolean;
   onNotification: (id: string, meta: TerminalMeta, payload: OscPayload) => void;
-  /** Called after a session whose program exited on its own has been removed. */
-  onExit: (id: string, exitCode: number) => void;
+  /**
+   * Called after a session that ended on its own (its program exited, or its host was lost) has
+   * been removed.
+   */
+  onExit: (id: string, end: TerminalEnd) => void;
   /** What contributes to a new shell's environment, applied in this order. */
   toolchainEnvs: readonly ToolchainEnvContributor[];
   /** A session was added (spawned or adopted) or removed, for whoever lists them. */
@@ -173,6 +176,11 @@ interface ManagedSession {
   attachment: number;
   /** True once the sink has received its state: output from then on is its own. */
   live: boolean;
+  /**
+   * Its program ended while no server was connected, and the host kept it: the next attach shows
+   * what its client missed, then its exit. It no longer counts as running.
+   */
+  ended: boolean;
 }
 
 /** What `get()` reports about a session. */
@@ -215,6 +223,7 @@ export class TerminalManager {
         sink: null,
         attachment: 0,
         live: false,
+        ended: info.exitCode !== undefined,
       });
     }
     this.hooks.onSessionsChanged?.();
@@ -222,7 +231,9 @@ export class TerminalManager {
 
   /** Every session running in the host, or being spawned there, with its meta. */
   running(): { id: string; meta: TerminalMeta }[] {
-    return [...this.sessions].map(([id, session]) => ({ id, meta: session.meta }));
+    return [...this.sessions]
+      .filter(([, session]) => !session.ended)
+      .map(([id, session]) => ({ id, meta: session.meta }));
   }
 
   /** The foreground program of each session whose host can tell; see `TerminalHost`. */
@@ -397,6 +408,7 @@ export class TerminalManager {
       sink: pending.sink,
       attachment: 0,
       live: false,
+      ended: false,
     };
     this.sessions.set(id, session);
     this.hooks.onSessionsChanged?.();
@@ -428,15 +440,18 @@ export class TerminalManager {
         session.sink.sendOutput(event);
         return;
       }
-      case "exit": {
-        const session = this.sessions.get(event.id);
-        if (!session || session.epoch !== event.epoch) return;
-        this.sessions.delete(event.id);
-        session.sink?.sendExit(event.exitCode);
-        this.hooks.onExit(event.id, event.exitCode);
-        this.hooks.onSessionsChanged?.();
+      case "exit":
+        this.onEnded(event.id, event.epoch, { reason: "exited", exitCode: event.exitCode });
         return;
-      }
+      case "lost":
+        this.onEnded(
+          event.id,
+          event.epoch,
+          event.reason === "host_lost"
+            ? { reason: "host_lost" }
+            : { reason: "exited", exitCode: null },
+        );
+        return;
       case "osc": {
         const session = this.sessions.get(event.id);
         if (!session || session.epoch !== event.epoch) return;
@@ -451,6 +466,15 @@ export class TerminalManager {
         throw new Error(`Unknown terminal host event: ${JSON.stringify(unknownEvent)}`);
       }
     }
+  }
+
+  private onEnded(id: string, epoch: string, end: TerminalEnd): void {
+    const session = this.sessions.get(id);
+    if (!session || session.epoch !== epoch) return;
+    this.sessions.delete(id);
+    session.sink?.sendExit(end);
+    this.hooks.onExit(id, end);
+    this.hooks.onSessionsChanged?.();
   }
 
   detach(id: string): void {

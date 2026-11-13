@@ -426,7 +426,8 @@ export class TerminalHostPool implements TerminalHost {
   }
 
   private onHostEvent(host: SocketTerminalHost, event: TerminalHostEvent): void {
-    if (event.type === "exit") this.onHostExit(host, event.id, event.epoch);
+    if (event.type === "exit" || event.type === "lost")
+      this.onHostExit(host, event.id, event.epoch);
     if (this.held) this.held.push(event);
     else this.deliver(event);
   }

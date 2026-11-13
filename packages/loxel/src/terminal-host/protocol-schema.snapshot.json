@@ -1,6 +1,6 @@
 {
-  "protocol": "1.1.0",
-  "capabilities": ["foregroundProcess"],
+  "protocol": "1.2.0",
+  "capabilities": ["foregroundProcess", "endedSessions"],
   "bootstrap": {
     "initialize": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -368,7 +368,8 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/__schema0" }
-        }
+        },
+        "exitCode": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
       },
       "required": ["id", "epoch", "offset", "pid", "cols", "rows", "meta"],
       "$defs": {
@@ -404,6 +405,11 @@
             "type": "object",
             "propertyNames": { "type": "string" },
             "additionalProperties": { "$ref": "#/$defs/__schema0" }
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           }
         },
         "required": ["id", "epoch", "offset", "pid", "cols", "rows", "meta"]

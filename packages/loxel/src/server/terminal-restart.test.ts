@@ -3,7 +3,8 @@
  * server reattaches the panel to the same shell, resuming its stream or, for a fresh xterm, with a
  * snapshot. A quit (SIGTERM) still ends them. A server started as the desktop app starts it, with
  * the app's channel, keeps them on a shutdown with `keep` (Quit and Keep Terminals, Restart
- * Loxel, an update) and when the app goes away, and ends them on one with `end`. `LOXEL_DEV=1`
+ * Loxel, an update) and when the app goes away, and ends them on one with `end`. A shell that
+ * exits while no server is connected shows the next one its last output and real exit code. `LOXEL_DEV=1`
  * keeps the server off the keychain, and a temporary state directory and port keep it and its
  * terminal host apart from any real one.
  */
@@ -16,6 +17,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -30,7 +32,7 @@ import {
   type ShutdownTerminals,
   encodeParentMessage,
 } from "@/parent-channel-protocol";
-import { hostRunDir } from "@/terminal-host/host-files";
+import { hostLogsDir, hostRunDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
 import { until } from "@/test/until";
 
@@ -56,9 +58,10 @@ function isAlive(pid: number): boolean {
   }
 }
 
-/** A panel's view of one terminal over its own socket: states, output and the offset it is at. */
+/** A panel's view of one terminal over its own socket: states, output, exits and its offset. */
 async function openPanel(baseUrl: string) {
   const states: Array<Extract<WsMessage, { type: "terminal_state" }>> = [];
+  const exits: Array<Extract<WsMessage, { type: "terminal_exit" }>> = [];
   let text = "";
   let offset: number | null = null;
   const socket = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
@@ -72,6 +75,7 @@ async function openPanel(baseUrl: string) {
       return;
     }
     const message = JSON.parse(event.data) as WsMessage;
+    if (message.type === "terminal_exit") exits.push(message);
     if (message.type !== "terminal_state") return;
     states.push(message);
     offset = message.offset;
@@ -82,6 +86,7 @@ async function openPanel(baseUrl: string) {
   });
   return {
     states,
+    exits,
     text: () => text,
     offset: () => offset,
     attach: (id: string, since?: { epoch: string; offset: number }) =>
@@ -140,6 +145,16 @@ describe("terminals across server restarts", () => {
       },
       "the server to listen",
     );
+  }
+
+  /** Everything the terminal hosts have logged. */
+  function hostLogs(): string {
+    const logsDir = hostLogsDir(stateDir);
+    if (!existsSync(logsDir)) return "";
+    return readdirSync(logsDir)
+      .filter((name) => name.startsWith("terminal-host-") && name.endsWith(".log"))
+      .map((name) => readFileSync(path.join(logsDir, name), "utf8"))
+      .join("");
   }
 
   /** The PIDs of the running terminal hosts, from their entries. */
@@ -312,6 +327,46 @@ describe("terminals across server restarts", () => {
       server!.kill("SIGTERM");
       await server!.exited;
       await until(() => !isAlive(shell.shellPid), TEST_TIMEOUT_MS);
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+
+  test(
+    "a shell that exits while the server is down shows the next one its last output and exit code",
+    async () => {
+      await startServer();
+      const shell = await openShell();
+      const go = path.join(stateDir, "finish.go");
+      // Sourced, so its exit ends the shell itself, once told to; typed as a short line, so the
+      // shell's echo of it does not wrap.
+      const script = path.join(stateDir, "f.sh");
+      writeFileSync(script, `while [ ! -e ${go} ]; do sleep 0.05; done; echo last-words; exit 7\n`);
+      shell.panel.type(shell.id, `. ${script}`);
+      await until(() => shell.panel.text().includes(`${script}\r\n`), TEST_TIMEOUT_MS);
+      const since = { epoch: shell.epoch, offset: shell.panel.offset()! };
+
+      server!.kill("SIGKILL");
+      await server!.exited;
+      // The host has seen the server go before the shell ends.
+      await until(
+        () => hostLogs().includes("The server's connection closed without a disconnect"),
+        TEST_TIMEOUT_MS,
+      );
+      writeFileSync(go, "");
+      await until(() => !isAlive(shell.shellPid), TEST_TIMEOUT_MS);
+
+      await startServer();
+      const resumed = await openPanel(baseUrl);
+      resumed.attach(shell.id, since);
+      await until(() => resumed.exits.length > 0, TEST_TIMEOUT_MS);
+      expect(resumed.states[0]).toMatchObject({ epoch: shell.epoch, mode: "resume" });
+      expect(resumed.text()).toContain("last-words");
+      expect(resumed.exits).toEqual([
+        { type: "terminal_exit", id: shell.id, reason: "exited", exitCode: 7 },
+      ]);
+      resumed.close();
+      server!.kill("SIGTERM");
+      await server!.exited;
     },
     TEST_TIMEOUT_MS * 3,
   );

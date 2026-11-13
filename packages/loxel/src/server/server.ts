@@ -1177,7 +1177,7 @@ function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSi
   return {
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
     sendOutput: ({ frame }) => ws.send(frame),
-    sendExit: (exitCode) => sendTo(ws, { type: "terminal_exit", id, exitCode }),
+    sendExit: (end) => sendTo(ws, { type: "terminal_exit", id, ...end }),
   };
 }
 

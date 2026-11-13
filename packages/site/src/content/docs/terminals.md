@@ -27,6 +27,10 @@ To rename a terminal, double-click its tab title, right-click the tab and choose
 
 Terminal sessions survive task switches. When you switch to another task — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-tasks#the-worktree-sidebar), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again. A crash doesn't end them either: if Loxel or its background server stops unexpectedly, your shells keep running, and reconnect with their scrollback when Loxel is back, as long as that is within 10 minutes.
 
+A program that ends while Loxel is away, an agent finishing its task for example, loses nothing: when Loxel is back, its panel shows what it printed last and the code it exited with, and the [notifications](/docs/coding-agents#notifications) it raised meanwhile show up. Once no terminal is still running, the ended ones wait 10 minutes for Loxel to come back.
+
+In the rare case that the process keeping your terminals running stops unexpectedly, its terminals end with it, and each one's panel says **[Terminal ended: Loxel's terminal host stopped unexpectedly]** instead of an exit code.
+
 ### Quitting without ending your terminals
 
 To leave agents and long-running commands working while Loxel is closed, quit with one of these instead of **Quit Loxel** (`Cmd+Q`):

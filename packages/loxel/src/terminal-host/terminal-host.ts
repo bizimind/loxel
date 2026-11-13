@@ -84,6 +84,12 @@ export const TerminalSessionInfoSchema = z.object({
   cols: SizeSchema,
   rows: SizeSchema,
   meta: TerminalSessionMetaSchema,
+  /**
+   * Set when the session's program has ended, while no server was connected: the host kept the
+   * session, its output and its screen, so the next server can attach once to show what it missed,
+   * after which the host sends the `exit` with this code. Capability `endedSessions` (1.2.0).
+   */
+  exitCode: z.number().int().optional(),
 });
 export type TerminalSessionInfo = z.infer<typeof TerminalSessionInfoSchema>;
 
@@ -144,6 +150,19 @@ export const TerminalOscEventSchema = z.object({
 });
 
 /**
+ * The session ended without its exit code reaching this side: its host is gone, and the program
+ * with it (`host_lost`), or it ended while the server was not connected to a host that does not
+ * keep ended sessions, or that had to let it go (`exit_unknown`). Reported by the client of a host
+ * in another process, never by a host itself, and never sent over the socket.
+ */
+export interface TerminalLostEvent {
+  type: "lost";
+  id: string;
+  epoch: string;
+  reason: "host_lost" | "exit_unknown";
+}
+
+/**
  * Output for the attached client, in offset order, only after that client's `state`. `frame` is
  * the renderer's binary output frame for it (`encodeOutputFrame`), and `data` is a view of the
  * frame's payload, not a copy: the frame is sent to the renderer as is, never re-encoded.
@@ -160,6 +179,7 @@ export type TerminalHostEvent =
   | z.infer<typeof TerminalStateEventSchema>
   | TerminalOutputEvent
   | z.infer<typeof TerminalExitEventSchema>
+  | TerminalLostEvent
   | z.infer<typeof TerminalOscEventSchema>;
 
 /**
@@ -171,10 +191,13 @@ export type TerminalHostEvent =
 export interface TerminalHost {
   /** Start a session. Rejects if the ID is in use or the program cannot be started. */
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo>;
+  /** Every session, ended ones a host kept for this server included, with their `exitCode`. */
   list(): Promise<TerminalSessionInfo[]>;
   /**
    * Bind the client: replaces any attached one. Resolves once the attach's `state` event has
    * been delivered, or once it was superseded by another attach, a detach or the session's end.
+   * A session that ended while no server was connected gets its state and the output the client
+   * missed, then its `exit`.
    */
   attach(request: TerminalAttachRequest): Promise<void>;
   /** Stop sending output. The program keeps running and its output keeps being parsed. */
@@ -187,7 +210,7 @@ export interface TerminalHost {
   /** Flow control: the attached client parsed `bytes` more bytes under the sync at `syncOffset`. */
   ack(id: string, syncOffset: number, bytes: number): void;
   /**
-   * Hang up and kill the program. The session is gone at once. Part of the contract: a destroyed
+   * Hang up and kill the program, or forget an ended session. The session is gone at once. Part of the contract: a destroyed
    * session never sends `exit`, even when its program ends later, so the caller removes the
    * session itself when it asks for the destroy.
    */

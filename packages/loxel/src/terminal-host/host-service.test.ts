@@ -6,10 +6,11 @@ import { join } from "node:path";
 
 import { createNoopLogger } from "@bizimind/logger";
 
+import type { ChildLogger } from "@/api/log-entry-model";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 
-import { TERMINAL_HOST_GRACE_MS, TerminalHostService } from "./host-service";
+import { NotificationQueue, TERMINAL_HOST_GRACE_MS, TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import { TERMINAL_HOST_CAPABILITIES } from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
@@ -20,7 +21,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-async function startService() {
+async function startService({ log = createNoopLogger() }: { log?: ChildLogger } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ths-"));
   const socketPath = join(dir, "host.sock");
   const host = new InProcessTerminalHost({ log: createNoopLogger() });
@@ -35,7 +36,7 @@ async function startService() {
   const service = new TerminalHostService({
     host,
     hostBuildId: "build-a",
-    log: createNoopLogger(),
+    log,
     setLogForward: (forward) => {
       forwarding.push(forward !== null);
       onForwarding?.();
@@ -44,11 +45,32 @@ async function startService() {
   });
   await service.listen(socketPath);
   cleanups.push(() => {
-    for (const id of host.sessionIds()) host.destroy(id);
+    host.destroyAll();
     service.close();
     rmSync(dir, { recursive: true, force: true });
   });
   return { host, socketPath, done, forwarding, forwardingChanged };
+}
+
+/** A logger that resolves `logged(text)` once a line containing `text` was logged. */
+function waitableLog() {
+  const lines: string[] = [];
+  const waiting: { text: string; resolve: () => void }[] = [];
+  const record = (msg: string) => {
+    lines.push(msg);
+    for (const waiter of waiting.splice(0)) {
+      if (msg.includes(waiter.text)) waiter.resolve();
+      else waiting.push(waiter);
+    }
+  };
+  const log: ChildLogger = { ...createNoopLogger(), info: record, warn: record };
+  const logged = (text: string) =>
+    lines.some((line) => line.includes(text))
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          waiting.push({ text, resolve });
+        });
+  return { log, logged };
 }
 
 /** A raw protocol client: what it sent is framed by hand, and what it got is kept parsed. */
@@ -102,7 +124,32 @@ async function rawClient(socketPath: string) {
       send({ type: "initialize", protocol: "9.9.9", build: "test", capabilities: ["future"] });
       return message("initialize_result");
     },
+    /** Initialize as a server of this build, with `capabilities` (all of this build's). */
+    initializeAsCurrent: (capabilities: readonly string[] = TERMINAL_HOST_CAPABILITIES) => {
+      send({
+        type: "initialize",
+        protocol: TERMINAL_HOST_PROTOCOL,
+        build: "test",
+        capabilities: [...capabilities],
+      });
+      return message("initialize_result");
+    },
   };
+}
+
+/** A session that waits for a line, then raises a notification, prints and exits with 4. */
+function spawnFinishing(host: InProcessTerminalHost) {
+  return host.spawn({
+    id: crypto.randomUUID(),
+    epoch: crypto.randomUUID(),
+    argv: ["/bin/sh", "-c", "read line; printf '\\033]9;done\\007'; echo final words; exit 4"],
+    cwd: "/tmp",
+    env: { PATH: "/usr/bin:/bin" },
+    cols: 80,
+    rows: 24,
+    scrollbackLines: 100,
+    meta: {},
+  });
 }
 
 function spawnSleep(host: InProcessTerminalHost) {
@@ -256,25 +303,72 @@ describe("TerminalHostService", () => {
     expect(done).toEqual(["grace period ended"]);
   });
 
-  test("with no server connected, the last session's exit ends the host", async () => {
+  test("an exit and a notification while no server is connected reach the next server", async () => {
     const { socketPath, host, done } = await startService();
-    const client = await rawClient(socketPath);
-    await client.initialize();
-    const { id } = await host.spawn({
-      id: crypto.randomUUID(),
-      epoch: crypto.randomUUID(),
-      argv: ["/bin/sh", "-c", "read line"],
-      cwd: "/tmp",
-      env: { PATH: "/usr/bin:/bin" },
-      cols: 80,
-      rows: 24,
-      scrollbackLines: 100,
-      meta: {},
+    const first = await rawClient(socketPath);
+    await first.initializeAsCurrent();
+    const { id, epoch } = await spawnFinishing(host);
+    first.send({ type: "disconnect", sessions: "keep" });
+    await first.closed;
+    const raised: string[] = [];
+    host.onEvent((event) => raised.push(event.type));
+    host.write(id, new TextEncoder().encode("\n"));
+    await until(() => raised.includes("osc") && host.endedSessionCount === 1);
+    expect(done).toEqual([]);
+
+    const next = await rawClient(socketPath);
+    await next.initializeAsCurrent();
+    expect(await next.message("osc")).toEqual({ type: "osc", id, epoch, code: 9, data: "done" });
+    expect(next.received.map((message) => message.type)).toEqual(["initialize_result", "osc"]);
+    next.send({ type: "list", requestId: 1 });
+    expect(await next.message("result")).toMatchObject({
+      requestId: 1,
+      value: [expect.objectContaining({ id, epoch, exitCode: 4 })],
     });
+
+    // The attach gets the screen as the program left it, then the real exit.
+    next.send({ type: "attach", requestId: 2, request: { id, attachment: 1 } });
+    expect(await next.message("exit")).toEqual({ type: "exit", id, epoch, exitCode: 4 });
+    const state = next.received.find((message) => message.type === "state") as
+      | { state: { snapshot?: string } }
+      | undefined;
+    expect(state?.state.snapshot).toContain("final words");
+    expect(host.endedSessionCount).toBe(0);
+  });
+
+  test("with only ended sessions left and no server, the host waits the grace period, then exits", async () => {
+    const { log, logged } = waitableLog();
+    const { socketPath, host, done } = await startService({ log });
+    const client = await rawClient(socketPath);
+    await client.initializeAsCurrent();
+    const { id } = await spawnFinishing(host);
     client.send({ type: "disconnect", sessions: "keep" });
     await client.closed;
+
+    jest.useFakeTimers();
     host.write(id, new TextEncoder().encode("\n"));
-    await until(() => done.length > 0);
-    expect(done).toEqual(["no sessions left"]);
+    await logged("1 ended session(s) waiting for a server");
+    jest.advanceTimersByTime(TERMINAL_HOST_GRACE_MS - 1);
+    expect(host.endedSessionCount).toBe(1);
+    expect(done).toEqual([]);
+    jest.advanceTimersByTime(1);
+    expect(host.endedSessionCount).toBe(0);
+    expect(done).toEqual(["grace period ended"]);
+  });
+});
+
+describe("NotificationQueue", () => {
+  const osc = (data: string) =>
+    ({ type: "osc", id: "x".repeat(36), epoch: "e", code: 9, data }) as const;
+
+  test("keeps the newest within its limits, counting the ones it dropped", () => {
+    const byCount = new NotificationQueue({ events: 2, chars: 100 });
+    for (const data of ["a", "b", "c"]) byCount.push(osc(data));
+    expect(byCount.take()).toEqual({ events: [osc("b"), osc("c")], dropped: 1 });
+    expect(byCount.take()).toEqual({ events: [], dropped: 0 });
+
+    const byChars = new NotificationQueue({ events: 10, chars: 5 });
+    for (const data of ["aaa", "bbb", "c"]) byChars.push(osc(data));
+    expect(byChars.take()).toEqual({ events: [osc("bbb"), osc("c")], dropped: 1 });
   });
 });

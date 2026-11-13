@@ -25,7 +25,7 @@ export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
 
 /** The events a session sends on its own; its exit goes to `onExit`, for the host to announce. */
-export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" }>;
+export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" | "lost" }>;
 
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {
@@ -217,6 +217,16 @@ export class TerminalSession {
     return this.attachment !== null;
   }
 
+  /** Whether the client attached under `attachment` is still the session's client. */
+  isAttachedAs(attachment: number): boolean {
+    return this.attachment === attachment;
+  }
+
+  /** Bytes of output the resume ring holds. */
+  get retainedBytes(): number {
+    return this.ring.end - this.ring.start;
+  }
+
   /**
    * Bind a client under `attachment`. With a `since` point from this epoch still covered by the
    * resume ring, the client keeps its xterm and only receives the bytes it missed; otherwise it gets
@@ -296,6 +306,14 @@ export class TerminalSession {
     for (const resolve of this.pendingSerializes) resolve("");
     this.pendingSerializes.clear();
     this.emulator.dispose();
+    this.hangUp();
+  }
+
+  /**
+   * Close the PTY and kill the program, keeping the screen and the ring: a session whose program
+   * ended can still be attached to, to show what it printed last.
+   */
+  hangUp(): void {
     try {
       this.proc.terminal?.close();
       this.proc.kill();
@@ -430,7 +448,7 @@ export class TerminalSession {
     // otherwise get its exit to the client before that snapshot and the output after it.
     while (this.snapshotSync) await this.snapshotSync.catch(() => {});
     // A paused client is still behind; without this final snapshot the tail of the output would
-    // be lost, since the host destroys the session (ring and emulator) right after onExit.
+    // be lost, since the host may destroy the session (ring and emulator) right after onExit.
     if (this.attachment !== null && this.paused) await this.attach(this.attachment);
     this.options.onExit(exitCode);
   }
