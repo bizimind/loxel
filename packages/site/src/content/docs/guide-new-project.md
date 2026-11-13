@@ -5,7 +5,7 @@ section: "Tasks & context"
 order: 5
 ---
 
-Click **Add project** at the bottom of the worktree sidebar. The **New Project** tab creates a new folder and repository from scratch; the **Import Existing** tab covers the three paths below. Which path you take depends on where your code lives right now and whether you want to work on parallel tasks from the start.
+Click **Add project** at the bottom of the worktree sidebar (or **Add Project** on the start screen, or in the command palette). The **New Project** tab creates a new folder and repository from scratch; the **Import Existing** tab covers the three paths below. Which path you take depends on where your code lives right now and whether you want to work on parallel tasks from the start.
 
 ---
 
@@ -25,7 +25,7 @@ Click **Add project** at the bottom of the worktree sidebar. The **New Project**
 
 Use this when the repo is already on disk and initialized. In **Import Existing**, enter or browse to the folder, and confirm.
 
-Loxel detects whether the folder is a bare repo or a regular repo. Detection is read-only — nothing changes until you confirm.
+Loxel detects whether the folder is a bare repo or a regular repo, and lists anything `wt doctor` would flag in its setup with a checkbox for each fix, the recommended ones checked, along with worktree nesting. Detection is read-only — nothing changes until you confirm, and then only the fixes you left checked.
 
 ---
 
@@ -35,7 +35,7 @@ Use this when you're starting from a GitHub, GitLab, or other remote URL. Paste 
 
 **Single-workspace** clones as a regular repo — standard `git clone`. One working tree, one branch at a time. The right choice for solo projects or repos where you won't run multiple agents in parallel.
 
-**Multi-workspace** clones as a bare repo and creates the first worktree alongside it. Optional setup choices are written to a repo-root `init.wt.sh` lifecycle hook, which runs in [trusted](/docs/repository-trust) repositories; for a new clone, Loxel asks before running it. Choose this if you plan to run parallel tasks from day one. You can always convert later, but starting bare is cleaner.
+**Multi-workspace** clones as a bare repo, fetches origin's branches as `origin/*` so new worktrees start from its default branch, and checks that branch out as the first worktree, as `wt init <url>` does. Optional setup choices are written to a repo-root `init.wt.sh` lifecycle hook, which runs in [trusted](/docs/repository-trust) repositories; for a new clone, Loxel asks before running it. Choose this if you plan to run parallel tasks from day one. You can always convert later, but starting bare is cleaner.
 
 > **Tip:** The dialog defaults to multi-workspace for URLs, new projects, and folders without git, and to single-workspace for repos already on disk. If you're unsure, single-workspace is the simpler start — you can convert to bare later, as long as you have a clean working tree.
 

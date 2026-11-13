@@ -25,6 +25,7 @@ import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
+import { codeBlockSourcePlugin, keepSourcesClosed } from "@/components/editor/code-block-source";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { codeBlockText, handleDiffBlockClick } from "@/components/editor/diff-block-preview";
@@ -420,6 +421,7 @@ export function MarkdownEditor({
           theme: codeTheme(),
           languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
+          previewLoading: "Rendering…",
         },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {
@@ -447,6 +449,7 @@ export function MarkdownEditor({
     }
 
     installSoftLineBreaks(crepe.editor);
+    crepe.editor.use(codeBlockSourcePlugin);
 
     // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
     // remark-stringify at init, so changes recreate the editor via the effect deps below.
@@ -529,7 +532,8 @@ export function MarkdownEditor({
             } else if (!editorContentCache.has(effectCacheKey)) {
               // New editor — place cursor at end
               const end = doc.content.size;
-              view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(end))));
+              const placeCaret = view.state.tr.setSelection(Selection.near(doc.resolve(end)));
+              view.dispatch(keepSourcesClosed(placeCaret));
               if (isActivatedPanel(panelApi)) view.focus();
             }
           }
@@ -913,12 +917,16 @@ export function MarkdownEditor({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    return attachMermaidPreviewControls(container, (codeBlock) => {
-      const source = crepeRef.current?.editor.action((ctx) =>
-        codeBlockText(ctx.get(editorViewCtx), codeBlock),
-      );
-      if (source) setViewerSource(source);
-    });
+    return attachMermaidPreviewControls(
+      container,
+      (codeBlock) => {
+        const source = crepeRef.current?.editor.action((ctx) =>
+          codeBlockText(ctx.get(editorViewCtx), codeBlock),
+        );
+        if (source) setViewerSource(source);
+      },
+      () => crepeRef.current?.editor.action((ctx) => ctx.get(editorViewCtx)),
+    );
     // crepeKey re-attaches the listeners after the container is remounted (accept disk version).
   }, [crepeKey]);
   const closeViewer = useCallback(() => setViewerSource(null), []);

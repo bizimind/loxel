@@ -83,6 +83,32 @@ describe("code block colors", () => {
     }
   });
 
+  test("colors mermaid blocks with Shiki's mermaid grammar in both themes", async () => {
+    expect(LanguageDescription.matchLanguageName(languages, "mmd")?.name).toBe("Mermaid");
+    const initial = useUIStore.getState().darkMode;
+    const code = "flowchart LR\n  A[Start] --> B";
+    const tokens = (chars: { char: string; color: string }[]) => ({
+      keyword: colorOf(chars, "f"),
+      label: colorOf(chars, "S"),
+      node: colorOf(chars, "A"),
+    });
+    try {
+      useUIStore.setState({ darkMode: false });
+      const light = tokens(await colors("mermaid", code));
+      view?.destroy();
+      useUIStore.setState({ darkMode: true });
+      const dark = tokens(await colors("mermaid", code));
+      for (const theme of [light, dark]) {
+        expect(theme.keyword).toBeTruthy();
+        expect(theme.label).toBeTruthy();
+        expect(new Set([theme.keyword, theme.label, theme.node]).size).toBe(3);
+      }
+      expect(dark.keyword).not.toBe(light.keyword);
+    } finally {
+      useUIStore.setState({ darkMode: initial });
+    }
+  });
+
   test("colors tokens with the editor theme", async () => {
     const chars = await colors("typescript", 'const a = "x";');
     expect(colorOf(chars, "c")).not.toBe("");

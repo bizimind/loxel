@@ -70,6 +70,7 @@ export type ActionId =
   | "toggle.logs"
   | "nav.project"
   | "nav.worktree"
+  | "project.add"
   | "nav.commandPalette"
   | "nav.search"
   | "nav.openFile"
@@ -321,7 +322,8 @@ export const ACTIONS: readonly ActionDef[] = [
     isEnabled: () => !isFocusInCenter(),
   },
 
-  // Worktree management
+  // Project and worktree management
+  { id: "project.add", label: "Add Project", category: "worktree" },
   { id: "worktree.back", label: "Go Back to Previous Worktree", category: "worktree" },
   { id: "worktree.forward", label: "Go Forward to Next Worktree", category: "worktree" },
   { id: "worktree.new", label: "New Worktree", category: "worktree" },

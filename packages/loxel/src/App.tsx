@@ -17,6 +17,7 @@ import { EmptyState } from "./components/EmptyState";
 import { FileSearchModal } from "./components/file-search/FileSearchModal";
 import { StatusBar } from "./components/panels/StatusBar";
 import { TopBar } from "./components/panels/TopBar";
+import { AddProjectWizard } from "./components/projects/AddProjectWizard";
 import { SearchModal } from "./components/search/SearchModal";
 import { SchemaConsentPrompt } from "./components/settings/SchemaConsentPrompt";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -111,6 +112,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <AddProjectWizard />
       <SettingsModal />
       <SearchModal />
       <FileSearchModal />

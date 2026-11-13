@@ -7,11 +7,23 @@
  * canvas element, so they reset whenever the panel re-renders the preview (on every edit of the
  * block). Pinch or Cmd/Ctrl+wheel zooms about the pointer and horizontal wheel or drag pans; a
  * vertical wheel is left to scroll the document. A click without a drag opens the full-size
- * viewer. The zoom geometry is the media viewer's (`pan-zoom.ts`).
+ * viewer. The zoom geometry is the media viewer's (`pan-zoom.ts`). Edit and Hide show and hide the
+ * block's source by moving the caret into and out of it (code-block-source.ts); CSS shows the one
+ * that applies.
  */
-import { CopyIcon, Maximize2Icon, MinusIcon, PlusIcon, ScanIcon } from "lucide-react";
+import type { EditorView } from "@milkdown/kit/prose/view";
+import {
+  CopyIcon,
+  EyeOffIcon,
+  Maximize2Icon,
+  MinusIcon,
+  PencilIcon,
+  PlusIcon,
+  ScanIcon,
+} from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { editCodeBlockSource, hideCodeBlockSource } from "@/components/editor/code-block-source";
 import {
   copyDiagram,
   type DiagramCopyFormat,
@@ -32,8 +44,19 @@ import {
 } from "@/components/pan-zoom/pan-zoom";
 
 const ACTION_ATTR = "data-mermaid-action";
-const ACTIONS = ["zoom-out", "zoom-in", "reset", "copy-svg", "copy-png", "open"] as const;
+const ACTIONS = [
+  "edit",
+  "hide",
+  "zoom-out",
+  "zoom-in",
+  "reset",
+  "copy-svg",
+  "copy-png",
+  "open",
+] as const;
 type Action = (typeof ACTIONS)[number];
+/** The actions that move the caret into or out of the block's source. */
+type SourceAction = "edit" | "hide";
 
 /** Class names of the preview's parts, shared with the markup in mermaid-preview.ts. */
 export const MERMAID_CLASSES = {
@@ -63,9 +86,23 @@ function ToolbarButton({
   );
 }
 
+function EditButton() {
+  return (
+    <ToolbarButton action="edit" title="Edit the diagram's source">
+      <PencilIcon className="size-3" />
+      Edit
+    </ToolbarButton>
+  );
+}
+
 function MermaidToolbar() {
   return (
     <div className="loxel-mermaid-toolbar bg-background/90 border-border flex items-center gap-0.5 rounded-md border p-0.5 font-sans text-[10px] shadow-sm backdrop-blur-sm">
+      <EditButton />
+      <ToolbarButton action="hide" title="Hide the source">
+        <EyeOffIcon className="size-3" />
+        Hide
+      </ToolbarButton>
       <ToolbarButton action="zoom-out" title="Zoom out">
         <MinusIcon className="size-3" />
       </ToolbarButton>
@@ -92,11 +129,22 @@ function MermaidToolbar() {
 }
 
 let toolbarHtml: string | null = null;
+let editButtonHtml: string | null = null;
 
 /** The preview toolbar's static markup. */
 export function mermaidToolbarHtml(): string {
   toolbarHtml ??= renderToStaticMarkup(<MermaidToolbar />);
   return toolbarHtml;
+}
+
+/**
+ * The Edit button alone, for an error preview: CSS shows it only on a collapsed block, which an
+ * error preview sits in only until its block's result catches up, and it must never leave the
+ * source unreachable.
+ */
+export function mermaidEditButtonHtml(): string {
+  editButtonHtml ??= renderToStaticMarkup(<EditButton />);
+  return editButtonHtml;
 }
 
 /** Each preview canvas's current view; a re-rendered preview starts again from none. */
@@ -167,17 +215,20 @@ interface Press {
 
 /**
  * Wires up the Mermaid previews inside `container` (the markdown editor's root): `openViewer`
- * receives the code block's node view element. Returns a cleanup function.
+ * receives the code block's node view element, and `editorView` returns the editor that Edit and
+ * Hide move the caret in. Returns a cleanup function.
  */
 export function attachMermaidPreviewControls(
   container: HTMLElement,
   openViewer: (codeBlock: Element) => void,
+  editorView: () => EditorView | undefined,
 ): () => void {
   /** The current press on a preview, so its click can tell a drag from a click. */
   let press: Press | null = null;
 
-  const runAction = (action: Action, parts: PreviewParts) => {
+  const runAction = (action: Exclude<Action, SourceAction>, parts: PreviewParts) => {
     const center = { x: parts.viewport.clientWidth / 2, y: parts.viewport.clientHeight / 2 };
+    const codeBlock = parts.diagram.closest(".milkdown-code-block");
     switch (action) {
       case "zoom-in":
         zoom(parts, ZOOM_STEP, center);
@@ -196,11 +247,9 @@ export function attachMermaidPreviewControls(
         if (svg) void copyDiagram(svg, format, surfaceColor(parts.viewport));
         break;
       }
-      case "open": {
-        const codeBlock = parts.diagram.closest(".milkdown-code-block");
+      case "open":
         if (codeBlock) openViewer(codeBlock);
         break;
-      }
       default: {
         const unknown: never = action;
         throw new Error(`Unknown mermaid preview action: ${String(unknown)}`);
@@ -210,10 +259,19 @@ export function attachMermaidPreviewControls(
 
   const handleClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
-    const parts = previewParts(event.target);
-    if (!parts) return;
     const option = event.target.closest(`[${ACTION_ATTR}]`)?.getAttribute(ACTION_ATTR);
     const action = ACTIONS.find((a) => a === option);
+    // Edit and Hide need only the block: Edit also sits in an error preview, which has no diagram.
+    if (action === "edit" || action === "hide") {
+      const codeBlock = event.target.closest(".milkdown-code-block");
+      const view = editorView();
+      if (!view || !codeBlock || !container.contains(codeBlock)) return;
+      if (action === "edit") editCodeBlockSource(view, codeBlock);
+      else hideCodeBlockSource(view, codeBlock);
+      return;
+    }
+    const parts = previewParts(event.target);
+    if (!parts) return;
     if (action) {
       runAction(action, parts);
       return;

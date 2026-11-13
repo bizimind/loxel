@@ -13,7 +13,12 @@ import DOMPurify from "dompurify";
 import type { Mermaid, MermaidConfig } from "mermaid";
 
 import type { PreviewValue, RenderPreview } from "@/components/editor/code-block-preview";
-import { MERMAID_CLASSES, mermaidToolbarHtml } from "@/components/editor/mermaid-preview-controls";
+import {
+  MERMAID_CLASSES,
+  mermaidEditButtonHtml,
+  mermaidToolbarHtml,
+} from "@/components/editor/mermaid-preview-controls";
+import { recordMermaidRender } from "@/components/editor/mermaid-render-results";
 import type { Dimensions } from "@/components/pan-zoom/pan-zoom";
 import { frontendLog } from "@/lib/frontend-logger";
 
@@ -167,12 +172,19 @@ function errorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-/** Error text goes in through `textContent` so diagram source echoed in it is never parsed as HTML. */
+/**
+ * The error, with an Edit button (static markup) for a block collapsed over it. Error text goes in
+ * through `textContent` so diagram source echoed in it is never parsed as HTML.
+ */
 function errorPreview(error: unknown): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "loxel-mermaid-error";
-  el.textContent = `Mermaid error: ${errorMessage(error)}`;
-  return el;
+  const preview = document.createElement("div");
+  preview.className = "loxel-mermaid-error-preview";
+  preview.innerHTML = mermaidEditButtonHtml();
+  const message = document.createElement("div");
+  message.className = "loxel-mermaid-error";
+  message.textContent = `Mermaid error: ${errorMessage(error)}`;
+  preview.append(message);
+  return preview;
 }
 
 /**
@@ -184,8 +196,10 @@ async function renderDiagram(source: string): Promise<PreviewValue> {
   try {
     rendered = await renderVariants(source);
   } catch (error) {
+    recordMermaidRender(source, false);
     return errorPreview(error);
   }
+  recordMermaidRender(source, true);
   const variants = rendered.map(
     ({ className, id, svg }) => `<div class="${className}">${withFreshId(id, svg)}</div>`,
   );
@@ -221,13 +235,16 @@ export async function renderMermaidDiagram(source: string): Promise<MermaidDiagr
 }
 
 /**
- * Preview for ```mermaid blocks, rendered asynchronously. An emptied block clears its preview
- * through the same queue, so a render still in flight cannot land after it. Crepe gives the hook
- * no block identity, so a block switched to another language within a pending render can still
- * receive that render; its next edit replaces it.
+ * Preview for ```mermaid blocks, rendered asynchronously. An empty block has no preview at once
+ * (so no loading placeholder), and also clears it through the same queue, so a render still in
+ * flight cannot land after it. Crepe gives the hook no block identity, so a block switched to
+ * another language within a pending render can still receive that render; its next edit
+ * replaces it.
  */
 export const renderMermaidPreview: RenderPreview = (_language, content, applyPreview) => {
-  const job = content.trim() === "" ? () => Promise.resolve(null) : () => renderDiagram(content);
-  void enqueue(job).then(applyPreview);
-  return undefined;
+  const empty = content.trim() === "";
+  void enqueue(empty ? () => Promise.resolve(null) : () => renderDiagram(content)).then(
+    applyPreview,
+  );
+  return empty ? null : undefined;
 };

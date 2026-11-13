@@ -35,7 +35,11 @@ beforeEach(() => {
   setSize(viewport(), { clientWidth: 500, clientHeight: 100 });
   setSize(canvas(), { scrollWidth: 1000, scrollHeight: 100 });
   opened = [];
-  detach = attachMermaidPreviewControls(root, (codeBlock) => opened.push(codeBlock));
+  detach = attachMermaidPreviewControls(
+    root,
+    (codeBlock) => opened.push(codeBlock),
+    () => undefined,
+  );
 });
 
 afterEach(() => {
