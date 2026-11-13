@@ -80,6 +80,8 @@ interface ProjectState {
   projects: EnrichedProject[];
   /** The server user's home directory (null until projects are first fetched). */
   homeDir: string | null;
+  /** Where Home's drafts are kept (`ProjectsResponse.homeDraftsDir`). */
+  homeDraftsDir: string | null;
   sidebarExpanded: boolean;
   /** Width of the sidebar when expanded (the collapsed width is fixed). */
   sidebarWidth: number;
@@ -92,6 +94,8 @@ interface ProjectState {
    */
   autoExpandedProjectIds: string[];
 
+  /** Whether the first project list fetch has settled, so an empty `projects` means none. */
+  projectsFetched: boolean;
   fetchProjects: () => Promise<void>;
   /** Refresh the list after the server added `project`, and switch to it. */
   showAddedProject: (project: Project) => Promise<void>;
@@ -110,21 +114,28 @@ export const useProjectStore = create<ProjectState>()(
     (set, get) => ({
       projects: [],
       homeDir: null,
+      homeDraftsDir: null,
       sidebarExpanded: false,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
       autoExpandedProjectIds: [],
+      projectsFetched: false,
 
       fetchProjects: async () => {
         try {
           const data = await api.getProjects();
-          set({ projects: data.projects, homeDir: data.homeDir });
+          set({
+            projects: data.projects,
+            homeDir: data.homeDir,
+            homeDraftsDir: data.homeDraftsDir,
+          });
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
           useWorktreeStore.getState().applyEnrichedProjects(data.projects);
         } finally {
           // Settle even on failure, so waiting opens report "no project" instead of hanging
           projectsLoaded.resolve();
+          if (!get().projectsFetched) set({ projectsFetched: true });
         }
       },
 

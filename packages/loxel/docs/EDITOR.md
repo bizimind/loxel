@@ -261,6 +261,8 @@ Drafts (detached files) are files outside the repository, one flat directory per
 - Listing changes broadcast `detached_files_changed`; content changes of existing files go through the shared `file_content_changed` broadcast with nonces, so drafts save exactly like worktree files.
 - `moveToProject` refuses to overwrite and falls back to copy + delete across filesystems (`EXDEV`); `copyToProject` uses `COPYFILE_EXCL`. After a move the client dispatches `loxel-file-moved`, so an open draft tab becomes a worktree tab. The Drafts section UI is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md).
 
+- **Home's drafts** (plans made in [Home](PANELS_AND_LAYOUT.md#home)) are one more directory, `<stateDir>/detached/home/` (`getHomeDraftsDir`), served by a `DetachedFilesService` the server starts at boot and keeps outside the per-worktree resources (`homeDrafts` in [server.ts](../src/server/server.ts)), since Home has no worktree subscription. `resolveFilePath` checks it before any worktree, the drafts routes take `HOME_KEY` ([home-model.ts](../src/api/home-model.ts)) where they take a worktree path (`draftsFor` in [routes.ts](../src/server/routes.ts)), and its `file_content_changed` and `detached_files_changed` go to every window with `wtPath: HOME_KEY`, so a save in Home gets its echo; [ws-bridge.ts](../src/queries/ws-bridge.ts) matches them to editors with no worktree. Moving or copying one into a project is refused, since Home has none.
+
 [detached-path.ts](../src/lib/detached-path.ts) only holds display-name and directory-normalization helpers.
 
 ## External files and Others folders

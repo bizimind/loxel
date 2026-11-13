@@ -24,6 +24,8 @@ const UPDATE_CHECK = "update:check";
 const UPDATE_DOWNLOAD = "update:download";
 const UPDATE_INSTALL = "update:install";
 const UPDATE_STATUS_CHANGED = "update:status-changed";
+const DEFAULT_BROWSER_GET = "default-browser:get";
+const DEFAULT_BROWSER_SET = "default-browser:set";
 const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 const APP_RESTART = "app:restart";
 
@@ -110,6 +112,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(UPDATE_STATUS_CHANGED, handler);
     return () => ipcRenderer.removeListener(UPDATE_STATUS_CHANGED, handler);
   },
+  getDefaultBrowserStatus: () => ipcRenderer.invoke(DEFAULT_BROWSER_GET),
+  setAsDefaultBrowser: () => ipcRenderer.invoke(DEFAULT_BROWSER_SET),
   quitKeepingTerminals: () => ipcRenderer.send(APP_QUIT_KEEPING_TERMINALS),
   restartApp: () => ipcRenderer.send(APP_RESTART),
 });

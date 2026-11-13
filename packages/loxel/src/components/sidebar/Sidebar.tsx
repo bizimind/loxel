@@ -29,6 +29,7 @@ import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/sto
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { ProjectIcon } from "../projects/ProjectIcon";
+import { LoxelLogoTile } from "../ui/loxel-logo";
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { ICON_PX, iconLeft, iconLeftExpanded, railDepth, railWidth } from "./worktree-geometry";
@@ -63,6 +64,7 @@ export function Sidebar() {
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
+  const showHome = useWorktreeStore((s) => s.showHome);
 
   // Auto-expand newly loaded projects once so worktrees and the create action are visible.
   // The "once" marker lives in the persisted store, not a ref: the sidebar remounts when the
@@ -231,6 +233,10 @@ export function Sidebar() {
     [activeWorktreePath, switchWorktree, toggleProjectExpanded],
   );
 
+  const isHome = activeWorktreePath === null;
+  // Always at full strength: the row's highlight and the rail's ring show when Home is shown.
+  const homeTileClass = "text-foreground size-6";
+
   return (
     <div
       className={cn(
@@ -254,6 +260,61 @@ export function Sidebar() {
         className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
+        {/* Home, what a window shows with no worktree, set off from the projects like they are */}
+        <div className="mb-2">
+          {sidebarExpanded ? (
+            // Laid out like a project row, so its logo sits in the column of the project icons.
+            <button
+              type="button"
+              className={cn(
+                "hover:bg-primary/50 focus-visible:ring-ring flex w-full cursor-pointer items-center py-1.5 text-left transition-colors outline-none not-dark:mx-1 not-dark:w-[calc(100%-0.5rem)] not-dark:rounded-md not-dark:pl-1! focus-visible:ring-2 focus-visible:ring-inset",
+                isHome && "bg-primary",
+              )}
+              style={{ paddingLeft: `${ROW_LEFT}px` }}
+              onClick={showHome}
+              aria-current={isHome ? "page" : undefined}
+            >
+              {/* Where a project row has its fold chevron */}
+              <span className="shrink-0" style={{ width: `${CHEVRON_PX}px` }} />
+              <span className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
+                <LoxelLogoTile className={homeTileClass} />
+              </span>
+              {/* As tall as a project row's two lines, with its name centered in that height */}
+              <span className="grid min-w-0 flex-1">
+                <span className="text-foreground col-start-1 row-start-1 self-center truncate text-xs font-medium">
+                  Home
+                </span>
+                <span aria-hidden className="invisible col-start-1 row-start-1">
+                  <span className="block text-xs font-medium">&nbsp;</span>
+                  <span className="block text-[10px]">&nbsp;</span>
+                </span>
+              </span>
+            </button>
+          ) : (
+            // The app's logo in the column of the worktree icons, ringed like the active project
+            // icon while Home is shown.
+            <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
+              <button
+                type="button"
+                className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
+                onClick={showHome}
+                title="Home"
+                aria-current={isHome ? "page" : undefined}
+              >
+                <LoxelLogoTile
+                  className={cn(
+                    homeTileClass,
+                    // The active project's ring, with a gap in the card color in both themes: its
+                    // white inner band would merge with the white tile.
+                    isHome &&
+                      "shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--primary)]",
+                  )}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+
         {projects.map((project, index) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);

@@ -4,9 +4,10 @@ const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
 const { onLoxelEvent } = await import("./loxel-events");
-const { openFile, openUrl } = await import("./open-path");
+const { openFile, openPath, openUrl } = await import("./open-path");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
+const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
 const { getWorktreeUI } = await import("@/store/worktree-ui");
 const { useWorktreeStore } = await import("@/store/worktrees");
 
@@ -46,7 +47,8 @@ describe("opens from outside the window", () => {
 
   afterEach(() => {
     for (const cleanup of cleanups) cleanup();
-    for (const worktree of [MAIN, OTHER]) getWorktreeUI(worktree).getState().takePendingOpens();
+    for (const key of [MAIN, OTHER, HOME_LAYOUT_KEY])
+      getWorktreeUI(key).getState().takePendingOpens();
     setCenterApi(null);
   });
 
@@ -57,6 +59,69 @@ describe("opens from outside the window", () => {
 
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     expect(switched).toEqual([]);
+  });
+
+  test("a link naming no worktree opens in the worktree on screen", async () => {
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(switched).toEqual([]);
+  });
+
+  test("a link naming no worktree opens in Home when it is on screen", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(switched).toEqual([]);
+  });
+
+  test("a link waits for Home's editor area to mount, as at a launch with the link", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi(null);
+
+    await openUrl(null, { url: URL_TARGET });
+
+    expect(created).toEqual([]);
+    expect(switched).toEqual([]);
+    expect(pending(HOME_LAYOUT_KEY)).toEqual([{ kind: "url", url: URL_TARGET }]);
+  });
+
+  test("a file link in Home opens in the worktree holding it, switching there", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath(`${OTHER}/a.md`, { line: 3, column: 1 });
+
+    expect(switched).toEqual([OTHER]);
+    expect(pending(OTHER)).toEqual([
+      { kind: "file", path: `${OTHER}/a.md`, location: { line: 3, column: 1 } },
+    ]);
+  });
+
+  test("a link between Home's plans opens in Home", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath("/state/detached/home/Plan.md");
+
+    expect(openedFiles).toEqual(["/state/detached/home/Plan.md"]);
+    expect(switched).toEqual([]);
+    useProjectStore.setState({ homeDraftsDir: null });
+  });
+
+  test("a file link in Home to a file in no worktree opens nothing", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath("/elsewhere/notes.md");
+
+    expect(openedFiles).toEqual([]);
+    expect(switched).toEqual([]);
+    expect(pending(HOME_LAYOUT_KEY)).toEqual([]);
   });
 
   test("a page for another worktree waits for it and switches there", async () => {

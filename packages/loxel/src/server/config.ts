@@ -49,6 +49,11 @@ export function getDetachedDir(projectPath: string, worktreePath: string | null)
   return join(stateDir, "detached", hash12(projectPath), hash12(worktreePath ?? projectPath));
 }
 
+/** Drafts made in Home, which belong to no project: `<stateDir>/detached/home/`. */
+export function getHomeDraftsDir(): string {
+  return join(stateDir, "detached", "home");
+}
+
 export const config = {
   isDev,
   stateDir,

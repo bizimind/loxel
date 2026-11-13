@@ -68,7 +68,7 @@ const STALE_SERVER_WAIT_MS = 15_000;
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
-import { requestOpen } from "../open-request";
+import { type OpenRequest, requestOpen } from "../open-request";
 import {
   PARENT_CHANNEL_FD,
   type ShutdownTerminals,
@@ -82,6 +82,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { BROWSER_PARTITION } from "./browser-partition";
+import { installDefaultBrowser } from "./default-browser";
 import {
   APP_QUIT_KEEPING_TERMINALS,
   APP_RESTART,
@@ -808,7 +809,7 @@ async function serverReady(): Promise<void> {
  * has opened the first window there is nothing to add to: startup opens it.
  */
 function openNewWindow(): void {
-  if (launchPaths !== null) return;
+  if (launchOpens !== null) return;
   serverReady()
     .then(() => createWindow())
     .catch((err: unknown) => dialog.showErrorBox("Cannot Open a Window", String(err)));
@@ -831,36 +832,56 @@ function ensureWindow(): Promise<void> {
   return windowStarting;
 }
 
-// --- Files and folders opened with Loxel ---
+// --- Files, folders and links opened with Loxel ---
 // macOS hands the app files and folders opened with it (Finder "Open With", drops on the Dock
-// icon, `open -a Loxel <path>`) as open-file events. Those that launch the app arrive before it is
-// ready, so they wait for the startup window. The server sends each to the window in use.
+// icon, `open -a Loxel <path>`) as open-file events, and web links, once Loxel is the default
+// browser, as open-url events. Those that launch the app arrive before it is ready, so they wait
+// for the startup window. The server sends each to the window in use.
 
-/** Paths received before the startup window exists; null once it does. */
-let launchPaths: string[] | null = [];
-/** Opens run one at a time so several files open in the order macOS sent them. */
+/** Something macOS asked Loxel to open, and how to name it (short, and in full) if that fails. */
+interface OsOpen {
+  request: OpenRequest;
+  label: string;
+  target: string;
+}
+
+/** Opens received before the startup window exists; null once it does. */
+let launchOpens: OsOpen[] | null = [];
+/** Opens run one at a time so several open in the order macOS sent them. */
 let openQueue = Promise.resolve();
 
-function openPathFromOS(filePath: string): void {
+function openFromOS({ request, label, target }: OsOpen): void {
   openQueue = openQueue.then(async () => {
     try {
       await ensureWindow();
-      await requestOpen(SERVER_URL, { filePath });
+      await requestOpen(SERVER_URL, request);
     } catch (err) {
-      console.error(`[electron] Failed to open ${filePath}:`, err);
+      console.error(`[electron] Failed to open ${label}:`, err);
       void dialog.showMessageBox({
         type: "error",
-        message: `Cannot open ${path.basename(filePath)}`,
-        detail: `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+        message: `Cannot open ${label}`,
+        detail: `${target}\n\n${err instanceof Error ? err.message : String(err)}`,
       });
     }
   });
 }
 
+function receiveOpenFromOS(open: OsOpen): void {
+  if (launchOpens) launchOpens.push(open);
+  else openFromOS(open);
+}
+
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
-  if (launchPaths) launchPaths.push(filePath);
-  else openPathFromOS(filePath);
+  receiveOpenFromOS({ request: { filePath }, label: path.basename(filePath), target: filePath });
+});
+
+// A link opened with Loxel as the browser goes straight to a browser panel at that URL: of the
+// worktree the window in use shows, else of Home. No `wtPath`, so the server picks the window.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  if (!isHttpUrl(url)) return;
+  receiveOpenFromOS({ request: { url }, label: "the link", target: url });
 });
 
 /** The window showing a webview frame, or the best guess once the frame is gone. */
@@ -947,7 +968,7 @@ function showStartupError(err: unknown): void {
 
 app.on("second-instance", () => {
   // Startup opens the first window; until it has, there is nothing to show.
-  if (launchPaths !== null) return;
+  if (launchOpens !== null) return;
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   if (!win) {
     ensureWindow().catch(showStartupError);
@@ -959,6 +980,7 @@ app.on("second-instance", () => {
 });
 
 installAppUpdater();
+installDefaultBrowser();
 
 app.whenReady().then(async () => {
   if (!isPrimaryInstance) return;
@@ -988,9 +1010,9 @@ app.whenReady().then(async () => {
     buildAppMenu();
     await applyPersistedTheme(SERVER_URL);
     await createWindow();
-    const pathsOpenedAtLaunch = launchPaths;
-    launchPaths = null;
-    for (const filePath of pathsOpenedAtLaunch ?? []) openPathFromOS(filePath);
+    const opensAtLaunch = launchOpens;
+    launchOpens = null;
+    for (const open of opensAtLaunch ?? []) openFromOS(open);
     startMainProcessMonitor(SERVER_URL);
     if (!IS_DEMO) scheduleAutomaticUpdateCheck(SERVER_URL);
 

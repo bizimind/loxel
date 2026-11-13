@@ -71,6 +71,15 @@ interface Window {
     onUpdateStatusChange: (
       callback: (status: import("@/api/update-model").UpdateState) => void,
     ) => () => void;
+    /** Whether Loxel is the default web browser, and whether this build can become it. */
+    getDefaultBrowserStatus: () => Promise<
+      import("@/api/default-browser-model").DefaultBrowserStatus
+    >;
+    /**
+     * Ask macOS to make Loxel the default web browser. macOS confirms with its own prompt, so the
+     * status returned may not show the user's answer yet.
+     */
+    setAsDefaultBrowser: () => Promise<import("@/api/default-browser-model").DefaultBrowserStatus>;
     /** Quit, leaving the terminals running for the next launch to reattach. */
     quitKeepingTerminals: () => void;
     /** Quit, leaving the terminals running, and open the app again. */

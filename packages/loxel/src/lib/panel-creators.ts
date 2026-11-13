@@ -16,6 +16,7 @@ import type {
 
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
+import { HOME_KEY } from "@/api/home-model";
 import type {
   PanelOpenOptions,
   PanelPlacement,
@@ -39,11 +40,17 @@ import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-d
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
+import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
 import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
-import { getCenterPanelDef, getCenterPanelDefByType } from "@/store/panel-config";
-import { getCenterApi, getCenterApiWorktree } from "@/store/tools-bar";
+import {
+  getCenterPanelDef,
+  getCenterPanelDefByType,
+  panelTypeNeedsWorktree,
+} from "@/store/panel-config";
+import { useProjectStore } from "@/store/projects";
+import { getCenterApi, getCenterApiLayoutKey } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -256,6 +263,15 @@ function movePlacedPanel(
 
 // -- Panel creators --
 
+/**
+ * The center layout, if it can hold a panel of `type`: Home, shown with no worktree active, holds
+ * only the types that need no worktree, and has no component for the others.
+ */
+function centerApiFor(type: string): DockviewApi | null {
+  const hasWorktree = useWorktreeStore.getState().activeWorktreePath !== null;
+  return hasWorktree || !panelTypeNeedsWorktree(type) ? getCenterApi() : null;
+}
+
 export interface CreateTerminalOptions extends PanelOpenOptions {
   /** Session ID to bind to; minted here when absent. The server names it for `loxel terminal`. */
   terminalId?: string;
@@ -267,20 +283,24 @@ export interface CreateTerminalOptions extends PanelOpenOptions {
 export function createTerminal({
   placement,
   focus,
-  cwd,
+  cwd: requestedCwd,
   ...options
 }: CreateTerminalOptions = {}): void {
-  const cApi = getCenterApi();
-  if (!cApi) return;
+  const cApi = centerApiFor("terminal");
+  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  // A Home terminal belongs to no worktree and starts in the user's home directory.
+  const cwd = requestedCwd ?? (worktreePath ? undefined : useProjectStore.getState().homeDir);
+  if (!cApi || (!worktreePath && !cwd)) return;
 
   const terminalId = options.terminalId ?? crypto.randomUUID();
   const title = options.title ?? nextPanelTitle(cApi, "Terminal");
   const panelId = `terminal-${terminalId}`;
 
-  getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  if (worktreePath) {
+    getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  }
   uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   addPlacedPanel(
     cApi,
     placement,
@@ -289,7 +309,11 @@ export function createTerminal({
       component: "terminal",
       tabComponent: "terminalTab",
       title,
-      params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
+      params: {
+        terminalId,
+        ...(worktreePath ? { worktreePath } : {}),
+        ...(cwd && cwd !== worktreePath ? { cwd } : {}),
+      },
     },
     focus,
   );
@@ -305,9 +329,9 @@ export async function createEditor(options?: {
   creatingEditor = true;
   try {
     const wt = useWorktreeStore.getState().activeWorktreePath;
-    if (!wt) return;
+    // In Home the plan is one of Home's drafts, which belong to no worktree.
     const { name, path: filePath } = await api.createDetachedFile({
-      wt,
+      wt: wt ?? HOME_KEY,
       prefix: "Note",
       ext: "md",
       content: options?.content ?? "# ",
@@ -324,7 +348,7 @@ export async function createEditor(options?: {
       component: "editor",
       tabComponent: "markdownEditorTab",
       title,
-      params: { filePath, worktreePath: wt },
+      params: { filePath, ...(wt ? { worktreePath: wt } : {}) },
     });
     uiLog.info("Panel created", { panelType: "editor", panelId, filePath });
 
@@ -485,12 +509,10 @@ export async function createCodeEditor(options?: {
  */
 export function reopenClosedTab(): void {
   const dv = getCenterApi();
-  const worktreePath = getCenterApiWorktree();
+  const layoutKey = getCenterApiLayoutKey();
   // While switching worktrees the center is about to be replaced, and the panel with it.
-  if (!dv || !worktreePath || worktreePath !== useWorktreeStore.getState().activeWorktreePath) {
-    return;
-  }
-  const tab = takeLastClosedTab(worktreePath, (id) => dv.getPanel(id) !== undefined);
+  if (!dv || !layoutKey || layoutKey !== activeLayoutKey()) return;
+  const tab = takeLastClosedTab(layoutKey, (id) => dv.getPanel(id) !== undefined);
   if (!tab) return;
 
   const { groupId, index, ...options } = tab;
@@ -500,7 +522,9 @@ export function reopenClosedTab(): void {
     options.params = { ...options.params, terminalId };
     const title = options.title ?? nextPanelTitle(dv, "Terminal");
     options.title = title;
-    getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+    if (layoutKey !== HOME_LAYOUT_KEY) {
+      getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+    }
   }
 
   const group = dv.getGroup(groupId);
@@ -512,7 +536,7 @@ export function reopenClosedTab(): void {
     : addPlacedPanel(dv, undefined, options);
   if (panel.group.id !== groupId) {
     const newIndex = panel.group.panels.indexOf(panel);
-    retargetClosedTabs(worktreePath, groupId, panel.group.id, newIndex - index);
+    retargetClosedTabs(layoutKey, groupId, panel.group.id, newIndex - index);
   }
   uiLog.info("Panel reopened", { panelId: options.id });
 }
@@ -537,8 +561,11 @@ export function openFileBacked(
   filePath: string,
   { params, slot, placement, focus = true }: OpenFileBackedOptions = {},
 ): IDockviewPanel | undefined {
-  const cApi = getCenterApi();
-  if (!cApi) return undefined;
+  const cApi = centerApiFor(type);
+  if (!cApi) {
+    uiLog.warn("No editor area here can show the file", { panelType: type, filePath });
+    return undefined;
+  }
   const def = getCenterPanelDefByType(type);
   if (!def) return undefined;
   const panelId = `${def.idPrefix}${filePath}`;
@@ -571,7 +598,7 @@ export function openVirtualDocument(
   uri: string,
   { line, column }: { line?: number; column?: number } = {},
 ): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("virtualDocument");
   const connection = virtualDocumentConnection(uri);
   if (!cApi || !connection) return;
   const panelId = `virtual-document-${uri}`;
@@ -773,7 +800,7 @@ export function handleFileDeleted(filePath: string): void {
 
 /** Handle open-diff events: open or focus the singleton diff panel. */
 export function openDiff(): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("diff");
   if (!cApi) return;
 
   const existing = cApi.getPanel("diff");
@@ -814,7 +841,7 @@ export function patchDiffTitle({ patch, sourcePath }: PatchDiffParams): string {
  * file. The panel keeps the text it opened with.
  */
 export function openPatchDiff(params: PatchDiffParams): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("patchDiff");
   if (!cApi) return;
   const existing = cApi.panels.find((panel) => {
     const open: Partial<Record<keyof PatchDiffParams, unknown>> = panel.params ?? {};
@@ -836,7 +863,7 @@ export function openPatchDiff(params: PatchDiffParams): void {
  * to the panel the placement is relative to (the active one by default).
  */
 export function duplicatePatchDiff(placement?: PanelPlacement): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("patchDiff");
   if (!cApi) return;
   const params: Partial<Record<keyof PatchDiffParams, unknown>> =
     placementReference(cApi, placement)?.params ?? {};
@@ -868,7 +895,7 @@ export function openCompareFiles(
   newPath: string,
   placement?: PanelPlacement,
 ): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("compare");
   if (!cApi) return;
 
   const panelId = `compare-${crypto.randomUUID()}`;
@@ -888,7 +915,7 @@ export function openCompareFiles(
  * next to the panel the placement is relative to (the active one by default).
  */
 export function duplicateComparison(placement?: PanelPlacement): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("compare");
   if (!cApi) return;
   const params: unknown = placementReference(cApi, placement)?.params;
   if (typeof params !== "object" || params === null) return;
@@ -899,7 +926,7 @@ export function duplicateComparison(placement?: PanelPlacement): void {
 
 /** Open or focus the singleton LocalDb panel. */
 export function openLocalDb(): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("localDb");
   if (!cApi) return;
 
   const existing = cApi.getPanel("localdb-main");
