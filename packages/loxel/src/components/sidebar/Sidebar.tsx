@@ -279,16 +279,14 @@ export function Sidebar() {
               <span className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
                 <LoxelLogoTile className={homeTileClass} />
               </span>
-              {/* Two lines like a project row: its name, and where it is */}
-              <span className="min-w-0 flex-1 overflow-hidden">
-                <span className="text-foreground block truncate text-xs font-medium">Home</span>
-                <span
-                  className={cn(
-                    "text-muted-foreground block truncate text-[10px]",
-                    isHome && "not-dark:text-foreground/70",
-                  )}
-                >
-                  Outside any project
+              {/* As tall as a project row's two lines, with its name centered in that height */}
+              <span className="grid min-w-0 flex-1">
+                <span className="text-foreground col-start-1 row-start-1 self-center truncate text-xs font-medium">
+                  Home
+                </span>
+                <span aria-hidden className="invisible col-start-1 row-start-1">
+                  <span className="block text-xs font-medium">&nbsp;</span>
+                  <span className="block text-[10px]">&nbsp;</span>
                 </span>
               </span>
             </button>
