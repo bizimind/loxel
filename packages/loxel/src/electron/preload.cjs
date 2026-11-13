@@ -25,6 +25,8 @@ const UPDATE_CHECK = "update:check";
 const UPDATE_DOWNLOAD = "update:download";
 const UPDATE_INSTALL = "update:install";
 const UPDATE_STATUS_CHANGED = "update:status-changed";
+const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
+const APP_RESTART = "app:restart";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -110,4 +112,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(UPDATE_STATUS_CHANGED, handler);
     return () => ipcRenderer.removeListener(UPDATE_STATUS_CHANGED, handler);
   },
+  quitKeepingTerminals: () => ipcRenderer.send(APP_QUIT_KEEPING_TERMINALS),
+  restartApp: () => ipcRenderer.send(APP_RESTART),
 });

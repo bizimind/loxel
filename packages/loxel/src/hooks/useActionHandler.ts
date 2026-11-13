@@ -443,6 +443,12 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "app.settings":
         useSettingsStore.getState().openSettings();
         break;
+      case "app.quitKeepingTerminals":
+        window.electronAPI?.quitKeepingTerminals();
+        break;
+      case "app.restart":
+        window.electronAPI?.restartApp();
+        break;
       // The same store write as Settings > Appearance > Theme, which persists it.
       case "theme.dark":
       case "theme.light":
