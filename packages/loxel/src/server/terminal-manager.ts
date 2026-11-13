@@ -112,6 +112,10 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
   // as an agent's, or their own `loxel` commands would open without focus.
   for (const name of CODING_AGENT_ENV_VARS) delete env[name];
+  // Nor carry the Loxel terminal it was started from: each shell gets its own from the spawn's
+  // overrides, and a Home terminal must have no worktree, so its `loxel` opens pages in its window.
+  delete env.LOXEL_WORKTREE;
+  delete env.LOXEL_WINDOW_ID;
   return env;
 }
 

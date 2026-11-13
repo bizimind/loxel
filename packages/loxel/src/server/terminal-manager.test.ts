@@ -175,6 +175,31 @@ describe("TerminalManager commands", () => {
       else process.env.CLAUDECODE = originalMarker;
     }
   });
+
+  test("shells don't inherit the server's own Loxel terminal, so a Home shell has no worktree", async () => {
+    process.env.SHELL = "/bin/sh";
+    const original = { wt: process.env.LOXEL_WORKTREE, win: process.env.LOXEL_WINDOW_ID };
+    process.env.LOXEL_WORKTREE = "/some/worktree";
+    process.env.LOXEL_WINDOW_ID = "server-window";
+    try {
+      const manager = createManager();
+      const id = crypto.randomUUID();
+      const sink = createRecordingSink();
+      await manager.attach(id, sink.sink, {
+        ...attachOptions,
+        command: "echo loxel-marker-[${LOXEL_WORKTREE-unset}:${LOXEL_WINDOW_ID-unset}]",
+      });
+      await until(() => sink.outputText().includes("loxel-marker-[unset:unset]"));
+    } finally {
+      for (const [name, value] of [
+        ["LOXEL_WORKTREE", original.wt],
+        ["LOXEL_WINDOW_ID", original.win],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });
 
 describe("TerminalManager toolchain environments", () => {
