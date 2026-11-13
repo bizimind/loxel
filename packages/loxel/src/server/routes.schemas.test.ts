@@ -171,6 +171,7 @@ describe("POST /api/schemas/sync", () => {
       getDetectedFormatters: () => [],
       activeWindow: () => null,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
 
     const pyproject = "https://json.schemastore.org/pyproject.json";

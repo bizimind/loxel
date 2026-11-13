@@ -15,16 +15,12 @@
 import { type Server, type Socket, createServer } from "node:net";
 
 import type { ChildLogger } from "@/api/log-entry-model";
+import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
 
 import type { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { HostLogMessage, InitializeResult, ServerMessage } from "./protocol";
-import {
-  InitializeSchema,
-  ServerMessageSchema,
-  TERMINAL_HOST_CAPABILITIES,
-  TERMINAL_HOST_PROTOCOL,
-} from "./protocol";
+import { InitializeSchema, ServerMessageSchema, TERMINAL_HOST_CAPABILITIES } from "./protocol";
 import { FrameReader, encodeFrame, encodeJsonFrame } from "./protocol-framing";
 import type { TerminalHostEvent } from "./terminal-host";
 
@@ -160,6 +156,7 @@ export class TerminalHostService {
         hostBuildId: this.options.hostBuildId,
         pid: process.pid,
         capabilities: [...TERMINAL_HOST_CAPABILITIES],
+        sessions: this.host.sessionIds().length,
       };
       connection.sendJson(result);
       return;
@@ -226,6 +223,9 @@ export class TerminalHostService {
         return;
       case "set_meta":
         this.host.setMeta(message.id, message.meta);
+        return;
+      case "foreground_processes":
+        this.answer(connection, message.requestId, this.host.foregroundProcesses());
         return;
       default: {
         const unknown: never = message;

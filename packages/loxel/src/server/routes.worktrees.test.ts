@@ -83,6 +83,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       getDetectedFormatters: () => [],
       activeWindow: () => null,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

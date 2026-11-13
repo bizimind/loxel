@@ -34,7 +34,18 @@ To leave agents and long-running commands working while Loxel is closed, quit wi
 - **Quit and Keep Terminals** (`Cmd+Alt+Q`, in the Loxel menu and the command palette): Loxel quits, and every terminal keeps running, for as long as it takes you to open Loxel again. Each panel then reconnects to its terminal, scrollback included.
 - **Restart Loxel** (in the Loxel menu and the command palette): Loxel quits and opens again, and your terminals keep running through it.
 
-Installing an update with **Install & Restart** keeps your terminals running the same way.
+### Updates and your terminals
+
+Installing an update with **Install & Restart** keeps your terminals running the same way. Now and then an update changes how Loxel talks to the shells it keeps running, and can't take over the ones running now. Loxel tells you before you install it:
+
+- The top bar's **Update** button shows a warning sign, and **Settings > General** says **This update restarts 3 terminals** (or **may restart**, for a release that doesn't say).
+- **Install & Restart** asks first, and lists the terminals that still have a program running, such as an agent or a dev server, so you can let them finish. Cancel to install later.
+
+If Loxel ever has to end terminals it can't talk to when it starts, after you install an older version for example, a notification says how many: **3 terminals were ended (incompatible terminal host)**.
+
+### Terminals from an earlier version
+
+After an update, the terminals you kept keep running as they were, on the version of Loxel's terminal engine they started with, while new terminals use the updated one. Such a terminal's tab shows a small clock icon, and its tooltip says so. To move it to the current version, right-click its tab and choose **Restart Terminal**: the shell ends, and a new one starts in the same tab and folder. Restart it once its programs have finished, since they end with the shell.
 
 Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 

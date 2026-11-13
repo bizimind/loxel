@@ -6,7 +6,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 
-import type { UpdateState } from "../api/update-model";
+import type { RestartsTerminals, UpdateState } from "../api/update-model";
 import type { ShutdownTerminals } from "../parent-channel-protocol";
 import { isAutoCheckEnabled } from "../server/persisted-settings";
 import {
@@ -17,12 +17,17 @@ import {
   UPDATE_STATUS_CHANGED,
 } from "./ipc-channels";
 import { readSettingsRow } from "./settings-row";
-import { ManifestProvider } from "./update-manifest";
+import { ManifestProvider, terminalHostProtocolOf } from "./update-manifest";
+import { terminalsForInstall, updateRestartsTerminals } from "./update-terminals";
 
 /** How long after launch the automatic check runs. */
 const AUTO_CHECK_DELAY_MS = 5000;
 
 let status: UpdateState = { state: "idle" };
+/** What the update found by the latest check does to the terminals, for when it is downloaded. */
+let found: { version: string; restartsTerminals: RestartsTerminals } | null = null;
+/** What the install under way does to the terminals, once Install & Restart is chosen. */
+let installTerminals: ShutdownTerminals | null = null;
 
 function setStatus(next: UpdateState): void {
   status = next;
@@ -64,6 +69,8 @@ async function downloadUpdate(): Promise<void> {
 
 function installUpdate(): void {
   if (status.state !== "ready") return;
+  installTerminals = terminalsForInstall(status.restartsTerminals);
+  console.log(`[updater] Installing ${status.version}; terminals: ${installTerminals}`);
   setStatus({ state: "installing" });
   // Hands the zip to Squirrel.Mac, which replaces the app once it has quit and relaunches it.
   // A failure (for example an app it cannot write to) arrives as an error event.
@@ -77,10 +84,12 @@ export function isInstallingUpdate(): boolean {
 
 /**
  * What installing the downloaded update does to the terminals. They keep running, and the new
- * version's server reattaches them: the terminal host they run in is not part of the app bundle.
+ * version's server reattaches them, since the terminal host they run in is not part of the app
+ * bundle; unless the update's terminal host protocol has another major version, which its server
+ * cannot talk to: then they end (see update-terminals.ts).
  */
 export function terminalsForUpdateInstall(): ShutdownTerminals {
-  return "keep";
+  return installTerminals ?? "keep";
 }
 
 /** Set up the updater and the IPC the renderer drives it with. Call once, at startup. */
@@ -96,19 +105,32 @@ export function installAppUpdater(): void {
   autoUpdater.setFeedURL({ provider: "custom", updateProvider: ManifestProvider });
 
   autoUpdater.on("checking-for-update", () => setStatus({ state: "checking" }));
-  autoUpdater.on("update-available", (info) =>
-    setStatus({ state: "available", version: info.version, releasedAt: info.releaseDate }),
-  );
+  autoUpdater.on("update-available", (info) => {
+    const restartsTerminals = updateRestartsTerminals(terminalHostProtocolOf(info));
+    found = { version: info.version, restartsTerminals };
+    setStatus({
+      state: "available",
+      version: info.version,
+      releasedAt: info.releaseDate,
+      restartsTerminals,
+    });
+  });
   autoUpdater.on("update-not-available", () => setStatus({ state: "idle" }));
   autoUpdater.on("download-progress", (progress) => {
     if (status.state !== "downloading") return;
     const percent = Math.floor(progress.percent);
     if (percent !== status.percent) setStatus({ ...status, percent });
   });
-  autoUpdater.on("update-downloaded", (info) =>
-    setStatus({ state: "ready", version: info.version }),
-  );
-  autoUpdater.on("error", (err) => setStatus({ state: "error", message: errorMessage(err) }));
+  autoUpdater.on("update-downloaded", (info) => {
+    // The download is of the update the check found; should it not be, nothing is known about it.
+    const restartsTerminals =
+      found?.version === info.version ? found.restartsTerminals : ("unknown" as const);
+    setStatus({ state: "ready", version: info.version, restartsTerminals });
+  });
+  autoUpdater.on("error", (err) => {
+    installTerminals = null;
+    setStatus({ state: "error", message: errorMessage(err) });
+  });
 
   ipcMain.handle(UPDATE_GET_STATUS, () => status);
   ipcMain.handle(UPDATE_CHECK, () => checkForUpdates());

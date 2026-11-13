@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ChildLogger } from "@/api/log-entry-model";
+import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 
 import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection } from "./host-connection";
@@ -36,10 +37,11 @@ import {
 import type { HostLaunch, LaunchedHost } from "./host-launcher";
 import { launchHost } from "./host-launcher";
 import type { DisconnectMode, InitializeMessage } from "./protocol";
-import { TERMINAL_HOST_CAPABILITIES, TERMINAL_HOST_PROTOCOL, compatibility } from "./protocol";
+import { TERMINAL_HOST_CAPABILITIES, compatibility } from "./protocol";
 import { encodeJsonFrame } from "./protocol-framing";
 import { SocketTerminalHost } from "./socket-terminal-host";
 import type {
+  ForegroundProcesses,
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
@@ -65,6 +67,20 @@ export interface TerminalHostPoolOptions {
   /** Override the run and socket directories, for tests. */
   runDir?: string;
   socketDir?: string;
+}
+
+/** A host the pool ended at startup because this server cannot talk to it. */
+export interface EndedHost {
+  hostId: string;
+  protocol: string;
+  /** How many sessions ended with it; null when the host did not say (a 1.0.0 host). */
+  sessions: number | null;
+}
+
+/** What `start()` found. */
+export interface TerminalHostPoolStart {
+  /** Hosts of a protocol this server cannot talk to, and so ended with their sessions. */
+  ended: EndedHost[];
 }
 
 /** The host a session runs in, and which spawn of its ID that is. */
@@ -109,9 +125,9 @@ export class TerminalHostPool implements TerminalHost {
    * Find the running hosts and hand their sessions to `adopt`. Events of those sessions are
    * delivered only after `adopt` returns, so none arrives for a session the caller does not know yet.
    */
-  async start(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<void> {
+  async start(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<TerminalHostPoolStart> {
     try {
-      await this.discoverAll(adopt);
+      return await this.discoverAll(adopt);
     } finally {
       // Delivered even when discovery failed, or every later session would stay mute.
       const held = this.held ?? [];
@@ -120,7 +136,9 @@ export class TerminalHostPool implements TerminalHost {
     }
   }
 
-  private async discoverAll(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<void> {
+  private async discoverAll(
+    adopt: (sessions: TerminalSessionInfo[]) => void,
+  ): Promise<TerminalHostPoolStart> {
     ensureRunDir(this.runDir);
     ensureRunDir(this.socketDir);
     const found = await Promise.all(
@@ -132,10 +150,15 @@ export class TerminalHostPool implements TerminalHost {
       ),
     );
     const sessions: TerminalSessionInfo[] = [];
+    const ended: EndedHost[] = [];
     const keepBuilds = new Set([this.options.hostBuildId]);
     const liveHostIds = new Set<string>();
     for (const result of found) {
       if (!result) continue;
+      if ("ended" in result) {
+        ended.push(result.ended);
+        continue;
+      }
       liveHostIds.add(result.hostId);
       keepBuilds.add(result.build);
       if (!result.host) continue;
@@ -155,6 +178,7 @@ export class TerminalHostPool implements TerminalHost {
       this.log.info(`Reattached ${sessions.length} terminal(s) from ${this.hosts.size} host(s)`);
     }
     this.collectGarbage(keepBuilds, liveHostIds);
+    return { ended };
   }
 
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
@@ -209,6 +233,33 @@ export class TerminalHostPool implements TerminalHost {
     this.owners.get(id)?.host.setMeta(id, meta);
   }
 
+  /** Every host's answer, from the hosts that can tell; see `SocketTerminalHost.supports`. */
+  async foregroundProcesses(): Promise<ForegroundProcesses> {
+    const answers = await Promise.all(
+      [...this.hosts].map((host) =>
+        host.foregroundProcesses().catch((err: unknown) => {
+          this.log.warn(`Terminal host ${host.hostId} could not tell its foreground programs`, {
+            error: err,
+          });
+          return {};
+        }),
+      ),
+    );
+    const programs: ForegroundProcesses = {};
+    for (const answer of answers) Object.assign(programs, answer);
+    return programs;
+  }
+
+  /**
+   * Whether session `id` runs in a host of another build than this server's: one an earlier
+   * version of the app started (or a later one, after a downgrade). Only a new session gets this
+   * build's host.
+   */
+  runsOnOtherBuild(id: string): boolean {
+    const build = this.owners.get(id)?.host.initializeResult?.hostBuildId;
+    return build !== undefined && build !== this.options.hostBuildId;
+  }
+
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -245,6 +296,7 @@ export class TerminalHostPool implements TerminalHost {
   ): Promise<
     | { hostId: string; build: string; host: SocketTerminalHost; sessions: TerminalSessionInfo[] }
     | { hostId: string; build: string; host: null }
+    | { ended: EndedHost }
     | null
   > {
     const entry = this.readEntry(hostId);
@@ -276,9 +328,16 @@ export class TerminalHostPool implements TerminalHost {
     const { result } = connection;
     const verdict = compatibility(result, this.initialize);
     if (verdict.status === "incompatible") {
-      this.log.warn(`Ending terminal host ${hostId}: ${verdict.reason}`);
+      const ended: EndedHost = {
+        hostId,
+        protocol: result.protocol,
+        sessions: result.sessions ?? null,
+      };
+      this.log.warn(`Ending terminal host ${hostId}: ${verdict.reason}`, {
+        sessions: ended.sessions,
+      });
       await terminateHost(connection);
-      return null;
+      return { ended };
     }
     const host = this.addHost(hostId, socketPath, Promise.resolve(connection));
     try {

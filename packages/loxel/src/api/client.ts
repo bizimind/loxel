@@ -37,6 +37,8 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
+import type { RunningTerminal } from "./running-terminals-model";
+import { RunningTerminalsSchema } from "./running-terminals-model";
 import type { SchemaConsentDecision } from "./schema-consent-model";
 import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./terminal-stream";
 import type {
@@ -1083,6 +1085,17 @@ class WsClient {
 export const wsClient = new WsClient();
 
 // --- Version API ---
+
+/**
+ * The terminals the server runs; with `programs`, each one's foreground program where its terminal
+ * host can tell, which costs the host a process listing.
+ */
+export async function getRunningTerminals(options: {
+  programs: boolean;
+}): Promise<RunningTerminal[]> {
+  const raw = await fetchJson<unknown>(options.programs ? "/terminals?programs" : "/terminals");
+  return RunningTerminalsSchema.parse(raw).terminals;
+}
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
   return fetchJson("/version");

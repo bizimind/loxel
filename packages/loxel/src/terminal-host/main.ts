@@ -12,13 +12,14 @@
 import { chmodSync, closeSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
+
 import { embeddedHostBuildId } from "./host-build-id";
 import type { HostEntry } from "./host-files";
 import { ensureRunDir, hostEntryPath, hostSocketPath, isHostId } from "./host-files";
 import { HostLog } from "./host-log";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
-import { TERMINAL_HOST_PROTOCOL } from "./protocol";
 
 const { values } = parseArgs({
   options: {

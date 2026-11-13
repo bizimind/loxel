@@ -2,7 +2,9 @@
  * A {@link TerminalHost} that runs its sessions in the calling process. Events are delivered
  * synchronously, from the PTY's callbacks or the call that caused them. See docs/TERMINAL_HOST.md.
  */
+import { foregroundPrograms } from "./foreground-process";
 import type {
+  ForegroundProcesses,
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
@@ -92,6 +94,20 @@ export class InProcessTerminalHost implements TerminalHost {
   setMeta(id: string, meta: TerminalSessionMeta): void {
     const hosted = this.sessions.get(id);
     if (hosted) hosted.meta = meta;
+  }
+
+  async foregroundProcesses(): Promise<ForegroundProcesses> {
+    const sessions = [...this.sessions.values()].map(({ session }) => session);
+    const programs = await foregroundPrograms(sessions.map((session) => session.pid));
+    const result: ForegroundProcesses = {};
+    for (const session of sessions) {
+      const program = programs.get(session.pid);
+      // Ended meanwhile, or its program could not be named.
+      if (program !== undefined && this.sessions.get(session.id)?.session === session) {
+        result[session.id] = program;
+      }
+    }
+    return result;
   }
 
   /** The IDs of the running sessions, for the host process's own bookkeeping. */

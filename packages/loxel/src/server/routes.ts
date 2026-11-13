@@ -45,6 +45,7 @@ import type {
   WorkspaceSetup,
 } from "@/api/project-model";
 import type { RepoTrustDecision, RepoTrustListResponse } from "@/api/repo-trust-model";
+import type { RunningTerminals } from "@/api/running-terminals-model";
 import type { SearchMatch } from "@/api/search-model";
 import type {
   NestedRemoval,
@@ -205,6 +206,8 @@ export interface RouteContext {
       command?: string;
     },
   ) => Promise<void>;
+  /** The terminals the server runs; with `programs`, their foreground programs where known. */
+  listTerminals: (options: { programs: boolean }) => Promise<RunningTerminals>;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -2852,6 +2855,14 @@ async function canonicalPath(rawPath: string): Promise<string | null> {
   return realpath(resolve(expanded)).catch(() => null);
 }
 
+// GET /api/terminals[?programs] — the running terminals, for the update warning and terminal tabs.
+// Foreground program names are private to the user: the request origin checks in server.ts keep
+// other sites from reading them, like every route here.
+async function handleListTerminals(req: Request, ctx: RouteContext): Promise<Response> {
+  const programs = new URL(req.url).searchParams.has("programs");
+  return json(await ctx.listTerminals({ programs }));
+}
+
 // GET /api/path-info?path= — whether a path exists and is a directory (e.g. for terminal links)
 async function handlePathInfo(req: Request): Promise<Response> {
   const rawPath = new URL(req.url).searchParams.get("path");
@@ -3466,6 +3477,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-content": handleDetachedFileContent,
     "/api/external-files": handleExternalFiles,
     "/api/path-info": handlePathInfo,
+    "/api/terminals": handleListTerminals,
     "/api/search": handleSearch,
     "/api/search-scopes": handleSearchScopes,
     "/api/file-index": handleFileIndex,

@@ -87,6 +87,14 @@ export const TerminalSessionInfoSchema = z.object({
 });
 export type TerminalSessionInfo = z.infer<typeof TerminalSessionInfoSchema>;
 
+/**
+ * The program in the foreground of each session's terminal, by session ID: its name, or null when
+ * the session's own program (the shell) is in the foreground, at its prompt. A session the host
+ * cannot tell about is left out.
+ */
+export const ForegroundProcessesSchema = z.record(TerminalIdSchema, z.string().nullable());
+export type ForegroundProcesses = z.infer<typeof ForegroundProcessesSchema>;
+
 export const TerminalAttachRequestSchema = z.object({
   id: TerminalIdSchema,
   /**
@@ -185,6 +193,12 @@ export interface TerminalHost {
    */
   destroy(id: string): void;
   setMeta(id: string, meta: TerminalSessionMeta): void;
+  /**
+   * Each session's foreground program. A host that cannot tell (one without the
+   * `foregroundProcess` capability) leaves its sessions out, so the caller falls back to what it
+   * knows without it.
+   */
+  foregroundProcesses(): Promise<ForegroundProcesses>;
   /** Receive every event from now on. Returns the unsubscribe function. */
   onEvent(listener: (event: TerminalHostEvent) => void): () => void;
 }

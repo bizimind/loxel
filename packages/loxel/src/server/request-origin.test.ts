@@ -170,3 +170,19 @@ describe("checkRequest: mutation bodies", () => {
     }
   });
 });
+
+describe("checkRequest: GET /api/terminals", () => {
+  // It lists the user's terminals and the programs running in them. The checks are the same for
+  // every path, which is what keeps it from other sites.
+  test("refuses other sites, whether they send an Origin or only Sec-Fetch-Site", () => {
+    expect(status(request("GET", { Origin: "https://evil.example" }))).toBe(403);
+    expect(
+      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors" })),
+    ).toBe(403);
+  });
+
+  test("serves the app's own renderer and native clients", () => {
+    expect(status(request("GET", { Origin: `http://127.0.0.1:${PORT}` }))).toBeNull();
+    expect(status(request("GET"))).toBeNull();
+  });
+});

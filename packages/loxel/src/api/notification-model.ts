@@ -1,5 +1,8 @@
 /** Source identifies where a notification came from. Extensible for future sources. */
-export type NotificationSource = { kind: "terminal"; panelId: string; worktreePath: string };
+export type NotificationSource =
+  | { kind: "terminal"; panelId: string; worktreePath: string }
+  /** The server itself, about the terminal hosts (terminals it had to end at startup). */
+  | { kind: "terminal_host" };
 // Future additions:
 // | { kind: "ci"; pipelineId: string; worktreePath?: string }
 

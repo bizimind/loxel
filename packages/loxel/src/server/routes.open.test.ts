@@ -65,6 +65,7 @@ describe("POST /api/open terminals and placement", () => {
       startTerminal: async (target) => {
         started.push(target);
       },
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 
