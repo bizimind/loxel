@@ -297,7 +297,18 @@ export function Sidebar() {
               <span className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
                 <LoxelLogoTile className={homeTileClass} />
               </span>
-              <span className="text-foreground truncate text-xs font-medium">Home</span>
+              {/* Two lines like a project row: its name, and where it is */}
+              <span className="min-w-0 flex-1 overflow-hidden">
+                <span className="text-foreground block truncate text-xs font-medium">Home</span>
+                <span
+                  className={cn(
+                    "text-muted-foreground block truncate text-[10px]",
+                    isHome && "not-dark:text-foreground/70",
+                  )}
+                >
+                  Outside any project
+                </span>
+              </span>
             </button>
           ) : (
             // The app's logo in the column of the worktree icons, ringed like the active project
