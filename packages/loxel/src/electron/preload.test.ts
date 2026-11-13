@@ -3,6 +3,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import {
+  APP_QUIT_KEEPING_TERMINALS,
+  APP_RESTART,
   SET_THEME_SOURCE,
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
@@ -59,6 +61,13 @@ describe("window preload", () => {
     expect(callback).toHaveBeenCalledWith({ state: "checking" });
     unsubscribe();
     expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(UPDATE_STATUS_CHANGED, listener);
+  });
+
+  test("sends Quit and Keep Terminals and Restart Loxel on their channels", () => {
+    api.quitKeepingTerminals();
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(APP_QUIT_KEEPING_TERMINALS);
+    api.restartApp();
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(APP_RESTART);
   });
 
   test("sends the theme setting on its channel", () => {

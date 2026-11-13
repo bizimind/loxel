@@ -111,6 +111,8 @@ export type ActionId =
   | "language.restartServers"
   | "worktree.manageRepoTrust"
   | "app.settings"
+  | "app.quitKeepingTerminals"
+  | "app.restart"
   | ThemeActionId;
 
 /** The action that switches Settings > Appearance > Theme to one choice. */
@@ -186,6 +188,11 @@ function hasActiveWorktree(): boolean {
 
 function isBrowserPanelFocused(): boolean {
   return getFocusedBrowserPanel() !== undefined;
+}
+
+/** Whether this window is the desktop app's, which can quit and restart; not a browser tab. */
+function isDesktopApp(): boolean {
+  return window.electronAPI !== undefined;
 }
 
 function isFindTargetFocused(): boolean {
@@ -417,6 +424,14 @@ export const ACTIONS: readonly ActionDef[] = [
     category: "app",
     isCurrent: () => useSettingsStore.getState().theme === theme,
   })),
+  // Also in the app menu, where Quit and Keep Terminals has ⌥⌘Q. Only the desktop app can quit.
+  {
+    id: "app.quitKeepingTerminals",
+    label: "Quit and Keep Terminals",
+    category: "app",
+    isEnabled: isDesktopApp,
+  },
+  { id: "app.restart", label: "Restart Loxel", category: "app", isEnabled: isDesktopApp },
 ];
 
 // --- Derived lookups ---

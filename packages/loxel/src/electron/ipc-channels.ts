@@ -63,3 +63,7 @@ export const UPDATE_STATUS_CHANGED = "update:status-changed";
 export const PASSKEY_QR_SHOW = "passkey:qr-show";
 /** Main → renderer: the passkey request of a webview (by webContents ID) ended; hide its QR code. */
 export const PASSKEY_QR_HIDE = "passkey:qr-hide";
+/** Renderer → main: Quit and Keep Terminals, from the command palette. */
+export const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
+/** Renderer → main: Restart Loxel, from the command palette. */
+export const APP_RESTART = "app:restart";

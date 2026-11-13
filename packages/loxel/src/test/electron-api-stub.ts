@@ -24,6 +24,8 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     downloadUpdate: async () => {},
     installUpdate: () => {},
     onUpdateStatusChange: () => () => {},
+    quitKeepingTerminals: () => {},
+    restartApp: () => {},
     ...overrides,
   };
 }

@@ -326,6 +326,7 @@ describe("no overlap with critical system shortcuts", () => {
     "Cmd+Z",
     "Cmd+Shift+Z",
     "Cmd+Q",
+    "Cmd+Alt+Q",
     "Cmd+H",
     "Cmd+M",
     "Cmd+S",

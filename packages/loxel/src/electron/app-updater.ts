@@ -7,6 +7,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import type { UpdateState } from "../api/update-model";
+import type { ShutdownTerminals } from "../parent-channel-protocol";
 import { isAutoCheckEnabled } from "../server/persisted-settings";
 import {
   UPDATE_CHECK,
@@ -72,6 +73,14 @@ function installUpdate(): void {
 /** Whether Install & Restart is under way: Squirrel is quitting the app to replace it. */
 export function isInstallingUpdate(): boolean {
   return status.state === "installing";
+}
+
+/**
+ * What installing the downloaded update does to the terminals. They keep running, and the new
+ * version's server reattaches them: the terminal host they run in is not part of the app bundle.
+ */
+export function terminalsForUpdateInstall(): ShutdownTerminals {
+  return "keep";
 }
 
 /** Set up the updater and the IPC the renderer drives it with. Call once, at startup. */
