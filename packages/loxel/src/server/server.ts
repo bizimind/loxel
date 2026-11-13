@@ -17,6 +17,9 @@ import type {
 } from "@/api/ws-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
+import { AgentManager, type AgentSocket, type AgentSocketData } from "./agent/agent-manager";
+import { agentStartGate } from "./agent/agent-start-gate";
+import { claudeSdkBackend } from "./agent/claude-sdk-transport";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
@@ -877,6 +880,13 @@ const terminalManager = new TerminalManager(terminalHosts, {
   },
 });
 const notificationStore = new NotificationStore();
+
+const agentManager = new AgentManager(claudeSdkBackend, agentStartGate);
+
+/** An agent panel's socket, as the agent manager sees it. */
+function agentSocket(ws: ServerWebSocket<WsData>, data: AgentSocketData): AgentSocket {
+  return { data, send: (text) => ws.send(text), close: (code, reason) => ws.close(code, reason) };
+}
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
 const formatService = new FormatService();
 const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
@@ -1050,6 +1060,9 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
 
     // --- Notifications ---
 
+    case "agent_close":
+      agentManager.close(msg.agentId);
+      break;
     case "notification_dismiss": {
       if (notificationStore.dismiss(msg.id)) {
         broadcastAll({ type: "notification_dismissed", id: msg.id });
@@ -1247,6 +1260,13 @@ const server = Bun.serve<WsData>({
       return error(rejection.reason, rejection.status);
     }
 
+    if (url.pathname === "/ws/agent") {
+      const data: WsData = { type: "agent", session: null, client: null };
+      const upgraded = server.upgrade(req, { data });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+      return undefined;
+    }
+
     if (url.pathname === "/ws/yaml-lsp") {
       const upgraded = server.upgrade(req, { data: { type: "yaml-lsp" as const } });
       if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
@@ -1295,6 +1315,7 @@ const server = Bun.serve<WsData>({
 
   websocket: {
     open(ws) {
+      if (ws.data?.type === "agent") return;
       if (ws.data?.type === "yaml-lsp") {
         yamlLspManager.attach(ws);
         return;
@@ -1320,6 +1341,10 @@ const server = Bun.serve<WsData>({
     },
 
     close(ws) {
+      if (ws.data?.type === "agent") {
+        agentManager.detach(agentSocket(ws, ws.data));
+        return;
+      }
       if (ws.data?.type === "yaml-lsp") {
         yamlLspManager.detach(ws);
         return;
@@ -1342,6 +1367,12 @@ const server = Bun.serve<WsData>({
     message(ws, message) {
       // Shutdown waits for language servers to exit: nothing may start again behind its teardown.
       if (shuttingDown) return;
+      if (ws.data?.type === "agent") {
+        if (typeof message === "string") {
+          void agentManager.handleMessage(agentSocket(ws, ws.data), message);
+        }
+        return;
+      }
       if (ws.data?.type === "yaml-lsp") {
         if (typeof message === "string") yamlLspManager.handleMessage(ws, message);
         return;
@@ -1413,6 +1444,8 @@ function startIdleTimer(): void {
       idleTimer = null;
       const destroyed = terminalManager.destroyOrphans();
       if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+      const agents = agentManager.disposeDetached();
+      if (agents > 0) log.info(`Ended ${agents} agent session(s) no window shows`);
       if (ownedByApp) return;
       log.info("Idle timeout reached, shutting down");
       shutdown();
@@ -1499,6 +1532,7 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
       ? terminalHosts.disconnectAll("end")
       : Promise.resolve(terminalHosts.dropAll());
   formatService.destroy();
+  agentManager.disposeAll();
   const lspServersStopped = Promise.all(
     [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
   );

@@ -295,6 +295,37 @@ export function createTerminal({
   );
 }
 
+/** The params of an agent panel; `sessionId` resumes its conversation after a server restart. */
+export interface AgentPanelParams {
+  agentId: string;
+  worktreePath: string;
+  sessionId?: string;
+  /** The session continues in a terminal; set until it is resumed in the panel. */
+  handedOff?: boolean;
+}
+
+export function createAgent({ placement, focus }: PanelOpenOptions = {}): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  if (!worktreePath) return;
+  const agentId = crypto.randomUUID();
+  const params: AgentPanelParams = { agentId, worktreePath };
+  addPlacedPanel(
+    cApi,
+    placement,
+    {
+      id: `agent-${agentId}`,
+      component: "agent",
+      tabComponent: "agentTab",
+      title: nextPanelTitle(cApi, "Agent"),
+      params,
+    },
+    focus,
+  );
+  uiLog.info("Panel created", { panelType: "agent", panelId: `agent-${agentId}` });
+}
+
 export async function createEditor(options?: {
   content?: string;
   title?: string;

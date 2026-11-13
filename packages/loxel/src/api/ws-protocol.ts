@@ -135,6 +135,8 @@ export type WsClientMessage =
    * `terminal_state` carried `syncOffset`; acks for an older sync are ignored.
    */
   | { type: "terminal_ack"; id: string; syncOffset: number; bytes: number }
+  /** An agent panel was closed (not swapped out): end its session. */
+  | { type: "agent_close"; agentId: string }
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }

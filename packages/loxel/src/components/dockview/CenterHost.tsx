@@ -78,6 +78,11 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         uiLog.info("Panel removed", { panelType: removedDef.type, panelId: event.id });
       }
 
+      if (removedDef?.type === "agent") {
+        const agentId = (event.params as { agentId?: string })?.agentId;
+        if (agentId) wsClient.send({ type: "agent_close", agentId });
+      }
+
       if (removedDef?.type === "terminal") {
         const terminalId = (event.params as { terminalId?: string })?.terminalId;
         if (terminalId) {

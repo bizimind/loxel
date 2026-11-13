@@ -14,6 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { AgentPanel } from "@/components/agent/AgentPanel";
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
@@ -30,11 +31,12 @@ import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
-import type { PatchDiffParams } from "@/lib/panel-creators";
+import type { AgentPanelParams, PatchDiffParams } from "@/lib/panel-creators";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
 
+import { AgentTab } from "./agent-tab";
 import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
 import { CodeEditorTab } from "./code-editor-tab";
@@ -148,6 +150,15 @@ function TerminalPanelComponent(
         }}
         panelApi={props.api}
       />
+    </PanelContext.Provider>
+  );
+}
+
+/** A native view of a Claude Code session, in the center group. */
+function AgentPanelComponent(props: IDockviewPanelProps<AgentPanelParams>) {
+  return (
+    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath }}>
+      <AgentPanel params={props.params} panelApi={props.api} />
     </PanelContext.Provider>
   );
 }
@@ -337,6 +348,7 @@ export const centerComponents = wrapPanelComponents(
     patchDiff: PatchDiffComponent,
     compare: CompareFilesPanelComponent,
     terminal: TerminalPanelComponent,
+    agent: AgentPanelComponent,
     editor: MarkdownEditorPanelComponent,
     excalidraw: ExcalidrawPanelComponent,
     codeEditor: CodeEditorPanelComponent,
@@ -350,6 +362,7 @@ export const centerComponents = wrapPanelComponents(
 
 /** Custom tab components for center panels. */
 export const centerTabComponents = {
+  agentTab: AgentTab,
   browserTab: BrowserTab,
   codeEditorTab: CodeEditorTab,
   compareTab: CompareTab,
