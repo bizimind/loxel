@@ -21,9 +21,27 @@ function LoxelGlyph() {
 }
 
 /**
- * Loxel's logo as the app shows it: the `L` and its blue `×` on a tile in `currentColor`, shaped like
- * the sidebar's project and worktree icons (a superellipse, which an SVG's rounded rectangle can't
- * draw). Home's entry in the sidebar.
+ * Loxel's logo as the app shows it: a tile in `currentColor` with the `L` cut out in the card color
+ * and the blue `×`. The top bar's brand.
+ */
+export function LoxelLogo({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <svg viewBox="0 0 100 100" fill="none" className={className} style={style}>
+      <rect width="100" height="100" rx="20" fill="currentColor" />
+      <LoxelGlyph />
+    </svg>
+  );
+}
+
+/**
+ * The logo on a tile shaped like the sidebar's project and worktree icons (a superellipse, which an
+ * SVG's rounded rectangle can't draw), in `currentColor`. Home's entry in the sidebar.
  */
 export function LoxelLogoTile({ className }: { className?: string }) {
   return (

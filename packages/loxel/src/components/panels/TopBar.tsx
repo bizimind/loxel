@@ -12,6 +12,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { ProjectIcon } from "../projects/ProjectIcon";
+import { LoxelLogo } from "../ui/loxel-logo";
 import { WorktreeIcon } from "../worktrees/WorktreeIcon";
 
 const isDev = import.meta.env.DEV;
@@ -19,9 +20,10 @@ const isElectron = navigator.userAgent.includes("Electron");
 
 // Native-chrome dimensions in screen points. The traffic lights (positioned via
 // `trafficLightPosition` in electron/main.ts) ignore page zoom, so the space reserved for
-// them and the minimum bar height are divided by the zoom factor to stay fixed.
+// them, the minimum bar height, and the logo are divided by the zoom factor to stay fixed.
 const TRAFFIC_LIGHTS_INSET_PX = 80;
 const BAR_MIN_HEIGHT_PX = 32;
+const LOGO_SIZE_PX = 16;
 
 export function TopBar() {
   const isScreenshot = import.meta.env.VITE_SCREENSHOT === "1";
@@ -66,7 +68,11 @@ export function TopBar() {
       {/* Worktree sidebar toggle: first in the bar, so it stays put whichever way it goes */}
       <SidebarToggle />
 
-      {/* Brand */}
+      {/* Logo + brand */}
+      <LoxelLogo
+        className="text-foreground shrink-0"
+        style={{ width: LOGO_SIZE_PX / zoom, height: LOGO_SIZE_PX / zoom }}
+      />
       <span className="text-foreground font-semibold">Loxel</span>
       {isDev && !isScreenshot && (
         <span className="text-[10px] font-semibold text-red-300">DEV</span>
