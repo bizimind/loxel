@@ -9,7 +9,7 @@ Every task gets its own browser tabs. The dev server for this branch, the PR the
 
 Press `Cmd+Shift+B` to open a browser panel. Like any panel, it can go next to an agent's terminal, under your editor, or in a group of its own (see [Panel Layout](/docs/panel-layout)). From a terminal, `loxel <url>` opens a page in the task that terminal belongs to, and an agent with the [`loxel` skill](/docs/coding-agents#teach-your-agent-about-loxel) does the same to show you what it started.
 
-An empty editor area lists what you can open, with a field under **New Browser**: type a URL or a search and press `Enter` to open it in a new browser panel. As you type, bookmarks whose title or address match are suggested below it; pick one with the arrow keys and `Enter`, or click it.
+An empty editor area lists what you can open, with a field next to **New Browser**: type a URL or a search and press `Enter` to open it in a new browser panel. As you type, bookmarks whose title or address match are suggested below it; pick one with the arrow keys and `Enter`, or click it.
 
 ---
 

@@ -47,20 +47,23 @@ export function CenterWatermark(_props: IWatermarkPanelProps) {
           draggable={false}
         />
 
-        <div className="flex w-72 flex-col gap-1.5">
+        {/* One grid for every row, so the fields line up after the longest label. */}
+        <div className="grid w-[28rem] max-w-full grid-cols-[auto_minmax(0,1fr)_auto] gap-y-1">
           {panels.map((def) => (
-            <div key={def.type} className="flex flex-col">
-              <QuickAction
-                icon={<def.icon className="size-4" />}
-                label={def.quickstartLabel}
-                onClick={() => window.dispatchEvent(new CustomEvent(def.createEvent))}
-                actionId={def.actionId ?? undefined}
-              />
-              {def.type === "terminal" && worktreePath && (
-                <CommandField worktreePath={worktreePath} />
-              )}
-              {def.type === "browser" && <AddressField />}
-            </div>
+            <QuickAction
+              key={def.type}
+              icon={<def.icon className="size-4" />}
+              label={def.quickstartLabel}
+              onClick={() => window.dispatchEvent(new CustomEvent(def.createEvent))}
+              actionId={def.actionId ?? undefined}
+              field={
+                def.type === "terminal" && worktreePath ? (
+                  <CommandField worktreePath={worktreePath} />
+                ) : def.type === "browser" ? (
+                  <AddressField />
+                ) : undefined
+              }
+            />
           ))}
           {!worktreePath && <AddProjectAction />}
         </div>
@@ -69,34 +72,65 @@ export function CenterWatermark(_props: IWatermarkPanelProps) {
   );
 }
 
+const ROW_CLASS =
+  "text-muted-foreground col-span-3 grid grid-cols-subgrid items-center rounded-md text-sm transition-colors";
+
+/**
+ * A quickstart row: its label creates the panel. A `field` sits on the same line, between the
+ * label and the shortcut, so every row keeps one line and the field reads as a hint until used.
+ */
 function QuickAction({
   icon,
   label,
   onClick,
   actionId,
+  field,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   actionId?: ActionId;
+  field?: React.ReactNode;
 }) {
   const store = useKeybindingStore();
   const binding = actionId ? getBindingsForAction(store, actionId)[0] : undefined;
+  const shortcut = binding && (
+    <KeyBindingDisplay
+      binding={binding}
+      className="text-muted-foreground dark:text-muted-foreground/60 justify-self-end pr-3 pl-4 text-xs"
+    />
+  );
+  const labelContent = (
+    <span className="flex items-center gap-2.5">
+      {icon}
+      <span>{label}</span>
+    </span>
+  );
+
+  if (!field) {
+    return (
+      <button
+        onClick={onClick}
+        className={cn(ROW_CLASS, "hover:text-foreground hover:bg-muted py-1.5 pl-3 text-left")}
+      >
+        {labelContent}
+        <span />
+        {shortcut ?? <span />}
+      </button>
+    );
+  }
 
   return (
-    <button
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition-colors"
-    >
-      {icon}
-      <span className="flex-1 text-left">{label}</span>
-      {binding && (
-        <KeyBindingDisplay
-          binding={binding}
-          className="text-muted-foreground dark:text-muted-foreground/60 ml-4 text-xs"
-        />
-      )}
-    </button>
+    <div className={cn(ROW_CLASS, "hover:bg-muted/60 focus-within:bg-muted")}>
+      <button
+        onClick={onClick}
+        className="hover:text-foreground self-stretch rounded-l-md py-1.5 pr-4 pl-3 text-left transition-colors"
+      >
+        {labelContent}
+      </button>
+      <div className="relative min-w-0">{field}</div>
+      {shortcut ?? <span />}
+    </div>
   );
 }
 
@@ -111,11 +145,14 @@ function AddProjectAction() {
   );
 }
 
-/** Lined up under its row's label, quiet until used. Never autofocused: keys belong to shortcuts. */
+/**
+ * No box: the placeholder reads as a hint on the row, which shows the field's surface on hover and
+ * focus. Never autofocused: keys belong to shortcuts.
+ */
 const FIELD_CLASS =
-  "border-border/70 text-foreground placeholder:text-muted-foreground/70 focus:border-ring h-7 w-full rounded-md border bg-transparent px-2 text-xs transition-colors outline-none";
+  "text-foreground placeholder:text-muted-foreground/45 w-full bg-transparent py-1.5 text-sm outline-none";
 
-/** Under New Terminal: Enter opens a terminal that runs the command, as `loxel terminal` does. */
+/** On the New Terminal row: Enter opens a terminal that runs the command, as `loxel terminal` does. */
 function CommandField({ worktreePath }: { worktreePath: string }) {
   const [command, setCommand] = useState("");
 
@@ -137,7 +174,7 @@ function CommandField({ worktreePath }: { worktreePath: string }) {
   };
 
   return (
-    <div className="pt-0.5 pr-3 pb-1 pl-[2.375rem]">
+    <>
       <input
         type="text"
         value={command}
@@ -157,12 +194,12 @@ function CommandField({ worktreePath }: { worktreePath: string }) {
         autoComplete="off"
         className={FIELD_CLASS}
       />
-    </div>
+    </>
   );
 }
 
 /**
- * Under New Browser: Enter opens the typed address in a new browser panel, as its address bar
+ * On the New Browser row: Enter opens the typed address in a new browser panel, as its address bar
  * would (text that is not an address is searched), or the bookmark picked from the suggestions.
  */
 function AddressField() {
@@ -208,7 +245,7 @@ function AddressField() {
   };
 
   return (
-    <div className="relative pt-0.5 pr-3 pb-1 pl-[2.375rem]">
+    <>
       <input
         type="text"
         value={text}
@@ -238,7 +275,7 @@ function AddressField() {
           id={listId}
           role="listbox"
           aria-label="Bookmarks"
-          className="bg-popover border-border absolute inset-x-0 top-full z-10 mr-3 ml-[2.375rem] rounded-md border py-1 shadow-md"
+          className="bg-popover border-border absolute top-full -right-2 -left-2 z-10 mt-1.5 rounded-md border py-1 shadow-md"
         >
           {suggestions.map((bookmark, index) => (
             <li
@@ -269,6 +306,6 @@ function AddressField() {
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }

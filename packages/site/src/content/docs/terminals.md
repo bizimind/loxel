@@ -17,7 +17,7 @@ Loxel's integrated terminals are full PTY sessions. Open as many as you need, ru
 
 ## Opening a terminal
 
-Press `Cmd+T` (or `` Ctrl+Shift+` ``) to open a new terminal tab. There is no limit on the number of terminals. Like any panel, terminals can be docked, split, or moved anywhere in your layout. An empty editor area also has a field under **New Terminal**: type a command and press `Enter` to run it in a new terminal, which stays open at its shell once the command ends, like [`loxel terminal`](/docs/cli).
+Press `Cmd+T` (or `` Ctrl+Shift+` ``) to open a new terminal tab. There is no limit on the number of terminals. Like any panel, terminals can be docked, split, or moved anywhere in your layout. An empty editor area also has a field next to **New Terminal**: type a command and press `Enter` to run it in a new terminal, which stays open at its shell once the command ends, like [`loxel terminal`](/docs/cli).
 
 To rename a terminal, double-click its tab title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` while it is the active tab. The name is saved with the layout.
 
