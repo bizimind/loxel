@@ -189,6 +189,10 @@ function startServer(): void {
   serverProcess = child;
   serverChannel = channel;
   channel.on("error", () => {});
+  // A binary that cannot be run (missing, not executable) fails here, after the spawn returned.
+  child.on("error", (err) => {
+    console.error("[electron] Could not start the server:", err);
+  });
 
   // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
   const dekBase64 = IS_DEMO ? null : getDek();
@@ -243,10 +247,12 @@ function scheduleServerRestart(): void {
   }, delayMs);
 }
 
-function cancelServerRestart(): void {
-  if (!serverRestartTimer) return;
+/** Cancel a pending crash restart; true when there was one. */
+function cancelServerRestart(): boolean {
+  if (!serverRestartTimer) return false;
   clearTimeout(serverRestartTimer);
   serverRestartTimer = null;
+  return true;
 }
 
 function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
@@ -442,17 +448,32 @@ async function createWindow(): Promise<BrowserWindow> {
 
 /**
  * Stop the server as the app quits, ending or keeping the terminals. It finishes shutting down on
- * its own after the app exits: the message is in the pipe before the app closes its end.
+ * its own after the app exits: the message is in the pipe before the app closes its end. Between
+ * a crash and its restart there is no server, and the terminal hosts would keep the shells only
+ * for their grace period: a server is started to carry the quit to them, which it does as soon as
+ * it has found them.
  */
 function stopServer(terminals: ShutdownTerminals): void {
   stoppingServer = true;
-  cancelServerRestart();
+  if (cancelServerRestart()) startServerToStop();
   const channel = serverChannel;
   serverProcess = null;
   serverChannel = null;
   if (!channel) return;
   console.log(`[electron] Stopping the server (terminals: ${terminals})`);
   channel.end(encodeParentMessage({ type: "shutdown", terminals }));
+}
+
+/**
+ * Start a server only to hand it the quit. One that cannot start (its pipes missing here, or its
+ * binary, reported by the child's `error` event) leaves the shells their grace period.
+ */
+function startServerToStop(): void {
+  try {
+    startServer();
+  } catch (err) {
+    console.error("[electron] Could not start a server to carry the quit to the terminals:", err);
+  }
 }
 
 /** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */

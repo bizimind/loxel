@@ -3,7 +3,8 @@
  * server reattaches the panel to the same shell, resuming its stream or, for a fresh xterm, with a
  * snapshot. A quit (SIGTERM) still ends them. A server started as the desktop app starts it, with
  * the app's channel, keeps them on a shutdown with `keep` (Quit and Keep Terminals, Restart
- * Loxel, an update) and when the app goes away, and ends them on one with `end`. `LOXEL_DEV=1`
+ * Loxel, an update) and when the app goes away, and ends them on one with `end`, even one that
+ * arrives while the server is still starting. `LOXEL_DEV=1`
  * keeps the server off the keychain, and a temporary state directory and port keep it and its
  * terminal host apart from any real one.
  */
@@ -115,6 +116,21 @@ describe("terminals across server restarts", () => {
    * the app's channel).
    */
   async function startServer({ asApp = false } = {}): Promise<void> {
+    const started = spawnServer({ asApp });
+    await retryUntil(
+      () => {},
+      async (timeoutMs) => {
+        if (started.exitCode !== null) throw new Error(`Server exited: ${started.exitCode}`);
+        if ((await fetch(`${baseUrl}/api/version`).catch(() => null))?.ok) return true;
+        await Bun.sleep(timeoutMs);
+        return false;
+      },
+      "the server to listen",
+    );
+  }
+
+  /** Start a server as {@link startServer} does, without waiting for it to listen. */
+  function spawnServer({ asApp = false } = {}) {
     const started = Bun.spawn(["bun", "src/server/index.ts"], {
       cwd: LOXEL_ROOT,
       env: {
@@ -130,16 +146,7 @@ describe("terminals across server restarts", () => {
     server = started;
     const channel = started.stdio[PARENT_CHANNEL_FD];
     appChannel = typeof channel === "number" ? channel : null;
-    await retryUntil(
-      () => {},
-      async (timeoutMs) => {
-        if (started.exitCode !== null) throw new Error(`Server exited: ${started.exitCode}`);
-        if ((await fetch(`${baseUrl}/api/version`).catch(() => null))?.ok) return true;
-        await Bun.sleep(timeoutMs);
-        return false;
-      },
-      "the server to listen",
-    );
+    return started;
   }
 
   /** The PIDs of the running terminal hosts, from their entries. */
@@ -273,6 +280,27 @@ describe("terminals across server restarts", () => {
       await expectResumed(shell);
 
       // A Quit ends the terminals, and the host with them.
+      await quitApp("end");
+      await until(
+        () => !isAlive(shell.shellPid) && hosts.every((pid) => !isAlive(pid)),
+        TEST_TIMEOUT_MS,
+      );
+    },
+    TEST_TIMEOUT_MS * 3,
+  );
+
+  test(
+    "a Quit while the server is still starting ends the shells it finds",
+    async () => {
+      await startServer({ asApp: true });
+      const shell = await openShell();
+      const hosts = hostPids();
+      // The app crashed, leaving the shell to the hosts' grace period.
+      closeSync(appChannel!);
+      expect(await server!.exited).toBe(0);
+
+      // The relaunched app quits at once: the message is in the channel before the server reads it.
+      spawnServer({ asApp: true });
       await quitApp("end");
       await until(
         () => !isAlive(shell.shellPid) && hosts.every((pid) => !isAlive(pid)),
