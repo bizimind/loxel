@@ -99,7 +99,7 @@ Terminals use the code font until you pick a terminal font of their own in **Set
 
 ## Injected environment variables
 
-Every Loxel terminal starts with four environment variables already set:
+Every Loxel terminal starts with these environment variables already set:
 
 | Variable          | Value                                                                      |
 | ----------------- | -------------------------------------------------------------------------- |
