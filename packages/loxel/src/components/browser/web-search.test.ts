@@ -19,5 +19,7 @@ describe("addressBarUrl", () => {
   test("searches anything else", () => {
     expect(addressBarUrl("how to rebase")).toBe(webSearchUrl("how to rebase"));
     expect(addressBarUrl("hello")).toBe(webSearchUrl("hello"));
+    expect(addressBarUrl("node.js tutorial")).toBe(webSearchUrl("node.js tutorial"));
+    expect(addressBarUrl("example.com/my file.pdf")).toBe(webSearchUrl("example.com/my file.pdf"));
   });
 });

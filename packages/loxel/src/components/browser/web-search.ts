@@ -5,12 +5,12 @@ export function webSearchUrl(query: string): string {
 
 /**
  * The page that text typed in an address bar opens: a web URL as is (or the source view of one,
- * which View Page Source puts in the address bar), a domain-like word over https, anything else a
- * web search.
+ * which View Page Source puts in the address bar), a single domain-like word over https, anything
+ * else, including several words that start with one (`node.js tutorial`), a web search.
  */
 export function addressBarUrl(text: string): string {
   const trimmed = text.trim();
   if (/^(view-source:)?https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^[^\s]+\.[^\s]+/.test(trimmed)) return `https://${trimmed}`;
+  if (/^[^\s]+\.[^\s]+$/.test(trimmed)) return `https://${trimmed}`;
   return webSearchUrl(trimmed);
 }
