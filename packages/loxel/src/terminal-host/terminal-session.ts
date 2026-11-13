@@ -12,6 +12,7 @@ import type { Subprocess } from "bun";
 import type { ChildLogger } from "@/api/log-entry-model";
 import { clampScrollbackLines, clampTerminalSize } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
+import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 
 import type { TerminalHostEvent } from "./terminal-host";
 import { OSC_NOTIFICATION_CODES } from "./terminal-host";
@@ -338,7 +339,10 @@ export class TerminalSession {
 
   /** Send output to the client and account for it against the flow-control budget. */
   private forward(offset: number, data: Uint8Array): void {
-    this.options.emit({ type: "output", id: this.id, offset, data });
+    // Encoded once here: the frame goes to the renderer as is, and `data` is a view of it.
+    const frame = encodeOutputFrame(this.id, offset, data);
+    const payload = frame.subarray(BIN_OUTPUT_HEADER_SIZE);
+    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
     this.unacked += data.byteLength;
     if (this.unacked > this.highWater && !this.paused) {
       this.paused = true;

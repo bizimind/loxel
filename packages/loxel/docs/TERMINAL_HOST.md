@@ -1,6 +1,8 @@
 # Terminal host
 
-The terminal host is the part of Loxel that owns terminal sessions: the PTY and its program, the headless emulator, stream offsets and epochs, the resume ring, snapshots, flow control, and detection of notification sequences. Everything else about terminals is policy and stays in the server: which shell runs and with what environment, toolchains and the Python shim, which client a session streams to, orphans, worktree lifecycle, settings and notifications. The server reaches sessions only through the `TerminalHost` interface. Today one implementation exists, `InProcessTerminalHost`, which runs the sessions inside the server process. What a session does with its bytes (attach, snapshot, resume, flow control) is in [TERMINALS.md](TERMINALS.md#server-terminal-sessions).
+The terminal host is the part of Loxel that owns terminal sessions: the PTY and its program, the headless emulator, stream offsets and epochs, the resume ring, snapshots, flow control, and detection of notification sequences. Everything else about terminals is policy and stays in the server: which shell runs and with what environment, toolchains and the Python shim, which client a session streams to, orphans, worktree lifecycle, settings and notifications. The server reaches sessions only through the `TerminalHost` interface.
+
+The sessions run in `loxel-terminal-host`, a separate process started detached from the server, so a server crash, a restart or a dev `--watch` reload leaves every shell running, and the next server reattaches to them. Inside it, `InProcessTerminalHost` runs the sessions; the server reaches it over a Unix socket through `SocketTerminalHost`, one per host, and `TerminalHostPool` puts every host the server uses behind the one interface. What a session does with its bytes (attach, snapshot, resume, flow control) is in [TERMINALS.md](TERMINALS.md#server-terminal-sessions).
 
 ## Modules
 
@@ -9,21 +11,32 @@ The terminal host is the part of Loxel that owns terminal sessions: the PTY and 
 | [terminal-host.ts](../src/terminal-host/terminal-host.ts)                       | The `TerminalHost` interface and the data it carries: `TerminalSpawnRequest`, `TerminalSessionInfo`, `TerminalAttachRequest`, `TerminalHostEvent`, `TerminalSessionMeta`, `OSC_NOTIFICATION_CODES` |
 | [in-process-terminal-host.ts](../src/terminal-host/in-process-terminal-host.ts) | `InProcessTerminalHost`: sessions by ID with their meta, event delivery to listeners                                                                                                               |
 | [terminal-session.ts](../src/terminal-host/terminal-session.ts)                 | `TerminalSession` (one PTY plus its emulator) and `OutputRing`                                                                                                                                     |
+| [main.ts](../src/terminal-host/main.ts)                                         | The `loxel-terminal-host` entry point: argument parsing, the entry file, signals, exit                                                                                                             |
+| [host-service.ts](../src/terminal-host/host-service.ts)                         | `TerminalHostService`, the host's side of the socket: one server at a time, the grace period, when the host is done                                                                                |
+| [host-log.ts](../src/terminal-host/host-log.ts)                                 | `HostLog`: the host's log file, and lines forwarded to the server, capped                                                                                                                          |
+| [protocol.ts](../src/terminal-host/protocol.ts)                                 | `TERMINAL_HOST_PROTOCOL`, the messages' zod schemas, `compatibility()`                                                                                                                             |
+| [protocol-framing.ts](../src/terminal-host/protocol-framing.ts)                 | The length-prefixed framing: `encodeFrame`, `FrameReader`                                                                                                                                          |
+| [host-connection.ts](../src/terminal-host/host-connection.ts)                   | The server's end of one connection: `openHostConnection` (connect and handshake), `HostConnection`                                                                                                 |
+| [socket-terminal-host.ts](../src/terminal-host/socket-terminal-host.ts)         | `SocketTerminalHost`: the `TerminalHost` interface over a host's socket, reconnecting, and reporting a lost host                                                                                   |
+| [terminal-host-pool.ts](../src/terminal-host/terminal-host-pool.ts)             | `TerminalHostPool`: discovery at startup, generations, routing by session, garbage collection                                                                                                      |
+| [host-launcher.ts](../src/terminal-host/host-launcher.ts)                       | `launchHost`: the host's command, the binary's clone, the detached spawn                                                                                                                           |
+| [host-build-id.ts](../src/terminal-host/host-build-id.ts)                       | The host build ID: embedded at build time, or computed from source                                                                                                                                 |
+| [host-files.ts](../src/terminal-host/host-files.ts)                             | Paths under the state directory, the run directory and its entries                                                                                                                                 |
 | [index.ts](../src/terminal-host/index.ts)                                       | The module's public API, which the server imports                                                                                                                                                  |
 | [terminal-manager.ts](../src/server/terminal-manager.ts)                        | The server's side: `TerminalManager`, the host's only caller                                                                                                                                       |
 
 ## The boundary
 
-Nothing under `src/terminal-host/` imports from `src/server/`, directly or through what it imports, so the host can run without the server and outlive it. [import-boundary.test.ts](../src/terminal-host/import-boundary.test.ts) walks the import graph of every file in the folder, type imports included, and fails with the chain of imports that reaches a server module. What both sides need lives where neither pulls in the other, and imports nothing itself:
+Nothing under `src/terminal-host/` imports from `src/server/`, directly or through what it imports, so the host can run without the server and outlive it. The host's own entry point makes the bundler hold to it too: `loxel-terminal-host` contains only what `main.ts` reaches. [import-boundary.test.ts](../src/terminal-host/import-boundary.test.ts) walks the import graph of every file in the folder, type imports included, and fails with the chain of imports that reaches a server module. What both sides need lives where neither pulls in the other, and imports nothing itself:
 
 - [terminal-stream.ts](../src/api/terminal-stream.ts): `TerminalState`, what a `state` event carries and `terminal_state` forwards, next to the binary frame codec the renderer and the server share.
 - [terminal-limits.ts](../src/api/terminal-limits.ts): the size and scrollback bounds and their clamps, which the host enforces whatever it is sent.
 
-The host never reads settings. What the process running it provides is passed in as a `TerminalSessionRuntime`: a logger (typed by `ChildLogger` from [log-entry-model.ts](../src/api/log-entry-model.ts)), and optional hooks for spawn accounting and the stress detector. `server.ts` gives the in-process host the `terminal` log category, `measureSpawn` and the `pty-output` checkpoint.
+The host never reads settings. What the process running it provides is passed in as a `TerminalSessionRuntime`: a logger (typed by `ChildLogger` from [log-entry-model.ts](../src/api/log-entry-model.ts)), and optional hooks for spawn accounting and the stress detector. The host process passes its `HostLog`; the server counts output for the stress detector from the `output` events it receives.
 
 ## The interface
 
-Everything that crosses the interface is plain data: strings, numbers, JSON objects and `Uint8Array` payloads. Commands return nothing or a promise of data, and everything the host has to say arrives as an event, so the interface can be carried over a socket without callbacks into the server.
+Everything that crosses the interface is plain data: strings, numbers, JSON objects and `Uint8Array` payloads. Commands return nothing or a promise of data, and everything the host has to say arrives as an event, so the interface is carried over a socket without callbacks into the server. The data types are inferred from zod schemas in [terminal-host.ts](../src/terminal-host/terminal-host.ts), which the protocol validates against.
 
 **Commands**
 
@@ -42,12 +55,12 @@ A command naming an unknown ID does nothing, since a session can end on its own 
 
 **Events**
 
-| Event                           | When                                                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `state { attachment, state }`   | For every attach and every flow-control resync, before any output at or past `state.offset`          |
-| `output { id, offset, data }`   | Output for the attached client, in offset order, only after that client's `state`                    |
-| `exit { id, epoch, exitCode }`  | The program ended on its own, after any final resync of a paused client; the session is already gone |
-| `osc { id, epoch, code, data }` | The emulator parsed OSC 9, 777 or 99, attached or not; `data` is the raw payload                     |
+| Event                                | When                                                                                                                                                                                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state { attachment, state }`        | For every attach and every flow-control resync, before any output at or past `state.offset`                                                                                                                                                                 |
+| `output { id, offset, data, frame }` | Output for the attached client, in offset order, only after that client's `state`. `frame` is the renderer's binary output frame, encoded once by the session; `data` is a view of its payload, not a copy. The server sends `frame` to the WebSocket as is |
+| `exit { id, epoch, exitCode }`       | The program ended on its own, after any final resync of a paused client; the session is already gone                                                                                                                                                        |
+| `osc { id, epoch, code, data }`      | The emulator parsed OSC 9, 777 or 99, attached or not; `data` is the raw payload                                                                                                                                                                            |
 
 **Meta.** Each session carries a JSON object the server sets at spawn and with `setMeta`, and reads back with `list()`. The host stores it as given and never looks inside, so the server can keep new fields there without changing the host. The server's shape is `TerminalMeta` in [terminal-manager.ts](../src/server/terminal-manager.ts): the panel's `worktreePath`, the shell's starting `cwd`, and the creating `windowId`.
 
@@ -66,13 +79,98 @@ The manager relies on that order, not on timing, to tell which events are curren
 - **Epochs.** `exit` and `osc` carry the session's epoch. The manager picks the epoch of each spawn, so it knows it before any event of the session can arrive, and a session destroyed and respawned under the same ID gets a new one: an exit or notification from the earlier spawn does not end or notify its replacement.
 - **Destroy is silent.** A destroyed session never sends `exit`, even when its program ends later. This is part of the contract: the manager removes the session itself when it asks for the destroy, and the `onExit` hook is only for programs that ended on their own.
 
+## The process
+
+`loxel-terminal-host` is its own binary, compiled from [main.ts](../src/terminal-host/main.ts), not the server started with a flag: the host outlives the server and may be of another version than it, and it shows up under its own name in Activity Monitor and `ps`. It is started with `--run-dir`, `--host-id` and `--log-file`, listens on `<run-dir>/<host-id>.sock`, writes its entry next to it, and prints `ready` on stdout once both exist; then it points stdout at `/dev/null`. It ignores SIGHUP, takes SIGTERM and SIGINT as an order to end every session and exit, and logs an uncaught exception rather than exit with every shell.
+
+[host-launcher.ts](../src/terminal-host/host-launcher.ts) starts it with `Bun.spawn({ detached: true })`, which calls `setsid`, so the host leads its own session and no signal to the server's process group reaches it, and `unref()`s it. It gets `/` as its working directory and only `HOME`, `TMPDIR` and `LANG` of the environment, since every session brings its whole environment; its stdin is closed and its stderr goes to `<log-file>.stderr`, for what the runtime itself prints, such as a crash report. What starts it depends on how the server runs:
+
+| Server                                                           | Host                                                                                                                     |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Packaged (`loxel-server`, a compiled binary)                     | The `loxel-terminal-host` bundled next to it, cloned to `<stateDir>/terminal-host/bin/<hostBuildId>/` and run from there |
+| Built as a bundle (`pnpm run build`, `bun dist/server/index.js`) | `dist/server/terminal-host.js`, with the same Bun                                                                        |
+| From source (dev, tests)                                         | `src/terminal-host/main.ts`, with the same Bun; nothing is copied                                                        |
+
+**The clone.** A packaged host never runs from the app bundle, so an update can replace the bundle under running hosts (the invariant in [ELECTRON.md](ELECTRON.md#updates)), and no host depends on a deleted file staying mapped. `installHostBinary` copies the bundled binary with `COPYFILE_FICLONE`: on APFS a copy-on-write clone that takes no space, elsewhere a plain copy. It copies to a temporary name and renames it into place, so a binary at the final path is always whole, and it copies only once per build. The clone keeps the binary's code signature and gets no quarantine attribute.
+
+**The host build ID.** A hash of the host's minified bundle plus the Bun version, so comments, formatting and releases that do not touch the host keep the ID. [build-server.ts](../scripts/build-server.ts) computes it with `computeHostBuildId` and embeds it in both the server and the host as `LOXEL_TERMINAL_HOST_BUILD_ID`; run from source, the server computes it at startup the same way (a bundle of the host's source, about 10 ms) and passes it to the host with `--build-id`.
+
+## Generations
+
+Hosts are one per host build ID, not one per terminal (a Bun runtime per shell would cost too much with many agents) and not one per app release:
+
+- New sessions spawn in the current generation's host: a running host whose build ID is this build's, or else one started the first time a session is spawned. A release that leaves the host's code and the Bun version alone keeps the ID, so its server reuses the hosts already running.
+- A host of another build keeps serving the sessions it has; once its last session ends, the server disconnects from it with `end`, and it exits. Host fixes so reach every new terminal at once, and no host is ever upgraded in place.
+- At startup the server removes `bin/<hostBuildId>/` directories that are neither this build's nor run by a live host.
+
+## Protocol
+
+A host speaks over its socket in frames: a 4-byte big-endian body length, then the body. A body starting with `{` is a JSON message; any other body is a binary terminal frame in the renderer's layout ([terminal-stream.ts](../src/api/terminal-stream.ts)): keyboard input as input frames `[0x02][id][payload]` to the host, output as output frames `[0x01][id][u64 offset][payload]` from it, which the server forwards to the renderer as they came. The JSON messages are zod schemas in [protocol.ts](../src/terminal-host/protocol.ts), the single source of truth with `TERMINAL_HOST_PROTOCOL` (`1.0.0`).
+
+**The bootstrap layer is frozen**, so that any server can identify and stop any host, even one of an incompatible major version: the framing, and
+
+| Message                                                          |                                                                                                                   |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `initialize { protocol, build, capabilities }`                   | The server's first message; nothing else is valid before it, and a connection that sends something else is closed |
+| `initialize_result { protocol, hostBuildId, pid, capabilities }` | The host's answer, whatever protocol the server speaks: the server decides whether it can go on                   |
+| `disconnect { sessions: "end" \| "keep" }`                       | The server is leaving, ending its sessions or keeping them                                                        |
+| `terminate`                                                      | End every session and exit                                                                                        |
+
+**The versioned layer** carries the interface. Requests carry a `requestId` and are answered by `result { requestId, value }` or `error { requestId, message, cause? }`, and the requester parses `value` with the schema of what it asked for.
+
+| Server to host                                                                                                                      | Host to server                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `spawn { requestId, request }` (typed-ahead input follows as an input frame), `list { requestId }`, `attach { requestId, request }` | `result`, `error`                                                           |
+| `detach`, `resize`, `set_scrollback`, `ack`, `destroy`, `set_meta` (no answer); input frames                                        | `state`, `exit`, `osc` events, output frames, and `log { level, msg, ctx }` |
+
+**Compatibility.** `compatibility(host, server)` is the one function that decides: a different major, or a version that is not semver, is `incompatible`, and the server ends the host with `terminate` (a SIGTERM to its pid if it does not close its socket within 2 seconds). Otherwise the result is `compatible`, or `degraded` when one side has capabilities the other lacks; either way each side uses only the capabilities both advertise, checked by name, never by comparing versions. None exist yet.
+
+## Lifetime
+
+A host serves one server at a time. The connection that sent the latest `initialize` is its server; one that was connected before is closed. Whenever its server changes or leaves, the host detaches every session, so no `state` or output meant for an earlier server's client reaches the next one, and the new server's attachment numbers start their own sequence. Events go to the current server; answers go to the connection that asked.
+
+| The server...                                                                          | The host                                                                                                                      |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| sends `disconnect { sessions: "end" }` (quit, a standalone server's idle shutdown)     | Ends every session                                                                                                            |
+| sends `disconnect { sessions: "keep" }`                                                | Keeps the sessions with no deadline, until a server comes back                                                                |
+| closes its connection without one (a crash, the app crashing, a dev `--watch` restart) | Keeps the sessions for `TERMINAL_HOST_GRACE_MS` (10 minutes); a server that connects meanwhile cancels it, otherwise they end |
+| sends `terminate`                                                                      | Ends every session and exits                                                                                                  |
+
+A host with neither a server nor sessions left exits, removing its socket and entry. A new host waits the grace period for its first server.
+
 ## The server's side
 
-`TerminalManager` keeps, per session, the meta, the epoch, the host's answer to the spawn, the client's sink, the latest attachment and whether that client has received its state. A client owns the session from the moment it attaches, before the host has answered the spawn: a detach or a later attach in that window takes effect, the session is not an orphan meanwhile, and only the client that owns the session once the spawn is answered is attached in the host. An attach waiting on a spawn the host refuses fails with it. It never asks the host for these; the host's `list()` is what a caller that did not spawn the sessions itself would read them from. Pending starts (a shell waiting for its toolchain environments) live only in the manager: the host is asked to spawn once the environment is ready, with the latest size, the command and any input typed ahead, in that order. A worktree move updates the meta in both places; removal, orphan cleanup and shutdown call `destroy`.
+[server.ts](../src/server/server.ts) builds one `TerminalHostPool` and hands it to `TerminalManager` as its host. Before serving, it calls `start()`, which finds the hosts in the run directory, handshakes with each, ends incompatible ones, removes the files of hosts that refuse connections, and hands every compatible host's sessions to `TerminalManager.adopt()`. The pool holds back their events until `adopt` returns, so none arrives for a session the manager does not know yet. Adopted sessions have no client, so they are orphans: the server starts the 5-minute orphan timer, which the first window to connect cancels, and each panel's reattach resumes from the ring or gets a snapshot. An adopted session whose meta the server cannot read is ended. A host that accepts the connection but does not answer is left alone, with its files and binary.
+
+**Shutdown.** SIGTERM and SIGINT (the app's quit), and a standalone server's idle shutdown, `disconnect` every host with `end` and wait for each to close its socket, so terminals still end on quit. A crash (an uncaught exception) and an app that is gone close the connections without a `disconnect`, so the terminals wait out the grace period for the next server.
+
+**One host's connection.** `SocketTerminalHost` frames commands in call order. A command sent while the connection is not up (a host still starting, or a connection being restored) waits in order, and requests are answered once it is. A connection that closes unasked does not mean the sessions are gone: the client reconnects at once, then after 250 ms, 1 s and every 5 s, lists the host's sessions and reconciles: a spawn whose answer was lost resolves if the host runs it, a session the host no longer runs is reported ended, and every session that had a client is attached again with the same attachment number, resuming from the last output that client got. Only when the host is confirmed gone, its pid not running or its socket refusing connections, does the client report its sessions ended with `HOST_LOST_EXIT_CODE` (129, 128 + SIGHUP: what the shell got when its PTY closed, not a code the program chose) and log it with the host's build ID and how many sessions it had. The next spawn then starts a new host.
+
+**Logs.** The host's log lines go to `logs/terminal-host-<hostId>.log` (rotated at 5 MB like the server's, with [log-file.ts](../src/lib/log-file.ts)). Lines at info and above are also sent to the current server as `log` messages, which it logs under `terminal` with the host's ID, so they show in the Logs panel; at most 50 a second, so a flood of log lines cannot crowd output off the socket, and a line then says how many were held back.
+
+**The manager's bookkeeping.** `TerminalManager` keeps, per session, the meta, the epoch, the host's answer to the spawn, the client's sink, the latest attachment and whether that client has received its state. A client owns the session from the moment it attaches, before the host has answered the spawn: a detach or a later attach in that window takes effect, the session is not an orphan meanwhile, and only the client that owns the session once the spawn is answered is attached in the host. An attach waiting on a spawn the host refuses fails with it. Pending starts (a shell waiting for its toolchain environments) live only in the manager: the host is asked to spawn once the environment is ready, with the latest size, the command and any input typed ahead, in that order. A worktree move updates the meta in both places; removal and orphan cleanup call `destroy`.
+
+## Files on disk
+
+[host-files.ts](../src/terminal-host/host-files.ts) owns the layout under the state directory, which keeps every mode (prod, dev, demo) apart:
+
+| Path                                                       | Contents                                                                                                                                                                                                                           |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `terminal-host/run/` (0700)                                | Each running host's socket `<hostId>.sock` (0600) and entry `<hostId>.json` (`{ pid, build, protocol }`). The handshake is the truth about a host; the entry names the build of a host that does not answer, so its binary is kept |
+| `terminal-host/bin/<hostBuildId>/loxel-terminal-host`      | The clone a packaged host runs from                                                                                                                                                                                                |
+| `logs/terminal-host-<hostId>.log`, `.log.1`, `.log.stderr` | The host's log, its rotation, and what its runtime printed. Removed a day after the host is gone, never while it runs                                                                                                              |
+
+Host IDs are 8 hex characters, so a socket path stays under macOS's 104-byte limit for `sun_path`. A state directory so deep that it would not gets its run directory in the user's temporary directory instead, `loxel-terminal-host-<hash of the state directory>`, which every server for that state directory finds. The run directory must be the user's own, and is made 0700 if it is not.
 
 ## Tests
 
 - [terminal-session.test.ts](../src/terminal-host/terminal-session.test.ts): the ring, snapshots, resume, flow control, raw notification sequences and exit, on one session.
 - [in-process-terminal-host.test.ts](../src/terminal-host/in-process-terminal-host.test.ts): the interface: spawn and list, typed-ahead input, attachments on states, events, destroy and ID reuse, rejected spawns, unknown IDs.
-- [terminal-manager.test.ts](../src/server/terminal-manager.test.ts): the policy against the in-process host, and, against a fake host, events that arrive stale.
+- [protocol.test.ts](../src/terminal-host/protocol.test.ts): framing however a stream is chunked, the schemas, `compatibility()`.
+- [host-service.test.ts](../src/terminal-host/host-service.test.ts): the lifetime rules, with fake timers: the handshake, the grace period and a server coming back within it, `keep`, `end`, `terminate`, a takeover.
+- [socket-terminal-host.test.ts](../src/terminal-host/socket-terminal-host.test.ts): the interface over a socket, a restored connection resuming its client, and a host that is gone.
+- [terminal-host-pool.test.ts](../src/terminal-host/terminal-host-pool.test.ts): discovery, generations, stale and incompatible hosts, garbage collection.
+- [host-launcher.test.ts](../src/terminal-host/host-launcher.test.ts), [host-files.test.ts](../src/terminal-host/host-files.test.ts), [host-log.test.ts](../src/terminal-host/host-log.test.ts): the clone, a host that fails to start, the run directory, the log cap.
+- [terminal-manager.test.ts](../src/server/terminal-manager.test.ts): the policy against the in-process host, against a fake host events that arrive stale, and adopted sessions.
+- [terminal-restart.test.ts](../src/server/terminal-restart.test.ts): a real server killed with a shell running, and the next one resuming the panel and snapshotting a fresh one; SIGTERM still ends the shell and the host.
 - [import-boundary.test.ts](../src/terminal-host/import-boundary.test.ts): the boundary.
