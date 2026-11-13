@@ -260,7 +260,7 @@ export function Sidebar() {
         className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
-        {/* Home, the browser panels shown with no worktree, set off from the projects like they are */}
+        {/* Home, what a window shows with no worktree, set off from the projects like they are */}
         <div className="mb-2">
           {sidebarExpanded ? (
             // Laid out like a project row, so its logo sits in the column of the project icons.
