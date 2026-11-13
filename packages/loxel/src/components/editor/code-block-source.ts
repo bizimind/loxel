@@ -8,8 +8,9 @@
  * block around it (the ```mermaid input rule, a block-type menu). Programmatic placements never
  * open a source: the initial selection, the caret the editor places when a file opens
  * ({@link keepSourcesClosed}), and disk changes applied outside history. So a file opens showing
- * its diagrams, wherever its first and last blocks are. A node selection (the block handle) is not
- * editing. Leaving the block, or its preview's Hide button, which moves the caret out, unmarks it.
+ * its diagrams, wherever its first and last blocks are. A caret such a placement leaves in a
+ * mermaid block could not be typed with, as the source it sits in is not displayed, so it moves to
+ * the nearest textblock outside code blocks. A node selection (the block handle) is not editing. Leaving the block, or its preview's Hide button, which moves the caret out, unmarks it.
  * The mark is a node decoration, so it lives on the block's node view and survives CodeMirror being
  * torn down off-screen; a recreated editor starts unmarked, and its restored caret marks the block
  * it lands in.
@@ -40,6 +41,36 @@ function codeBlockAt(selection: Selection): number | null {
   return $head.parent.type.name === CODE_BLOCK ? $head.before() : null;
 }
 
+function isMermaid(node: Node): boolean {
+  const language: unknown = node.attrs.language;
+  return typeof language === "string" && language.toLowerCase() === "mermaid";
+}
+
+/** The nearest text position from `from` in direction `dir` that is not inside a code block. */
+function outsideCodeBlocks(doc: Node, from: number, dir: 1 | -1): Selection | null {
+  let found = TextSelection.findFrom(doc.resolve(from), dir, true);
+  while (found && found.$head.parent.type.name === CODE_BLOCK) {
+    const next = dir > 0 ? found.$head.after() : found.$head.before();
+    found = TextSelection.findFrom(doc.resolve(next), dir, true);
+  }
+  return found;
+}
+
+/**
+ * Moves a caret out of a mermaid block it sits in unmarked (placed there programmatically), to the
+ * nearest textblock before it, or else after it, outside code blocks.
+ */
+function releaseCaret(state: EditorState): Transaction | null {
+  const block = codeBlockAt(state.selection);
+  if (block === null || sourceKey.getState(state) !== null) return null;
+  const node = state.doc.nodeAt(block);
+  if (!node || !isMermaid(node)) return null;
+  const target =
+    outsideCodeBlocks(state.doc, block, -1) ??
+    outsideCodeBlocks(state.doc, block + node.nodeSize, 1);
+  return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
+}
+
 /** Marks a transaction that places the caret for the user, so it opens no source. */
 export function keepSourcesClosed(tr: Transaction): Transaction {
   return tr.setMeta(sourceKey, true);
@@ -67,11 +98,17 @@ function editingDecorations(state: EditorState): DecorationSet {
   ]);
 }
 
-/** Whether the code block at `pos` is showing its preview in place of its source. */
+/**
+ * Whether the code block at `pos` shows its preview in place of its source by mermaid-preview.css.
+ * A source hidden by Crepe's own preview toggle (its `hidden` class, still used by diff blocks)
+ * stays hidden with the caret in it, so it does not count.
+ */
 function isSourceHidden(view: EditorView, pos: number): boolean {
   const dom = view.nodeDOM(pos);
   const host = dom instanceof HTMLElement ? dom.querySelector(".codemirror-host") : null;
-  return host instanceof HTMLElement && !host.checkVisibility();
+  return (
+    host instanceof HTMLElement && !host.classList.contains("hidden") && !host.checkVisibility()
+  );
 }
 
 const ARROWS: Record<string, { dir: 1 | -1; edge: "up" | "down" | "left" | "right" }> = {
@@ -129,6 +166,15 @@ export const codeBlockSourcePlugin = $prose(
           return tr.selectionSet || changesNodeAt(tr, block) ? block : null;
         },
       },
+      appendTransaction: (_trs, _old, state) => releaseCaret(state),
+      // The initial selection comes with no transaction, so its caret is released once mounted.
+      view: (view) => {
+        queueMicrotask(() => {
+          const tr = view.isDestroyed ? null : releaseCaret(view.state);
+          if (tr) view.dispatch(tr);
+        });
+        return {};
+      },
       props: { decorations: editingDecorations, handleKeyDown: enterHiddenSource },
     }),
 );
@@ -160,16 +206,8 @@ export function hideCodeBlockSource(view: EditorView, codeBlock: Element): void 
   const block = codeBlockOf(view, codeBlock);
   if (!block) return;
   const { doc } = view.state;
-  const outside = (from: number, dir: 1 | -1): Selection | null => {
-    let found = TextSelection.findFrom(doc.resolve(from), dir, true);
-    while (found && found.$head.parent.type.name === CODE_BLOCK) {
-      const next = dir > 0 ? found.$head.after() : found.$head.before();
-      found = TextSelection.findFrom(doc.resolve(next), dir, true);
-    }
-    return found;
-  };
   const after = block.pos + block.node.nodeSize;
-  const target = outside(after, 1) ?? outside(block.pos, -1);
+  const target = outsideCodeBlocks(doc, after, 1) ?? outsideCodeBlocks(doc, block.pos, -1);
   const { tr } = view.state;
   if (target) tr.setSelection(target);
   else {

@@ -207,8 +207,9 @@ afterEach(async () => {
 });
 
 describe("mermaid source visibility", () => {
-  test("a loaded document shows diagrams alone, even with the initial caret in the first", () => {
-    expect(view.state.selection.$head.parent.type.name).toBe("code_block");
+  test("a loaded document shows diagrams alone, and its initial caret leaves the first", () => {
+    // ProseMirror starts the selection in the first block; it cannot type in a hidden source.
+    expect(view.state.selection.$head.parent.textContent).toBe("Between");
     expect(editing()).toEqual(NONE_EDITING);
     expect(sourceShown(0)).toBe(false);
     expect(sourceShown(1)).toBe(false);
@@ -218,11 +219,13 @@ describe("mermaid source visibility", () => {
     expect(isShown(action(0, "hide"))).toBe(false);
   });
 
-  test("the caret placed when a file opens opens no source, even at the end of a last diagram", () => {
+  test("the caret placed at the end of a file ending in a diagram opens no source", () => {
     const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, codeEnd(LAST)));
     view.dispatch(keepSourcesClosed(tr));
     expect(editing()).toEqual(NONE_EDITING);
     expect(sourceShown(LAST)).toBe(false);
+    // The caret moves to the text before the diagram, where typing shows.
+    expect(view.state.selection.$head.parent.textContent).toBe("End");
   });
 
   test("a disk change applied outside history opens no source", () => {
@@ -230,6 +233,7 @@ describe("mermaid source visibility", () => {
     tr.setSelection(TextSelection.create(tr.doc, codeEnd(1))).setMeta("addToHistory", false);
     view.dispatch(tr);
     expect(editing()).toEqual(NONE_EDITING);
+    expect(view.state.selection.$head.parent.textContent).toBe("Between");
   });
 
   test("selecting a whole block, as the block handle does, opens no source", () => {
@@ -334,6 +338,14 @@ describe("mermaid source visibility", () => {
     // "End" follows the empty block, whose source shows.
     select(paragraphStart("End"));
     expect(pressKey("ArrowLeft")).toBe(false);
+  });
+
+  test("an arrow key leaves a source hidden by Crepe's own preview toggle alone", () => {
+    // The toggle (still on diff blocks) hides the source with a class the mark cannot override.
+    block(1).querySelector(".codemirror-host")!.classList.add("hidden");
+    select(paragraphStart("Between"));
+    expect(pressKey("ArrowLeft")).toBe(false);
+    expect(editing()).toEqual(NONE_EDITING);
   });
 
   test("an arrow key selects a rule between the caret and a diagram first", () => {
