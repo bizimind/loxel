@@ -249,11 +249,8 @@ export function Sidebar() {
   );
 
   const isHome = activeWorktreePath === null;
-  // Muted until Home is shown, like an entry that isn't the one in use.
-  const homeTileClass = cn(
-    "size-6 transition-colors",
-    isHome ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-  );
+  // Always at full strength: the row's highlight and the rail's ring show when Home is shown.
+  const homeTileClass = "text-foreground size-6";
 
   return (
     <div

@@ -647,12 +647,15 @@ describe("Sidebar resizing", () => {
 describe("Sidebar Home entry", () => {
   test("goes Home and marks it current, expanded and collapsed", () => {
     const { rerender } = render(<Sidebar />);
-    const home = screen.getByRole("button", { name: "Home" });
+    // Its name and its second line, in the expanded sidebar.
+    const home = screen.getByRole("button", { name: /^Home\b/ });
     expect(home.getAttribute("aria-current")).toBeNull();
 
     fireEvent.click(home);
     expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
-    expect(screen.getByRole("button", { name: "Home" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: /^Home\b/ }).getAttribute("aria-current")).toBe(
+      "page",
+    );
 
     useProjectStore.setState({ sidebarExpanded: false });
     rerender(<Sidebar />);
