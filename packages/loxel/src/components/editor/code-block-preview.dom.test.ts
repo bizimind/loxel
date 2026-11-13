@@ -78,9 +78,14 @@ describe("renderCodeBlockPreview routing", () => {
     expect(renderCalls).toHaveLength(0);
   });
 
-  test("empty mermaid blocks clear their preview without rendering", async () => {
-    expect(await renderAsync("mermaid", "")).toBeNull();
-    expect(await renderAsync("mermaid", "  \n\t\n")).toBeNull();
+  test("empty mermaid blocks have no preview at once, and clear it through the queue", async () => {
+    for (const content of ["", "  \n\t\n"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one render at a time, like the queue
+      const applied = await new Promise<PreviewValue>((resolve) => {
+        expect(renderCodeBlockPreview("mermaid", content, resolve)).toBeNull();
+      });
+      expect(applied).toBeNull();
+    }
     expect(renderCalls).toHaveLength(0);
   });
 
@@ -112,6 +117,8 @@ describe("mermaid rendering", () => {
     expect(diagram.style.getPropertyValue("--loxel-mermaid-width")).toBe("640px");
     const actions = [...diagram.querySelectorAll(".loxel-mermaid-toolbar [data-mermaid-action]")];
     expect(actions.map((b) => b.getAttribute("data-mermaid-action"))).toEqual([
+      "edit",
+      "hide",
       "zoom-out",
       "zoom-in",
       "reset",
@@ -163,9 +170,10 @@ describe("mermaid rendering", () => {
     };
     const preview = await renderAsync("mermaid", "graph TD; A-->");
     if (!(preview instanceof HTMLElement)) throw new Error("expected an error element");
-    expect(preview.textContent).toBe(
+    expect(preview.querySelector(".loxel-mermaid-error")?.textContent).toBe(
       'Mermaid error: Parse error: <img src="x" onerror="alert(1)">',
     );
+    expect(preview.querySelector('[data-mermaid-action="edit"]')).not.toBeNull();
     expect(preview.querySelector("img")).toBeNull();
     expect(renderCalls).toHaveLength(1); // the dark variant is skipped
     expect(document.getElementById(`d${renderCalls[0]!.id}`)).toBeNull();
