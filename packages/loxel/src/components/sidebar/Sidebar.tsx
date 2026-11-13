@@ -24,10 +24,10 @@ import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/foc
 import { frontendLog } from "@/lib/frontend-logger";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { cn } from "@/lib/utils";
+import { openAddProjectWizard } from "@/store/add-project-wizard";
 import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
@@ -57,7 +57,6 @@ export function Sidebar() {
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds);
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded);
-  const addProject = useProjectStore((s) => s.addProject);
   const removeProject = useProjectStore((s) => s.removeProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   const updateProject = useProjectStore((s) => s.updateProject);
@@ -100,7 +99,6 @@ export function Sidebar() {
     [setSidebarWidth],
   );
 
-  const [wizardOpen, setWizardOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -134,15 +132,6 @@ export function Sidebar() {
       contextMenu !== null && s.byProject[contextMenu.project.path]?.worktreeMetadata === false,
   );
   const [nestingProjectPath, setNestingProjectPath] = useState<string | null>(null);
-
-  const handleAddProject = useCallback(async () => {
-    if (window.electronAPI?.openFolderDialog) {
-      const path = await window.electronAPI.openFolderDialog();
-      if (path) await addProject(path);
-    } else {
-      setWizardOpen(true);
-    }
-  }, [addProject]);
 
   const handleProjectContextMenu = useCallback((e: React.MouseEvent, project: Project) => {
     e.preventDefault();
@@ -378,7 +367,7 @@ export function Sidebar() {
             <div
               className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors not-dark:mx-1 not-dark:rounded-md not-dark:px-1.5"
               style={{ paddingLeft: "13px" }}
-              onClick={handleAddProject}
+              onClick={openAddProjectWizard}
             >
               <div className="flex size-6 shrink-0 items-center justify-center">
                 <FolderPlusIcon className="size-4" />
@@ -389,7 +378,7 @@ export function Sidebar() {
             <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_ADD_LEFT}px` }}>
               <button
                 className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
-                onClick={handleAddProject}
+                onClick={openAddProjectWizard}
                 title="Add project"
               >
                 <FolderPlusIcon className="size-5" />
@@ -398,8 +387,6 @@ export function Sidebar() {
           )}
         </div>
       </div>
-
-      <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
 
       {/* Project context menu */}
       {contextMenu && (
