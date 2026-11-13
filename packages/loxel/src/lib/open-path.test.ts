@@ -101,6 +101,18 @@ describe("opens from outside the window", () => {
     ]);
   });
 
+  test("a link between Home's plans opens in Home", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath("/state/detached/home/Plan.md");
+
+    expect(openedFiles).toEqual(["/state/detached/home/Plan.md"]);
+    expect(switched).toEqual([]);
+    useProjectStore.setState({ homeDraftsDir: null });
+  });
+
   test("a file link in Home to a file in no worktree opens nothing", async () => {
     useWorktreeStore.setState({ activeWorktreePath: null });
     setCenterApi({} as never, HOME_LAYOUT_KEY);

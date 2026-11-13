@@ -60,7 +60,7 @@ Files, folders and URLs can be mixed in one command, and shell patterns work. Th
 ### Files and folders
 
 - Relative paths resolve against your current directory. The path must exist, and it takes no `:line` suffix: `loxel src/app.ts:42` fails with `File not found`.
-- The file or folder opens in your terminal's window, in the worktree that contains it. A path outside every project opens in the Others section of the file tree.
+- The file or folder opens in your terminal's window, in the worktree that contains it. A path outside every project opens in the Others section of the file tree, except from a Home terminal (no worktree), where it doesn't open and the user sees a notice.
 - Folders are revealed in the file tree, which needs `--focus`: without it nothing opens and the CLI prints a warning. Files open as tabs: `.md` in a live-preview markdown editor (` ```mermaid ` blocks render as diagrams), `.excalidraw` in a drawing canvas, images, videos and SVGs in a media viewer, and everything else in a code editor.
 
 ### URLs
@@ -74,7 +74,7 @@ Files, folders and URLs can be mixed in one command, and shell patterns work. Th
 
 ### Terminals
 
-- `loxel terminal` opens a new terminal tab in your window, with its shell started in `--cwd <dir>` (default: your current directory). The tab goes to the worktree that contains the directory, or to the window's current worktree for a directory outside every worktree. Its command starts right away, even when the tab opens in the background or in a worktree the user isn't looking at. A worktree created moments ago inside the project's directory is picked up.
+- `loxel terminal` opens a new terminal tab in your window, with its shell started in `--cwd <dir>` (default: your current directory). The tab goes to the worktree that contains the directory, or to the window's current worktree for a directory outside every worktree, or to Home when the window shows none. Its command starts right away, even when the tab opens in the background or in a worktree the user isn't looking at. A worktree created moments ago inside the project's directory is picked up.
 - The new shell is a fresh login shell, like any new tab. It has the user's aliases and shell config but not your environment, so put any variables the command needs in the command itself. The shell stays open after the command exits, and the user can watch the output, scroll back and take over.
 - The CLI returns as soon as the tab is requested. It does not wait for the command, and it reports neither the command's output nor its exit code. Run the command yourself when you need its result. Use a new terminal for long-running processes the user should see (dev servers, watchers, log tails) or for handing work to another agent.
 - The command is typed into the shell as keystrokes, so keep it on one line. With one argument, that argument is a shell command line used as is (`&&`, pipes and `cd` work). With several arguments, each one is quoted where needed and they are joined into one command, which makes a separate argument the safe way to pass a long prompt. `--` ends `loxel`'s own flags; put it before the command to be safe. `--title` names the tab.
@@ -128,4 +128,4 @@ Loxel recognizes coding agents by the environment variables they set for their c
 
 - Opening with `--focus` switches the window to the worktree the panel belongs to, including your own worktree if the user has moved on to another one. Do that only when they asked for it or when the hand-off is the point. Otherwise open in the background and mention it, or just mention the path.
 - Open what the user needs next, such as the file you want reviewed, the page you built, or the PR you created. Don't open every file you touch.
-- In your replies, write file references as absolute paths, each on one line, with an optional `:line` or `:line:col` suffix. Loxel makes them Cmd-clickable in terminal output, and URLs too. `./` and `../` paths resolve against the directory this terminal started in, and bare names like `src/app.ts` are clickable only when they match a file in the project.
+- In your replies, write file references as absolute paths, each on one line, with an optional `:line` or `:line:col` suffix. Loxel makes them Cmd-clickable in terminal output, and URLs too. `./` and `../` paths resolve against the directory this terminal started in, and bare names like `src/app.ts` are clickable only when they match a file in the project, so never in a Home terminal, which has no project.

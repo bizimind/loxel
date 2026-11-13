@@ -229,15 +229,26 @@ export async function openPath(path: string, location?: FileLocation): Promise<v
   dispatchOpenFile(filePath, location);
 }
 
+/**
+ * A file link followed in Home: one of Home's own drafts opens there; any other file opens in the
+ * worktree holding it, switching there, since Home shows no worktree's files.
+ */
 function openFileFromHome(path: string, location: FileLocation | undefined): Promise<void> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    const { projects } = useProjectStore.getState();
-    const owner = deriveOwningWorktree(path, projects, useWorktreeStore.getState().byProject);
-    if (!owner) {
-      showToast("Open a project before opening other files");
+    const { projects, homeDraftsDir } = useProjectStore.getState();
+    if (homeDraftsDir && path.startsWith(homeDraftsDir + "/")) {
+      dispatchOpenFile(path, location);
       return;
     }
-    await openInWorktree(owner, { kind: "file", path, ...(location ? { location } : {}) });
+    const owner = deriveOwningWorktree(path, projects, useWorktreeStore.getState().byProject);
+    if (owner) {
+      await openInWorktree(owner, { kind: "file", path, ...(location ? { location } : {}) });
+      return;
+    }
+    const project = deriveProject(path, projects);
+    if (project) showToast(`${path} is inside ${project.name} but not in any of its worktrees`);
+    else if (projects.length > 0) showToast(`${path} is in none of your projects`);
+    else showToast("Open a project before opening other files");
   });
 }

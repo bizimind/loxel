@@ -2301,7 +2301,11 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
       };
     }),
   );
-  const response: ProjectsResponse = { projects: enriched, homeDir: homedir() };
+  const response: ProjectsResponse = {
+    projects: enriched,
+    homeDir: homedir(),
+    homeDraftsDir: ctx.homeDrafts.dir,
+  };
   return json(response);
 }
 

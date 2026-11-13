@@ -80,6 +80,8 @@ interface ProjectState {
   projects: EnrichedProject[];
   /** The server user's home directory (null until projects are first fetched). */
   homeDir: string | null;
+  /** Where Home's drafts are kept (`ProjectsResponse.homeDraftsDir`). */
+  homeDraftsDir: string | null;
   sidebarExpanded: boolean;
   /** Width of the sidebar when expanded (the collapsed width is fixed). */
   sidebarWidth: number;
@@ -111,6 +113,7 @@ export const useProjectStore = create<ProjectState>()(
     (set, get) => ({
       projects: [],
       homeDir: null,
+      homeDraftsDir: null,
       sidebarExpanded: false,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
@@ -120,7 +123,11 @@ export const useProjectStore = create<ProjectState>()(
       fetchProjects: async () => {
         try {
           const data = await api.getProjects();
-          set({ projects: data.projects, homeDir: data.homeDir });
+          set({
+            projects: data.projects,
+            homeDir: data.homeDir,
+            homeDraftsDir: data.homeDraftsDir,
+          });
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
           useWorktreeStore.getState().applyEnrichedProjects(data.projects);

@@ -39,8 +39,13 @@ export interface ProjectWorktreesResponse {
 /** Response of GET /api/projects. */
 export interface ProjectsResponse {
   projects: EnrichedProject[];
-  /** The server user's home directory, for shortening displayed paths to `~/…`. */
+  /**
+   * The server user's home directory, for shortening displayed paths to `~/…` and as where Home's
+   * terminals start.
+   */
   homeDir: string;
+  /** Where Home's drafts (its plans) are kept, so links between them open in Home. */
+  homeDraftsDir: string;
 }
 
 export interface BrowseEntry {
