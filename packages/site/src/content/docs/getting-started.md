@@ -11,10 +11,10 @@ This page gets you from a fresh install to your first task, with an agent workin
 
 ## Add your first project
 
-Click **Add project** at the bottom of the worktree sidebar. The dialog has two tabs: **New Project** creates a new folder and repository, and **Import Existing** brings in something you already have:
+Click **Add project** at the bottom of the worktree sidebar (or **Add Project** on the start screen). The dialog has two tabs: **New Project** creates a new folder and repository, and **Import Existing** brings in something you already have:
 
 - **Detect** — enter a path or browse to a folder on disk. Loxel identifies whether it's a bare repo, a regular repo, or a non-repo folder.
-- **Add** — after detection, confirm to register the repo in Loxel's project list.
+- **Add** — after detection, confirm to register the repo in Loxel's project list, along with any setup fixes you choose from what `wt doctor` finds.
 - **Clone** — paste a remote URL. Choose single-workspace (regular clone) or multi-workspace (bare repo + first worktree) before confirming.
 - **Init** — initialize git in an existing folder that isn't yet a repo. Same single/multi choice as Clone.
 - **Convert** — choose multi-workspace on a detected regular repo to turn it into a bare repo with worktrees. Requires a clean working tree, a checked-out branch, and no existing linked worktrees.

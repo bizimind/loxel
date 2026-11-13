@@ -5,13 +5,21 @@
  * themselves run in a {@link TerminalHost}, reached only through its interface. See
  * docs/TERMINALS.md and docs/TERMINAL_HOST.md.
  */
+import { z } from "zod";
+
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
 import type { NotificationSequence } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
-import type { OscNotificationCode, TerminalHost, TerminalHostEvent } from "@/terminal-host";
+import type {
+  OscNotificationCode,
+  TerminalHost,
+  TerminalHostEvent,
+  TerminalOutputEvent,
+  TerminalSessionInfo,
+} from "@/terminal-host";
 
 import { logger } from "./logger";
 import { buildShellSpawnEnv } from "./shell-env";
@@ -28,25 +36,29 @@ const textEncoder = new TextEncoder();
 /** How long a new shell waits for its toolchains' environments before starting without them. */
 const TOOLCHAIN_ENV_TIMEOUT_MS = 3000;
 
+export type TerminalOutput = Omit<TerminalOutputEvent, "type" | "id">;
+
 /** Where a session delivers messages for its attached client. */
 export interface TerminalSink {
   sendState(state: TerminalState): void;
-  sendOutput(offset: number, data: Uint8Array): void;
+  /** Output from the host, with the renderer frame to forward as is. */
+  sendOutput(output: TerminalOutput): void;
   sendExit(exitCode: number): void;
 }
 
-/** What the server keeps in a session's host meta. */
-export type TerminalMeta = {
+/** What the server keeps in a session's host meta, read back from the host after a restart. */
+const TerminalMetaSchema = z.object({
   /**
    * The worktree the panel belongs to, or null for a Home terminal; follows the worktree when it
    * is moved.
    */
-  worktreePath: string | null;
+  worktreePath: z.string().nullable(),
   /** The directory the shell started in. */
-  cwd: string;
+  cwd: z.string(),
   /** The window that created the terminal, if any. */
-  windowId?: string;
-};
+  windowId: z.string().optional(),
+});
+export type TerminalMeta = z.infer<typeof TerminalMetaSchema>;
 
 export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   cols: number;
@@ -173,6 +185,31 @@ export class TerminalManager {
     private readonly hooks: TerminalManagerHooks,
   ) {
     host.onEvent((event) => this.onHostEvent(event));
+  }
+
+  /**
+   * Take over sessions that are already running in the host, found there after a server restart.
+   * They have no client until one attaches; one whose meta this server cannot read is ended.
+   */
+  adopt(sessions: readonly TerminalSessionInfo[]): void {
+    for (const info of sessions) {
+      const meta = TerminalMetaSchema.safeParse(info.meta);
+      if (!meta.success) {
+        log.warn(`Ending terminal ${info.id.slice(0, 8)}, whose meta this server cannot read`, {
+          error: meta.error,
+        });
+        this.host.destroy(info.id);
+        continue;
+      }
+      this.sessions.set(info.id, {
+        meta: meta.data,
+        epoch: info.epoch,
+        ready: Promise.resolve(),
+        sink: null,
+        attachment: 0,
+        live: false,
+      });
+    }
   }
 
   get(id: string): TerminalSessionView | undefined {
@@ -366,7 +403,7 @@ export class TerminalManager {
       case "output": {
         const session = this.sessions.get(event.id);
         if (!session?.sink || !session.live) return;
-        session.sink.sendOutput(event.offset, event.data);
+        session.sink.sendOutput(event);
         return;
       }
       case "exit": {

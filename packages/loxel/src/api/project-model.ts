@@ -1,3 +1,4 @@
+import type { Check, InitAction, InitActionId } from "@bizimind/wt/lib";
 import { z } from "zod";
 
 import type { WorktreeEntry } from "./git-models";
@@ -15,10 +16,12 @@ export const ProjectsDataSchema = z.object({ projects: z.array(ProjectSchema) })
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectsData = z.infer<typeof ProjectsDataSchema>;
 
-/** Response of POST /api/projects/clone and /init. */
+/** Response of POST /api/projects and the wizard's create, clone, init and convert routes. */
 export interface ProjectSetupResult extends Project {
   /** The first worktree, when it was created without running its repository's `init.wt.sh` */
   initHookSkippedAt?: string;
+  /** The `wt init` fixes that failed; the project was added anyway, set up as far as they got */
+  setupFailures?: string;
 }
 
 /** Enriched project returned by GET /api/projects — includes inline worktrees + wt metadata. */
@@ -70,6 +73,22 @@ export interface DetectPathResult {
   name: string;
   branch?: string;
   hasUncommittedChanges?: boolean;
+  /** For a git repository: what `wt doctor` finds and the `wt init` fixes for it */
+  setup?: RepoSetupPlan;
+}
+
+/** The `wt doctor` checks of an existing repository that are not ok, and their `wt init` fixes. */
+export interface RepoSetupPlan {
+  checks: Check[];
+  /** The fixes for `checks`, each naming the check it resolves */
+  actions: InitAction[];
+}
+
+/** Body of POST /api/projects: register an existing folder, applying the chosen `wt init` fixes. */
+export interface AddProjectRequest {
+  path: string;
+  name?: string;
+  apply?: InitActionId[];
 }
 
 export interface ScanSuggestionsResult {

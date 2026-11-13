@@ -1,15 +1,20 @@
 /**
  * Worktree hooks (`init.wt.sh`, `clean.wt.sh`) are the repository's code, so Loxel runs them only
- * in a trusted repository. Every add and remove Loxel makes goes through here; the `wt` command
- * line is the user's own act and runs them as it always does.
+ * in a trusted repository. Every add, remove, bare clone and `wt init` fix Loxel makes goes through
+ * here; the `wt` command line is the user's own act and runs them as it always does.
  */
 import {
+  cloneBareRepo,
   executeAdd,
+  executeInit,
   executeRemove,
   HOOK_INIT,
   runInitHook,
   type AddParams,
   type AddResult,
+  type CloneParams,
+  type InitActionId,
+  type InitResult,
   type ProgressHandler,
   type RemoveParams,
   type RemoveResult,
@@ -33,6 +38,47 @@ export async function addWorktree(
     progress,
   );
   if (result.hookSkipped) reportRepoRestriction(result.path, WORKTREE_HOOKS_RESTRICTION);
+  return result;
+}
+
+/**
+ * Apply `wt init` fixes (`executeInit`), running `init.wt.sh` in a worktree one adds only if the
+ * repository is trusted.
+ */
+export async function applyInitActions(
+  repoPath: string,
+  apply: InitActionId[],
+  progress: ProgressHandler,
+): Promise<InitResult> {
+  return reportHeldHooks(
+    await executeInit(
+      repoPath,
+      { apply, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
+      progress,
+    ),
+  );
+}
+
+/**
+ * Bare-clone a repository set up the way `wt init <url>` does it (`cloneBareRepo`), running
+ * `init.wt.sh` in a worktree a setup action adds only if the repository is trusted.
+ */
+export async function cloneRepository(
+  params: Omit<CloneParams, HookOptions>,
+  progress: ProgressHandler,
+): Promise<InitResult> {
+  return reportHeldHooks(
+    await cloneBareRepo(
+      { ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
+      progress,
+    ),
+  );
+}
+
+function reportHeldHooks(result: InitResult): InitResult {
+  for (const { worktree } of result.outcomes) {
+    if (worktree?.hookSkipped) reportRepoRestriction(worktree.path, WORKTREE_HOOKS_RESTRICTION);
+  }
   return result;
 }
 

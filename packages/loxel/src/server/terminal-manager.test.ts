@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createNoopLogger } from "@bizimind/logger";
 
 import type { TerminalState } from "@/api/terminal-stream";
+import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 import type {
   TerminalAttachRequest,
   TerminalHost,
@@ -25,7 +26,7 @@ function createRecordingSink() {
   const exits: number[] = [];
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
-    sendOutput: (_offset, data) => output.push(data),
+    sendOutput: ({ data }) => output.push(data),
     sendExit: (exitCode) => exits.push(exitCode),
   };
   return {
@@ -557,12 +558,10 @@ describe("TerminalManager with events in flight", () => {
     cols: 80,
     rows: 24,
   });
-  const output = (id: string, offset: number): TerminalHostEvent => ({
-    type: "output",
-    id,
-    offset,
-    data: new Uint8Array([0x61]),
-  });
+  const output = (id: string, offset: number): TerminalHostEvent => {
+    const frame = encodeOutputFrame(id, offset, new Uint8Array([0x61]));
+    return { type: "output", id, offset, data: frame.subarray(BIN_OUTPUT_HEADER_SIZE), frame };
+  };
 
   test("a client gets only its own attach's states, and output only after its state", async () => {
     const host = new FakeTerminalHost();
@@ -723,5 +722,61 @@ describe("TerminalManager with events in flight", () => {
     });
     expect(textDecoder.decode(spawned!.input)).toBe("echo hi\ntyped");
     expect(Object.values(spawned!.env).every((value) => typeof value === "string")).toBe(true);
+  });
+});
+
+describe("TerminalManager adopting sessions found running", () => {
+  const info = (meta: TerminalSessionInfo["meta"]): TerminalSessionInfo => ({
+    id: crypto.randomUUID(),
+    epoch: "epoch-1",
+    offset: 120,
+    pid: 1,
+    cols: 80,
+    rows: 24,
+    meta,
+  });
+
+  test("an adopted session is an orphan until a client attaches, resuming where it was", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const running = info({ worktreePath: "/wt/a", cwd: "/wt/a/sub", windowId: "w1" });
+    manager.adopt([running]);
+
+    expect(manager.get(running.id)).toEqual({
+      meta: { worktreePath: "/wt/a", cwd: "/wt/a/sub", windowId: "w1" },
+      attached: false,
+    });
+    expect(manager.hasOrphanSessions()).toBe(true);
+
+    const client = createRecordingSink();
+    await manager.attach(running.id, client.sink, {
+      ...attachOptions,
+      sinceEpoch: "epoch-1",
+      sinceOffset: 100,
+    });
+    // Attached to the running session, not spawned anew.
+    expect(host.spawns).toEqual([]);
+    expect(host.attaches).toEqual([
+      expect.objectContaining({ id: running.id, since: { epoch: "epoch-1", offset: 100 } }),
+    ]);
+    expect(manager.hasOrphanSessions()).toBe(false);
+  });
+
+  test("a Home terminal, which has no worktree, is adopted like any other", () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const home = info({ worktreePath: null, cwd: "/Users/me" });
+    manager.adopt([home]);
+    expect(host.destroyed).toEqual([]);
+    expect(manager.get(home.id)?.meta).toEqual({ worktreePath: null, cwd: "/Users/me" });
+  });
+
+  test("a session whose meta it cannot read is ended", () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const unreadable = info({ somethingElse: true });
+    manager.adopt([unreadable]);
+    expect(host.destroyed).toEqual([unreadable.id]);
+    expect(manager.get(unreadable.id)).toBeUndefined();
   });
 });

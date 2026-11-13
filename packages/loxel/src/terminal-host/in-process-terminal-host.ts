@@ -94,6 +94,11 @@ export class InProcessTerminalHost implements TerminalHost {
     if (hosted) hosted.meta = meta;
   }
 
+  /** The IDs of the running sessions, for the host process's own bookkeeping. */
+  sessionIds(): string[] {
+    return [...this.sessions.keys()];
+  }
+
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

@@ -7,7 +7,6 @@ interface Window {
     onOpenInBrowserTab: (callback: (url: string) => void) => () => void;
     setDockBadge: (count: number) => void;
     onWindowFocusChange: (callback: (focused: boolean) => void) => () => void;
-    openFolderDialog: () => Promise<string | null>;
     /**
      * Apply the Theme setting to Electron's `nativeTheme`, so native menus and dialogs, browser
      * panels' `prefers-color-scheme` and window backgrounds follow it ("system": the OS).

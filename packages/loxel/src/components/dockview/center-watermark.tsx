@@ -1,8 +1,7 @@
 /**
  * The quickstart page an empty editor area shows: a row per panel to create, with fields that run
  * a command in a new terminal or open a page in a new browser panel. Home, the layout shown with
- * no worktree active, lists only what needs no worktree, and offers to add a project (the dialog is
- * the sidebar's, which outlives this page).
+ * no worktree active, lists only what needs no worktree, and offers to add a project.
  */
 import type { IWatermarkPanelProps } from "dockview-react";
 import { FolderPlusIcon } from "lucide-react";
@@ -18,6 +17,7 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { cn } from "@/lib/utils";
 import { WINDOW_ID } from "@/lib/window-id";
+import { openAddProjectWizard } from "@/store/add-project-wizard";
 import { matchBookmarks, useBrowserBookmarksStore } from "@/store/browser-bookmarks";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
@@ -136,17 +136,17 @@ function QuickAction({
 }
 
 /**
- * Opens the Add Project dialog the sidebar hosts. Before the first project it is the page's main
+ * Opens the Add Project wizard, which App hosts. Before the first project it is the page's main
  * action: a filled button the size of its label, set apart from the rows above it.
  */
 function AddProjectAction() {
   const isFirstProject = useProjectStore((s) => s.projectsFetched && s.projects.length === 0);
-  const open = () => dispatchLoxelEvent("loxel-open-add-project-wizard");
   const icon = <FolderPlusIcon className="size-4" />;
-  if (!isFirstProject) return <QuickAction icon={icon} label="Add Project" onClick={open} />;
+  if (!isFirstProject)
+    return <QuickAction icon={icon} label="Add Project" onClick={openAddProjectWizard} />;
   return (
     <button
-      onClick={open}
+      onClick={openAddProjectWizard}
       className="bg-button-primary text-button-primary-foreground hover:bg-button-primary/85 col-span-3 mt-3 flex items-center gap-2.5 justify-self-start rounded-md py-1.5 pr-4 pl-3 text-sm transition-colors"
     >
       {icon}

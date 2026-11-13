@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { IWatermarkPanelProps } from "dockview-react";
 
 import type { OpenRequest } from "@/open-request";
+import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
 import { useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -71,11 +72,9 @@ describe("quickstart page", () => {
     watermark();
 
     expect(rowLabels()).toEqual(["New Terminal", "New Browser", "New Plan", "Add Project"]);
-    let wizardRequests = 0;
-    const stop = onLoxelEvent("loxel-open-add-project-wizard", () => wizardRequests++);
     fireEvent.click(screen.getByRole("button", { name: "Add Project" }));
-    stop();
-    expect(wizardRequests).toBe(1);
+    expect(useAddProjectWizardStore.getState().isOpen).toBe(true);
+    useAddProjectWizardStore.getState().close();
   });
 
   test("makes Add Project the main action before the first project, and only once known", () => {

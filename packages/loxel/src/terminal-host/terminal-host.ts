@@ -3,8 +3,11 @@
  * ring, snapshots, flow control and OSC detection) and what the server asks of it. Everything that
  * crosses this interface is plain data, answered by a promise or reported as an event, so it can be
  * carried over a socket unchanged; the host never calls into the server and never reads server
- * settings. See docs/TERMINAL_HOST.md.
+ * settings. The data's zod schemas are the source of its types, and what the socket protocol
+ * (protocol.ts) validates. See docs/TERMINAL_HOST.md.
  */
+import { z } from "zod";
+
 import type { TerminalState } from "@/api/terminal-stream";
 
 /** A JSON value: what can be stored in a session's {@link TerminalSessionMeta}. */
@@ -16,54 +19,76 @@ export type JsonValue =
   | readonly JsonValue[]
   | { readonly [key: string]: JsonValue };
 
+export const JsonValueSchema: z.ZodType<JsonValue> = z.json();
+
 /**
  * Data the server attaches to a session and reads back with `list()`. The host stores it as given
  * and never looks inside, so server-side fields can change without changing the host.
  */
+export const TerminalSessionMetaSchema = z.record(z.string(), JsonValueSchema);
 export type TerminalSessionMeta = { readonly [key: string]: JsonValue };
 
 /** The OSC sequences the host reports as `osc` events: 9 (iTerm2), 777 (rxvt-unicode), 99 (Kitty). */
 export const OSC_NOTIFICATION_CODES = [9, 777, 99] as const;
 export type OscNotificationCode = (typeof OSC_NOTIFICATION_CODES)[number];
 
-export interface TerminalSpawnRequest {
+/** A terminal ID: a 36-character UUID, as in the binary frames. */
+const TerminalIdSchema = z.string().length(36);
+const SizeSchema = z.number().int().nonnegative();
+
+export const TerminalStateSchema = z.object({
+  id: TerminalIdSchema,
+  epoch: z.string(),
+  mode: z.enum(["snapshot", "resume"]),
+  offset: SizeSchema,
+  snapshot: z.string().optional(),
+  cols: SizeSchema,
+  rows: SizeSchema,
+}) satisfies z.ZodType<TerminalState>;
+
+/** A spawn as it crosses the socket; {@link TerminalSpawnRequest} adds the typed-ahead bytes. */
+export const TerminalSpawnSpecSchema = z.object({
   /** The terminal ID, a 36-character UUID, as in the binary frames. */
-  id: string;
+  id: TerminalIdSchema,
   /**
    * Chosen by the caller, unique per spawn (a random UUID). Known to the caller before any event
    * of the session can arrive, so it can tell them from events of an earlier spawn under the ID.
    */
-  epoch: string;
+  epoch: z.string(),
   /** The program and its arguments; the host adds nothing to it. */
-  argv: readonly string[];
-  cwd: string;
+  argv: z.array(z.string()).min(1).readonly(),
+  cwd: z.string(),
   /** The program's whole environment; the host inherits nothing. */
-  env: Readonly<Record<string, string>>;
-  cols: number;
-  rows: number;
-  scrollbackLines: number;
-  meta: TerminalSessionMeta;
+  env: z.record(z.string(), z.string()).readonly(),
+  cols: SizeSchema,
+  rows: SizeSchema,
+  scrollbackLines: SizeSchema,
+  meta: TerminalSessionMetaSchema,
+});
+
+export type TerminalSpawnRequest = z.infer<typeof TerminalSpawnSpecSchema> & {
   /**
    * Bytes written to the PTY right after the spawn, before anything else: typed ahead, the PTY
    * queues them until the program reads its first line.
    */
   input?: Uint8Array;
-}
+};
 
-export interface TerminalSessionInfo {
-  id: string;
+export const TerminalSessionInfoSchema = z.object({
+  id: TerminalIdSchema,
   /** The spawn's epoch; offsets and `since` points are only meaningful within one epoch. */
-  epoch: string;
+  epoch: z.string(),
   /** Output bytes produced so far: the stream offset the next output chunk starts at. */
-  offset: number;
-  pid: number;
-  cols: number;
-  rows: number;
-  meta: TerminalSessionMeta;
-}
+  offset: SizeSchema,
+  pid: z.number().int(),
+  cols: SizeSchema,
+  rows: SizeSchema,
+  meta: TerminalSessionMetaSchema,
+});
+export type TerminalSessionInfo = z.infer<typeof TerminalSessionInfoSchema>;
 
-export interface TerminalAttachRequest {
-  id: string;
+export const TerminalAttachRequestSchema = z.object({
+  id: TerminalIdSchema,
   /**
    * Chosen by the caller and echoed on every `state` event this attach produces (its first sync
    * and any flow-control resync). The caller tells by it which client a state belongs to, and that
@@ -71,29 +96,63 @@ export interface TerminalAttachRequest {
    * sends to one host: the host keeps only the latest attach per session and never compares
    * numbers, so a caller that starts over (a restarted server) may start its own sequence.
    */
-  attachment: number;
+  attachment: z.number().int(),
   /** The epoch and offset a client's xterm is already current to, to resume without a snapshot. */
-  since?: { epoch: string; offset: number };
+  since: z.object({ epoch: z.string(), offset: SizeSchema }).optional(),
+});
+export type TerminalAttachRequest = z.infer<typeof TerminalAttachRequestSchema>;
+
+/**
+ * Brings the attached client in line: sent for every attach and every flow-control resync, before
+ * any output at or past `state.offset`.
+ */
+export const TerminalStateEventSchema = z.object({
+  type: z.literal("state"),
+  attachment: z.number().int(),
+  state: TerminalStateSchema,
+});
+
+/**
+ * The program ended on its own, after any final resync of a paused client. The session is gone by
+ * the time this is delivered. A session ended with `destroy()` sends no exit.
+ */
+export const TerminalExitEventSchema = z.object({
+  type: z.literal("exit"),
+  id: TerminalIdSchema,
+  epoch: z.string(),
+  exitCode: z.number().int(),
+});
+
+/**
+ * A notification sequence the emulator parsed, with its raw payload (everything after `code;`),
+ * whether or not a client is attached. Unfiltered: the server applies settings and parsing.
+ */
+export const TerminalOscEventSchema = z.object({
+  type: z.literal("osc"),
+  id: TerminalIdSchema,
+  epoch: z.string(),
+  code: z.literal(OSC_NOTIFICATION_CODES),
+  data: z.string(),
+});
+
+/**
+ * Output for the attached client, in offset order, only after that client's `state`. `frame` is
+ * the renderer's binary output frame for it (`encodeOutputFrame`), and `data` is a view of the
+ * frame's payload, not a copy: the frame is sent to the renderer as is, never re-encoded.
+ */
+export interface TerminalOutputEvent {
+  type: "output";
+  id: string;
+  offset: number;
+  data: Uint8Array;
+  frame: Uint8Array;
 }
 
 export type TerminalHostEvent =
-  /**
-   * Brings the attached client in line: sent for every attach and every flow-control resync,
-   * before any output at or past `state.offset`.
-   */
-  | { type: "state"; attachment: number; state: TerminalState }
-  /** Output for the attached client, in offset order, only after that client's `state`. */
-  | { type: "output"; id: string; offset: number; data: Uint8Array }
-  /**
-   * The program ended on its own, after any final resync of a paused client. The session is gone
-   * by the time this is delivered. A session ended with `destroy()` sends no exit.
-   */
-  | { type: "exit"; id: string; epoch: string; exitCode: number }
-  /**
-   * A notification sequence the emulator parsed, with its raw payload (everything after `code;`),
-   * whether or not a client is attached. Unfiltered: the server applies settings and parsing.
-   */
-  | { type: "osc"; id: string; epoch: string; code: OscNotificationCode; data: string };
+  | z.infer<typeof TerminalStateEventSchema>
+  | TerminalOutputEvent
+  | z.infer<typeof TerminalExitEventSchema>
+  | z.infer<typeof TerminalOscEventSchema>;
 
 /**
  * Commands to the host. Each applies after every command sent before it, so a `write` sent right

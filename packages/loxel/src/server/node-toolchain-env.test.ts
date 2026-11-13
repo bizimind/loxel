@@ -186,7 +186,7 @@ describe("nodeToolchainEnv", () => {
         crypto.randomUUID(),
         {
           sendState: () => {},
-          sendOutput: (_offset, data) => {
+          sendOutput: ({ data }) => {
             output += decoder.decode(data);
           },
           sendExit: () => {},

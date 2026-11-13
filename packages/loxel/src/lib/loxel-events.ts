@@ -29,8 +29,6 @@ export interface LoxelEventMap {
   /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
   "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;
-  /** Home's quickstart asks the sidebar, which outlives it, to show the Add Project dialog. */
-  "loxel-open-add-project-wizard": undefined;
   "loxel-file-moved": { oldPath: string; newPath: string };
   "loxel-file-deleted": { filePath: string };
   "loxel-dir-changed": { dir: string };

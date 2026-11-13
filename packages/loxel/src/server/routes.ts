@@ -17,12 +17,13 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
-  executeInit,
+  INIT_ACTION_ORDER,
   planInit,
   shellQuote,
   type AddPlan,
   type AddResult,
   type InitActionId,
+  type InitResult,
   type ProgressHandler,
   type RemovePlan,
   type RemoveResult,
@@ -42,6 +43,7 @@ import type {
   ProjectsResponse,
   Project,
   ProjectSetupResult,
+  RepoSetupPlan,
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
@@ -111,6 +113,8 @@ import { getCurrentVersion } from "./version";
 import {
   addFirstWorktreeOfNewRepo,
   addWorktree,
+  applyInitActions,
+  cloneRepository,
   isCleanHookHeld,
   removeWorktree,
   runHeldInitHook,
@@ -1857,6 +1861,70 @@ async function createInitialCommit(bareRepoPath: string): Promise<void> {
   }
 }
 
+/**
+ * What `wt doctor` finds in an existing repository, without the checks that are ok, and the
+ * `wt init` fixes for the rest. Undefined when the repository cannot be inspected.
+ */
+async function repoSetupPlan(repoPath: string): Promise<RepoSetupPlan | undefined> {
+  try {
+    const plan = await planInit(repoPath);
+    const checks = plan.checks.filter((check) => check.status !== "ok");
+    const ids = new Set(checks.map((check) => check.id));
+    return { checks, actions: plan.actions.filter((action) => ids.has(action.check)) };
+  } catch (err) {
+    wtLog.warn("Failed to plan the repository's setup", { path: repoPath, error: err });
+    return undefined;
+  }
+}
+
+/** The optional `apply` list of a request body: known `wt init` action ids that can go together. */
+function parseInitActions(body: Record<string, unknown>): InitActionId[] {
+  if (body.apply === undefined) return [];
+  const apply = requireStringArray(body, "apply");
+  const known = new Set<string>(INIT_ACTION_ORDER);
+  const unknown = apply.find((id) => !known.has(id));
+  if (unknown !== undefined) throw new Error(`Unknown setup action '${unknown}'`);
+  const ids = apply.filter((id): id is InitActionId => known.has(id));
+  if (ids.includes("worktree-metadata-on") && ids.includes("worktree-metadata-off")) {
+    throw new Error("Cannot turn worktree metadata both on and off");
+  }
+  return ids;
+}
+
+/**
+ * A project set up with `wt init` fixes: the first worktree whose `init.wt.sh` was held back
+ * (`firstWorktree`, or one a fix added), and the fixes that failed. A repository a fix already changed is added anyway, so the user can
+ * work in it and see what is left, rather than finding it changed and not added.
+ */
+function withSetupOutcome(
+  project: Project,
+  results: InitResult[],
+  firstWorktree?: AddResult,
+): ProjectSetupResult {
+  const added = [
+    firstWorktree,
+    ...results.flatMap((result) => result.outcomes.map((o) => o.worktree)),
+  ];
+  const held = added.find((worktree) => worktree?.hookSkipped);
+  const setupFailures = failedInitActions(results);
+  if (setupFailures)
+    wtLog.warn("Repository setup partly failed", { path: project.path, setupFailures });
+  return {
+    ...project,
+    ...(held && { initHookSkippedAt: held.path }),
+    ...(setupFailures && { setupFailures }),
+  };
+}
+
+/** A message naming every applied `wt init` fix that failed, or null when none did. */
+function failedInitActions(results: InitResult[]): string | null {
+  const failed = results
+    .flatMap((result) => result.outcomes)
+    .filter((outcome) => outcome.status === "failed");
+  if (failed.length === 0) return null;
+  return failed.map((outcome) => `${outcome.id}: ${outcome.error ?? "failed"}`).join("; ");
+}
+
 // POST /api/projects/detect — detect what a path points to
 async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -1877,6 +1945,7 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         type: "git-repo-bare",
         path: dirPath,
         name: basename(dirPath).replace(/\.git$/, ""),
+        setup: await repoSetupPlan(dirPath),
       };
       return json(result);
     }
@@ -1901,6 +1970,9 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         name: basename(gitRoot),
         branch,
         hasUncommittedChanges: dirty,
+        // A linked worktree is added as a checkout of its own, while `wt init` fixes would apply
+        // to the repository it belongs to, so it gets none.
+        setup: repoType === "regular" ? await repoSetupPlan(gitRoot) : undefined,
       };
       return json(result);
     }
@@ -1953,6 +2025,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
+  const setupResults: InitResult[] = [];
   // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
@@ -1965,6 +2038,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
     await createInitialCommit(projectDir);
     await ensureWorktreesDir(projectDir);
     await writeInitHook(projectDir, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(projectDir));
 
     try {
       await addFirstWorktreeOfNewRepo(
@@ -1985,14 +2059,15 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   }
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setupResults));
 }
 
-/** A set-up project, saying when its first worktree's `init.wt.sh` was held back. */
-function projectSetupResult(project: Project, firstWorktree?: AddResult): ProjectSetupResult {
-  return firstWorktree?.hookSkipped
-    ? { ...project, initHookSkippedAt: firstWorktree.path }
-    : project;
+/**
+ * Turn on worktree metadata in a multi-workspace project the wizard set up, so its worktrees can
+ * nest and have titles from the start. Before the first worktree is added, it gets its id then.
+ */
+async function turnOnWorktreeMetadata(repoPath: string): Promise<InitResult> {
+  return applyInitActions(repoPath, [METADATA_ON_ACTION], wtProgress);
 }
 
 // POST /api/projects/clone — clone a remote repo
@@ -2006,7 +2081,11 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const copyFilesError = copyFilesValidationResponse(copyFiles);
   if (copyFilesError) return copyFilesError;
 
-  validateCloneUrl(url);
+  try {
+    validateCloneUrl(url);
+  } catch (err) {
+    return error(describeError(err, "Invalid clone URL"), 400);
+  }
   const destDir = expandTilde(destination);
   mkdirSync(destDir, { recursive: true });
 
@@ -2031,32 +2110,26 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return json(project);
   }
 
-  // Multi-workspace: clone as bare
+  // Multi-workspace: a bare clone set up the way `wt init <url>` does it, with worktree metadata on.
+  // The default branch's worktree comes after the hook is written, so the hook runs in it (when
+  // trusted).
   const repoName = repoNameFromUrl(url);
-  const bareDir = join(destDir, `${repoName}.git`);
-
-  const result = measureSpawn("git clone", () =>
-    Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]),
-  );
-  if (result.exitCode !== 0) {
-    return error(`git clone --bare failed: ${result.stderr.toString()}`, 500);
-  }
-
-  // Determine default branch from the bare clone
-  let baseBranch = "main";
+  const bareDir = join(destDir, repoName);
+  let cloned: InitResult;
   try {
-    const headRef = await Bun.file(join(bareDir, "HEAD")).text();
-    const match = headRef.match(/ref: refs\/heads\/(.+)/);
-    if (match?.[1]) baseBranch = match[1].trim();
-  } catch {
-    // default to main
+    cloned = await cloneRepository(
+      { url, cwd: destDir, dir: repoName, apply: ["fetch-refspec"] },
+      wtProgress,
+    );
+  } catch (err) {
+    return error(describeError(err, "Failed to clone"), 500);
   }
 
   await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
-
-  const firstWorktree = await addWorktree(
-    { name: baseBranch, branch: baseBranch, repoPath: bareDir },
+  const mainWorktree = await applyInitActions(
+    bareDir,
+    [METADATA_ON_ACTION, "main-worktree"],
     wtProgress,
   );
 
@@ -2068,7 +2141,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(projectSetupResult(project, firstWorktree));
+  return json(withSetupOutcome(project, [cloned, mainWorktree]));
 }
 
 // POST /api/projects/init — initialize git in an existing non-repo folder
@@ -2089,6 +2162,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   }
 
   let firstWorktree: AddResult | undefined;
+  const setupResults: InitResult[] = [];
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
@@ -2124,6 +2198,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     }
 
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(dirPath));
 
     const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
     if (!hasMain) {
@@ -2146,7 +2221,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(projectSetupResult(project, firstWorktree));
+  return json(withSetupOutcome(project, setupResults, firstWorktree));
 }
 
 // POST /api/projects/convert — convert regular repo to bare+wt
@@ -2189,9 +2264,11 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   // Teardown only after every non-mutating conversion preflight has passed.
   ctx.teardownProject(dirPath);
 
+  let metadata: InitResult;
   try {
     await transformToBare(dirPath, currentBranch);
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    metadata = await turnOnWorktreeMetadata(dirPath);
   } catch (err) {
     try {
       await ctx.initializeProject(dirPath);
@@ -2214,7 +2291,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, [metadata]));
 }
 
 /** Repo-root directory holding local-only files copied into new worktrees. */
@@ -2312,8 +2389,25 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
 // POST /api/projects — add a new project and initialize its server state
 async function handleAddProject(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const path = requireString(body, "path");
+  const path = expandTilde(requireString(body, "path"));
   const name = typeof body.name === "string" ? body.name : undefined;
+  let apply: InitActionId[];
+  try {
+    apply = parseInitActions(body);
+  } catch (err) {
+    return error(describeError(err, "Invalid setup actions"), 400);
+  }
+
+  // The chosen `wt init` fixes run before the project is initialized, so it starts set up.
+  const setup: InitResult[] = [];
+  if (apply.length > 0) {
+    wtLog.info("Applying repository setup", { path, apply });
+    try {
+      setup.push(await applyInitActions(path, apply, wtProgress));
+    } catch (err) {
+      return error(describeError(err, "Failed to set up the repository"), 500);
+    }
+  }
 
   const project = await projectStore.addProject(path, name);
 
@@ -2333,7 +2427,7 @@ async function handleAddProject(req: Request, ctx: RouteContext): Promise<Respon
   // project has no wtResources entries yet, so broadcastToProject would be a
   // no-op and the UI would not refresh.
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setup));
 }
 
 // Project routes that require :id path parameter
@@ -2538,11 +2632,7 @@ async function handleEnableWorktreeMetadata(req: Request, ctx: RouteContext): Pr
 
   wtLog.info("Turning on worktree metadata", { project: project.cwd });
   try {
-    const result = await executeInit(
-      project.cwd,
-      { apply: [METADATA_ON_ACTION], hookEnv: buildSpawnEnv() },
-      wtProgress,
-    );
+    const result = await applyInitActions(project.cwd, [METADATA_ON_ACTION], wtProgress);
     const outcome = result.outcomes.find((candidate) => candidate.id === METADATA_ON_ACTION);
     if (outcome?.status === "failed") {
       return error(outcome.error ?? "Failed to turn on worktree metadata", 500);

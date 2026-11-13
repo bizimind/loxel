@@ -4,6 +4,19 @@
  * handled in mermaid-preview-controls.tsx.
  */
 
+/*
+ * A collapsed block (code-block-source.ts decides which) shows only its diagram. Crepe's own
+ * preview toggle would hide a mermaid source while the caret is in it, so the diagram toolbar's
+ * Edit and Hide replace it.
+ */
+.milkdown .loxel-code-block-collapsed > :is(.tools, .codemirror-host),
+.milkdown .loxel-code-block-collapsed > .preview-panel > :is(.preview-divider, .preview-label),
+.milkdown .loxel-mermaid-block .preview-toggle-button,
+.milkdown .loxel-code-block-collapsed [data-mermaid-action="hide"],
+.milkdown .milkdown-code-block:not(.loxel-code-block-collapsed) [data-mermaid-action="edit"] {
+  display: none;
+}
+
 .milkdown .loxel-mermaid-dark,
 .milkdown.dark .loxel-mermaid-light {
   display: none;

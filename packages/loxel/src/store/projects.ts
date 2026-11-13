@@ -97,7 +97,8 @@ interface ProjectState {
   /** Whether the first project list fetch has settled, so an empty `projects` means none. */
   projectsFetched: boolean;
   fetchProjects: () => Promise<void>;
-  addProject: (path: string, name?: string) => Promise<void>;
+  /** Refresh the list after the server added `project`, and switch to it. */
+  showAddedProject: (project: Project) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   updateProject: (id: string, updates: { name?: string }) => Promise<void>;
@@ -138,11 +139,10 @@ export const useProjectStore = create<ProjectState>()(
         }
       },
 
-      addProject: async (path, name) => {
-        const project = await api.addProject(path, name);
+      showAddedProject: async (project) => {
         // Fetch updated project list so deriveProject() works
         await get().fetchProjects();
-        // Server initializes the project during addProject (starts watcher).
+        // The server initialized the project when it added it (started its watcher).
         // Switch to the new project's worktree (or project root for non-bare).
         const { useWorktreeStore } = await import("./worktrees");
         const added = get().projects.find((candidate) => candidate.id === project.id);

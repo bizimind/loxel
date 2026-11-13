@@ -11,7 +11,6 @@ export const WINDOW_FOCUS_CHANGE = "window:focus-change";
 export const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 /** Renderer → main (sync): whether the sender's window is fullscreen right now. */
 export const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
-export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 /**
  * Renderer → main: the Theme setting (`ThemePreference`), applied as `nativeTheme.themeSource` so
  * native UI and browser panels follow it.
