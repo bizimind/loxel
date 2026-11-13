@@ -22,6 +22,7 @@ import { toHexColor } from "@/lib/css-color";
 import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
 import { resolveTheme, xtermColorOptions } from "@/lib/loxel-theme";
+import { openWebLink } from "@/lib/open-link";
 import { readThemeTokens } from "@/lib/theme-stylesheet";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
@@ -81,21 +82,6 @@ function loadTerminalFont(): Promise<unknown> {
     setTimeout(resolve, TERMINAL_FONT_TIMEOUT_MS);
   });
   return Promise.race([loaded, timeout]);
-}
-
-/** Open a URL: Cmd+click opens in browser panel, plain click opens in system browser. */
-function openUrl(event: MouseEvent, url: string) {
-  try {
-    const { protocol } = new URL(url);
-    if (protocol !== "https:" && protocol !== "http:") return;
-  } catch {
-    return;
-  }
-  if (event.metaKey) {
-    window.dispatchEvent(new CustomEvent("loxel-create-browser", { detail: { url } }));
-  } else {
-    window.open(url);
-  }
 }
 
 const termLog = frontendLog.child("terminal");
@@ -316,7 +302,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       ...terminalFontOptions(resolveFont(useSettingsStore.getState().fonts, "terminal")),
       letterSpacing: 0,
       lineHeight: 1.1,
-      linkHandler: { activate: (event, text) => openUrl(event, text) },
+      linkHandler: { activate: (event, text) => openWebLink(event, text) },
       macOptionIsMeta: true,
       // The search addon highlights matches with decorations, a proposed API.
       allowProposedApi: true,
@@ -327,7 +313,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
 
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();
-    const webLinksAddon = new WebLinksAddon((event, uri) => openUrl(event, uri));
+    const webLinksAddon = new WebLinksAddon((event, uri) => openWebLink(event, uri));
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);

@@ -8,6 +8,7 @@ export type {
   TerminalHost,
   TerminalHostEvent,
   TerminalOutputEvent,
+  TerminalScreen,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,

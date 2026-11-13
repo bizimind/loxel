@@ -1,0 +1,34 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   /…/demo/project
+
+
+❯ Run exactly this bash command and nothing else: python3 -c 'print(6*7)'                                               
+
+⏺ Bash(python3 -c 'print(6*7)')
+  ⎿  42
+
+⏺ The command printed 42.
+
+✻ Brewed for 1s · done 10:00 AM
+
+❯ Use the AskUserQuestion tool once with two questions. Question 1, header 'Color': 'Which color do you prefer?'        
+  options Red, Blue (single select). Question 2, header 'Fruit': 'Which fruits do you like?' options Apple, Pear, Plum  
+  (multiSelect true). After I answer, reply with my answers in one short line.                                          
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Color  ☒ Fruit  ✔ Submit  →
+
+Which fruits do you like?
+
+  1. [✔] Apple
+         Choose apple
+  2. [ ] Pear
+         Choose pear
+❯ 3. [✔] Plum
+         Choose plum
+  4. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

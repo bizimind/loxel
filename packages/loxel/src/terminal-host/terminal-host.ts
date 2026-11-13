@@ -148,6 +148,22 @@ export interface TerminalOutputEvent {
   frame: Uint8Array;
 }
 
+/**
+ * The visible screen of a session as plain text, one string per row (trailing blanks trimmed), for
+ * callers that recognize what a program shows (the agent overlay). Read after everything written
+ * so far has been parsed. Carries no colors: recognizers match text, never styling.
+ */
+export const TerminalScreenSchema = z.object({
+  cols: SizeSchema,
+  rows: SizeSchema,
+  cursorX: SizeSchema,
+  cursorY: SizeSchema,
+  /** Whether the program switched to the alternate screen buffer. */
+  alternate: z.boolean(),
+  lines: z.array(z.string()),
+});
+export type TerminalScreen = z.infer<typeof TerminalScreenSchema>;
+
 export type TerminalHostEvent =
   | z.infer<typeof TerminalStateEventSchema>
   | TerminalOutputEvent
@@ -185,6 +201,11 @@ export interface TerminalHost {
    */
   destroy(id: string): void;
   setMeta(id: string, meta: TerminalSessionMeta): void;
+  /**
+   * The session's visible screen, or null for an unknown ID or a host without the `screen`
+   * capability (see protocol.ts).
+   */
+  screen(id: string): Promise<TerminalScreen | null>;
   /** Receive every event from now on. Returns the unsubscribe function. */
   onEvent(listener: (event: TerminalHostEvent) => void): () => void;
 }

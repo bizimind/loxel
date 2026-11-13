@@ -16,16 +16,18 @@ Reference for the environment variables, files, and settings that configure Loxe
 
 The variables you set are read from the environment Loxel starts in; a Loxel launched from Finder or the Dock doesn't see your shell profile's variables. The tools Loxel starts for you (language servers, formatters, and worktree hooks) do get your login shell's variables, re-read (at most every few minutes) when a language server or formatter isn't found, so something you install later is picked up without restarting Loxel. The `LOXEL_*` injection variables are set automatically by Loxel in every terminal it opens — you don't configure them. See [Terminals](/docs/terminals) for how these are used in practice.
 
-| Variable           | What it does                                                                                                                 | Default                               |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `LOXEL_DEV`        | Set to `1` for dev mode: separate state directory, port 7434 instead of 7433                                                 | (unset = prod)                        |
-| `LOXEL_SERVE_PORT` | Server port when running the server on its own, such as in tests; the desktop app and the `loxel` CLI always use 7433 / 7434 | `7433` (dev: `7434`)                  |
-| `LOXEL_STATE_DIR`  | Override the state directory                                                                                                 | See [File Locations](#file-locations) |
-| `LOXEL_STATIC_DIR` | Override the frontend assets directory                                                                                       | Auto-detect                           |
-| `LOXEL_PORT`       | Auto-injected in terminals: port of the running Loxel server                                                                 | (injected)                            |
-| `LOXEL_WORKTREE`   | Auto-injected in terminals: worktree path for that terminal                                                                  | (injected)                            |
-| `LOXEL_WINDOW_ID`  | Auto-injected in terminals: ID of the Loxel window                                                                           | (injected)                            |
-| `LOXEL`            | Auto-injected in terminals: always `1`                                                                                       | (injected)                            |
+| Variable            | What it does                                                                                                                 | Default                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `LOXEL_DEV`         | Set to `1` for dev mode: separate state directory, port 7434 instead of 7433                                                 | (unset = prod)                        |
+| `LOXEL_SERVE_PORT`  | Server port when running the server on its own, such as in tests; the desktop app and the `loxel` CLI always use 7433 / 7434 | `7433` (dev: `7434`)                  |
+| `LOXEL_STATE_DIR`   | Override the state directory                                                                                                 | See [File Locations](#file-locations) |
+| `LOXEL_STATIC_DIR`  | Override the frontend assets directory                                                                                       | Auto-detect                           |
+| `LOXEL_PORT`        | Auto-injected in terminals: port of the running Loxel server                                                                 | (injected)                            |
+| `LOXEL_WORKTREE`    | Auto-injected in terminals: worktree path for that terminal                                                                  | (injected)                            |
+| `LOXEL_WINDOW_ID`   | Auto-injected in terminals: ID of the Loxel window                                                                           | (injected)                            |
+| `LOXEL_TERMINAL_ID` | Auto-injected in terminals: ID of the terminal                                                                               | (injected)                            |
+| `LOXEL_AGENT_TOKEN` | Auto-injected in terminals: authenticates Claude Code's hooks from that terminal to Loxel                                    | (injected)                            |
+| `LOXEL`             | Auto-injected in terminals: always `1`                                                                                       | (injected)                            |
 
 > **Note:** Inside a Loxel terminal, `LOXEL=1` is always set. You can use this in scripts and shell prompts to detect when you're running inside Loxel.
 

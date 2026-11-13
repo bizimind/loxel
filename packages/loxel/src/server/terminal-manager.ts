@@ -18,6 +18,7 @@ import type {
   TerminalHost,
   TerminalHostEvent,
   TerminalOutputEvent,
+  TerminalScreen,
   TerminalSessionInfo,
 } from "@/terminal-host";
 
@@ -455,6 +456,15 @@ export class TerminalManager {
 
   ack(id: string, syncOffset: number, bytes: number): void {
     if (this.sessions.has(id)) this.host.ack(id, syncOffset, bytes);
+  }
+
+  /** The session's visible screen, or null when it is not running or its host cannot tell. */
+  screen(id: string): Promise<TerminalScreen | null> {
+    if (!this.sessions.has(id)) return Promise.resolve(null);
+    return this.host.screen(id).catch((err: unknown) => {
+      log.warn("Could not read a terminal's screen", { terminalId: id, error: err });
+      return null;
+    });
   }
 
   destroy(id: string): void {

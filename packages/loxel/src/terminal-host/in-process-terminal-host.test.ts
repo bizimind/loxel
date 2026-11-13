@@ -181,6 +181,29 @@ describe("InProcessTerminalHost", () => {
     expect((await host.list()).map((s) => s.id)).toEqual([spawned.id]);
   });
 
+  test("screen reports the visible text and cursor of a session, attached or not", async () => {
+    const { host, outputText } = createHost();
+    const spawned = request(String.raw`printf 'first line\nsecond'; exec sleep 30`, {
+      cols: 40,
+      rows: 5,
+    });
+    await host.spawn(spawned);
+    await host.attach({ id: spawned.id, attachment: 1 });
+    await until(() => outputText(spawned.id).includes("second"));
+    host.detach(spawned.id);
+
+    const screen = await host.screen(spawned.id);
+    expect(screen).toEqual({
+      cols: 40,
+      rows: 5,
+      cursorX: 6,
+      cursorY: 1,
+      alternate: false,
+      lines: ["first line", "second", "", "", ""],
+    });
+    expect(await host.screen(crypto.randomUUID())).toBeNull();
+  });
+
   test("commands for an unknown ID do nothing", async () => {
     const { host, events } = createHost();
     const id = crypto.randomUUID();

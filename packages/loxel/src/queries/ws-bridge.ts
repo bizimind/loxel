@@ -11,6 +11,7 @@ import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
+import { applyAgentOverlayMessage } from "@/store/agent-overlay";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
@@ -443,6 +444,14 @@ export function useWsBridge(): void {
           break;
         case "notifications_cleared":
           usePanelNotificationStore.getState().clearFromServer();
+          break;
+
+        // --- Agent overlay ---
+
+        case "agent_sessions_sync":
+        case "agent_session":
+        case "agent_transcript":
+          applyAgentOverlayMessage(message);
           break;
 
         case "repo_trust_changed":

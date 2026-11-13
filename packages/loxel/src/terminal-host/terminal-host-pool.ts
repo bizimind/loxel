@@ -43,6 +43,7 @@ import type {
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
+  TerminalScreen,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,
@@ -207,6 +208,10 @@ export class TerminalHostPool implements TerminalHost {
 
   setMeta(id: string, meta: TerminalSessionMeta): void {
     this.owners.get(id)?.host.setMeta(id, meta);
+  }
+
+  screen(id: string): Promise<TerminalScreen | null> {
+    return this.owners.get(id)?.host.screen(id) ?? Promise.resolve(null);
   }
 
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {

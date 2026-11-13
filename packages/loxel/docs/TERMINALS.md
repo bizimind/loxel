@@ -46,12 +46,14 @@ An app launched from Finder or the Dock inherits launchd's minimal environment, 
 
 `server.ts` then adds per-terminal overrides:
 
-| Variable          | Value                                                     | Why                                                                               |
-| ----------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `LOXEL`           | `1`                                                       | Lets the CLI (and user scripts) detect they run inside a Loxel terminal           |
-| `LOXEL_PORT`      | `config.port`                                             | The CLI talks to the exact server that owns the terminal (dev and prod differ)    |
-| `LOXEL_WORKTREE`  | the panel's worktree (`msg.worktreePath`, else `msg.cwd`) | CLI fallback for URL requests when the shell's cwd is not inside a git repository |
-| `LOXEL_WINDOW_ID` | the creating window's `WINDOW_ID`, if any                 | Routes `loxel <file>` back to the window the terminal belongs to                  |
+| Variable            | Value                                                     | Why                                                                                       |
+| ------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `LOXEL`             | `1`                                                       | Lets the CLI (and user scripts) detect they run inside a Loxel terminal                   |
+| `LOXEL_PORT`        | `config.port`                                             | The CLI talks to the exact server that owns the terminal (dev and prod differ)            |
+| `LOXEL_WORKTREE`    | the panel's worktree (`msg.worktreePath`, else `msg.cwd`) | CLI fallback for URL requests when the shell's cwd is not inside a git repository         |
+| `LOXEL_WINDOW_ID`   | the creating window's `WINDOW_ID`, if any                 | Routes `loxel <file>` back to the window the terminal belongs to                          |
+| `LOXEL_TERMINAL_ID` | the terminal's ID                                         | Names the terminal a Claude Code hook reports from ([AGENT_OVERLAY.md](AGENT_OVERLAY.md)) |
+| `LOXEL_AGENT_TOKEN` | HMAC of the terminal ID with the overlay's key            | Proves a hook comes from that terminal's shell                                            |
 
 These are fixed at spawn. A session reattached by another window keeps the original `LOXEL_WINDOW_ID`.
 
@@ -111,7 +113,7 @@ A terminal draws in the colors of the current mode's theme ([THEMES.md](THEMES.m
 
 ### Links
 
-- **URLs** come from `WebLinksAddon` and xterm's `linkHandler` (OSC 8 hyperlinks); both call `openUrl()`, which accepts only `http:`/`https:`. Cmd+click dispatches `loxel-create-browser` (handled in [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts), which opens a browser panel); a plain click calls `window.open`, which the Electron main process turns into `shell.openExternal` through `setWindowOpenHandler` in [main.ts](../src/electron/main.ts); main also accepts only `http:`/`https:` there, so no other scheme ever reaches the OS.
+- **URLs** come from `WebLinksAddon` and xterm's `linkHandler` (OSC 8 hyperlinks); both call `openWebLink()` in [open-link.ts](../src/lib/open-link.ts), which accepts only `http:`/`https:` (the agent overlay's transcript links use it too). Cmd+click dispatches `loxel-create-browser` (handled in [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts), which opens a browser panel); a plain click calls `window.open`, which the Electron main process turns into `shell.openExternal` through `setWindowOpenHandler` in [main.ts](../src/electron/main.ts); main also accepts only `http:`/`https:` there, so no other scheme ever reaches the OS.
 - **File paths** come from [file-link-provider.ts](../src/components/terminal/file-link-provider.ts). Pass 1 always links tokens starting with `/`, `./`, `../` or `~/`, trimming trailing punctuation but keeping a `:line[:col]` suffix. Pass 2 links bare tokens with an extension (`CLAUDE.md`, `src/index.ts:12`) only if they match the worktree's file index by full relative path or by basename (first match wins). The index comes from the file-search store cache or `api.getFileIndex`. Column ranges are mapped back from ANSI-stripped text to raw cell positions. Links activate on Cmd+click only.
 - Explicit relative paths (`./`, `../`) resolve against the **terminal's starting directory** (its `cwd`), and bare names matched through the file index against the **panel's worktree root**; neither follows the shell's live current directory (the renderer does not track `cd`). `~/` is left for the server to expand. Activation calls `openPath()` in [open-path.ts](../src/lib/open-path.ts), which asks `GET /api/path-info` whether the path is a directory: folders go to `openFolder()`, everything else to `dispatchOpenFile(path, location)` in [open-file.ts](../src/lib/open-file.ts), so the `:line:col` location reaches the editor. Missing files still open an editor, which reports the error.
 

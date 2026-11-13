@@ -10,7 +10,7 @@ import { until } from "@/test/until";
 
 import { TERMINAL_HOST_GRACE_MS, TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
-import { TERMINAL_HOST_PROTOCOL } from "./protocol";
+import { TERMINAL_HOST_CAPABILITIES, TERMINAL_HOST_PROTOCOL } from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
 
 const cleanups: (() => void)[] = [];
@@ -127,7 +127,7 @@ describe("TerminalHostService", () => {
       protocol: TERMINAL_HOST_PROTOCOL,
       hostBuildId: "build-a",
       pid: process.pid,
-      capabilities: [],
+      capabilities: [...TERMINAL_HOST_CAPABILITIES],
     });
   });
 

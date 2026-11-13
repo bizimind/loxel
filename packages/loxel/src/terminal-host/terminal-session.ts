@@ -14,7 +14,7 @@ import { clampScrollbackLines, clampTerminalSize } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
 import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 
-import type { TerminalHostEvent } from "./terminal-host";
+import type { TerminalHostEvent, TerminalScreen } from "./terminal-host";
 import { OSC_NOTIFICATION_CODES } from "./terminal-host";
 
 /** Bytes of recent output kept so a reconnecting client can resume without a snapshot. */
@@ -380,6 +380,50 @@ export class TerminalSession {
     this.syncOffset = offset;
     if (pending.byteLength > 0) this.forward(offset, pending);
     this.streaming = true;
+  }
+
+  /** The visible screen as plain text, once everything written so far has been parsed. */
+  screen(): Promise<TerminalScreen> {
+    const blank: TerminalScreen = {
+      cols: this.cols,
+      rows: this.rows,
+      cursorX: 0,
+      cursorY: 0,
+      alternate: false,
+      lines: [],
+    };
+    return new Promise((resolve) => {
+      const read = (): void => {
+        // destroy() may have run while the write was queued; the disposed emulator must not be read.
+        if (this.disposed) {
+          resolve(blank);
+          return;
+        }
+        const buffer = this.emulator.buffer.active;
+        const lines: string[] = [];
+        for (let y = 0; y < this.emulator.rows; y++) {
+          lines.push(buffer.getLine(buffer.baseY + y)?.translateToString(true) ?? "");
+        }
+        resolve({
+          cols: this.emulator.cols,
+          rows: this.emulator.rows,
+          cursorX: buffer.cursorX,
+          cursorY: buffer.cursorY,
+          alternate: buffer.type === "alternate",
+          lines,
+        });
+      };
+      if (this.disposed) {
+        read();
+        return;
+      }
+      try {
+        this.emulator.write("", read);
+      } catch {
+        // Past xterm's discard watermark (see feedEmulator): the stale screen is all there is.
+        read();
+      }
+    });
   }
 
   /** Serialize the emulator once everything written so far has been parsed. */

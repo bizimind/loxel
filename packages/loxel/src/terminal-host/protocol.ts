@@ -24,10 +24,16 @@ import {
 } from "./terminal-host";
 
 /** The protocol version this build speaks, as semver. */
-export const TERMINAL_HOST_PROTOCOL = "1.0.0";
+export const TERMINAL_HOST_PROTOCOL = "1.1.0";
 
-/** Optional features of the versioned layer this build supports, by name; none yet. */
-export const TERMINAL_HOST_CAPABILITIES: readonly string[] = [];
+/** Optional features of the versioned layer, by name. */
+export const TerminalHostCapability = {
+  /** The `screen` request (1.1.0): a session's visible screen as plain text. */
+  screen: "screen",
+} as const;
+
+/** Optional features of the versioned layer this build supports, by name. */
+export const TERMINAL_HOST_CAPABILITIES: readonly string[] = [TerminalHostCapability.screen];
 
 // --- Bootstrap layer (frozen) ---
 
@@ -82,6 +88,12 @@ const SpawnSchema = z.object({
   request: TerminalSpawnSpecSchema,
 });
 const ListSchema = z.object({ type: z.literal("list"), requestId: RequestIdSchema });
+/** Capability `screen`: answered with a `TerminalScreen`, or null for an unknown ID. */
+const ScreenSchema = z.object({
+  type: z.literal("screen"),
+  requestId: RequestIdSchema,
+  id: IdSchema,
+});
 const AttachSchema = z.object({
   type: z.literal("attach"),
   requestId: RequestIdSchema,
@@ -128,6 +140,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   AckSchema,
   DestroySchema,
   SetMetaSchema,
+  ScreenSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 

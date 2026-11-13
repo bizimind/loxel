@@ -79,14 +79,16 @@ Terminals use the code font until you pick a terminal font of their own in **Set
 
 ## Injected environment variables
 
-Every Loxel terminal starts with four environment variables already set:
+Every Loxel terminal starts with these environment variables already set:
 
-| Variable          | Value                                         |
-| ----------------- | --------------------------------------------- |
-| `LOXEL`           | `1`                                           |
-| `LOXEL_PORT`      | Port of the running Loxel server              |
-| `LOXEL_WORKTREE`  | Path of the worktree this terminal belongs to |
-| `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only)     |
+| Variable            | Value                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `LOXEL`             | `1`                                                                                                                  |
+| `LOXEL_PORT`        | Port of the running Loxel server                                                                                     |
+| `LOXEL_WORKTREE`    | Path of the worktree this terminal belongs to                                                                        |
+| `LOXEL_WINDOW_ID`   | ID of the Loxel window (desktop app only)                                                                            |
+| `LOXEL_TERMINAL_ID` | ID of this terminal                                                                                                  |
+| `LOXEL_AGENT_TOKEN` | Lets Claude Code's hooks in this terminal report to Loxel ([Claude Code view](/docs/coding-agents#claude-code-view)) |
 
 `LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by agents that want to know which worktree they're in.
 

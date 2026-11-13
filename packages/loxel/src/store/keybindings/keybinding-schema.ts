@@ -90,6 +90,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   // New panel as a tab in the active group: direct keys use the split chord's type letters, and
   // the chord ends with Enter instead of an arrow.
   "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick", newTabChord("terminal")],
+  "panel.new.claude": [],
   "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
   "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
   "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],

@@ -11,6 +11,7 @@ export const LOG_CATEGORIES = [
   "server",
   "git",
   "terminal",
+  "agent-overlay",
   "files",
   "watcher",
   "detached",

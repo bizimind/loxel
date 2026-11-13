@@ -7,6 +7,7 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { showToast } from "@/components/ui/toast";
 import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
@@ -28,6 +29,7 @@ import { renameActiveTab } from "@/lib/tab-rename";
 import { toolchainStatusItems } from "@/lib/toolchain-status-items";
 import { getActiveWt } from "@/store/active-worktree";
 import { openAddProjectWizard } from "@/store/add-project-wizard";
+import { launchClaudeTerminal } from "@/store/agent-overlay";
 import { closeCenterTab } from "@/store/closed-tabs";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
@@ -453,6 +455,18 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "theme.system":
         useSettingsStore.getState().setTheme(themeOfAction(actionId));
         break;
+
+      case "panel.new.claude": {
+        const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+        if (worktreePath) {
+          launchClaudeTerminal(worktreePath).catch((err: unknown) => {
+            showToast(
+              `Could not start Claude Code: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        }
+        break;
+      }
 
       // -- Panel creation (handled above via getCreateEventForAction early return) --
       case "panel.new.browser":

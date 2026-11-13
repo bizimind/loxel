@@ -6,6 +6,7 @@ import type {
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
+  TerminalScreen,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,
@@ -92,6 +93,10 @@ export class InProcessTerminalHost implements TerminalHost {
   setMeta(id: string, meta: TerminalSessionMeta): void {
     const hosted = this.sessions.get(id);
     if (hosted) hosted.meta = meta;
+  }
+
+  screen(id: string): Promise<TerminalScreen | null> {
+    return this.sessions.get(id)?.session.screen() ?? Promise.resolve(null);
   }
 
   /** The IDs of the running sessions, for the host process's own bookkeeping. */

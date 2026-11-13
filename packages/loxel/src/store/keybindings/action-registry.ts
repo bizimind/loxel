@@ -27,6 +27,7 @@ import { useWorktreeStore } from "@/store/worktrees";
  */
 export type ActionId =
   | "panel.new.terminal"
+  | "panel.new.claude"
   | "panel.new.markdown"
   | "panel.new.drawing"
   | "panel.new.browser"
@@ -199,6 +200,7 @@ function isFindTargetFocused(): boolean {
 export const ACTIONS: readonly ActionDef[] = [
   // Panel creation
   { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
+  { id: "panel.new.claude", label: "New Claude Code Terminal", category: "panel" },
   { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
   { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
   { id: "panel.new.browser", label: "New Browser", category: "panel" },

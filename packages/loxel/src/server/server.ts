@@ -17,6 +17,7 @@ import type {
 } from "@/api/ws-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
+import { AgentOverlayService, agentOverlayDir } from "./agent-overlay/agent-overlay-service";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
@@ -63,7 +64,12 @@ import type {
   WorktreeResources,
   WsData,
 } from "./server-state";
-import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
+import {
+  LOGIN_SHELL_ENV_WAIT_MS,
+  buildSpawnEnv,
+  onLoginShellEnvChange,
+  resolveLoginShellEnv,
+} from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
 import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
@@ -225,6 +231,7 @@ function terminalSpawnTarget(
     LOXEL: "1",
     LOXEL_PORT: String(config.port),
     LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
+    ...agentOverlay.terminalEnv(msg.id),
   };
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
 
@@ -645,6 +652,7 @@ function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
     const owner = terminalOwners.get(id);
     if (owner) clients.get(owner)?.terminals.delete(id);
     terminalOwners.delete(id);
+    agentOverlay.removeTerminal(id);
     // Anything it raised during the delay; the rest went with the worktree.
     if (notificationStore.dismissByPanel(id)) {
       broadcastAll({ type: "notification_panel_dismissed", panelId: id });
@@ -874,7 +882,20 @@ const terminalManager = new TerminalManager(terminalHosts, {
     const owner = terminalOwners.get(id);
     if (owner) clients.get(owner)?.terminals.delete(id);
     terminalOwners.delete(id);
+    agentOverlay.removeTerminal(id);
   },
+});
+/** Claude Code sessions in terminals, from their hooks (docs/AGENT_OVERLAY.md). */
+const agentOverlay = new AgentOverlayService({
+  dir: agentOverlayDir(config.stateDir),
+  terminals: {
+    has: (id) => terminalManager.get(id) !== undefined,
+    screen: (id) => terminalManager.screen(id),
+    write: (id, data) => terminalManager.write(id, data),
+  },
+  broadcastAll: (message) => broadcastAll(message),
+  spawnEnv: buildSpawnEnv,
+  log: logger.child("agent-overlay"),
 });
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
@@ -1044,9 +1065,20 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         terminalManager.destroy(msg.id);
         clients.get(ws)?.terminals.delete(msg.id);
         terminalOwners.delete(msg.id);
+        agentOverlay.removeTerminal(msg.id);
       }
       break;
     }
+
+    // --- Agent overlay ---
+
+    case "agent_subscribe":
+      agentOverlay.subscribe(ws, msg.terminalId);
+      break;
+
+    case "agent_unsubscribe":
+      agentOverlay.unsubscribe(ws, msg.terminalId);
+      break;
 
     // --- Notifications ---
 
@@ -1275,6 +1307,10 @@ const server = Bun.serve<WsData>({
     // The relaunching app and the CLI poll /api/version while this server shuts down; counting
     // those polls as work to drain would keep the drain's quiet period from ever starting.
     if (url.pathname === "/api/version") return handleRequest(req, routeContext);
+    if (url.pathname.startsWith("/api/agent-overlay/")) {
+      const response = await agentOverlay.handle(req, url);
+      if (response) return response;
+    }
     if (url.pathname.startsWith("/api")) {
       return trackApiRequest(() => handleRequest(req, routeContext));
     }
@@ -1315,6 +1351,7 @@ const server = Bun.serve<WsData>({
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
+      sendTo(ws, agentOverlay.syncMessage());
       sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
       log.debug(`Client connected (${clients.size} total)`);
     },
@@ -1331,6 +1368,7 @@ const server = Bun.serve<WsData>({
       }
       unsubscribeAllWorktrees(ws);
       detachClientTerminals(ws);
+      agentOverlay.dropSubscriber(ws);
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
@@ -1483,6 +1521,7 @@ function shutdown(exitCode = 0, terminals: TerminalsOnShutdown = "end") {
 }
 
 function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
+  agentOverlay.dispose();
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);

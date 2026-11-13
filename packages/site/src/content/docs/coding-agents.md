@@ -39,6 +39,16 @@ A notification shows up under the bell in the top bar and as a dot on its worktr
 
 ---
 
+## Claude Code view
+
+A terminal running Claude Code can show the session as a conversation instead of the terminal screen: messages in the markdown editor's typography, tool calls you can expand, and cards for what Claude waits on (permission prompts, questions, plan approval) that you answer with a click. It is the same Claude Code process the terminal shows: anything you do in one view shows in the other, and the toggle on the terminal's tab (or **Terminal** in the view's header) switches between them at any time. Anything the view does not handle yet points you to the terminal.
+
+Start one with **New Claude Code Terminal** in the command palette. It runs your installed `claude` with Loxel's hooks added for that session only, which is how Loxel follows it; your Claude Code settings are not changed.
+
+The header shows the session's state, model and permission mode, and switches them. Typing `/` in the message box lists the session's commands and skills. A message sent while Claude works is queued, as in the terminal.
+
+---
+
 ## Multi-line prompts
 
 `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences agents use to insert a newline instead of submitting, so you can write a longer prompt without sending half of it.

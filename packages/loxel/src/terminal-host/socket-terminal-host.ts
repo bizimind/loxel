@@ -17,18 +17,19 @@ import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection } from "./host-connection";
 import { isProcessRunning } from "./host-files";
 import type { DisconnectMode, HostMessage, InitializeMessage, InitializeResult } from "./protocol";
-import { HostMessageSchema } from "./protocol";
+import { HostMessageSchema, TerminalHostCapability } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
 import { encodeFrame, encodeJsonFrame } from "./protocol-framing";
 import type {
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
+  TerminalScreen,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,
 } from "./terminal-host";
-import { TerminalSessionInfoSchema } from "./terminal-host";
+import { TerminalScreenSchema, TerminalSessionInfoSchema } from "./terminal-host";
 
 /**
  * The exit code reported for a session whose host is gone, or that ended while the server was not
@@ -223,6 +224,17 @@ export class SocketTerminalHost implements TerminalHost {
 
   setMeta(id: string, meta: TerminalSessionMeta): void {
     this.sendJson({ type: "set_meta", id, meta });
+  }
+
+  /** Null unless the host is connected and has the `screen` capability (an older host does not). */
+  screen(id: string): Promise<TerminalScreen | null> {
+    const capable = this.hello?.capabilities.includes(TerminalHostCapability.screen) ?? false;
+    if (!capable || this.state !== "connected" || !this.sessions.has(id)) {
+      return Promise.resolve(null);
+    }
+    return this.request({ type: "screen", id }, (value) =>
+      TerminalScreenSchema.nullable().parse(value),
+    );
   }
 
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {

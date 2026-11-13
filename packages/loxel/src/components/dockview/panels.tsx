@@ -14,6 +14,9 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { AgentOverlay } from "@/components/agent-overlay/AgentOverlay";
+import type { TerminalViewParams } from "@/components/agent-overlay/terminal-view";
+import { setTerminalView, terminalView } from "@/components/agent-overlay/terminal-view";
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
@@ -31,6 +34,7 @@ import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import type { PatchDiffParams } from "@/lib/panel-creators";
+import { useAgentOverlayStore } from "@/store/agent-overlay";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
@@ -133,21 +137,43 @@ function CompareFilesPanelComponent(
   );
 }
 
-/** Terminal panel in the center group. `cwd` is set only when the shell starts outside the worktree. */
+/**
+ * Terminal panel in the center group. `cwd` is set only when the shell starts outside the worktree.
+ * When a coding agent's session is detected in the terminal, the agent overlay covers it (unless
+ * the panel's `view` is `terminal`); the terminal stays mounted and sized underneath, inert.
+ */
 function TerminalPanelComponent(
-  props: IDockviewPanelProps<{ terminalId: string; worktreePath?: string; cwd?: string }>,
+  props: IDockviewPanelProps<
+    { terminalId: string; worktreePath?: string; cwd?: string } & TerminalViewParams
+  >,
 ) {
+  const { terminalId } = props.params;
+  const hasAgent = useAgentOverlayStore((s) => terminalId in s.sessions);
+  const overlay = hasAgent && terminalView(props.params) === "agent";
   return (
     <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
-      <Terminal
-        terminalId={props.params.terminalId}
-        cwd={props.params.cwd}
-        onClose={() => props.api.close()}
-        onCreateNew={() => {
-          window.dispatchEvent(new CustomEvent("loxel-create-terminal"));
-        }}
-        panelApi={props.api}
-      />
+      <div className="relative min-h-0 flex-1">
+        <div className="h-full" inert={overlay}>
+          <Terminal
+            terminalId={terminalId}
+            cwd={props.params.cwd}
+            onClose={() => props.api.close()}
+            onCreateNew={() => {
+              window.dispatchEvent(new CustomEvent("loxel-create-terminal"));
+            }}
+            panelApi={props.api}
+          />
+        </div>
+        {overlay && (
+          <div className="absolute inset-0 z-10">
+            <AgentOverlay
+              terminalId={terminalId}
+              panelApi={props.api}
+              onShowTerminal={() => setTerminalView(props.api, "terminal")}
+            />
+          </div>
+        )}
+      </div>
     </PanelContext.Provider>
   );
 }

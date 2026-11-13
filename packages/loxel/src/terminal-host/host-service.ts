@@ -227,6 +227,9 @@ export class TerminalHostService {
       case "set_meta":
         this.host.setMeta(message.id, message.meta);
         return;
+      case "screen":
+        this.answer(connection, message.requestId, this.host.screen(message.id));
+        return;
       default: {
         const unknown: never = message;
         throw new Error(`Unhandled server message ${JSON.stringify(unknown)}`);

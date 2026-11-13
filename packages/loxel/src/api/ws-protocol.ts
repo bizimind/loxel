@@ -1,5 +1,6 @@
 import type { OpenTerminalRequest } from "@/open-request";
 
+import type { AgentOverlayClientMessage, AgentOverlayServerMessage } from "./agent-overlay-model";
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
@@ -17,6 +18,8 @@ export type FileMoveSource = "loxel" | "external";
 
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
+  // Agent overlay (sessions to every window, transcripts to subscribers)
+  | AgentOverlayServerMessage
   // Worktree-scoped (sent to worktree subscribers only)
   | { type: "status_changed"; wtPath: string; data: StatusInfo }
   | { type: "files_dir_changed"; wtPath: string; data: { dir: string; entries: DirEntry[] } }
@@ -144,7 +147,9 @@ export type WsClientMessage =
   // Notifications
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }
-  | { type: "notifications_clear" };
+  | { type: "notifications_clear" }
+  // Agent overlay
+  | AgentOverlayClientMessage;
 
 // Close codes of a language-server socket, which tell the client whether to reconnect (see
 // `lsp-connection.ts`).

@@ -131,6 +131,21 @@ describe("SocketTerminalHost against the host service", () => {
     ]);
   });
 
+  test("reads a session's screen over the socket when the host has the screen capability", async () => {
+    const { socketPath } = await startService();
+    const { client } = connect(socketPath);
+
+    const spawned = request("echo ready; exec sleep 30", { cols: 30, rows: 3 });
+    await client.spawn(spawned);
+    let lines: string[] = [];
+    for (let attempt = 0; attempt < 500 && lines[0] !== "ready"; attempt++) {
+      lines = (await client.screen(spawned.id))?.lines ?? [];
+      if (lines[0] !== "ready") await Bun.sleep(10);
+    }
+    expect(lines).toEqual(["ready", "", ""]);
+    expect(await client.screen(crypto.randomUUID())).toBeNull();
+  });
+
   test("reports an exit with the spawn's epoch, and a rejected spawn with its cause", async () => {
     const { socketPath } = await startService();
     const { client, events } = connect(socketPath);

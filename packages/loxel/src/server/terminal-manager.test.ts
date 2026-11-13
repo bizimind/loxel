@@ -533,6 +533,9 @@ class FakeTerminalHost implements TerminalHost {
     this.destroyed.push(id);
   }
   setMeta(): void {}
+  screen(): Promise<null> {
+    return Promise.resolve(null);
+  }
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
     this.listener = listener;
     return () => {};
