@@ -2,11 +2,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
-import {
-  DEFAULT_SCROLLBACK_LINES,
-  DEFAULT_NOTIFICATION_SEQUENCES,
-  type NotificationSequences,
-} from "@/api/ws-protocol";
+import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
+import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
 import {
   allThemes,

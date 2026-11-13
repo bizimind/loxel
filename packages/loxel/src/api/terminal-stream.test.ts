@@ -5,14 +5,11 @@ import {
   BIN_MSG_INPUT,
   BIN_MSG_OUTPUT,
   BIN_OUTPUT_HEADER_SIZE,
-  clampScrollbackLines,
-  clampTerminalSize,
-  DEFAULT_SCROLLBACK_LINES,
   encodeInputFrame,
   encodeOutputFrame,
   parseBinaryHeader,
   parseOutputFrame,
-} from "./ws-protocol";
+} from "./terminal-stream";
 
 const TERMINAL_ID = "0f3c2a1e-7b4d-4c8e-9a6f-123456789abc";
 
@@ -48,24 +45,5 @@ describe("terminal binary frames", () => {
     const frame = encodeInputFrame(TERMINAL_ID, payload);
     expect(parseBinaryHeader(frame)).toEqual({ type: BIN_MSG_INPUT, terminalId: TERMINAL_ID });
     expect([...frame.subarray(BIN_HEADER_SIZE)]).toEqual([...payload]);
-  });
-});
-
-describe("clampTerminalSize", () => {
-  test("floors, clamps and falls back for non-finite values", () => {
-    expect(clampTerminalSize(120, 40)).toEqual({ cols: 120, rows: 40 });
-    expect(clampTerminalSize(120.9, 40.2)).toEqual({ cols: 120, rows: 40 });
-    expect(clampTerminalSize(0, 0)).toEqual({ cols: 2, rows: 1 });
-    expect(clampTerminalSize(50_000, 50_000)).toEqual({ cols: 1_000, rows: 500 });
-    expect(clampTerminalSize(Infinity, NaN)).toEqual({ cols: 80, rows: 24 });
-  });
-});
-
-describe("clampScrollbackLines", () => {
-  test("defaults and clamps", () => {
-    expect(clampScrollbackLines(undefined)).toBe(DEFAULT_SCROLLBACK_LINES);
-    expect(clampScrollbackLines(10)).toBe(1_000);
-    expect(clampScrollbackLines(5_000)).toBe(5_000);
-    expect(clampScrollbackLines(10_000_000)).toBe(100_000);
   });
 });

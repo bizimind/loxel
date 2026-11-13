@@ -3,6 +3,9 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createNoopLogger } from "@bizimind/logger";
+
+import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
@@ -35,7 +38,7 @@ describe("pythonToolchainEnv", () => {
     Bun.spawnSync(["git", "init", "-q", worktree]);
     await writeFile(join(worktree, ".venv", "bin", "python"), "#!/bin/sh\n", { mode: 0o755 });
     await writeFile(join(worktree, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
-    const manager = new TerminalManager({
+    const manager = new TerminalManager(new InProcessTerminalHost({ log: createNoopLogger() }), {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
