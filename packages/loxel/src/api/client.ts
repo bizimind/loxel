@@ -1,4 +1,5 @@
 import type { FormattingSettings } from "@/lib/formatting-model";
+import type { OpenRequest, OpenResult } from "@/open-request";
 
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
@@ -367,6 +368,14 @@ export async function getDetachedFiles(wt: string) {
 /** The worktree's Others section: open folders (`isDir`), then individually opened files. */
 export async function getExternalFiles(wt: string) {
   return fetchJson<DirEntry[]>(withScope("/external-files", { wt }));
+}
+
+/**
+ * Send an open request (`POST /api/open`), the one the `loxel` CLI sends: for the quickstart's
+ * command field, a terminal the server starts with its command typed in.
+ */
+export async function postOpenRequest(request: OpenRequest) {
+  return fetchJson<OpenResult>("/open", { method: "POST", body: JSON.stringify(request) });
 }
 
 /** Open a folder in the worktree's Others section. Returns the root it is shown under. */

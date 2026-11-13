@@ -13,6 +13,8 @@ Drafts let you sketch a design doc or architecture diagram before deciding where
 
 A draft is a file — usually markdown (`.md`) or Excalidraw (`.excalidraw`) — stored in Loxel's own state directory, outside your project. Drafts appear in a **Drafts** section at the top of the Project Files panel, shown once you have at least one, with their names in muted italics to set them apart from repo files.
 
+Plans you create in [Home](/docs/worktrees-and-tasks#home) are drafts too, kept apart from every project's. Home has no Project Files panel, so reopen one from its tab, or with **Reopen Closed Tab** after closing it.
+
 They behave identically to their repo-file counterparts:
 
 - `.md` drafts open in the live-preview markdown editor

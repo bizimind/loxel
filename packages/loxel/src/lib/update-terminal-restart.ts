@@ -63,7 +63,8 @@ export function terminalRestartConfirmation(
           {
             id: terminal.id,
             program: terminal.program,
-            worktree: folderName(terminal.worktreePath),
+            // A Home terminal's has none.
+            worktree: terminal.worktreePath === null ? "Home" : folderName(terminal.worktreePath),
           },
         ]
       : [],

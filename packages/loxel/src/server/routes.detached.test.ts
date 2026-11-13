@@ -13,6 +13,7 @@ describe("detached file project destinations", () => {
   let wt: string;
   let detachedDir: string;
   let service: DetachedFilesService;
+  let homeDrafts: DetachedFilesService;
   let ctx: RouteContext;
 
   beforeEach(async () => {
@@ -25,6 +26,8 @@ describe("detached file project destinations", () => {
 
     service = new DetachedFilesService(detachedDir, () => {});
     await service.start();
+    homeDrafts = new DetachedFilesService(join(root, "home-drafts"), () => {});
+    await homeDrafts.start();
 
     const resources = { detachedFilesService: service } as WorktreeResources;
 
@@ -52,6 +55,7 @@ describe("detached file project destinations", () => {
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
     };
@@ -59,7 +63,42 @@ describe("detached file project destinations", () => {
 
   afterEach(async () => {
     service.stop();
+    homeDrafts.stop();
     await rm(root, { recursive: true, force: true });
+  });
+
+  test("Home's drafts are created, listed, read, renamed and deleted under the Home key", async () => {
+    const created = await post("/api/detached-file-create", {
+      wt: "home",
+      prefix: "Note",
+      ext: "md",
+    });
+    expect(created.status).toBe(200);
+    const { name, path } = (await created.json()) as { name: string; path: string };
+    expect(path).toBe(join(root, "home-drafts", name));
+
+    const listed = await get(`/api/detached-files?wt=home`);
+    expect(((await listed.json()) as { name: string }[]).map((e) => e.name)).toEqual([name]);
+    const read = await get(`/api/detached-file-content?wt=home&name=${name}`);
+    expect(read.status).toBe(200);
+
+    const renamed = await post("/api/detached-file-rename", {
+      wt: "home",
+      path,
+      newName: "Plan.md",
+    });
+    expect(((await renamed.json()) as { path: string }).path).toBe(
+      join(root, "home-drafts", "Plan.md"),
+    );
+    const deleted = await post("/api/detached-file-delete", { wt: "home", name: "Plan.md" });
+    expect(deleted.status).toBe(200);
+  });
+
+  test("Home's drafts can't move or copy into a project, which they have none of", async () => {
+    for (const route of ["/api/detached-file-move", "/api/detached-file-copy-to-project"]) {
+      const res = await post(route, { wt: "home", name: "Draft.md", destPath: "src" });
+      expect(res.status).toBe(400);
+    }
   });
 
   test("copy accepts a relative destination", async () => {
@@ -100,14 +139,7 @@ describe("detached file project destinations", () => {
   test("file content of a deleted draft is a 404 with code ENOENT", async () => {
     const draft = join(detachedDir, "Draft.md");
     ctx.resolveFilePath = (absolutePath) =>
-      absolutePath === draft
-        ? {
-            type: "detached",
-            wtPath: wt,
-            resources: { detachedFilesService: service } as never,
-            name: "Draft.md",
-          }
-        : null;
+      absolutePath === draft ? { type: "detached", wtPath: wt, service, name: "Draft.md" } : null;
 
     const present = await get(
       `/api/file-content?path=${encodeURIComponent(draft)}&wt=${encodeURIComponent(wt)}`,

@@ -99,3 +99,19 @@ export const useBrowserBookmarksStore = create<BrowserBookmarksState>()(
 export function useIsBookmarked(url: string): boolean {
   return useBrowserBookmarksStore((s) => s.bookmarks.some((b) => b.url === url));
 }
+
+/**
+ * The bookmarks whose title or URL contains `query` (ignoring case), at most `limit`, in list
+ * order: the suggestions for a typed address. None for a blank query.
+ */
+export function matchBookmarks(
+  bookmarks: readonly BrowserBookmark[],
+  query: string,
+  limit: number,
+): BrowserBookmark[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  return bookmarks
+    .filter((b) => b.title.toLowerCase().includes(needle) || b.url.toLowerCase().includes(needle))
+    .slice(0, limit);
+}

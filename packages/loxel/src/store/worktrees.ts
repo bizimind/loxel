@@ -234,6 +234,9 @@ export interface WorktreeState {
    */
   switchWorktree: (path: string) => Promise<void>;
 
+  /** Show Home, the layout with no worktree active (its own browsers, terminals and plans). */
+  showHome: () => void;
+
   /**
    * Create a worktree; with `parentPath`, a child branched from that worktree's commit, and with
    * `title`, shown by that title. Resolves once the create has started, as a pending sidebar entry
@@ -420,6 +423,12 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           // 3. No server API call needed — server supports concurrent projects.
           // WebSocket subscription is handled by the subscription lifecycle in App.tsx.
+        },
+
+        showHome: () => {
+          if (get().activeWorktreePath === null) return;
+          set({ activeWorktreePath: null });
+          transitionWorktreeState();
         },
 
         createWorktree: async (projectPath, name, options) => {

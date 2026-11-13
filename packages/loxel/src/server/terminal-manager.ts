@@ -49,8 +49,11 @@ export interface TerminalSink {
 
 /** What the server keeps in a session's host meta, read back from the host after a restart. */
 const TerminalMetaSchema = z.object({
-  /** The worktree the panel belongs to; follows the worktree when it is moved. */
-  worktreePath: z.string(),
+  /**
+   * The worktree the panel belongs to, or null for a Home terminal; follows the worktree when it
+   * is moved.
+   */
+  worktreePath: z.string().nullable(),
   /** The directory the shell started in. */
   cwd: z.string(),
   /** The window that created the terminal, if any. */
@@ -63,7 +66,7 @@ export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   rows: number;
   /** Applied only when the session is spawned. */
   cwd: string;
-  /** The panel's worktree when the shell starts elsewhere; applied only when spawned. */
+  /** The panel's worktree, absent for a Home terminal; applied only when spawned. */
   worktreePath?: string;
   /** The window creating the terminal; applied only when spawned. */
   windowId?: string;
@@ -112,6 +115,10 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
   // as an agent's, or their own `loxel` commands would open without focus.
   for (const name of CODING_AGENT_ENV_VARS) delete env[name];
+  // Nor carry the Loxel terminal it was started from: each shell gets its own from the spawn's
+  // overrides, and a Home terminal must have no worktree, so its `loxel` opens pages in its window.
+  delete env.LOXEL_WORKTREE;
+  delete env.LOXEL_WINDOW_ID;
   return env;
 }
 
@@ -138,7 +145,8 @@ async function resolveToolchainEnv(
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
 interface PendingStart {
-  worktreePath: string;
+  /** Null for a Home terminal, which belongs to no worktree. */
+  worktreePath: string | null;
   /** Resolves to null when the terminal was destroyed meanwhile. */
   session: Promise<ManagedSession | null>;
   /** The client to bind once spawned; cleared by a detach. */
@@ -302,7 +310,7 @@ export class TerminalManager {
         this.starting.delete(id);
         return this.spawn(id, options, pending, env);
       }),
-      worktreePath: options.worktreePath ?? options.cwd,
+      worktreePath: options.worktreePath ?? null,
       sink: null,
       size: null,
       input: [],
@@ -316,6 +324,7 @@ export class TerminalManager {
   ): Promise<Record<string, string | undefined>> {
     const env = buildTerminalEnv();
     if (options.envOverrides) Object.assign(env, options.envOverrides);
+    // A Home terminal's toolchains are those of the directory it starts in.
     const worktreePath = options.worktreePath ?? options.cwd;
     const contributors = this.hooks.toolchainEnvs.filter(
       (contributor) => contributor.enabledInTerminal?.(options) ?? true,

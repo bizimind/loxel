@@ -7,8 +7,8 @@ import { z } from "zod";
 
 export const RunningTerminalSchema = z.object({
   id: z.string(),
-  /** The worktree the terminal belongs to. */
-  worktreePath: z.string(),
+  /** The worktree the terminal belongs to, or null for a Home terminal. */
+  worktreePath: z.string().nullable(),
   /** The directory its shell started in. */
   cwd: z.string(),
   /**

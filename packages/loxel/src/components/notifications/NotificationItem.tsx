@@ -17,6 +17,8 @@ const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
 function sourceLabel(notification: ServerNotification): string {
   const { source } = notification;
   if (source.kind === "terminal_host") return "Loxel";
+  // A Home terminal's notification names no worktree.
+  if (source.worktreePath === null) return "Home";
   return source.worktreePath.split("/").pop() || "terminal";
 }
 

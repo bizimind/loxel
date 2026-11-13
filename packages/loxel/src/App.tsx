@@ -4,16 +4,17 @@ import "dockview-react/dist/styles/dockview.css";
 import { useEffect, useRef } from "react";
 
 import { CommandPaletteModal } from "./components/command-palette/CommandPaletteModal";
+import { HomeCenter } from "./components/dockview/CenterHost";
 import { LAYOUT_VERSION, createDefaultLayout } from "./components/dockview/default-layout";
 import {
   onOuterLayoutChange,
   onOuterLayoutRestored,
+  onOuterSwapAbandoned,
   performOuterClear,
   setupOuterDockview,
 } from "./components/dockview/outer-dockview-setup";
 import { outerComponents } from "./components/dockview/panels";
 import { PersistedLayoutComponent } from "./components/dockview/PersistedLayout";
-import { EmptyState } from "./components/EmptyState";
 import { FileSearchModal } from "./components/file-search/FileSearchModal";
 import { StatusBar } from "./components/panels/StatusBar";
 import { TopBar } from "./components/panels/TopBar";
@@ -95,6 +96,7 @@ export default function App() {
                 onLayoutRestored={onOuterLayoutRestored}
                 onLayoutChange={onOuterLayoutChange}
                 performClear={performOuterClear}
+                onSwapAbandoned={onOuterSwapAbandoned}
                 apiRef={apiRef}
                 components={outerComponents}
                 scrollbars="native"
@@ -105,10 +107,11 @@ export default function App() {
           <StatusBar />
         </>
       ) : (
+        // Home: no worktree active, so only the editor area, with panels that need no worktree
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden">
-            <EmptyState />
+            <HomeCenter />
           </div>
         </div>
       )}

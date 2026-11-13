@@ -132,9 +132,10 @@ describe("TerminalManager commands", () => {
     // The host holds the same, for a server that has to find its sessions again.
     expect((await host.list()).map((s) => s.meta)).toEqual([meta]);
 
-    const plain = crypto.randomUUID();
-    await manager.attach(plain, createRecordingSink().sink, attachOptions);
-    expect(manager.get(plain)?.meta).toEqual({ worktreePath: "/tmp", cwd: "/tmp" });
+    // A Home terminal belongs to no worktree, wherever its shell starts.
+    const home = crypto.randomUUID();
+    await manager.attach(home, createRecordingSink().sink, attachOptions);
+    expect(manager.get(home)?.meta).toEqual({ worktreePath: null, cwd: "/tmp" });
   });
 
   test("a shell spawned with no client runs its command, and a later attach binds to it", async () => {
@@ -173,6 +174,31 @@ describe("TerminalManager commands", () => {
     } finally {
       if (originalMarker === undefined) delete process.env.CLAUDECODE;
       else process.env.CLAUDECODE = originalMarker;
+    }
+  });
+
+  test("shells don't inherit the server's own Loxel terminal, so a Home shell has no worktree", async () => {
+    process.env.SHELL = "/bin/sh";
+    const original = { wt: process.env.LOXEL_WORKTREE, win: process.env.LOXEL_WINDOW_ID };
+    process.env.LOXEL_WORKTREE = "/some/worktree";
+    process.env.LOXEL_WINDOW_ID = "server-window";
+    try {
+      const manager = createManager();
+      const id = crypto.randomUUID();
+      const sink = createRecordingSink();
+      await manager.attach(id, sink.sink, {
+        ...attachOptions,
+        command: "echo loxel-marker-[${LOXEL_WORKTREE-unset}:${LOXEL_WINDOW_ID-unset}]",
+      });
+      await until(() => sink.outputText().includes("loxel-marker-[unset:unset]"));
+    } finally {
+      for (const [name, value] of [
+        ["LOXEL_WORKTREE", original.wt],
+        ["LOXEL_WINDOW_ID", original.win],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   });
 });
@@ -763,6 +789,15 @@ describe("TerminalManager adopting sessions found running", () => {
       expect.objectContaining({ id: running.id, since: { epoch: "epoch-1", offset: 100 } }),
     ]);
     expect(manager.hasOrphanSessions()).toBe(false);
+  });
+
+  test("a Home terminal, which has no worktree, is adopted like any other", () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const home = info({ worktreePath: null, cwd: "/Users/me" });
+    manager.adopt([home]);
+    expect(host.destroyed).toEqual([]);
+    expect(manager.get(home.id)?.meta).toEqual({ worktreePath: null, cwd: "/Users/me" });
   });
 
   test("a session whose meta it cannot read is ended", () => {

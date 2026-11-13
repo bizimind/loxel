@@ -9,7 +9,7 @@
  * logs them to the frontend logger, and shows a per-panel fallback with
  * the panel's icon, error message, and a retry button.
  */
-import type { IDockviewPanelProps, IWatermarkPanelProps } from "dockview-react";
+import type { IDockviewPanelProps } from "dockview-react";
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -29,11 +29,8 @@ import { FileTreePanel } from "@/components/panels/FileTreePanel";
 import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
-import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import type { PatchDiffParams } from "@/lib/panel-creators";
-import type { ActionId } from "@/store/keybindings/action-registry";
-import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
-import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
+import { CENTER_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
 
 import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
@@ -149,65 +146,6 @@ function TerminalPanelComponent(
         panelApi={props.api}
       />
     </PanelContext.Provider>
-  );
-}
-
-/** Center watermark — visible when no center panels are open. */
-export function CenterWatermark(_props: IWatermarkPanelProps) {
-  return (
-    <div className="bg-editor-surface flex h-full items-center justify-center">
-      <div className="flex items-center gap-10">
-        <img
-          src="/watermark.svg"
-          alt=""
-          className="h-20 w-20 opacity-85 invert select-none dark:opacity-100 dark:invert-0"
-          draggable={false}
-        />
-
-        <div className="flex flex-col gap-1.5">
-          {QUICKSTART_PANELS.map((def) => (
-            <QuickAction
-              key={def.type}
-              icon={<def.icon className="size-4" />}
-              label={def.quickstartLabel}
-              onClick={() => window.dispatchEvent(new CustomEvent(def.createEvent))}
-              actionId={def.actionId ?? undefined}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  onClick,
-  actionId,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  actionId?: ActionId;
-}) {
-  const store = useKeybindingStore();
-  const binding = actionId ? getBindingsForAction(store, actionId)[0] : undefined;
-
-  return (
-    <button
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition-colors"
-    >
-      {icon}
-      <span className="flex-1 text-left">{label}</span>
-      {binding && (
-        <KeyBindingDisplay
-          binding={binding}
-          className="text-muted-foreground dark:text-muted-foreground/60 ml-4 text-xs"
-        />
-      )}
-    </button>
   );
 }
 
@@ -362,3 +300,17 @@ export const centerTabComponents = {
   localDbTab: LocalDbTab,
   virtualDocumentTab: VirtualDocumentTab,
 };
+
+/** Dockview components (content or tab) of the center panels that need no worktree. */
+function withoutWorktreePanels<T>(registry: Record<string, T>, key: "component" | "tabComponent") {
+  const keys = new Set<string>(
+    CENTER_PANELS.filter((def) => !def.needsWorktree).map((def) => def[key]),
+  );
+  return Object.fromEntries(Object.entries(registry).filter(([name]) => keys.has(name)));
+}
+
+/** Home's center components: only panels that need no worktree. */
+export const homeComponents = withoutWorktreePanels(centerComponents, "component");
+
+/** Tabs of Home's center panels. */
+export const homeTabComponents = withoutWorktreePanels(centerTabComponents, "tabComponent");

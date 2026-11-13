@@ -58,7 +58,7 @@ Inside a Loxel terminal, `loxel` connects through `LOXEL_PORT`. Elsewhere it loo
 
 ## URLs
 
-`loxel <url>` opens in the worktree that contains the current directory. Inside a Loxel terminal, it falls back to `LOXEL_WORKTREE` when the current directory isn't in a git repository; otherwise that URL errors. It goes to the windows showing that worktree: layout flags and focus apply only in the window you are working in, and other windows showing it get the page as a background tab. If no window shows it, the page opens there in the window you are working in, switching to the worktree when the open takes focus. See [Browser](/docs/browser) for what you can do with the page once it's open.
+`loxel <url>` opens in the worktree that contains the current directory. Inside a Loxel terminal, it falls back to `LOXEL_WORKTREE` when the current directory isn't in a git repository, and in a Home terminal, which has none, the page opens in what that terminal's window shows; otherwise that URL errors. It goes to the windows showing that worktree: layout flags and focus apply only in the window you are working in, and other windows showing it get the page as a background tab. If no window shows it, the page opens there in the window you are working in, switching to the worktree when the open takes focus. See [Browser](/docs/browser) for what you can do with the page once it's open.
 
 ---
 
@@ -76,7 +76,7 @@ Inside a Loxel terminal, `loxel` connects through `LOXEL_PORT`. Elsewhere it loo
 
 ## Terminals
 
-`loxel terminal` opens a new terminal panel in the same window as a file would: the window of the Loxel terminal it runs in, or else the most recently focused window. The shell starts in the current directory, or in `--cwd <dir>`. A directory inside one of your worktrees opens the panel in that worktree, switching to it if needed when the open takes focus; any other directory gets a panel in the window's active worktree. `--title <name>` names the tab.
+`loxel terminal` opens a new terminal panel in the same window as a file would: the window of the Loxel terminal it runs in, or else the most recently focused window. The shell starts in the current directory, or in `--cwd <dir>`. A directory inside one of your worktrees opens the panel in that worktree, switching to it if needed when the open takes focus; any other directory gets a panel in the window's active worktree, or in Home when the window shows none. `--title <name>` names the tab.
 
 Everything after the flags (or after `--`) is a command typed into the shell once it starts, exactly as if you had entered it: your login shell, aliases and history all apply, and the shell stays open after the command exits. A single argument is a shell command line (`loxel terminal 'cd src && make'`); several arguments are passed as one command with each argument quoted where needed, so `loxel terminal -- claude "Fix the failing tests"` types `claude 'Fix the failing tests'` and an alias for `claude` still applies. Put `--` before commands that have flags of their own.
 

@@ -7,9 +7,10 @@ import {
   RefreshCwIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import * as api from "@/api/client";
+import type { DefaultBrowserStatus } from "@/api/default-browser-model";
 import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import { useUpdateStatus } from "@/queries/use-update-status";
 import { queryClient } from "@/query-client";
 import { useSettingsStore } from "@/store/settings-store";
 
+const settingsLog = frontendLog.child("ui");
 const updateLog = frontendLog.child("update");
 
 /** The site's download page, for installing by hand when an update cannot install itself. */
@@ -53,6 +55,10 @@ export function GeneralSection() {
       </div>
 
       {window.electronAPI && <UpdateControls electronAPI={window.electronAPI} />}
+
+      {window.electronAPI?.macOSVersion && (
+        <DefaultBrowserSetting electronAPI={window.electronAPI} />
+      )}
 
       <div className="space-y-2">
         <h4 className="text-foreground text-xs font-medium">Project Explorer</h4>
@@ -135,6 +141,83 @@ function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["elec
           (ask the update server for the latest version when Loxel starts)
         </span>
         <Switch checked={autoCheck} onCheckedChange={setAutoCheck} className="ml-auto" />
+      </div>
+    </div>
+  );
+}
+
+function logDefaultBrowserError(action: "read" | "set", err: unknown): void {
+  settingsLog.error(`Could not ${action} the default browser`, {
+    error: err instanceof Error ? err : undefined,
+  });
+}
+
+/** Whether macOS opens web links in Loxel, and a button to make it the default browser. */
+function DefaultBrowserSetting({
+  electronAPI,
+}: {
+  electronAPI: NonNullable<Window["electronAPI"]>;
+}) {
+  const [status, setStatus] = useState<DefaultBrowserStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      electronAPI
+        .getDefaultBrowserStatus()
+        .then((next) => {
+          if (live) setStatus(next);
+        })
+        .catch((err: unknown) => logDefaultBrowserError("read", err));
+    };
+    refresh();
+    // macOS asks the user to confirm in a prompt of its own; focus comes back once it is answered.
+    const unsubscribe = electronAPI.onWindowFocusChange((focused) => {
+      if (focused) refresh();
+    });
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, [electronAPI]);
+
+  const isDefault = status?.isDefault ?? false;
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-foreground text-xs font-medium">Default Browser</h4>
+      <div className="flex items-center gap-2">
+        {isDefault ? (
+          <span className="text-foreground flex items-center gap-1.5 text-xs">
+            <CheckCircleIcon className="size-3.5 shrink-0" />
+            Loxel is your default web browser
+          </span>
+        ) : (
+          <>
+            <span className="text-foreground text-xs">Open web links in Loxel</span>
+            <span className="text-muted-foreground text-[10px]">
+              {status && !status.canSet
+                ? "(only the installed app can be the default browser)"
+                : "(links from other apps open in a browser panel)"}
+            </span>
+          </>
+        )}
+        {!isDefault && (
+          <Button
+            variant="outline"
+            size="xs"
+            className="ml-auto"
+            disabled={!status?.canSet}
+            onClick={() => {
+              electronAPI
+                .setAsDefaultBrowser()
+                .then(setStatus)
+                .catch((err: unknown) => logDefaultBrowserError("set", err));
+            }}
+          >
+            Set as default browser
+          </Button>
+        )}
       </div>
     </div>
   );

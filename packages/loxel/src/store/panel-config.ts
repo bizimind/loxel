@@ -108,7 +108,7 @@ export interface CenterPanelDef {
   readonly tabComponent: string;
   /** Lucide icon used in tabs and quickstart. */
   readonly icon: LucideIcon;
-  /** Label shown in CenterPlaceholder quickstart. Null = not shown. */
+  /** Label shown in the quickstart (`CenterWatermark`). Null = not shown. */
   readonly quickstartLabel: string | null;
   /** ActionId for the "new panel" keybinding. Null if not creatable via keybinding. */
   readonly actionId: ActionId | null;
@@ -122,6 +122,12 @@ export interface CenterPanelDef {
   readonly kind: "connected-process" | "file-editor" | "state-view";
   /** Whether only one instance of this panel type can exist. */
   readonly singleton: boolean;
+  /**
+   * Whether the panel needs a worktree (its files or project). Home, the layout shown with no
+   * worktree active, holds only panels that don't: browsers, terminals in the home directory, and
+   * plans saved as Home drafts.
+   */
+  readonly needsWorktree: boolean;
 }
 
 /**
@@ -133,21 +139,8 @@ export interface CenterPanelDef {
  * is derived automatically from this registry.
  */
 export const CENTER_PANELS = [
-  // Order determines quickstart menu order (entries with quickstartLabel).
-  {
-    type: "editor",
-    idPrefix: "editor-",
-    component: "editor",
-    tabComponent: "markdownEditorTab",
-    icon: FileTextIcon,
-    quickstartLabel: "New Plan",
-    actionId: "panel.new.markdown" as const,
-    createEvent: "loxel-create-editor",
-    openEvent: "loxel-open-markdown-editor",
-    titlePrefix: "Note",
-    kind: "file-editor" as const,
-    singleton: false,
-  },
+  // Order determines quickstart menu order (entries with quickstartLabel), so the Database entry
+  // stays last.
   {
     type: "terminal",
     idPrefix: "terminal-",
@@ -161,20 +154,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Terminal",
     kind: "connected-process" as const,
     singleton: false,
-  },
-  {
-    type: "excalidraw",
-    idPrefix: "drawing-",
-    component: "excalidraw",
-    tabComponent: "excalidrawEditorTab",
-    icon: PencilRulerIcon,
-    quickstartLabel: "New Drawing",
-    actionId: "panel.new.drawing" as const,
-    createEvent: "loxel-create-drawing",
-    openEvent: "loxel-open-drawing-editor",
-    titlePrefix: "Drawing",
-    kind: "file-editor" as const,
-    singleton: false,
+    needsWorktree: false,
   },
   {
     type: "browser",
@@ -189,8 +169,39 @@ export const CENTER_PANELS = [
     titlePrefix: "Browser",
     kind: "state-view" as const,
     singleton: false,
+    needsWorktree: false,
   },
-  // Non-quickstart panels (no quickstartLabel)
+  {
+    type: "editor",
+    idPrefix: "editor-",
+    component: "editor",
+    tabComponent: "markdownEditorTab",
+    icon: FileTextIcon,
+    quickstartLabel: "New Plan",
+    actionId: "panel.new.markdown" as const,
+    createEvent: "loxel-create-editor",
+    openEvent: "loxel-open-markdown-editor",
+    titlePrefix: "Note",
+    kind: "file-editor" as const,
+    singleton: false,
+    needsWorktree: false,
+  },
+  {
+    type: "excalidraw",
+    idPrefix: "drawing-",
+    component: "excalidraw",
+    tabComponent: "excalidrawEditorTab",
+    icon: PencilRulerIcon,
+    quickstartLabel: "New Drawing",
+    actionId: "panel.new.drawing" as const,
+    createEvent: "loxel-create-drawing",
+    openEvent: "loxel-open-drawing-editor",
+    titlePrefix: "Drawing",
+    kind: "file-editor" as const,
+    singleton: false,
+    needsWorktree: true,
+  },
+  // Panels without a quickstart entry, then Database, the quickstart's last entry
   {
     type: "media",
     idPrefix: "media-",
@@ -204,6 +215,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Media",
     kind: "state-view" as const,
     singleton: false,
+    needsWorktree: true,
   },
   {
     type: "codeEditor",
@@ -218,6 +230,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Untitled",
     kind: "file-editor" as const,
     singleton: false,
+    needsWorktree: true,
   },
   {
     type: "diff",
@@ -232,6 +245,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Diff",
     kind: "state-view" as const,
     singleton: true,
+    needsWorktree: true,
   },
   {
     type: "patchDiff",
@@ -246,6 +260,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Patch",
     kind: "state-view" as const,
     singleton: false,
+    needsWorktree: true,
   },
   {
     type: "compare",
@@ -260,6 +275,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Compare",
     kind: "file-editor" as const,
     singleton: false,
+    needsWorktree: true,
   },
   {
     type: "localDb",
@@ -274,6 +290,7 @@ export const CENTER_PANELS = [
     titlePrefix: "Database",
     kind: "state-view" as const,
     singleton: true,
+    needsWorktree: true,
   },
 ] as const satisfies readonly CenterPanelDef[];
 
@@ -301,10 +318,15 @@ export function getCenterPanelDef(panelId: string): CenterPanelDef | undefined {
   return undefined;
 }
 
-/** All quickstart-visible panels (for CenterPlaceholder). */
+/** All quickstart-visible panels (for `CenterWatermark`). */
 export const QUICKSTART_PANELS = CENTER_PANELS.filter(
   (def): def is typeof def & { quickstartLabel: string } => def.quickstartLabel !== null,
 );
+
+/** Whether panels of a center panel type need a worktree, so none can open in Home. */
+export function panelTypeNeedsWorktree(type: string): boolean {
+  return getCenterPanelDefByType(type)?.needsWorktree ?? true;
+}
 
 /** Map from actionId → createEvent for panel creation keybindings. */
 const actionToCreateEvent = new Map<string, string>(

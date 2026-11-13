@@ -46,7 +46,7 @@ import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserConte
 import { JavaScriptDialog } from "./JavaScriptDialog";
 import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
-import { webSearchUrl } from "./web-search";
+import { addressBarUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -313,17 +313,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       const webview = webviewRef.current;
       if (!webview || !readyRef.current) return;
 
-      let normalized = url.trim();
-      // A web URL, or the source view of one (View Page Source puts those in the address bar).
-      if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
-        // If it looks like a domain (contains a dot), prepend https://
-        // Otherwise treat it as a search query
-        if (/^[^\s]+\.[^\s]+/.test(normalized)) {
-          normalized = `https://${normalized}`;
-        } else {
-          normalized = webSearchUrl(normalized);
-        }
-      }
+      const normalized = addressBarUrl(url);
 
       setInputUrl(normalized);
       setCurrentUrl(normalized);
