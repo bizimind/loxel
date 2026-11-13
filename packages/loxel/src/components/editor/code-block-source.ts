@@ -107,7 +107,9 @@ function blockDecorations(doc: Node, open: number | null): DecorationSet {
   doc.descendants((node, pos) => {
     if (node.type.name !== CODE_BLOCK) return !node.isTextblock;
     if (!isMermaid(node)) return false;
-    const collapsed = pos !== open && hidesSource(node);
+    // Read even for the open block: reading keeps its failure from aging out.
+    const hides = hidesSource(node);
+    const collapsed = pos !== open && hides;
     const className = collapsed ? `${MERMAID_BLOCK_CLASS} ${COLLAPSED_CLASS}` : MERMAID_BLOCK_CLASS;
     decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: className }));
     return false;
@@ -131,16 +133,23 @@ function outsideCodeBlocks(doc: Node, from: number, dir: 1 | -1): Selection | nu
  * of a file that ends in a diagram lands in the trailing paragraph.
  */
 function releaseCaret(state: EditorState): Transaction | null {
+  const block = strandedBlock(state);
+  const node = block === null ? null : state.doc.nodeAt(block);
+  if (block === null || !node) return null;
+  const target =
+    outsideCodeBlocks(state.doc, block + node.nodeSize, 1) ??
+    outsideCodeBlocks(state.doc, block, -1);
+  return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
+}
+
+/** The collapsed block holding the caret, or null. */
+function strandedBlock(state: EditorState): number | null {
   const block = codeBlockAt(state.selection);
   if (block === null || !state.selection.empty || sourceKey.getState(state)?.open !== null) {
     return null;
   }
   const node = state.doc.nodeAt(block);
-  if (!node || !hidesSource(node)) return null;
-  const target =
-    outsideCodeBlocks(state.doc, block + node.nodeSize, 1) ??
-    outsideCodeBlocks(state.doc, block, -1);
-  return target ? keepSourcesClosed(state.tr.setSelection(target)) : null;
+  return node && hidesSource(node) ? block : null;
 }
 
 const ARROWS: Record<string, { dir: 1 | -1; edge: "up" | "down" | "left" | "right" }> = {
@@ -198,9 +207,11 @@ export const codeBlockSourcePlugin = $prose(
       appendTransaction: (_trs, _old, state) => releaseCaret(state),
       view: (view) => {
         // The initial selection comes with no transaction, so its caret is released once mounted.
+        // A document of one diagram has no text to release it to yet: an empty transaction lets
+        // Crepe add its trailing paragraph, which `appendTransaction` then releases it to.
         queueMicrotask(() => {
-          const tr = view.isDestroyed ? null : releaseCaret(view.state);
-          if (tr) view.dispatch(tr);
+          if (view.isDestroyed || strandedBlock(view.state) === null) return;
+          view.dispatch(releaseCaret(view.state) ?? view.state.tr);
         });
         const unsubscribe = onMermaidRenderResult(() => {
           if (!view.isDestroyed) {

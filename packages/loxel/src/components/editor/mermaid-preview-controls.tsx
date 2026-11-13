@@ -55,6 +55,8 @@ const ACTIONS = [
   "open",
 ] as const;
 type Action = (typeof ACTIONS)[number];
+/** The actions that move the caret into or out of the block's source. */
+type SourceAction = "edit" | "hide";
 
 /** Class names of the preview's parts, shared with the markup in mermaid-preview.ts. */
 export const MERMAID_CLASSES = {
@@ -84,13 +86,19 @@ function ToolbarButton({
   );
 }
 
+function EditButton() {
+  return (
+    <ToolbarButton action="edit" title="Edit the diagram's source">
+      <PencilIcon className="size-3" />
+      Edit
+    </ToolbarButton>
+  );
+}
+
 function MermaidToolbar() {
   return (
     <div className="loxel-mermaid-toolbar bg-background/90 border-border flex items-center gap-0.5 rounded-md border p-0.5 font-sans text-[10px] shadow-sm backdrop-blur-sm">
-      <ToolbarButton action="edit" title="Edit the diagram's source">
-        <PencilIcon className="size-3" />
-        Edit
-      </ToolbarButton>
+      <EditButton />
       <ToolbarButton action="hide" title="Hide the source">
         <EyeOffIcon className="size-3" />
         Hide
@@ -121,11 +129,22 @@ function MermaidToolbar() {
 }
 
 let toolbarHtml: string | null = null;
+let editButtonHtml: string | null = null;
 
 /** The preview toolbar's static markup. */
 export function mermaidToolbarHtml(): string {
   toolbarHtml ??= renderToStaticMarkup(<MermaidToolbar />);
   return toolbarHtml;
+}
+
+/**
+ * The Edit button alone, for an error preview: CSS shows it only on a collapsed block, which an
+ * error preview sits in only until its block's result catches up, and it must never leave the
+ * source unreachable.
+ */
+export function mermaidEditButtonHtml(): string {
+  editButtonHtml ??= renderToStaticMarkup(<EditButton />);
+  return editButtonHtml;
 }
 
 /** Each preview canvas's current view; a re-rendered preview starts again from none. */
@@ -207,18 +226,10 @@ export function attachMermaidPreviewControls(
   /** The current press on a preview, so its click can tell a drag from a click. */
   let press: Press | null = null;
 
-  const runAction = (action: Action, parts: PreviewParts) => {
+  const runAction = (action: Exclude<Action, SourceAction>, parts: PreviewParts) => {
     const center = { x: parts.viewport.clientWidth / 2, y: parts.viewport.clientHeight / 2 };
     const codeBlock = parts.diagram.closest(".milkdown-code-block");
     switch (action) {
-      case "edit":
-      case "hide": {
-        const view = editorView();
-        if (!view || !codeBlock) break;
-        if (action === "edit") editCodeBlockSource(view, codeBlock);
-        else hideCodeBlockSource(view, codeBlock);
-        break;
-      }
       case "zoom-in":
         zoom(parts, ZOOM_STEP, center);
         break;
@@ -248,10 +259,19 @@ export function attachMermaidPreviewControls(
 
   const handleClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
-    const parts = previewParts(event.target);
-    if (!parts) return;
     const option = event.target.closest(`[${ACTION_ATTR}]`)?.getAttribute(ACTION_ATTR);
     const action = ACTIONS.find((a) => a === option);
+    // Edit and Hide need only the block: Edit also sits in an error preview, which has no diagram.
+    if (action === "edit" || action === "hide") {
+      const codeBlock = event.target.closest(".milkdown-code-block");
+      const view = editorView();
+      if (!view || !codeBlock || !container.contains(codeBlock)) return;
+      if (action === "edit") editCodeBlockSource(view, codeBlock);
+      else hideCodeBlockSource(view, codeBlock);
+      return;
+    }
+    const parts = previewParts(event.target);
+    if (!parts) return;
     if (action) {
       runAction(action, parts);
       return;

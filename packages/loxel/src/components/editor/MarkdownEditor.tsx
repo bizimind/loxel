@@ -421,6 +421,7 @@ export function MarkdownEditor({
           theme: codeTheme(),
           languages: CODE_BLOCK_LANGUAGES,
           renderPreview: renderCodeBlockPreview,
+          previewLoading: "Rendering…",
         },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {

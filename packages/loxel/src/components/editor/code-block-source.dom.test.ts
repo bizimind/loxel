@@ -28,7 +28,7 @@ class ImmediateIntersectionObserver {
 globalThis.IntersectionObserver = ImmediateIntersectionObserver as never;
 
 /** Text ending in a dangling arrow fails to parse. */
-const isBroken = (source: string) => /-->\s*$/.test(source);
+const isBroken = (source: string) => source.trimEnd().endsWith("-->");
 
 void mock.module("mermaid", () => ({
   default: {
@@ -55,6 +55,7 @@ const { renderCodeBlockPreview } = await import("./code-block-preview");
 const { COLLAPSED_CLASS, codeBlockSourcePlugin, keepSourcesClosed } =
   await import("./code-block-source");
 const { attachMermaidPreviewControls } = await import("./mermaid-preview-controls");
+const { recordMermaidRender } = await import("./mermaid-render-results");
 const { serializeBody, setSourceBaseline } = await import("./MarkdownEditor");
 
 const previewCss = await Bun.file(
@@ -115,8 +116,8 @@ let style: HTMLStyleElement;
 /** What the blocks went through while the document opened. */
 let seen: { emptyCollapsed: boolean; emptyPanel: boolean };
 
-/** Resolves once `condition` holds, checked whenever the editor's DOM changes. */
-function whenDom(condition: () => boolean): Promise<void> {
+/** Resolves once `condition` holds, checked whenever the editor's DOM (or `target`) changes. */
+function whenDom(condition: () => boolean, target: Node = root): Promise<void> {
   return new Promise((resolve) => {
     if (condition()) {
       resolve();
@@ -127,7 +128,7 @@ function whenDom(condition: () => boolean): Promise<void> {
       observer.disconnect();
       resolve();
     });
-    observer.observe(root, { subtree: true, childList: true, attributes: true });
+    observer.observe(target, { subtree: true, childList: true, attributes: true });
   });
 }
 
@@ -244,6 +245,47 @@ describe("mermaid source visibility", () => {
       "Parse error",
     );
     expect(sourceShown(BROKEN)).toBe(true);
+    expect(isShown(action(BROKEN, "edit"))).toBe(false);
+  });
+
+  test("a block collapsed over an error still offers Edit", () => {
+    // Its text's failure cleared elsewhere (the same text rendering in another block).
+    const text = view.state.doc.resolve(codeStart(BROKEN)).parent.textContent;
+    recordMermaidRender(text, true);
+    expect(collapsed()[BROKEN]).toBe(1);
+    expect(isShown(action(BROKEN, "edit"))).toBe(true);
+    action(BROKEN, "edit").click();
+    expect(collapsed()[BROKEN]).toBe(0);
+    expect(sourceShown(BROKEN)).toBe(true);
+  });
+
+  test("the open block's failure does not age out while others are recorded", () => {
+    select(codeStart(BROKEN) + 1);
+    for (let i = 0; i < 2500; i++) recordMermaidRender(`elsewhere ${i} -->`, false);
+    select(paragraphStart("End"));
+    expect(collapsed()).toEqual(AT_REST);
+    expect(sourceShown(BROKEN)).toBe(true);
+  });
+
+  test("a document of one diagram releases its initial caret to the trailing paragraph", async () => {
+    const other = document.createElement("div");
+    document.body.append(other);
+    const single = new Crepe({
+      root: other,
+      defaultValue: "```mermaid\ngraph TD\n  S --> T\n```\n",
+      features: { [Crepe.Feature.Latex]: false },
+      featureConfigs: { [Crepe.Feature.CodeMirror]: { renderPreview: renderCodeBlockPreview } },
+    });
+    single.editor.use(codeBlockSourcePlugin);
+    try {
+      await single.create();
+      const singleView = single.editor.action((ctx) => ctx.get(editorViewCtx));
+      await whenDom(() => singleView.state.selection.$head.parent.type.name === "paragraph", other);
+      expect(singleView.state.doc.childCount).toBe(2);
+    } finally {
+      await single.destroy();
+      other.remove();
+    }
   });
 
   test("an empty block shows its source from the start, with no preview", () => {

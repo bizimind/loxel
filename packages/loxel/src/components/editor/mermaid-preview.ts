@@ -13,7 +13,11 @@ import DOMPurify from "dompurify";
 import type { Mermaid, MermaidConfig } from "mermaid";
 
 import type { PreviewValue, RenderPreview } from "@/components/editor/code-block-preview";
-import { MERMAID_CLASSES, mermaidToolbarHtml } from "@/components/editor/mermaid-preview-controls";
+import {
+  MERMAID_CLASSES,
+  mermaidEditButtonHtml,
+  mermaidToolbarHtml,
+} from "@/components/editor/mermaid-preview-controls";
 import { recordMermaidRender } from "@/components/editor/mermaid-render-results";
 import type { Dimensions } from "@/components/pan-zoom/pan-zoom";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -168,12 +172,19 @@ function errorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-/** Error text goes in through `textContent` so diagram source echoed in it is never parsed as HTML. */
+/**
+ * The error, with an Edit button (static markup) for a block collapsed over it. Error text goes in
+ * through `textContent` so diagram source echoed in it is never parsed as HTML.
+ */
 function errorPreview(error: unknown): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "loxel-mermaid-error";
-  el.textContent = `Mermaid error: ${errorMessage(error)}`;
-  return el;
+  const preview = document.createElement("div");
+  preview.className = "loxel-mermaid-error-preview";
+  preview.innerHTML = mermaidEditButtonHtml();
+  const message = document.createElement("div");
+  message.className = "loxel-mermaid-error";
+  message.textContent = `Mermaid error: ${errorMessage(error)}`;
+  preview.append(message);
+  return preview;
 }
 
 /**
