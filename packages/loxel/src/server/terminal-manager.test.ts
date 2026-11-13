@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { TerminalState } from "@/api/ws-protocol";
+import { createNoopLogger } from "@bizimind/logger";
+
+import type { TerminalState } from "@/api/terminal-stream";
+import type {
+  TerminalAttachRequest,
+  TerminalHost,
+  TerminalHostEvent,
+  TerminalSessionInfo,
+  TerminalSpawnRequest,
+} from "@/terminal-host";
+import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
+import type { TerminalManagerHooks, TerminalSink } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
-import type { TerminalSink } from "./terminal-session";
 import type { ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 const textDecoder = new TextDecoder();
@@ -12,12 +22,18 @@ const textDecoder = new TextDecoder();
 function createRecordingSink() {
   const states: TerminalState[] = [];
   const output: Uint8Array[] = [];
+  const exits: number[] = [];
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: (_offset, data) => output.push(data),
-    sendExit: () => {},
+    sendExit: (exitCode) => exits.push(exitCode),
   };
-  return { sink, states, outputText: () => output.map((o) => textDecoder.decode(o)).join("") };
+  return {
+    sink,
+    states,
+    exits,
+    outputText: () => output.map((o) => textDecoder.decode(o)).join(""),
+  };
 }
 
 const managers: TerminalManager[] = [];
@@ -33,15 +49,34 @@ function contributor(
   return { name: "Test", resolveForTerminal, ...overrides };
 }
 
-function createManager(toolchainEnvs: readonly ToolchainEnvContributor[] = []): TerminalManager {
-  const manager = new TerminalManager({
+function createHost(): InProcessTerminalHost {
+  return new InProcessTerminalHost({ log: createNoopLogger() });
+}
+
+function createManager(
+  toolchainEnvs: readonly ToolchainEnvContributor[] = [],
+  host: TerminalHost = createHost(),
+  hooks: Partial<TerminalManagerHooks> = {},
+): TerminalManager {
+  const manager = new TerminalManager(host, {
     isSequenceEnabled: () => false,
     onNotification: () => {},
     onExit: () => {},
     toolchainEnvs,
+    ...hooks,
   });
   managers.push(manager);
   return manager;
+}
+
+/** True once the process is gone, reaped included, which is when its exit has been handled. */
+function processGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 const attachOptions = { cols: 80, rows: 24, cwd: "/tmp" };
@@ -55,7 +90,8 @@ describe("TerminalManager commands", () => {
 
   test("types the command into the shell it spawns, and a respawn gets a plain shell", async () => {
     process.env.SHELL = "/bin/sh";
-    const manager = createManager();
+    const host = createHost();
+    const manager = createManager([], host);
     const id = crypto.randomUUID();
 
     const first = createRecordingSink();
@@ -67,13 +103,13 @@ describe("TerminalManager commands", () => {
 
     // A respawn under the same ID (what a reload after a server restart does) gets a plain shell,
     // and the destroyed shell's late exit must not drop the new session from the manager.
-    const firstSession = manager.get(id)!;
+    const [firstSession] = await host.list();
     manager.destroy(id);
     const second = createRecordingSink();
     await manager.attach(id, second.sink, attachOptions);
-    const secondSession = manager.get(id);
-    await firstSession.exited;
-    expect(manager.get(id)).toBe(secondSession);
+    await until(() => processGone(firstSession!.pid));
+    expect(manager.get(id)).toBeDefined();
+    expect((await host.list()).map((s) => s.epoch)).not.toContain(firstSession!.epoch);
     manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
     await until(() => second.outputText().includes("done-2"));
     expect(second.outputText()).not.toContain("hello-from-42");
@@ -81,33 +117,42 @@ describe("TerminalManager commands", () => {
 
   test("the session keeps the panel's worktree apart from the shell's cwd", async () => {
     process.env.SHELL = "/bin/sh";
-    const manager = createManager();
+    const host = createHost();
+    const manager = createManager([], host);
     const id = crypto.randomUUID();
-    await manager.attach(id, createRecordingSink().sink, { ...attachOptions, worktreePath: "/" });
-    expect(manager.get(id)?.cwd).toBe("/tmp");
-    expect(manager.get(id)?.worktreePath).toBe("/");
+    await manager.attach(id, createRecordingSink().sink, {
+      ...attachOptions,
+      worktreePath: "/",
+      windowId: "w1",
+    });
+    const meta = { worktreePath: "/", cwd: "/tmp", windowId: "w1" };
+    expect(manager.get(id)?.meta).toEqual(meta);
+    // The host holds the same, for a server that has to find its sessions again.
+    expect((await host.list()).map((s) => s.meta)).toEqual([meta]);
 
     const plain = crypto.randomUUID();
     await manager.attach(plain, createRecordingSink().sink, attachOptions);
-    expect(manager.get(plain)?.worktreePath).toBe("/tmp");
+    expect(manager.get(plain)?.meta).toEqual({ worktreePath: "/tmp", cwd: "/tmp" });
   });
 
   test("a shell spawned with no client runs its command, and a later attach binds to it", async () => {
     process.env.SHELL = "/bin/sh";
-    const manager = createManager();
+    const host = createHost();
+    const manager = createManager([], host);
     const id = crypto.randomUUID();
 
     await manager.ensureSpawned(id, { ...attachOptions, command: "echo hello-from-$((40+2))" });
-    const session = manager.get(id);
+    const spawned = await host.list();
     await manager.ensureSpawned(id, attachOptions);
-    expect(manager.get(id)).toBe(session);
-    expect(session?.attached).toBe(false);
+    expect((await host.list()).map((s) => s.epoch)).toEqual([spawned[0]!.epoch]);
+    expect(manager.get(id)?.attached).toBe(false);
 
     const sink = createRecordingSink();
     await manager.attach(id, sink.sink, attachOptions);
     const shown = () => sink.states.map((s) => s.snapshot ?? "").join("") + sink.outputText();
     await until(() => shown().includes("hello-from-42"));
-    expect(manager.get(id)).toBe(session);
+    expect(sink.states[0]?.epoch).toBe(spawned[0]!.epoch);
+    expect(manager.get(id)?.attached).toBe(true);
   });
 
   test("shells don't inherit a coding agent's variables from the server", async () => {
@@ -240,7 +285,8 @@ describe("TerminalManager toolchain environments", () => {
     const gate = new Promise<null>((resolve) => {
       release = () => resolve(null);
     });
-    return { manager: createManager([contributor(() => gate)]), release };
+    const host = createHost();
+    return { manager: createManager([contributor(() => gate)], host), host, release };
   }
 
   test("a panel attaching while a command's shell starts gets that shell, command included", async () => {
@@ -270,7 +316,7 @@ describe("TerminalManager toolchain environments", () => {
 
   test("input, a resize and the command sent while the shell starts all reach it", async () => {
     process.env.SHELL = "/bin/sh";
-    const { manager, release } = gatedManager();
+    const { manager, host, release } = gatedManager();
     const id = crypto.randomUUID();
     const sink = createRecordingSink();
     const attached = manager.attach(id, sink.sink, {
@@ -285,7 +331,9 @@ describe("TerminalManager toolchain environments", () => {
     expect(sink.outputText().indexOf("first-2")).toBeLessThan(
       sink.outputText().indexOf("second-4"),
     );
-    expect(manager.get(id)?.cols).toBe(100);
+    expect((await host.list()).map(({ cols, rows }) => ({ cols, rows }))).toEqual([
+      { cols: 100, rows: 30 },
+    ]);
   });
 });
 
@@ -373,18 +421,306 @@ describe("ending a removed worktree's sessions", () => {
     release();
     await started;
 
-    expect(manager.get(id)?.worktreePath).toBe("/wt/after");
+    expect(manager.get(id)?.meta.worktreePath).toBe("/wt/after");
   });
 
   test("a moved worktree's sessions are found at the new path", async () => {
     process.env.SHELL = "/bin/sh";
-    const manager = createManager();
+    const host = createHost();
+    const manager = createManager([], host);
     const id = crypto.randomUUID();
     await manager.ensureSpawned(id, inWorktree("/wt/before"));
 
     manager.retargetWorktree("/wt/before", "/wt/after");
+    expect((await host.list()).map((s) => s.meta)).toEqual([
+      { worktreePath: "/wt/after", cwd: "/tmp" },
+    ]);
 
     expect(end(manager, "/wt/before")).toEqual([]);
     expect(end(manager, "/wt/after")).toEqual([id]);
+  });
+});
+
+describe("TerminalManager host events", () => {
+  const originalShell = process.env.SHELL;
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  test("notifications pass the server's sequence settings and are filed under the worktree", async () => {
+    process.env.SHELL = "/bin/sh";
+    const notifications: unknown[] = [];
+    const manager = createManager([], createHost(), {
+      isSequenceEnabled: (sequence) => sequence !== "osc9",
+      onNotification: (id, meta, payload) => notifications.push({ id, meta, payload }),
+    });
+    const id = crypto.randomUUID();
+    // OSC 9 comes first in the stream, so it has been dropped by the time OSC 777 is reported.
+    await manager.ensureSpawned(id, {
+      ...attachOptions,
+      worktreePath: "/wt/a",
+      command: String.raw`printf '\033]9;nine\007\033]777;notify;T;B\007'`,
+    });
+    await until(() => notifications.length > 0);
+    expect(notifications).toEqual([
+      {
+        id,
+        meta: { worktreePath: "/wt/a", cwd: "/tmp" },
+        payload: { title: "T", body: "B", urgency: "normal" },
+      },
+    ]);
+  });
+
+  test("an exit reaches the attached client and the hook, and ends the session", async () => {
+    process.env.SHELL = "/bin/sh";
+    const exits: unknown[] = [];
+    const manager = createManager([], createHost(), {
+      onExit: (id, exitCode) => exits.push({ id, exitCode }),
+    });
+    const id = crypto.randomUUID();
+    const sink = createRecordingSink();
+    await manager.attach(id, sink.sink, { ...attachOptions, command: "exit 3" });
+    await until(() => exits.length === 1);
+    expect(exits).toEqual([{ id, exitCode: 3 }]);
+    expect(sink.exits).toEqual([3]);
+    expect(manager.get(id)).toBeUndefined();
+  });
+});
+
+/**
+ * A host whose events the test sends, for the orderings a host across a socket can produce: events
+ * already on their way when the manager sends a command that makes them stale.
+ */
+class FakeTerminalHost implements TerminalHost {
+  readonly spawns: TerminalSpawnRequest[] = [];
+  readonly attaches: TerminalAttachRequest[] = [];
+  readonly destroyed: string[] = [];
+  /** When set, spawns wait for `answerSpawns()` instead of succeeding at once. */
+  holdSpawns = false;
+  private held: { resolve: () => void; reject: (err: Error) => void }[] = [];
+  private listener: (event: TerminalHostEvent) => void = () => {};
+
+  spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
+    this.spawns.push(request);
+    const { id, epoch, cols, rows, meta } = request;
+    const info = { id, epoch, offset: 0, pid: 1, cols, rows, meta };
+    if (!this.holdSpawns) return Promise.resolve(info);
+    return new Promise((resolve, reject) => {
+      this.held.push({ resolve: () => resolve(info), reject });
+    });
+  }
+  /** Answer every held spawn, with `error` if given. */
+  answerSpawns(error?: Error): void {
+    for (const { resolve, reject } of this.held.splice(0)) {
+      if (error) reject(error);
+      else resolve();
+    }
+  }
+  list(): Promise<TerminalSessionInfo[]> {
+    return Promise.resolve([]);
+  }
+  attach(request: TerminalAttachRequest): Promise<void> {
+    this.attaches.push(request);
+    return Promise.resolve();
+  }
+  detach(): void {}
+  write(): void {}
+  resize(): void {}
+  setScrollback(): void {}
+  ack(): void {}
+  destroy(id: string): void {
+    this.destroyed.push(id);
+  }
+  setMeta(): void {}
+  onEvent(listener: (event: TerminalHostEvent) => void): () => void {
+    this.listener = listener;
+    return () => {};
+  }
+  emit(event: TerminalHostEvent): void {
+    this.listener(event);
+  }
+}
+
+describe("TerminalManager with events in flight", () => {
+  const originalShell = process.env.SHELL;
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  const state = (id: string, epoch: string, offset: number): TerminalState => ({
+    id,
+    epoch,
+    mode: "snapshot",
+    offset,
+    snapshot: "",
+    cols: 80,
+    rows: 24,
+  });
+  const output = (id: string, offset: number): TerminalHostEvent => ({
+    type: "output",
+    id,
+    offset,
+    data: new Uint8Array([0x61]),
+  });
+
+  test("a client gets only its own attach's states, and output only after its state", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    await manager.attach(id, second.sink, attachOptions);
+    const [older, newer] = host.attaches.map((a) => a.attachment);
+    expect(newer).not.toBe(older);
+
+    // Still on its way from before the second attach: the first client's resync and output.
+    host.emit({ type: "state", attachment: older!, state: state(id, "epoch-1", 0) });
+    host.emit(output(id, 0));
+    expect(first.states).toEqual([]);
+    expect(second.states).toEqual([]);
+    expect(second.outputText()).toBe("");
+
+    host.emit({ type: "state", attachment: newer!, state: state(id, "epoch-1", 1) });
+    host.emit(output(id, 1));
+    expect(second.states.map((s) => s.offset)).toEqual([1]);
+    expect(second.outputText()).toBe("a");
+    expect(first.outputText()).toBe("");
+  });
+
+  test("events from an earlier spawn under the same ID do not touch its replacement", async () => {
+    const host = new FakeTerminalHost();
+    const notifications: string[] = [];
+    const exits: string[] = [];
+    const manager = createManager([], host, {
+      isSequenceEnabled: () => true,
+      onNotification: (id) => notifications.push(id),
+      onExit: (id) => exits.push(id),
+    });
+    const id = crypto.randomUUID();
+    await manager.ensureSpawned(id, attachOptions);
+    manager.destroy(id);
+    await manager.ensureSpawned(id, attachOptions);
+    const [earlier, current] = host.spawns.map((spawn) => spawn.epoch);
+    expect(current).not.toBe(earlier);
+
+    host.emit({ type: "osc", id, epoch: earlier!, code: 9, data: "stale" });
+    host.emit({ type: "exit", id, epoch: earlier!, exitCode: 0 });
+    expect(notifications).toEqual([]);
+    expect(exits).toEqual([]);
+    expect(manager.get(id)).toBeDefined();
+
+    host.emit({ type: "osc", id, epoch: current!, code: 9, data: "current" });
+    host.emit({ type: "exit", id, epoch: current!, exitCode: 0 });
+    expect(notifications).toEqual([id]);
+    expect(exits).toEqual([id]);
+    expect(manager.get(id)).toBeUndefined();
+  });
+
+  /** Attach to a new terminal `id` and resolve once the host has been asked to spawn it. */
+  async function attachWhileSpawning(host: FakeTerminalHost, manager: TerminalManager, id: string) {
+    host.holdSpawns = true;
+    const first = createRecordingSink();
+    const attached = manager.attach(id, first.sink, attachOptions);
+    await until(() => host.spawns.length === 1);
+    return { first, attached };
+  }
+
+  test("an exit that arrives before the spawn's answer ends the session", async () => {
+    const host = new FakeTerminalHost();
+    const exits: string[] = [];
+    const manager = createManager([], host, { onExit: (id) => exits.push(id) });
+    const id = crypto.randomUUID();
+    const { first, attached } = await attachWhileSpawning(host, manager, id);
+
+    host.emit({ type: "exit", id, epoch: host.spawns[0]!.epoch, exitCode: 1 });
+    host.answerSpawns();
+    await attached;
+    expect(exits).toEqual([id]);
+    expect(first.exits).toEqual([1]);
+    expect(manager.get(id)).toBeUndefined();
+    expect(host.attaches).toEqual([]);
+  });
+
+  test("a client that detaches before the spawn's answer is not bound", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const { attached } = await attachWhileSpawning(host, manager, id);
+    expect(manager.hasOrphanSessions()).toBe(false);
+
+    manager.detach(id);
+    expect(manager.hasOrphanSessions()).toBe(true);
+    host.answerSpawns();
+    await attached;
+    expect(host.attaches).toEqual([]);
+    expect(manager.get(id)?.attached).toBe(false);
+  });
+
+  test("of two attaches before the spawn's answer, the later one gets the session", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const { first, attached } = await attachWhileSpawning(host, manager, id);
+    const second = createRecordingSink();
+    const secondAttached = manager.attach(id, second.sink, attachOptions);
+
+    host.answerSpawns();
+    await Promise.all([attached, secondAttached]);
+    expect(host.attaches).toHaveLength(1);
+    const { attachment } = host.attaches[0]!;
+    host.emit({ type: "state", attachment, state: state(id, host.spawns[0]!.epoch, 0) });
+    expect(second.states).toHaveLength(1);
+    expect(first.states).toEqual([]);
+  });
+
+  test("a spawn the host refuses fails every attach waiting on it", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const { attached } = await attachWhileSpawning(host, manager, id);
+    const secondAttached = manager.attach(id, createRecordingSink().sink, attachOptions);
+
+    host.answerSpawns(new Error("no pty"));
+    const results = await Promise.allSettled([attached, secondAttached]);
+    expect(results.map((r) => r.status === "rejected" && String(r.reason))).toEqual([
+      "Error: no pty",
+      "Error: no pty",
+    ]);
+    expect(manager.get(id)).toBeUndefined();
+  });
+
+  test("the spawn request carries the shell, settings, meta and everything typed ahead", async () => {
+    process.env.SHELL = "/bin/sh";
+    let release = () => {};
+    const gate = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const host = new FakeTerminalHost();
+    const manager = createManager([contributor(() => gate)], host);
+    const id = crypto.randomUUID();
+    const started = manager.ensureSpawned(id, {
+      ...attachOptions,
+      worktreePath: "/wt/a",
+      windowId: "w1",
+      command: "echo hi",
+    });
+    manager.write(id, new TextEncoder().encode("typed"));
+    manager.resize(id, 100, 30);
+    release();
+    await started;
+
+    const [spawned] = host.spawns;
+    expect(spawned).toMatchObject({
+      id,
+      argv: ["/bin/sh", "-il"],
+      cwd: "/tmp",
+      cols: 100,
+      rows: 30,
+      scrollbackLines: 50_000,
+      meta: { worktreePath: "/wt/a", cwd: "/tmp", windowId: "w1" },
+    });
+    expect(textDecoder.decode(spawned!.input)).toBe("echo hi\ntyped");
+    expect(Object.values(spawned!.env).every((value) => typeof value === "string")).toBe(true);
   });
 });

@@ -13,7 +13,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
-import type { TerminalState } from "@/api/ws-protocol";
+import type { TerminalState } from "@/api/terminal-stream";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";

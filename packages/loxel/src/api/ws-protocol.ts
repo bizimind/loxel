@@ -6,6 +6,7 @@ import type { ServerNotification } from "./notification-model";
 import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { SchemaConsentState } from "./schema-consent-model";
+import type { TerminalState } from "./terminal-stream";
 import type { ToolchainChangedMessage } from "./toolchain-status-model";
 
 /**
@@ -74,64 +75,6 @@ export const DEFAULT_NOTIFICATION_SEQUENCES: NotificationSequences = {
   osc777: true,
   osc99: true,
 };
-
-/** Default number of scrollback lines. Shared by client settings and server fallback. */
-export const DEFAULT_SCROLLBACK_LINES = 50_000;
-
-/** Bounds for the scrollback setting, enforced on both sides. */
-export const MIN_SCROLLBACK_LINES = 1_000;
-export const MAX_SCROLLBACK_LINES = 100_000;
-
-/**
- * Bounds for a terminal's size. The server-side emulator allocates its cell grid eagerly, so
- * sizes are clamped there as well as fitted on the client.
- */
-export const MIN_TERMINAL_COLS = 2;
-export const MAX_TERMINAL_COLS = 1_000;
-export const MIN_TERMINAL_ROWS = 1;
-export const MAX_TERMINAL_ROWS = 500;
-
-function clampDimension(value: number, min: number, max: number, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(value)));
-}
-
-export function clampTerminalSize(cols: number, rows: number): { cols: number; rows: number } {
-  return {
-    cols: clampDimension(cols, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS, 80),
-    rows: clampDimension(rows, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS, 24),
-  };
-}
-
-export function clampScrollbackLines(lines: number | undefined): number {
-  return Math.max(
-    MIN_SCROLLBACK_LINES,
-    Math.min(MAX_SCROLLBACK_LINES, lines ?? DEFAULT_SCROLLBACK_LINES),
-  );
-}
-
-/**
- * How a `terminal_state` message brings the client's xterm in line with the server's session.
- *
- * - `snapshot`: the serialized screen and scrollback of the server-side emulator at `offset`.
- *   The client resets its xterm and writes `snapshot`, then applies output frames from `offset`.
- * - `resume`: the client's xterm is already current up to `offset`; output frames continue
- *   from there with nothing to replay.
- */
-export type TerminalStateMode = "snapshot" | "resume";
-
-export interface TerminalState {
-  id: string;
-  /** Random per spawn. Offsets are only comparable within one epoch. */
-  epoch: string;
-  mode: TerminalStateMode;
-  /** Stream offset the client's xterm is current to once this message is applied. */
-  offset: number;
-  /** Present only for `snapshot`. */
-  snapshot?: string;
-  cols: number;
-  rows: number;
-}
 
 /**
  * A file the server asks a window to open (`loxel <file>`, Finder). It opens in `worktreePath` if
@@ -202,66 +145,6 @@ export type WsClientMessage =
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }
   | { type: "notifications_clear" };
-
-/**
- * Binary WebSocket frame protocol for terminal I/O.
- * Used for high-frequency data to avoid JSON overhead and preserve raw bytes.
- *
- * Output (server → client): [0x01][terminalId: 36 ASCII bytes][offset: u64 BE][payload]
- *   `offset` is the position of the payload's first byte in the session's output stream,
- *   counted from spawn. The client tracks `offset + payload.length` as the offset it is current
- *   to and sends it back as `sinceOffset` when it re-attaches after a reconnect.
- * Input (client → server):  [0x02][terminalId: 36 ASCII bytes][payload]
- *   `payload` is UTF-8 keyboard input or a terminal reply, written to the PTY verbatim.
- */
-export const BIN_MSG_OUTPUT = 0x01;
-export const BIN_MSG_INPUT = 0x02;
-export const BIN_HEADER_SIZE = 1 + 36; // type byte + UUID
-const OFFSET_SIZE = 8;
-export const BIN_OUTPUT_HEADER_SIZE = BIN_HEADER_SIZE + OFFSET_SIZE;
-
-const textEncoder = new TextEncoder();
-
-function writeHeader(buf: Uint8Array, type: number, terminalId: string): void {
-  buf[0] = type;
-  buf.set(textEncoder.encode(terminalId), 1);
-}
-
-export function encodeInputFrame(terminalId: string, payload: Uint8Array): Uint8Array {
-  const buf = new Uint8Array(BIN_HEADER_SIZE + payload.byteLength);
-  writeHeader(buf, BIN_MSG_INPUT, terminalId);
-  buf.set(payload, BIN_HEADER_SIZE);
-  return buf;
-}
-
-export function encodeOutputFrame(
-  terminalId: string,
-  offset: number,
-  payload: Uint8Array,
-): Uint8Array {
-  const buf = new Uint8Array(BIN_OUTPUT_HEADER_SIZE + payload.byteLength);
-  writeHeader(buf, BIN_MSG_OUTPUT, terminalId);
-  new DataView(buf.buffer, buf.byteOffset).setBigUint64(BIN_HEADER_SIZE, BigInt(offset));
-  buf.set(payload, BIN_OUTPUT_HEADER_SIZE);
-  return buf;
-}
-
-/** Parse the common header. The caller guarantees `data.byteLength >= BIN_HEADER_SIZE`. */
-export function parseBinaryHeader(data: Uint8Array): { type: number; terminalId: string } {
-  const type = data[0]!;
-  const terminalId = String.fromCharCode(...data.subarray(1, BIN_HEADER_SIZE));
-  return { type, terminalId };
-}
-
-/** Parse an output frame's offset and payload. Returns null if the frame is too short. */
-export function parseOutputFrame(
-  data: Uint8Array,
-): { terminalId: string; offset: number; payload: Uint8Array } | null {
-  if (data.byteLength < BIN_OUTPUT_HEADER_SIZE) return null;
-  const { terminalId } = parseBinaryHeader(data);
-  const offset = Number(new DataView(data.buffer, data.byteOffset).getBigUint64(BIN_HEADER_SIZE));
-  return { terminalId, offset, payload: data.subarray(BIN_OUTPUT_HEADER_SIZE) };
-}
 
 // Close codes of a language-server socket, which tell the client whether to reconnect (see
 // `lsp-connection.ts`).

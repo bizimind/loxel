@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { shellQuote } from "@bizimind/wt/lib";
 import type { Locator, Page } from "@playwright/test";
 
-import { BIN_MSG_OUTPUT, parseOutputFrame } from "../../src/api/ws-protocol";
+import { BIN_MSG_OUTPUT, parseOutputFrame } from "../../src/api/terminal-stream";
 import type { DemoSession } from "./demo-session";
 
 /** How long an agent may take to answer; real requests to real models. */
