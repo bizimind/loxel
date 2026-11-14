@@ -74,6 +74,17 @@ export type TerminalSpawnRequest = z.infer<typeof TerminalSpawnSpecSchema> & {
   input?: Uint8Array;
 };
 
+/**
+ * How a session that ended while no server was connected ended: its program's exit code, and
+ * whether the host still has its output and screen for an attach, or had to let them go to stay
+ * within its limits.
+ */
+export const TerminalSessionEndSchema = z.object({
+  exitCode: z.number().int(),
+  outputKept: z.boolean(),
+});
+export type TerminalSessionEnd = z.infer<typeof TerminalSessionEndSchema>;
+
 export const TerminalSessionInfoSchema = z.object({
   id: TerminalIdSchema,
   /** The spawn's epoch; offsets and `since` points are only meaningful within one epoch. */
@@ -84,6 +95,12 @@ export const TerminalSessionInfoSchema = z.object({
   cols: SizeSchema,
   rows: SizeSchema,
   meta: TerminalSessionMetaSchema,
+  /**
+   * Set when the session's program has ended, while no server was connected: the host kept the
+   * session, so the next server learns how it ended and can attach once to show what its client
+   * missed, after which the host sends the `exit`. Capability `endedSessions` (1.2.0).
+   */
+  ended: TerminalSessionEndSchema.optional(),
 });
 export type TerminalSessionInfo = z.infer<typeof TerminalSessionInfoSchema>;
 
@@ -144,6 +161,31 @@ export const TerminalOscEventSchema = z.object({
 });
 
 /**
+ * A session this side knew as running is listed ended (see {@link TerminalSessionInfo}): found
+ * when a connection to its host is restored. The host keeps it until an attach drains it, which
+ * then gets its `exit`, or a `destroy`. Reported by the client of a host in another process, never
+ * by a host itself, and never sent over the socket.
+ */
+export interface TerminalEndedEvent extends TerminalSessionEnd {
+  type: "ended";
+  id: string;
+  epoch: string;
+}
+
+/**
+ * The session ended without its exit code reaching this side: its host is gone, and the program
+ * with it (`host_lost`), or it ended while the server was not connected to a host that does not
+ * keep ended sessions, or that had to let it go (`exit_unknown`). Reported by the client of a host
+ * in another process, never by a host itself, and never sent over the socket.
+ */
+export interface TerminalLostEvent {
+  type: "lost";
+  id: string;
+  epoch: string;
+  reason: "host_lost" | "exit_unknown";
+}
+
+/**
  * Output for the attached client, in offset order, only after that client's `state`. `frame` is
  * the renderer's binary output frame for it (`encodeOutputFrame`), and `data` is a view of the
  * frame's payload, not a copy: the frame is sent to the renderer as is, never re-encoded.
@@ -160,6 +202,8 @@ export type TerminalHostEvent =
   | z.infer<typeof TerminalStateEventSchema>
   | TerminalOutputEvent
   | z.infer<typeof TerminalExitEventSchema>
+  | TerminalEndedEvent
+  | TerminalLostEvent
   | z.infer<typeof TerminalOscEventSchema>;
 
 /**
@@ -171,10 +215,13 @@ export type TerminalHostEvent =
 export interface TerminalHost {
   /** Start a session. Rejects if the ID is in use or the program cannot be started. */
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo>;
+  /** Every session, ended ones a host kept for this server included, with how they `ended`. */
   list(): Promise<TerminalSessionInfo[]>;
   /**
    * Bind the client: replaces any attached one. Resolves once the attach's `state` event has
    * been delivered, or once it was superseded by another attach, a detach or the session's end.
+   * A session that ended while no server was connected gets its state and the output the client
+   * missed, then its `exit`.
    */
   attach(request: TerminalAttachRequest): Promise<void>;
   /** Stop sending output. The program keeps running and its output keeps being parsed. */
@@ -187,7 +234,7 @@ export interface TerminalHost {
   /** Flow control: the attached client parsed `bytes` more bytes under the sync at `syncOffset`. */
   ack(id: string, syncOffset: number, bytes: number): void;
   /**
-   * Hang up and kill the program. The session is gone at once. Part of the contract: a destroyed
+   * Hang up and kill the program, or forget an ended session. The session is gone at once. Part of the contract: a destroyed
    * session never sends `exit`, even when its program ends later, so the caller removes the
    * session itself when it asks for the destroy.
    */

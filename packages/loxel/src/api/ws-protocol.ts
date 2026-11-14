@@ -15,6 +15,16 @@ import type { ToolchainChangedMessage } from "./toolchain-status-model";
  */
 export type FileMoveSource = "loxel" | "external";
 
+/**
+ * How a terminal's session ended: its program exited, or the terminal host running it stopped
+ * unexpectedly, taking the program with it. A program that exited while no server was connected
+ * may have lost its exit code (null; an older terminal host keeps none), or the output its panel
+ * had not shown yet (`outputLost`), when the host had to let it go to stay within its limits.
+ */
+export type TerminalEnd =
+  | { reason: "exited"; exitCode: number | null; outputLost: boolean }
+  | { reason: "host_lost" };
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // Worktree-scoped (sent to worktree subscribers only)
@@ -50,7 +60,7 @@ export type WsMessage =
     }
   // Global (sent to all clients)
   | { type: "error"; message: string }
-  | { type: "terminal_exit"; id: string; exitCode: number }
+  | ({ type: "terminal_exit"; id: string } & TerminalEnd)
   | ({ type: "terminal_state" } & TerminalState)
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
   | { type: "terminals_changed" }

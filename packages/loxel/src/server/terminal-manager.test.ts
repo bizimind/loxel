@@ -4,6 +4,7 @@ import { createNoopLogger } from "@bizimind/logger";
 
 import type { TerminalState } from "@/api/terminal-stream";
 import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
+import type { TerminalEnd } from "@/api/ws-protocol";
 import type {
   ForegroundProcesses,
   TerminalAttachRequest,
@@ -24,11 +25,11 @@ const textDecoder = new TextDecoder();
 function createRecordingSink() {
   const states: TerminalState[] = [];
   const output: Uint8Array[] = [];
-  const exits: number[] = [];
+  const exits: TerminalEnd[] = [];
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: ({ data }) => output.push(data),
-    sendExit: (exitCode) => exits.push(exitCode),
+    sendExit: (end) => exits.push(end),
   };
   return {
     sink,
@@ -503,14 +504,14 @@ describe("TerminalManager host events", () => {
     process.env.SHELL = "/bin/sh";
     const exits: unknown[] = [];
     const manager = createManager([], createHost(), {
-      onExit: (id, exitCode) => exits.push({ id, exitCode }),
+      onExit: (id, end) => exits.push({ id, end }),
     });
     const id = crypto.randomUUID();
     const sink = createRecordingSink();
     await manager.attach(id, sink.sink, { ...attachOptions, command: "exit 3" });
     await until(() => exits.length === 1);
-    expect(exits).toEqual([{ id, exitCode: 3 }]);
-    expect(sink.exits).toEqual([3]);
+    expect(exits).toEqual([{ id, end: { reason: "exited", exitCode: 3, outputLost: false } }]);
+    expect(sink.exits).toEqual([{ reason: "exited", exitCode: 3, outputLost: false }]);
     expect(manager.get(id)).toBeUndefined();
   });
 });
@@ -646,6 +647,50 @@ describe("TerminalManager with events in flight", () => {
     expect(manager.get(id)).toBeUndefined();
   });
 
+  test("a session lost with its host ends with the reason, and without a made-up exit code", async () => {
+    const host = new FakeTerminalHost();
+    const ends: TerminalEnd[] = [];
+    const manager = createManager([], host, { onExit: (_id, end) => ends.push(end) });
+    const lost = crypto.randomUUID();
+    const unseen = crypto.randomUUID();
+    const client = createRecordingSink();
+    await manager.attach(lost, client.sink, attachOptions);
+    await manager.ensureSpawned(unseen, attachOptions);
+    const [lostSpawn, unseenSpawn] = host.spawns;
+
+    host.emit({ type: "lost", id: lost, epoch: lostSpawn!.epoch, reason: "host_lost" });
+    host.emit({ type: "lost", id: unseen, epoch: unseenSpawn!.epoch, reason: "exit_unknown" });
+    expect(client.exits).toEqual([{ reason: "host_lost" }]);
+    expect(ends).toEqual([
+      { reason: "host_lost" },
+      { reason: "exited", exitCode: null, outputLost: true },
+    ]);
+    expect(manager.running()).toEqual([]);
+  });
+
+  test("a session found ended on a reconnect is recorded at once, and drained when its panel mounts", async () => {
+    const host = new FakeTerminalHost();
+    let changes = 0;
+    const manager = createManager([], host, { onSessionsChanged: () => changes++ });
+    const id = crypto.randomUUID();
+    await manager.ensureSpawned(id, attachOptions);
+    const { epoch } = host.spawns[0]!;
+    expect(manager.hasOrphanSessions()).toBe(true);
+
+    const before = changes;
+    host.emit({ type: "ended", id, epoch, exitCode: 5, outputKept: true });
+    expect(changes).toBe(before + 1);
+    expect(manager.running()).toEqual([]);
+    expect(manager.hasOrphanSessions()).toBe(false);
+    expect(manager.destroyOrphans()).toBe(0);
+
+    const client = createRecordingSink();
+    await manager.attach(id, client.sink, attachOptions);
+    expect(host.spawns).toHaveLength(1);
+    host.emit({ type: "exit", id, epoch, exitCode: 5 });
+    expect(client.exits).toEqual([{ reason: "exited", exitCode: 5, outputLost: false }]);
+  });
+
   /** Attach to a new terminal `id` and resolve once the host has been asked to spawn it. */
   async function attachWhileSpawning(host: FakeTerminalHost, manager: TerminalManager, id: string) {
     host.holdSpawns = true;
@@ -666,7 +711,7 @@ describe("TerminalManager with events in flight", () => {
     host.answerSpawns();
     await attached;
     expect(exits).toEqual([id]);
-    expect(first.exits).toEqual([1]);
+    expect(first.exits).toEqual([{ reason: "exited", exitCode: 1, outputLost: false }]);
     expect(manager.get(id)).toBeUndefined();
     expect(host.attaches).toEqual([]);
   });
@@ -798,6 +843,43 @@ describe("TerminalManager adopting sessions found running", () => {
     manager.adopt([home]);
     expect(host.destroyed).toEqual([]);
     expect(manager.get(home.id)?.meta).toEqual({ worktreePath: null, cwd: "/Users/me" });
+  });
+
+  test("an adopted session that ended meanwhile is neither running nor ended as an orphan", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const ended = {
+      ...info({ worktreePath: "/wt/a", cwd: "/wt/a" }),
+      ended: { exitCode: 2, outputKept: true },
+    };
+    manager.adopt([ended]);
+    expect(manager.running()).toEqual([]);
+    expect(manager.hasOrphanSessions()).toBe(false);
+    expect(manager.destroyOrphans()).toBe(0);
+    expect(host.destroyed).toEqual([]);
+
+    // Its panel mounts later and drains what it missed; the host then reports the exit.
+    const client = createRecordingSink();
+    await manager.attach(ended.id, client.sink, attachOptions);
+    expect(host.spawns).toEqual([]);
+    expect(host.attaches).toEqual([expect.objectContaining({ id: ended.id })]);
+    host.emit({ type: "exit", id: ended.id, epoch: ended.epoch, exitCode: 2 });
+    expect(client.exits).toEqual([{ reason: "exited", exitCode: 2, outputLost: false }]);
+    expect(manager.get(ended.id)).toBeUndefined();
+  });
+
+  test("an ended session whose output the host let go of says so on its exit", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const ended = {
+      ...info({ worktreePath: "/wt/a", cwd: "/wt/a" }),
+      ended: { exitCode: 1, outputKept: false },
+    };
+    manager.adopt([ended]);
+    const client = createRecordingSink();
+    await manager.attach(ended.id, client.sink, attachOptions);
+    host.emit({ type: "exit", id: ended.id, epoch: ended.epoch, exitCode: 1 });
+    expect(client.exits).toEqual([{ reason: "exited", exitCode: 1, outputLost: true }]);
   });
 
   test("a session whose meta it cannot read is ended", () => {

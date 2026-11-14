@@ -5,13 +5,14 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { type Server, createServer } from "node:net";
+import { type Server, type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createNoopLogger } from "@bizimind/logger";
 
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
+import { until } from "@/test/until";
 
 import { openHostConnection } from "./host-connection";
 import { TerminalHostService } from "./host-service";
@@ -20,7 +21,7 @@ import type { InitializeMessage, InitializeResult } from "./protocol";
 import { TERMINAL_HOST_CAPABILITIES, compatibility, sharedCapabilities } from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
 import { SocketTerminalHost } from "./socket-terminal-host";
-import type { ForegroundProcesses, TerminalSpawnRequest } from "./terminal-host";
+import type { ForegroundProcesses, TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
 
 const INITIALIZE: InitializeMessage = {
   type: "initialize",
@@ -41,8 +42,9 @@ function socketPathInTempDir(): string {
 }
 
 /**
- * A host of another version, as a bare socket: it answers `initialize` with `hello`, answers a
- * `foreground_processes` request with `foreground`, and records every message it gets.
+ * A host of another version, as a bare socket: it answers `initialize` with `hello`, a
+ * `foreground_processes` request with `foreground`, a spawn with its session and a `list` with no
+ * session, and records every message it gets.
  */
 async function startFakeHost(
   hello: Omit<InitializeResult, "type">,
@@ -50,19 +52,31 @@ async function startFakeHost(
 ) {
   const socketPath = socketPathInTempDir();
   const received: { type: string }[] = [];
+  const sockets = new Set<Socket>();
   const server: Server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
     const reader = new FrameReader();
+    const answer = (requestId: unknown, value: unknown) =>
+      socket.write(encodeJsonFrame({ type: "result", requestId, value }));
     socket.on("data", (chunk: Buffer) => {
       for (const body of reader.push(chunk)) {
         if (body.kind !== "json") continue;
-        const message = body.value as { type: string; requestId?: number };
+        const message = body.value as {
+          type: string;
+          requestId?: number;
+          request?: TerminalSpawnRequest;
+        };
         received.push(message);
         if (message.type === "initialize") {
           socket.write(encodeJsonFrame({ type: "initialize_result", ...hello }));
         } else if (message.type === "foreground_processes") {
-          socket.write(
-            encodeJsonFrame({ type: "result", requestId: message.requestId, value: foreground }),
-          );
+          answer(message.requestId, foreground);
+        } else if (message.type === "spawn" && message.request) {
+          const { id, epoch, cols, rows, meta } = message.request;
+          answer(message.requestId, { id, epoch, offset: 0, pid: 1, cols, rows, meta });
+        } else if (message.type === "list") {
+          answer(message.requestId, []);
         }
       }
     });
@@ -71,17 +85,47 @@ async function startFakeHost(
     server.listen(socketPath, resolve);
   });
   cleanups.push(() => {
+    for (const socket of sockets) socket.destroy();
     server.close();
   });
-  return { socketPath, received };
+  /** Close every connection, as a blip would. */
+  const cut = () => {
+    for (const socket of sockets) socket.destroy();
+  };
+  return { socketPath, received, cut };
 }
 
-async function connect(socketPath: string): Promise<SocketTerminalHost> {
-  const connection = openHostConnection(socketPath, INITIALIZE);
+/** A host service in this process, as the host process runs one. */
+async function startService() {
+  const socketPath = socketPathInTempDir();
+  const host = new InProcessTerminalHost({ log: createNoopLogger() });
+  const service = new TerminalHostService({
+    host,
+    hostBuildId: "current",
+    log: createNoopLogger(),
+    setLogForward: () => {},
+    onDone: () => {},
+  });
+  await service.listen(socketPath);
+  cleanups.push(() => {
+    host.destroyAll();
+    service.close();
+  });
+  return { socketPath, host };
+}
+
+/** Connect as a server; `events` gets every event, from the first one the host sends on. */
+async function connect(
+  socketPath: string,
+  initialize: InitializeMessage = INITIALIZE,
+  events: TerminalHostEvent[] = [],
+): Promise<SocketTerminalHost> {
+  const connection = openHostConnection(socketPath, initialize);
   const client = new SocketTerminalHost(
-    { hostId: "abcdef01", socketPath, initialize: INITIALIZE, log: createNoopLogger() },
+    { hostId: "abcdef01", socketPath, initialize, log: createNoopLogger() },
     connection,
   );
+  client.onEvent((event) => events.push(event));
   cleanups.push(() => client.drop());
   // The client took the connection in its own callback on it, registered first, so it ran first.
   await connection;
@@ -110,13 +154,13 @@ describe("capabilities", () => {
       protocol: "1.7.0",
       hostBuildId: "newer",
       pid: process.pid,
-      capabilities: ["foregroundProcess", "teleport"],
+      capabilities: [...TERMINAL_HOST_CAPABILITIES, "teleport"],
     };
     expect(compatibility(hello, INITIALIZE)).toMatchObject({
       status: "degraded",
       unshared: ["teleport"],
     });
-    expect([...sharedCapabilities(hello, INITIALIZE)]).toEqual(["foregroundProcess"]);
+    expect([...sharedCapabilities(hello, INITIALIZE)]).toEqual([...TERMINAL_HOST_CAPABILITIES]);
 
     const newer = await startFakeHost(hello, { [id]: "vim" });
     const client = await connect(newer.socketPath);
@@ -230,5 +274,64 @@ describe("foregroundProcess", () => {
     const client = await connect(older.socketPath);
     expect(client.initializeResult).toMatchObject({ protocol: "1.0.0" });
     expect(client.initializeResult?.sessions).toBeUndefined();
+  });
+});
+
+describe("endedSessions", () => {
+  const spawnRequest = (script: string): TerminalSpawnRequest => ({
+    id: crypto.randomUUID(),
+    epoch: crypto.randomUUID(),
+    argv: ["/bin/sh", "-c", script],
+    cwd: "/tmp",
+    env: { PATH: "/usr/bin:/bin" },
+    cols: 80,
+    rows: 24,
+    scrollbackLines: 100,
+    meta: {},
+  });
+
+  test("with an older host, a session that ended during a reconnect is lost, its code unknown", async () => {
+    const older = await startFakeHost({
+      protocol: "1.1.0",
+      hostBuildId: "older",
+      pid: process.pid,
+      capabilities: ["foregroundProcess"],
+    });
+    const client = await connect(older.socketPath);
+    expect(client.supports("endedSessions")).toBe(false);
+    const events: TerminalHostEvent[] = [];
+    client.onEvent((event) => events.push(event));
+    const spawned = spawnRequest("exit 3");
+    await client.spawn(spawned);
+
+    // The connection drops; the older host forgets the session that ends meanwhile.
+    older.cut();
+    await until(() => events.length > 0);
+    expect(events).toEqual([
+      { type: "lost", id: spawned.id, epoch: spawned.epoch, reason: "exit_unknown" },
+    ]);
+  });
+
+  test("an older server gets the notifications raised without it, but not the ended sessions", async () => {
+    const { socketPath, host } = await startService();
+    // No server yet: the session ends, and its notification is queued, for the next one.
+    const raised: TerminalHostEvent[] = [];
+    host.onEvent((event) => raised.push(event));
+    const ended = await host.spawn(spawnRequest("printf '\\033]9;done\\007'; exit 3"));
+    await until(() => raised.length > 0 && host.endedSessionCount === 1);
+
+    const olderServer: InitializeMessage = {
+      ...INITIALIZE,
+      protocol: "1.1.0",
+      capabilities: ["foregroundProcess"],
+    };
+    const events: TerminalHostEvent[] = [];
+    const client = await connect(socketPath, olderServer, events);
+    // Answered after anything the host sent on connecting.
+    expect(await client.list()).toEqual([]);
+    expect(events).toEqual([
+      { type: "osc", id: ended.id, epoch: ended.epoch, code: 9, data: "done" },
+    ]);
+    expect(host.endedSessionCount).toBe(0);
   });
 });

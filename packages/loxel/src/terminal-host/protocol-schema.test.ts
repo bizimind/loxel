@@ -37,6 +37,9 @@ function refusal(verdict: SnapshotVerdict): string {
 
 describe("snapshotVerdict", () => {
   const base = currentProtocolSnapshot();
+  const [major, minor] = base.protocol.split(".").map(Number);
+  /** The version a change needing a minor bump of `base` would take. */
+  const nextMinor = `${major}.${minor! + 1}.0`;
   const withProtocol = (snapshot: ProtocolSnapshot, protocol: string) => ({
     ...snapshot,
     protocol,
@@ -60,7 +63,7 @@ describe("snapshotVerdict", () => {
     const message = refusal(snapshotVerdict(base, after));
     expect(message).toContain("without a minor bump");
     expect(message).toContain("server resize.hint is a new optional field");
-    expect(snapshotVerdict(base, withProtocol(after, "1.2.0"))).toEqual({ status: "outdated" });
+    expect(snapshotVerdict(base, withProtocol(after, nextMinor))).toEqual({ status: "outdated" });
   });
 
   test("a removed field, a new required one or a retyped one needs a major bump", () => {
@@ -86,12 +89,12 @@ describe("snapshotVerdict", () => {
 
   test("a new message needs a new capability to gate it, and a minor bump", () => {
     const after = withServerMessage("fly", { type: "object", properties: {}, required: [] });
-    expect(refusal(snapshotVerdict(base, withProtocol(after, "1.2.0")))).toContain(
+    expect(refusal(snapshotVerdict(base, withProtocol(after, nextMinor)))).toContain(
       "need a new capability",
     );
     const gated = { ...after, capabilities: [...base.capabilities, "fly"] };
     expect(refusal(snapshotVerdict(base, gated))).toContain("without a minor bump");
-    expect(snapshotVerdict(base, withProtocol(gated, "1.2.0"))).toEqual({ status: "outdated" });
+    expect(snapshotVerdict(base, withProtocol(gated, nextMinor))).toEqual({ status: "outdated" });
   });
 
   test("the bootstrap layer may gain an optional field, never lose or retype one", () => {
@@ -107,7 +110,7 @@ describe("snapshotVerdict", () => {
     expect(refusal(snapshotVerdict(base, withProtocol(removed, "2.0.0")))).toContain(
       "bootstrap layer is frozen",
     );
-    expect(snapshotVerdict(removed, withProtocol(base, "1.2.0"))).toEqual({ status: "outdated" });
+    expect(snapshotVerdict(removed, withProtocol(base, nextMinor))).toEqual({ status: "outdated" });
   });
 
   test("a new bootstrap message is refused: a peer from before it could not parse it", () => {
@@ -115,7 +118,7 @@ describe("snapshotVerdict", () => {
       ...base,
       bootstrap: { ...base.bootstrap, ping: { type: "object", properties: {}, required: [] } },
     };
-    expect(refusal(snapshotVerdict(base, withProtocol(after, "1.2.0")))).toContain(
+    expect(refusal(snapshotVerdict(base, withProtocol(after, nextMinor)))).toContain(
       "bootstrap layer is frozen",
     );
   });
@@ -136,7 +139,7 @@ describe("snapshotVerdict", () => {
         },
       },
     };
-    expect(refusal(snapshotVerdict(base, withProtocol(after, "1.2.0")))).toContain(
+    expect(refusal(snapshotVerdict(base, withProtocol(after, nextMinor)))).toContain(
       "answer of list[].title is a new required field",
     );
     expect(snapshotVerdict(base, withProtocol(after, "2.0.0"))).toEqual({ status: "outdated" });

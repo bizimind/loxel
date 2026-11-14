@@ -77,7 +77,7 @@ function exit(code: number): never {
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     log.info(`Received ${signal}, ending every session`);
-    for (const id of host.sessionIds()) host.destroy(id);
+    host.destroyAll();
     exit(0);
   });
 }

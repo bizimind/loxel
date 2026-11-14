@@ -25,7 +25,7 @@ export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
 
 /** The events a session sends on its own; its exit goes to `onExit`, for the host to announce. */
-export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" }>;
+export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" | "ended" | "lost" }>;
 
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {
@@ -49,6 +49,9 @@ export interface TerminalSessionOptions {
   /** The program ended on its own, after any final resync of a paused client. */
   onExit: (exitCode: number) => void;
 }
+
+/** Identifies one attach of a client, from `TerminalSession.attach()`. */
+export type AttachToken = symbol;
 
 /** Handle returned by `OutputRing.pin()`; only its holder can release that pin. */
 export interface RingPin {
@@ -151,8 +154,10 @@ export class TerminalSession {
   private syncOffset = 0;
   /** Resolvers of snapshots still waiting on the emulator; settled with "" on destroy. */
   private pendingSerializes = new Set<(snapshot: string) => void>();
-  /** Invalidates in-flight snapshots when the client changes. */
+  /** Invalidates in-flight snapshots when the client changes or resyncs. */
   private attachGeneration = 0;
+  /** The current client's attach, or its absence: what `isCurrent` compares tokens with. */
+  private client: AttachToken = Symbol("attach");
   private unacked = 0;
   private paused = false;
   /** The snapshot sync in flight, if any: the exit waits for it, so it reaches the client last. */
@@ -217,15 +222,48 @@ export class TerminalSession {
     return this.attachment !== null;
   }
 
+  /** Bytes of output the resume ring holds. */
+  get retainedBytes(): number {
+    return this.ring.end - this.ring.start;
+  }
+
   /**
    * Bind a client under `attachment`. With a `since` point from this epoch still covered by the
    * resume ring, the client keeps its xterm and only receives the bytes it missed; otherwise it gets
    * a snapshot of the emulator. Replaces any previously attached client. The session counts as
-   * attached from this call on, even while the snapshot is still being produced.
+   * attached from this call on, even while the snapshot is still being produced. Resolves, once the
+   * client is synced or the attach was superseded, to the attach's {@link AttachToken}, which
+   * `isCurrent` checks whenever the caller needs to know whether this attach still holds.
    */
-  async attach(attachment: number, since?: { epoch: string; offset: number }): Promise<void> {
-    const generation = ++this.attachGeneration;
+  async attach(
+    attachment: number,
+    since?: { epoch: string; offset: number },
+  ): Promise<AttachToken> {
+    const token = this.newClient(attachment);
+    await this.sync(attachment, since);
+    // A flow-control resync started meanwhile is this client's too: settle once it is synced.
+    while (this.snapshotSync) await this.snapshotSync.catch(() => {});
+    return token;
+  }
+
+  /**
+   * Whether the attach `token` identifies is still the session's: no attach since (whatever its
+   * attachment number, which a caller may send twice), no detach and no destroy.
+   */
+  isCurrent(token: AttachToken): boolean {
+    return token === this.client && !this.disposed;
+  }
+
+  /** A new client, or none: every earlier attach's token stops being current. */
+  private newClient(attachment: number | null): AttachToken {
     this.attachment = attachment;
+    this.client = Symbol("attach");
+    return this.client;
+  }
+
+  /** Bring the attached client in line, with the missed bytes from `since` or a snapshot. */
+  private async sync(attachment: number, since?: { epoch: string; offset: number }): Promise<void> {
+    const generation = ++this.attachGeneration;
     this.streaming = false;
     this.unacked = 0;
     this.paused = false;
@@ -254,7 +292,7 @@ export class TerminalSession {
     if (this.attachment === null) return;
     this.log.debug(`Detaching terminal ${this.shortId}`);
     this.attachGeneration++;
-    this.attachment = null;
+    this.newClient(null);
     this.streaming = false;
   }
 
@@ -283,7 +321,7 @@ export class TerminalSession {
     this.unacked = Math.max(0, this.unacked - bytes);
     if (!this.paused || this.unacked > this.lowWater || this.attachment === null) return;
     this.log.info(`Terminal ${this.shortId} client caught up, resyncing with a snapshot`);
-    void this.attach(this.attachment);
+    void this.sync(this.attachment);
   }
 
   destroy(): void {
@@ -291,11 +329,19 @@ export class TerminalSession {
     this.log.debug(`Destroying terminal ${this.shortId}`);
     this.disposed = true;
     this.attachGeneration++;
-    this.attachment = null;
+    this.newClient(null);
     // Snapshots in flight would otherwise await write callbacks that never fire.
     for (const resolve of this.pendingSerializes) resolve("");
     this.pendingSerializes.clear();
     this.emulator.dispose();
+    this.hangUp();
+  }
+
+  /**
+   * Close the PTY and kill the program, keeping the screen and the ring: a session whose program
+   * ended can still be attached to, to show what it printed last.
+   */
+  hangUp(): void {
     try {
       this.proc.terminal?.close();
       this.proc.kill();
@@ -430,8 +476,8 @@ export class TerminalSession {
     // otherwise get its exit to the client before that snapshot and the output after it.
     while (this.snapshotSync) await this.snapshotSync.catch(() => {});
     // A paused client is still behind; without this final snapshot the tail of the output would
-    // be lost, since the host destroys the session (ring and emulator) right after onExit.
-    if (this.attachment !== null && this.paused) await this.attach(this.attachment);
+    // be lost, since the host may destroy the session (ring and emulator) right after onExit.
+    if (this.attachment !== null && this.paused) await this.sync(this.attachment);
     this.options.onExit(exitCode);
   }
 }

@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
-import type { NotificationSequence } from "@/api/ws-protocol";
+import type { NotificationSequence, TerminalEnd } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
@@ -19,6 +19,7 @@ import type {
   TerminalHost,
   TerminalHostEvent,
   TerminalOutputEvent,
+  TerminalSessionEnd,
   TerminalSessionInfo,
 } from "@/terminal-host";
 
@@ -44,7 +45,7 @@ export interface TerminalSink {
   sendState(state: TerminalState): void;
   /** Output from the host, with the renderer frame to forward as is. */
   sendOutput(output: TerminalOutput): void;
-  sendExit(exitCode: number): void;
+  sendExit(end: TerminalEnd): void;
 }
 
 /** What the server keeps in a session's host meta, read back from the host after a restart. */
@@ -90,8 +91,11 @@ export interface TerminalAttachOptions extends TerminalSpawnOptions {
 export interface TerminalManagerHooks {
   isSequenceEnabled: (sequence: NotificationSequence) => boolean;
   onNotification: (id: string, meta: TerminalMeta, payload: OscPayload) => void;
-  /** Called after a session whose program exited on its own has been removed. */
-  onExit: (id: string, exitCode: number) => void;
+  /**
+   * Called after a session that ended on its own (its program exited, or its host was lost) has
+   * been removed.
+   */
+  onExit: (id: string, end: TerminalEnd) => void;
   /** What contributes to a new shell's environment, applied in this order. */
   toolchainEnvs: readonly ToolchainEnvContributor[];
   /** A session was added (spawned or adopted) or removed, for whoever lists them. */
@@ -173,6 +177,12 @@ interface ManagedSession {
   attachment: number;
   /** True once the sink has received its state: output from then on is its own. */
   live: boolean;
+  /**
+   * Set once its program ended while no server was connected, and the host kept it: the next
+   * attach shows what its client missed, then its exit. It no longer counts as running, nor as an
+   * orphan to end, so a panel that mounts later still gets what it missed.
+   */
+  ended: TerminalSessionEnd | null;
 }
 
 /** What `get()` reports about a session. */
@@ -215,6 +225,7 @@ export class TerminalManager {
         sink: null,
         attachment: 0,
         live: false,
+        ended: info.ended ?? null,
       });
     }
     this.hooks.onSessionsChanged?.();
@@ -222,7 +233,9 @@ export class TerminalManager {
 
   /** Every session running in the host, or being spawned there, with its meta. */
   running(): { id: string; meta: TerminalMeta }[] {
-    return [...this.sessions].map(([id, session]) => ({ id, meta: session.meta }));
+    return [...this.sessions]
+      .filter(([, session]) => !session.ended)
+      .map(([id, session]) => ({ id, meta: session.meta }));
   }
 
   /** The foreground program of each session whose host can tell; see `TerminalHost`. */
@@ -397,6 +410,7 @@ export class TerminalManager {
       sink: pending.sink,
       attachment: 0,
       live: false,
+      ended: null,
     };
     this.sessions.set(id, session);
     this.hooks.onSessionsChanged?.();
@@ -429,14 +443,34 @@ export class TerminalManager {
         return;
       }
       case "exit": {
+        const outputLost = this.sessions.get(event.id)?.ended?.outputKept === false;
+        this.onEnded(event.id, event.epoch, {
+          reason: "exited",
+          exitCode: event.exitCode,
+          outputLost,
+        });
+        return;
+      }
+      case "ended": {
         const session = this.sessions.get(event.id);
         if (!session || session.epoch !== event.epoch) return;
-        this.sessions.delete(event.id);
-        session.sink?.sendExit(event.exitCode);
-        this.hooks.onExit(event.id, event.exitCode);
+        const known = session.ended;
+        if (known?.exitCode === event.exitCode && known.outputKept === event.outputKept) return;
+        // Listed again on every restored connection; the host may have let its output go since.
+        session.ended = { exitCode: event.exitCode, outputKept: event.outputKept };
+        log.info(`Terminal ${event.id.slice(0, 8)} ended with code ${event.exitCode} meanwhile`);
         this.hooks.onSessionsChanged?.();
         return;
       }
+      case "lost":
+        this.onEnded(
+          event.id,
+          event.epoch,
+          event.reason === "host_lost"
+            ? { reason: "host_lost" }
+            : { reason: "exited", exitCode: null, outputLost: true },
+        );
+        return;
       case "osc": {
         const session = this.sessions.get(event.id);
         if (!session || session.epoch !== event.epoch) return;
@@ -451,6 +485,15 @@ export class TerminalManager {
         throw new Error(`Unknown terminal host event: ${JSON.stringify(unknownEvent)}`);
       }
     }
+  }
+
+  private onEnded(id: string, epoch: string, end: TerminalEnd): void {
+    const session = this.sessions.get(id);
+    if (!session || session.epoch !== epoch) return;
+    this.sessions.delete(id);
+    session.sink?.sendExit(end);
+    this.hooks.onExit(id, end);
+    this.hooks.onSessionsChanged?.();
   }
 
   detach(id: string): void {
@@ -528,17 +571,20 @@ export class TerminalManager {
     }
   }
 
-  /** True if any session has no attached client. */
+  /** True if any running session has no attached client. */
   hasOrphanSessions(): boolean {
     for (const session of this.sessions.values()) {
-      if (!session.sink) return true;
+      if (!session.sink && !session.ended) return true;
     }
     return false;
   }
 
-  /** Destroy every session without an attached client. Returns the number destroyed. */
+  /**
+   * Destroy every running session without an attached client. Ended ones are kept for their
+   * panels to show what they missed. Returns the number destroyed.
+   */
   destroyOrphans(): number {
-    const orphans = [...this.sessions].filter(([, s]) => !s.sink).map(([id]) => id);
+    const orphans = [...this.sessions].filter(([, s]) => !s.sink && !s.ended).map(([id]) => id);
     for (const id of orphans) this.destroy(id);
     return orphans.length;
   }
