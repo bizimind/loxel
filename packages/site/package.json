@@ -21,7 +21,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^7.3.5",
+    "astro": "^7.4.7",
     "posthog-js": "^1.438.18",
     "satteri": "0.10.5",
     "sharp": "^0.35.5",
