@@ -57,7 +57,10 @@ type RequestType = keyof typeof RESULT_SCHEMAS;
 
 /**
  * How long a host has to answer each request, from when it is made (or, for a host still starting,
- * from when its first connection is up). A host that does not is unresponsive.
+ * from when its first connection is up). A spawn or list it does not answer in time fails, and the
+ * host is unresponsive. An attach keeps waiting: its panel is told the host is unresponsive, and
+ * gets the session once the host answers. A `foreground_processes` request fails alone, since its
+ * `ps` can be slow on a busy machine while the host itself is fine.
  */
 export const REQUEST_TIMEOUTS_MS = {
   spawn: 10_000,
@@ -118,9 +121,10 @@ export interface SocketTerminalHostOptions {
   pid?: number;
   /**
    * For a host added before its sessions are known (found running, but it did not answer): the
-   * sessions of the first list it answers. Until then, none of them is ended as unknown.
+   * sessions of the first list it answers, returning the ones the caller takes; the host ends the
+   * others. Until then, none of them is ended as unknown.
    */
-  onSessionsFound?: (sessions: TerminalSessionInfo[]) => void;
+  onSessionsFound?: (sessions: TerminalSessionInfo[]) => TerminalSessionInfo[];
   /** Replaces the process check, for tests. */
   isProcessAlive?: (pid: number) => boolean;
   /** Replaces {@link openHostConnection} after the first connection, for tests. */
@@ -151,6 +155,8 @@ export class SocketTerminalHost implements TerminalHost {
   private unresponsiveSince: number | null = null;
   /** False for a host added before its sessions are known, until its first list. */
   private sessionsKnown: boolean;
+  /** Why the latest restore failed. */
+  private restoreError: unknown = null;
   private readonly log: ChildLogger;
   private readonly perfLog: ChildLogger;
 
@@ -173,7 +179,8 @@ export class SocketTerminalHost implements TerminalHost {
       this.state = "reconnecting";
       this.reconnectingSince = Date.now();
       this.unresponsiveSince = this.reconnectingSince;
-      void this.reconnect();
+      // Once the caller has its listeners on it, should the first attempt find the host gone.
+      queueMicrotask(() => void this.reconnect());
       return;
     }
     connection.then(
@@ -272,6 +279,10 @@ export class SocketTerminalHost implements TerminalHost {
       sent: this.state === "connected",
       since: request.since && { ...request.since },
     };
+    // A panel attaching to a host that is not answering learns so now, not when it answers.
+    if (this.unresponsiveSince !== null && known.confirmed) {
+      this.emit({ type: "unresponsive", id: request.id, epoch: known.epoch });
+    }
     return this.request<void>(
       "attach",
       { request },
@@ -318,8 +329,13 @@ export class SocketTerminalHost implements TerminalHost {
    * now, can tell nothing, so the answer is empty.
    */
   foregroundProcesses(): Promise<ForegroundProcesses> {
-    // Only on a live connection: one being restored may never be, and the caller is waiting.
-    if (this.state !== "connected" || !this.supports("foregroundProcess")) {
+    // Only on a live connection that answers: one being restored may never be, a host that does
+    // not answer would only keep the caller waiting.
+    if (
+      this.state !== "connected" ||
+      this.unresponsiveSince !== null ||
+      !this.supports("foregroundProcess")
+    ) {
       return Promise.resolve({});
     }
     return this.request("foreground_processes", {}, (value) =>
@@ -486,16 +502,24 @@ export class SocketTerminalHost implements TerminalHost {
   }
 
   private onRequestTimeout(requestId: number, timeoutMs: number): void {
-    const request = this.settle(requestId);
+    const request = this.pending.get(requestId);
     if (!request) return;
-    const name = request.type.replace("_", " ");
     const seconds = timeoutMs / 1000;
-    const failure =
-      this.state === "connected"
-        ? `did not answer a ${name} request within ${seconds} s`
-        : `could not be reached for a ${name} request within ${seconds} s`;
-    if (this.unresponsiveSince === null) this.markUnresponsive(`it ${failure}`);
-    else this.log.warn(`The terminal host ${failure}`, { hostBuildId: this.hello?.hostBuildId });
+    const failure = this.connection
+      ? `did not answer its ${request.type.replace("_", " ")} request within ${seconds} s`
+      : `could not be reached for its ${request.type.replace("_", " ")} request within ${seconds} s`;
+    if (request.attach) {
+      // Still bound to its panel, which gets the session once the host answers: only told.
+      request.timer = null;
+      this.markUnresponsive(`it ${failure}`);
+      return;
+    }
+    this.settle(requestId);
+    // Restoring a connection counts it as one failed attempt, logged as such.
+    if (request.type !== "foreground_processes" && !request.internal) {
+      if (this.unresponsiveSince === null) this.markUnresponsive(`it ${failure}`);
+      else this.log.warn(`The terminal host ${failure}`, { hostBuildId: this.hello?.hostBuildId });
+    }
     // A spawn the host may still get to: the destroy follows it, so the host never runs it unseen.
     if (request.spawn) this.sendJson({ type: "destroy", id: request.spawn.id });
     request.reject(new Error(`Terminal host ${this.hostId} ${failure}`));
@@ -571,8 +595,9 @@ export class SocketTerminalHost implements TerminalHost {
   private onMessage(message: HostMessage): void {
     switch (message.type) {
       case "result": {
-        this.markResponsive();
         const request = this.settle(message.requestId);
+        // A late answer counts too; the restore's own list says so once the restore is done.
+        if (!request?.internal) this.markResponsive();
         if (!request) return;
         try {
           request.resolve(request.parse(message.value));
@@ -582,8 +607,8 @@ export class SocketTerminalHost implements TerminalHost {
         return;
       }
       case "error": {
-        this.markResponsive();
         const request = this.settle(message.requestId);
+        if (!request?.internal) this.markResponsive();
         if (!request) return;
         const cause = message.cause === undefined ? undefined : new Error(message.cause);
         request.reject(new Error(message.message, { cause }));
@@ -659,6 +684,29 @@ export class SocketTerminalHost implements TerminalHost {
     const isAlive = this.options.isProcessAlive ?? isProcessRunning;
     let failures = 0;
     let reportedAt = 0;
+    const noteFailure = (err: unknown) => {
+      failures++;
+      const now = Date.now();
+      if (failures === 1) {
+        reportedAt = now;
+        this.log.warn("Could not reconnect to the terminal host yet; retrying", {
+          error: err,
+          pid,
+        });
+      } else if (now - reportedAt >= RECONNECT_REPORT_INTERVAL_MS) {
+        const minutes = Math.round((now - (this.reconnectingSince ?? now)) / 60_000);
+        reportedAt = now;
+        this.log.warn(
+          `Still cannot reconnect to the terminal host: ${failures} attempts in ${minutes} min`,
+          { error: err, pid },
+        );
+      }
+      if (now - (this.reconnectingSince ?? now) >= STALLED_AFTER_MS) {
+        this.markUnresponsive(
+          `no answer for ${STALLED_AFTER_MS / 1000} s while its process ${pid} runs`,
+        );
+      }
+    };
     for (let attempt = 0; ; attempt++) {
       const delay =
         RECONNECT_DELAYS_MS[attempt] ??
@@ -684,35 +732,17 @@ export class SocketTerminalHost implements TerminalHost {
           this.markGone(reason, err);
           return;
         }
-        failures++;
-        const now = Date.now();
-        if (failures === 1) {
-          reportedAt = now;
-          this.log.warn("Could not reconnect to the terminal host yet; retrying", {
-            error: err,
-            pid,
-          });
-        } else if (now - reportedAt >= RECONNECT_REPORT_INTERVAL_MS) {
-          const minutes = Math.round((now - (this.reconnectingSince ?? now)) / 60_000);
-          reportedAt = now;
-          this.log.warn(
-            `Still cannot reconnect to the terminal host: ${failures} attempts in ${minutes} min`,
-            { error: err, pid },
-          );
-        }
-        if (now - (this.reconnectingSince ?? now) >= STALLED_AFTER_MS) {
-          this.markUnresponsive(
-            `no answer for ${STALLED_AFTER_MS / 1000} s while its process ${pid} runs`,
-          );
-        }
+        noteFailure(err);
         continue;
       }
       if (this.state !== "reconnecting") {
         connection.destroy();
         return;
       }
-      await this.restore(connection);
-      return;
+      // A host that answers the handshake but not the list is one more failed attempt.
+      const outcome = await this.restore(connection);
+      if (outcome !== "failed") return;
+      noteFailure(this.restoreError);
     }
   }
 
@@ -732,16 +762,21 @@ export class SocketTerminalHost implements TerminalHost {
     return connect(this.options.socketPath, this.options.initialize);
   }
 
-  /** Bring the client in line with the host over a fresh connection, then resume sending. */
-  private async restore(connection: HostConnection): Promise<void> {
+  /**
+   * Bring the client in line with the host over a fresh connection, then resume sending.
+   * `failed` (why in `restoreError`) when the connection closed or the host did not list its
+   * sessions in time, and `stopped` when the client was left meanwhile.
+   */
+  private async restore(connection: HostConnection): Promise<"restored" | "failed" | "stopped"> {
     this.handshake(connection);
+    let restored = false;
+    const closed = Promise.withResolvers<never>();
+    closed.promise.catch(() => {});
     connection.start({
       onBody: (body) => this.onBody(connection, body),
       onClose: (error) => {
-        if (this.connection !== connection) return;
-        // Closed again before it was restored: start over.
-        this.state = "connected";
-        this.onConnectionClosed(connection, error);
+        if (restored) this.onConnectionClosed(connection, error);
+        else closed.reject(new Error("The connection closed while it was being restored"));
       },
     });
     const requestId = ++this.lastRequestId;
@@ -763,25 +798,34 @@ export class SocketTerminalHost implements TerminalHost {
     connection.send(encodeJsonFrame({ type: "list", requestId }));
     let sessions: TerminalSessionInfo[];
     try {
-      sessions = await listed;
+      sessions = await Promise.race([listed, closed.promise]);
     } catch (err) {
-      if (this.connection === connection) {
-        this.log.warn("Could not list the terminal host's sessions, reconnecting", { error: err });
-        connection.destroy();
-      }
-      return;
+      this.settle(requestId);
+      if (this.connection !== connection) return "stopped";
+      this.connection = null;
+      connection.destroy();
+      this.restoreError = err;
+      return "failed";
     }
-    if (this.connection !== connection) return;
+    if (this.connection !== connection) return "stopped";
+    let running = new Map(sessions.map((info) => [info.id, info]));
     if (!this.sessionsKnown) {
-      // Found not answering: what it runs is news, not sessions whose destroy was lost.
+      // Found not answering: what it runs is news, not sessions whose destroy was lost. The ones
+      // the caller does not take (a panel gave the ID a new shell meanwhile) are ended.
       this.sessionsKnown = true;
-      this.noteListed(sessions);
-      this.options.onSessionsFound?.(sessions);
-      if (this.state !== "reconnecting" || this.connection !== connection) return;
+      const taken = this.options.onSessionsFound?.(sessions) ?? sessions;
+      const takenIds = new Set(taken.map((info) => info.id));
+      for (const { id } of sessions) {
+        if (!takenIds.has(id)) connection.send(encodeJsonFrame({ type: "destroy", id }));
+      }
+      this.noteListed(taken);
+      running = new Map(taken.map((info) => [info.id, info]));
+      if (this.state !== "reconnecting" || this.connection !== connection) return "stopped";
     }
-    this.reconcile(connection, new Map(sessions.map((info) => [info.id, info])));
+    this.reconcile(connection, running);
     // The exits reconcile reported may have led the caller to leave the host.
-    if (this.state !== "reconnecting" || this.connection !== connection) return;
+    if (this.state !== "reconnecting" || this.connection !== connection) return "stopped";
+    restored = true;
     this.state = "connected";
     this.reconnectingSince = null;
     this.markResponsive();
@@ -790,7 +834,8 @@ export class SocketTerminalHost implements TerminalHost {
       if (request.sent) connection.send(request.frame);
     }
     this.flushOutbox(connection);
-    this.log.info(`Reconnected to the terminal host (${sessions.length} sessions)`);
+    this.log.info(`Reconnected to the terminal host (${running.size} sessions)`);
+    return "restored";
   }
 
   private reconcile(connection: HostConnection, running: Map<string, TerminalSessionInfo>): void {

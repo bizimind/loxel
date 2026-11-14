@@ -33,10 +33,10 @@ describe("terminalNoticeMessage", () => {
     expect(
       terminalNoticeMessage({
         notice: "attach_failed",
-        message: "Terminal host 0a1b2c3d did not answer a spawn request within 10 s",
+        message: "Terminal host 0a1b2c3d did not answer its spawn request within 10 s",
       }),
     ).toBe(
-      "Could not open the terminal: Terminal host 0a1b2c3d did not answer a spawn request within 10 s",
+      "Could not open the terminal: Terminal host 0a1b2c3d did not answer its spawn request within 10 s",
     );
   });
 

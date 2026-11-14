@@ -33,7 +33,7 @@ const HOST_ID = /^[0-9a-f]{8}$/;
 const MAX_SOCKET_PATH_BYTES = 103;
 
 export const HostEntrySchema = z.object({
-  pid: z.number().int(),
+  pid: z.number().int().positive(),
   build: z.string(),
   protocol: z.string(),
   /** The host's socket: in the run directory, or in the temporary directory's fallback. */
@@ -109,6 +109,8 @@ export function ensureRunDir(runDir: string): void {
 
 /** Ask the host at `pid` to end its sessions and exit, as it takes a SIGTERM; one gone is no error. */
 export function signalHost(pid: number): void {
+  // 0 and negative pids name process groups, 1 is launchd: never a host.
+  if (!Number.isInteger(pid) || pid <= 1) return;
   try {
     process.kill(pid, "SIGTERM");
   } catch {

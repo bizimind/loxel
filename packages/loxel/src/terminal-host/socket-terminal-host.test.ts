@@ -570,7 +570,7 @@ describe("SocketTerminalHost and a host that stops answering", () => {
     const failed = pool.spawn(stuckSpawn);
     await sent;
     jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.spawn);
-    await expect(failed).rejects.toThrow("did not answer a spawn request within 10 s");
+    await expect(failed).rejects.toThrow("did not answer its spawn request within 10 s");
     // Its running session is told, and keeps running: nothing ended.
     expect(events).toEqual([{ type: "unresponsive", id: first.id, epoch: first.epoch }]);
 
@@ -601,13 +601,73 @@ describe("SocketTerminalHost and a host that stops answering", () => {
     const unanswered = client.list();
     await listed;
     jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.list);
-    await expect(unanswered).rejects.toThrow("did not answer a list request");
+    await expect(unanswered).rejects.toThrow("did not answer its list request");
     expect(client.acceptsNewSessions).toBe(false);
     expect(events).toEqual([{ type: "unresponsive", id: spawned.id, epoch: spawned.epoch }]);
 
     host.script.holdAll = false;
     await client.list();
     expect(client.acceptsNewSessions).toBe(true);
+  });
+
+  test("an attach the host does not answer in time keeps waiting: its panel is told, and gets the session once the host answers", async () => {
+    const host = await startScriptedHost();
+    const { client, events } = connect(host.socketPath);
+    await client.list();
+    const spawned = request("exec sleep 30");
+    await client.spawn(spawned);
+
+    jest.useFakeTimers();
+    let attached = false;
+    const sent = host.whenReceived(() => host.connections[0]!.received.at(-1)?.type === "attach");
+    const attaching = client.attach({ id: spawned.id, attachment: 1 }).then(() => {
+      attached = true;
+    });
+    await sent;
+    jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.attach);
+    await settle();
+    expect(attached).toBe(false);
+    expect(client.acceptsNewSessions).toBe(false);
+    const told: TerminalHostEvent = { type: "unresponsive", id: spawned.id, epoch: spawned.epoch };
+    expect(events).toEqual([told]);
+    // A panel that attaches meanwhile is told at once.
+    void client.attach({ id: spawned.id, attachment: 2 }).catch(() => {});
+    expect(events).toEqual([told, told]);
+
+    const { requestId } = host.connections[0]!.received.find((m) => m.type === "attach")!;
+    host.connections[0]!.socket.write(encodeJsonFrame({ type: "result", requestId, value: null }));
+    await attaching;
+    expect(client.acceptsNewSessions).toBe(true);
+  });
+
+  test("a host that answers the handshake but not the list is retried with the backoff, without flooding the log", async () => {
+    const host = await startScriptedHost();
+    const recorded = recordingLog();
+    const { client } = connect(host.socketPath, { log: recorded.log, isProcessAlive: () => true });
+    await client.list();
+    host.script.holdList = true;
+
+    jest.useFakeTimers();
+    host.connections[0]!.socket.destroy();
+    const started = Date.now();
+    while (Date.now() - started < RECONNECT_REPORT_INTERVAL_MS + STALLED_AFTER_MS) {
+      const count = host.connections.length;
+      await host.whenReceived(() => host.connections[count]?.received.at(-1)?.type === "list");
+      jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.list);
+      await settle();
+      jest.advanceTimersByTime(STALLED_AFTER_MS);
+    }
+    // One attempt per 40 s or so once unresponsive, rather than one every 10 s.
+    expect(host.connections.length).toBeLessThan(13);
+    expect(recorded.at("warn").map((line) => line.msg)).toEqual([
+      "The connection to the terminal host closed, reconnecting",
+      "Could not reconnect to the terminal host yet; retrying",
+      expect.stringMatching(
+        /^Still cannot reconnect to the terminal host: \d+ attempts in \d+ min$/,
+      ),
+    ]);
+    expect(recorded.at("error")).toHaveLength(1);
+    expect(client.acceptsNewSessions).toBe(false);
   });
 
   test("a host that cannot be reconnected to is reported unresponsive, retried without flooding the log, and resumed once it answers", async () => {

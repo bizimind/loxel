@@ -330,6 +330,7 @@ export class TerminalHostPool implements TerminalHost {
             hostId,
             socketPath,
             entry.pid,
+            entry.build,
             "did not answer the handshake",
             err,
           );
@@ -373,11 +374,17 @@ export class TerminalHostPool implements TerminalHost {
       const sessions = await host.list();
       return { hostId, build: result.hostBuildId, host, sessions };
     } catch (err) {
+      // Gone meanwhile (its process ended, its socket refuses, another server took it over).
+      if (host.isGone) {
+        this.log.warn(`Could not list the sessions of terminal host ${hostId}`, { error: err });
+        return { hostId, build: result.hostBuildId, host: null };
+      }
       // Closing the connection without a disconnect gives it its grace period, which the
       // reconnect cancels once the host answers.
       this.hosts.delete(host);
       host.drop();
-      this.addUnresponsiveHost(hostId, socketPath, result.pid, "did not list its sessions", err);
+      const failure = "did not list its sessions";
+      this.addUnresponsiveHost(hostId, socketPath, result.pid, result.hostBuildId, failure, err);
       return { hostId, build: result.hostBuildId, host: null };
     }
   }
@@ -400,12 +407,13 @@ export class TerminalHostPool implements TerminalHost {
     hostId: string,
     socketPath: string,
     pid: number,
+    hostBuildId: string,
     failure: string,
     cause: unknown,
   ): void {
     this.log.error(
       `Terminal host ${hostId} (pid ${pid}) ${failure}; its terminals are unreachable until it answers`,
-      { pid, error: cause },
+      { pid, hostBuildId, error: cause },
     );
     const host: SocketTerminalHost = this.addHost(hostId, socketPath, null, {
       pid,
@@ -413,16 +421,21 @@ export class TerminalHostPool implements TerminalHost {
     });
   }
 
-  /** The sessions of a host found not answering, now that it does. */
-  private adoptFound(host: SocketTerminalHost, sessions: TerminalSessionInfo[]): void {
+  /**
+   * The sessions of a host found not answering, now that it does: the ones the pool takes, which
+   * the caller adopts. A session whose ID a panel gave a new shell meanwhile is left for the host
+   * to end.
+   */
+  private adoptFound(
+    host: SocketTerminalHost,
+    sessions: TerminalSessionInfo[],
+  ): TerminalSessionInfo[] {
     const adopted: TerminalSessionInfo[] = [];
     for (const info of sessions) {
-      // A panel attached while the host did not answer got a new shell under the ID.
       if (this.owners.has(info.id)) {
         this.log.warn(
           `Ending terminal ${info.id.slice(0, 8)} of terminal host ${host.hostId}: its panel has a new shell`,
         );
-        host.destroy(info.id);
         continue;
       }
       this.owners.set(info.id, { host, epoch: info.epoch });
@@ -432,7 +445,9 @@ export class TerminalHostPool implements TerminalHost {
       `Terminal host ${host.hostId} answers; reattaching ${adopted.length} terminal(s)`,
     );
     if (adopted.length > 0) this.adopt?.(adopted);
-    this.retireIfDone(host);
+    // Let go once the host knows which sessions it keeps, should it keep none.
+    queueMicrotask(() => this.retireIfDone(host));
+    return adopted;
   }
 
   private addHost(
