@@ -191,6 +191,18 @@ function enterHiddenSource(view: EditorView, event: KeyboardEvent): boolean {
   return true;
 }
 
+/** Milkdown focuses CodeMirror even for a whole-node selection; a hidden source must not focus. */
+function preventHiddenSourceFocus(view: EditorView, event: FocusEvent): void {
+  const target = event.target;
+  if (target instanceof HTMLElement && target.closest(`.${COLLAPSED_CLASS} .codemirror-host`)) {
+    // CodeMirror forwards focus-driven updates as a text selection. Blur in capture phase, before
+    // its focus handlers run, so selecting a diagram keeps the whole node selected.
+    target.blur();
+    // Focus the DOM directly: view.focus() would re-enter the node view's selectNode mid-selection.
+    view.dom.focus({ preventScroll: true });
+  }
+}
+
 export const codeBlockSourcePlugin = $prose(
   () =>
     new Plugin<SourceState>({
@@ -206,6 +218,8 @@ export const codeBlockSourcePlugin = $prose(
       },
       appendTransaction: (_trs, _old, state) => releaseCaret(state),
       view: (view) => {
+        const onFocus = (event: FocusEvent) => preventHiddenSourceFocus(view, event);
+        view.dom.addEventListener("focus", onFocus, true);
         // The initial selection comes with no transaction, so its caret is released once mounted.
         // A document of one diagram has no text to release it to yet: an empty transaction lets
         // Crepe add its trailing paragraph, which `appendTransaction` then releases it to.
@@ -218,7 +232,12 @@ export const codeBlockSourcePlugin = $prose(
             view.dispatch(view.state.tr.setMeta(sourceKey, "rendered" satisfies SourceMeta));
           }
         });
-        return { destroy: unsubscribe };
+        return {
+          destroy() {
+            unsubscribe();
+            view.dom.removeEventListener("focus", onFocus, true);
+          },
+        };
       },
       props: {
         decorations: (state) => sourceKey.getState(state)?.decorations,

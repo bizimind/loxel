@@ -33,7 +33,6 @@ import {
   useBrowserBookmarksStore,
   useIsBookmarked,
 } from "@/store/browser-bookmarks";
-import { reattachActiveContent } from "@/store/layout-actions";
 import { isHttpUrl } from "@/url-utils";
 
 import {
@@ -139,7 +138,6 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   useEffect(() => {
     if (panelApi.renderer === "always") return;
     panelApi.setRenderer("always");
-    reattachActiveContent(panelApi.group);
   }, [panelApi]);
 
   // Hand keyboard focus to the page when the panel is activated (e.g. directional focus), or to

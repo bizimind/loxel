@@ -40,7 +40,10 @@ describe.each(VizTypeSchema.options)("the %s page", (vizType) => {
 
 test("the shipped d3 notices match d3's installed dependency tree", async () => {
   // Fails after the installed d3 tree changes; regenerate with `bun src/d3-notices.ts`.
-  expect(await Bun.file(D3_NOTICES_PATH).text()).toBe(buildD3Notices());
+  const notices = await Bun.file(D3_NOTICES_PATH).text();
+  expect(notices).toBe(buildD3Notices());
+  expect(notices).toContain("Based on https://github.com/mourner/quickselect");
+  expect(notices).toContain("ISC license, Copyright 2018 Vladimir Agafonkin.");
 });
 
 test("the served d3 script opens with the shipped notices", async () => {

@@ -43,7 +43,7 @@ import { queryClient } from "@/query-client";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
-import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
+import { activatePanel } from "@/store/layout-actions";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -201,8 +201,6 @@ function addPlacedPanel(
       inactive: !focus,
     });
     if (!joined) rememberBatch(dv, placement, panel.group);
-    // A background `renderer: "always"` tab (a browser) detaches the group's shown content.
-    if (!focus) reattachActiveContent(panel.group);
     // Added before closing, so a group holding only the replaced tab isn't removed in between.
     if (ref && placement?.replace) ref.api.close();
     return panel;

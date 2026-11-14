@@ -3,7 +3,8 @@
  * whole dependency tree), from their installed LICENSE files, one section per distinct text.
  * The build was made from the versions current when d3 was published; the installed texts carry
  * the same terms with copyright ranges at least as wide. Notices that live only in a source
- * comment, which minification strips, are listed in IN_SOURCE_NOTICES and read from that source.
+ * comment, which minification strips, are listed in IN_SOURCE_NOTICES and read from the shipped
+ * unminified distribution (d3-array no longer publishes its src/ directory).
  *
  * Regenerate after any change to the installed d3 tree: `bun src/d3-notices.ts`.
  * serve.test.ts fails while the committed file differs from what this builds.
@@ -34,7 +35,7 @@ function readPackage(dir: string): InstalledPackage {
 const NOT_BUNDLED = new Set(["commander", "iconv-lite", "rw"]);
 
 // Bundled code whose notice is only a comment in its source file, not in the package's LICENSE.
-const IN_SOURCE_NOTICES = [{ name: "d3-array", file: "src/quickselect.js" }];
+const IN_SOURCE_NOTICES = [{ name: "d3-array", file: "dist/d3-array.js" }];
 
 /** d3 and its dependency tree as installed, each package's directory keyed by `name@version`. */
 function d3Tree(): Map<string, string> {

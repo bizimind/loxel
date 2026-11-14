@@ -1,13 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import {
-  DockviewComponent,
-  Orientation,
-  type DockviewApi,
-  type IDockviewPanel,
-} from "dockview-react";
+import { DockviewComponent, Orientation, DockviewApi, type IDockviewPanel } from "dockview-react";
 
-import { activatePanel, reattachActiveContent } from "./layout-actions";
+import { activatePanel } from "./layout-actions";
 
 function setup({ isGroupActiveTab = true, maximized = "none" as "none" | "self" | "other" } = {}) {
   const panelSetActive = mock();
@@ -58,7 +53,7 @@ describe("activatePanel", () => {
   });
 });
 
-describe("reattachActiveContent", () => {
+describe("dockview content attachment", () => {
   function createDockview() {
     const element = document.createElement("div");
     document.body.append(element);
@@ -74,7 +69,35 @@ describe("reattachActiveContent", () => {
     return panel !== undefined && panel.view.content.element.parentElement !== null;
   }
 
-  test("restores content blanked by restoring a background always-rendered tab", () => {
+  test.each(["always", "onlyWhenVisible"] as const)(
+    "activates an already visible %s panel without detaching its content",
+    (renderer) => {
+      const dockview = createDockview();
+      const api = new DockviewApi(dockview);
+      const browser = api.addPanel({ id: "browser", component: "c", renderer });
+      api.addPanel({ id: "editor", component: "c", position: { direction: "right" } });
+      const content = browser.view.content.element;
+      const observer = new MutationObserver(() => {});
+      observer.observe(dockview.element, { childList: true, subtree: true });
+
+      activatePanel(api, browser);
+
+      expect(api.activePanel).toBe(browser);
+      expect(content.isConnected).toBe(true);
+      expect(
+        observer
+          .takeRecords()
+          .some((record) =>
+            [...record.removedNodes].some((node) => node === content || node.contains(content)),
+          ),
+      ).toBe(false);
+      observer.disconnect();
+      dockview.dispose();
+      dockview.element.remove();
+    },
+  );
+
+  test("keeps active content attached when restoring a background always-rendered tab", () => {
     const dockview = createDockview();
     dockview.fromJSON({
       grid: {
@@ -93,13 +116,30 @@ describe("reattachActiveContent", () => {
         browser: { id: "browser", contentComponent: "c", renderer: "always" },
       },
     } as Parameters<DockviewComponent["fromJSON"]>[0]);
-    expect(isAttached(dockview, "editor")).toBe(false);
-
-    for (const group of dockview.groups) reattachActiveContent(group);
     expect(isAttached(dockview, "editor")).toBe(true);
+    dockview.dispose();
+    dockview.element.remove();
   });
 
-  test("restores content blanked by merging a group with a background always-rendered tab", () => {
+  test("keeps active content attached when adding an always-rendered tab in the background", () => {
+    const dockview = createDockview();
+    const api = new DockviewApi(dockview);
+    const editor = api.addPanel({ id: "editor", component: "c" });
+    const browser = api.addPanel({
+      id: "browser",
+      component: "c",
+      renderer: "always",
+      inactive: true,
+    });
+
+    expect(api.activePanel).toBe(editor);
+    expect(isAttached(dockview, "editor")).toBe(true);
+    expect(browser.view.content.element.isConnected).toBe(true);
+    dockview.dispose();
+    dockview.element.remove();
+  });
+
+  test("keeps active content attached when merging a group with a background always-rendered tab", () => {
     const dockview = createDockview();
     dockview.addPanel({ id: "editor", component: "c" });
     dockview.addPanel({ id: "browser", component: "c", renderer: "always" });
@@ -110,13 +150,12 @@ describe("reattachActiveContent", () => {
     editor.api.setActive();
 
     editor.group.api.moveTo({ group: other.group, position: "center" });
-    expect(isAttached(dockview, "editor")).toBe(false);
-
-    reattachActiveContent(editor.group);
     expect(isAttached(dockview, "editor")).toBe(true);
+    dockview.dispose();
+    dockview.element.remove();
   });
 
-  test("restores content blanked by upgrading a background tab's renderer", () => {
+  test("keeps active content attached when upgrading a background tab's renderer", () => {
     const dockview = createDockview();
     dockview.addPanel({ id: "browser", component: "c" });
     dockview.addPanel({ id: "editor", component: "c" });
@@ -124,10 +163,9 @@ describe("reattachActiveContent", () => {
     if (!browser) throw new Error("browser panel missing");
 
     browser.api.setRenderer("always");
-    expect(isAttached(dockview, "editor")).toBe(false);
-
-    reattachActiveContent(browser.group);
     expect(isAttached(dockview, "editor")).toBe(true);
     expect(browser.view.content.element.isConnected).toBe(true);
+    dockview.dispose();
+    dockview.element.remove();
   });
 });
