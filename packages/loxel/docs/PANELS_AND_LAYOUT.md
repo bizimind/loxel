@@ -21,7 +21,7 @@ Where to look:
 
 - [outer-dockview-setup.ts](../src/components/dockview/outer-dockview-setup.ts): one-time outer setup, drop constraints, restore and resize callbacks.
 - [default-layout.ts](../src/components/dockview/default-layout.ts): default outer layout, zone constraint re-application, layout-derived state, `nextPanelTitle`.
-- [layout-actions.ts](../src/store/layout-actions.ts): `getGroupZone`, `collapseZone` / `expandZone`, `activatePanel`, `reattachActiveContent`, `findAdjacentCenterGroup`.
+- [layout-actions.ts](../src/store/layout-actions.ts): `getGroupZone`, `collapseZone` / `expandZone`, `activatePanel`, `findAdjacentCenterGroup`.
 
 ## Home
 

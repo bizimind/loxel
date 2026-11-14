@@ -254,10 +254,11 @@ export function GraphPanel() {
       setBranchesConstraints(group, true);
       group.api.setSize({ width: COLLAPSED_WIDTH });
     } else {
+      // Relaxing constraints can lay out the column at its minimum and emit a layout change.
+      // Restore the chosen width in the same turn, before that change records the temporary size.
+      const width = savedWidthRef.current;
       setBranchesConstraints(group, false);
-      requestAnimationFrame(() => {
-        group.api.setSize({ width: savedWidthRef.current });
-      });
+      group.api.setSize({ width });
     }
   }, [branchesPanelCollapsed]);
 

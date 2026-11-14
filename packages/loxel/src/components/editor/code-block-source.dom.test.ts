@@ -319,10 +319,32 @@ describe("mermaid source visibility", () => {
   });
 
   test("selecting a whole block, as the block handle does, opens no source", () => {
-    view.dispatch(
-      view.state.tr.setSelection(NodeSelection.create(view.state.doc, codeStart(0) - 1)),
-    );
+    // With a real DOM selection, CodeMirror synchronizes focus even without a text edit.
+    view.focus();
+    for (const index of [0, 1, LAST, 0]) {
+      const selection = NodeSelection.create(view.state.doc, codeStart(index) - 1);
+      view.dispatch(view.state.tr.setSelection(selection));
+      expect(view.state.selection.eq(selection)).toBe(true);
+      expect(collapsed()).toEqual(AT_REST);
+      expect(sourceShown(index)).toBe(false);
+      expect(block(index).querySelector(".codemirror-host")?.contains(document.activeElement)).toBe(
+        false,
+      );
+      expect(view.hasFocus()).toBe(true);
+    }
+
+    // Editing still moves from a whole-node selection into its source.
+    action(0, "edit").click();
+    expect(view.state.selection).toBeInstanceOf(TextSelection);
+    expect(collapsed()).toEqual(openOnly(0));
+    expect(sourceShown(0)).toBe(true);
+
+    const wholeBlock = NodeSelection.create(view.state.doc, codeStart(0) - 1);
+    view.dispatch(view.state.tr.setSelection(wholeBlock));
+    expect(view.state.selection.eq(wholeBlock)).toBe(true);
     expect(collapsed()).toEqual(AT_REST);
+    select(codeStart(0) + 2);
+    expect(collapsed()).toEqual(openOnly(0));
   });
 
   test("Edit shows the source with the caret at its start; Hide moves the caret out", () => {
