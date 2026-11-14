@@ -9,6 +9,8 @@
  *   build ID, or else one started the first time a session is spawned.
  * - Every other command goes to the host that runs its session. A host of an earlier generation
  *   serves its sessions until the last one ends, and is then let go, which ends it.
+ * - A host found running that does not answer is kept, unresponsive: it gets no new sessions,
+ *   the pool keeps trying it, and the sessions it lists once it answers are adopted then.
  * - Binaries no host uses, and old logs of hosts that are gone, are removed.
  */
 import { readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -18,7 +20,7 @@ import type { ChildLogger } from "@/api/log-entry-model";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 
 import type { HostConnection } from "./host-connection";
-import { HostConnectError, openHostConnection } from "./host-connection";
+import { HostConnectError, openHostConnection, sendAndClose } from "./host-connection";
 import {
   HOST_LOG_PREFIX,
   type HostEntry,
@@ -33,13 +35,13 @@ import {
   isProcessRunning,
   isHostId,
   newHostId,
+  signalHost,
 } from "./host-files";
 import type { HostLaunch, LaunchedHost } from "./host-launcher";
 import { launchHost } from "./host-launcher";
 import type { DisconnectMode, InitializeMessage } from "./protocol";
 import { TERMINAL_HOST_CAPABILITIES, compatibility } from "./protocol";
-import { encodeJsonFrame } from "./protocol-framing";
-import { SocketTerminalHost } from "./socket-terminal-host";
+import { SocketTerminalHost, type SocketTerminalHostOptions } from "./socket-terminal-host";
 import type {
   ForegroundProcesses,
   TerminalAttachRequest,
@@ -50,8 +52,6 @@ import type {
   TerminalSpawnRequest,
 } from "./terminal-host";
 
-/** How long a terminated host has to close its socket before it gets a SIGTERM. */
-const TERMINATE_TIMEOUT_MS = 2000;
 /** Logs of hosts that are gone are kept this long, for a look at why. */
 const STALE_LOG_AGE_MS = 24 * 60 * 60_000;
 
@@ -62,6 +62,8 @@ export interface TerminalHostPoolOptions {
   /** This build's host build ID. */
   hostBuildId: string;
   log: ChildLogger;
+  /** Where the hosts' perf monitor lines go. */
+  perfLog: ChildLogger;
   /** Starts a host; tests replace it. */
   launch?: (launch: HostLaunch) => Promise<LaunchedHost>;
   /** Override the run and socket directories, for tests. */
@@ -102,6 +104,8 @@ export class TerminalHostPool implements TerminalHost {
   private readonly listeners = new Set<(event: TerminalHostEvent) => void>();
   /** Events held back until the caller has adopted the sessions found at startup. */
   private held: TerminalHostEvent[] | null = [];
+  /** The caller's `adopt`, for the sessions of a host found not answering, once it does. */
+  private adopt: ((sessions: TerminalSessionInfo[]) => void) | null = null;
   private closed = false;
 
   constructor(private readonly options: TerminalHostPoolOptions) {
@@ -126,6 +130,7 @@ export class TerminalHostPool implements TerminalHost {
    * delivered only after `adopt` returns, so none arrives for a session the caller does not know yet.
    */
   async start(adopt: (sessions: TerminalSessionInfo[]) => void): Promise<TerminalHostPoolStart> {
+    this.adopt = adopt;
     try {
       return await this.discoverAll(adopt);
     } finally {
@@ -317,6 +322,19 @@ export class TerminalHostPool implements TerminalHost {
       connection = await openHostConnection(socketPath, this.initialize);
     } catch (err) {
       if (!(err instanceof HostConnectError && err.refused)) {
+        // Accepts connections but does not answer: stalled, or stopped. With its process known
+        // to run, it is kept as unresponsive, so its sessions are adopted if it answers later
+        // and a quit that ends the terminals reaches it.
+        if (entry && isProcessRunning(entry.pid)) {
+          this.addUnresponsiveHost(
+            hostId,
+            socketPath,
+            entry.pid,
+            "did not answer the handshake",
+            err,
+          );
+          return { hostId, build: entry.build, host: null };
+        }
         this.log.warn(`Terminal host ${hostId} did not answer; leaving it be`, { error: err });
         return { hostId, build: entry?.build ?? null, host: null };
       }
@@ -355,9 +373,11 @@ export class TerminalHostPool implements TerminalHost {
       const sessions = await host.list();
       return { hostId, build: result.hostBuildId, host, sessions };
     } catch (err) {
-      this.log.warn(`Could not list the sessions of terminal host ${hostId}`, { error: err });
-      // Left be: closing the connection without a disconnect gives it its grace period.
+      // Closing the connection without a disconnect gives it its grace period, which the
+      // reconnect cancels once the host answers.
+      this.hosts.delete(host);
       host.drop();
+      this.addUnresponsiveHost(hostId, socketPath, result.pid, "did not list its sessions", err);
       return { hostId, build: result.hostBuildId, host: null };
     }
   }
@@ -372,13 +392,64 @@ export class TerminalHostPool implements TerminalHost {
     }
   }
 
+  /**
+   * Keep the host `hostId`, found running at `pid` but not answering, as an unresponsive host: it
+   * gets no new sessions, is retried, and its sessions are adopted once it lists them.
+   */
+  private addUnresponsiveHost(
+    hostId: string,
+    socketPath: string,
+    pid: number,
+    failure: string,
+    cause: unknown,
+  ): void {
+    this.log.error(
+      `Terminal host ${hostId} (pid ${pid}) ${failure}; its terminals are unreachable until it answers`,
+      { pid, error: cause },
+    );
+    const host: SocketTerminalHost = this.addHost(hostId, socketPath, null, {
+      pid,
+      onSessionsFound: (sessions) => this.adoptFound(host, sessions),
+    });
+  }
+
+  /** The sessions of a host found not answering, now that it does. */
+  private adoptFound(host: SocketTerminalHost, sessions: TerminalSessionInfo[]): void {
+    const adopted: TerminalSessionInfo[] = [];
+    for (const info of sessions) {
+      // A panel attached while the host did not answer got a new shell under the ID.
+      if (this.owners.has(info.id)) {
+        this.log.warn(
+          `Ending terminal ${info.id.slice(0, 8)} of terminal host ${host.hostId}: its panel has a new shell`,
+        );
+        host.destroy(info.id);
+        continue;
+      }
+      this.owners.set(info.id, { host, epoch: info.epoch });
+      adopted.push(info);
+    }
+    this.log.info(
+      `Terminal host ${host.hostId} answers; reattaching ${adopted.length} terminal(s)`,
+    );
+    if (adopted.length > 0) this.adopt?.(adopted);
+    this.retireIfDone(host);
+  }
+
   private addHost(
     hostId: string,
     socketPath: string,
-    connection: Promise<HostConnection>,
+    connection: Promise<HostConnection> | null,
+    found: Pick<SocketTerminalHostOptions, "pid" | "onSessionsFound"> = {},
   ): SocketTerminalHost {
     const host = new SocketTerminalHost(
-      { hostId, socketPath, initialize: this.initialize, log: this.log },
+      {
+        hostId,
+        socketPath,
+        initialize: this.initialize,
+        log: this.log,
+        perfLog: this.options.perfLog,
+        ...found,
+      },
       connection,
     );
     this.hosts.add(host);
@@ -396,9 +467,10 @@ export class TerminalHostPool implements TerminalHost {
   /** The host new sessions go to, started when there is none. */
   private currentHost(): SocketTerminalHost {
     if (this.current?.acceptsNewSessions) return this.current;
-    if (this.current && !this.current.isGone) {
+    const previous = this.current;
+    if (previous && !previous.isGone) {
       this.log.warn(
-        `Terminal host ${this.current.hostId} has been unreachable too long; starting another for new terminals`,
+        `Terminal host ${previous.hostId} is not responding; starting another for new terminals`,
       );
     }
     const hostId = newHostId();
@@ -426,6 +498,8 @@ export class TerminalHostPool implements TerminalHost {
     });
     const host = this.addHost(hostId, socketPath, connection);
     this.current = host;
+    // An unresponsive host keeps its sessions; one without any is let go.
+    if (previous && !previous.isGone) this.retireIfDone(previous);
     return host;
   }
 
@@ -453,7 +527,7 @@ export class TerminalHostPool implements TerminalHost {
 
   /** Let go of an earlier generation's host once it has no sessions left; it then exits. */
   private retireIfDone(host: SocketTerminalHost): void {
-    if (host === this.current || this.closed) return;
+    if (host === this.current || this.closed || !host.knowsSessions) return;
     for (const owner of this.owners.values()) if (owner.host === host) return;
     this.hosts.delete(host);
     this.log.info(`Terminal host ${host.hostId} has no sessions left, letting it go`);
@@ -509,21 +583,5 @@ function readdirOrEmpty(dir: string): string[] {
  * its socket in time gets a SIGTERM, which it also takes as an order to end its sessions.
  */
 async function terminateHost(connection: HostConnection): Promise<void> {
-  const closed = new Promise<void>((resolve) => {
-    connection.start({ onBody: () => {}, onClose: () => resolve() });
-  });
-  connection.send(encodeJsonFrame({ type: "terminate" }));
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), TERMINATE_TIMEOUT_MS);
-  });
-  const outcome = await Promise.race([closed, timedOut]);
-  clearTimeout(timer);
-  if (outcome !== "timeout") return;
-  connection.destroy();
-  try {
-    process.kill(connection.result.pid, "SIGTERM");
-  } catch {
-    // Already gone.
-  }
+  if (!(await sendAndClose(connection, { type: "terminate" }))) signalHost(connection.result.pid);
 }

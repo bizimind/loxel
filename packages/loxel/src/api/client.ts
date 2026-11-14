@@ -1103,13 +1103,22 @@ export const wsClient = new WsClient();
 // --- Version API ---
 
 /**
+ * How long to wait for the server's list of terminals. It bounds its own wait for each terminal
+ * host's foreground programs at a few seconds, so this only gives up on a server that stalls: the
+ * callers then fall back to what they knew without it, as for any failure.
+ */
+const RUNNING_TERMINALS_TIMEOUT_MS = 10_000;
+
+/**
  * The terminals the server runs; with `programs`, each one's foreground program where its terminal
  * host can tell, which costs the host a process listing.
  */
 export async function getRunningTerminals(options: {
   programs: boolean;
 }): Promise<RunningTerminal[]> {
-  const raw = await fetchJson<unknown>(options.programs ? "/terminals?programs" : "/terminals");
+  const raw = await fetchJson<unknown>(options.programs ? "/terminals?programs" : "/terminals", {
+    signal: AbortSignal.timeout(RUNNING_TERMINALS_TIMEOUT_MS),
+  });
   return RunningTerminalsSchema.parse(raw).terminals;
 }
 

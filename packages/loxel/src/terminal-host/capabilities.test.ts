@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createNoopLogger } from "@bizimind/logger";
+import { z } from "zod";
 
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
@@ -18,7 +19,13 @@ import { openHostConnection } from "./host-connection";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { InitializeMessage, InitializeResult } from "./protocol";
-import { TERMINAL_HOST_CAPABILITIES, compatibility, sharedCapabilities } from "./protocol";
+import {
+  HostLogLevelSchema,
+  HostMessageSchema,
+  TERMINAL_HOST_CAPABILITIES,
+  compatibility,
+  sharedCapabilities,
+} from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
 import { SocketTerminalHost } from "./socket-terminal-host";
 import type { ForegroundProcesses, TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
@@ -49,6 +56,8 @@ function socketPathInTempDir(): string {
 async function startFakeHost(
   hello: Omit<InitializeResult, "type">,
   foreground: ForegroundProcesses = {},
+  /** Sent right after its `initialize_result`. */
+  afterHello: object[] = [],
 ) {
   const socketPath = socketPathInTempDir();
   const received: { type: string }[] = [];
@@ -70,6 +79,7 @@ async function startFakeHost(
         received.push(message);
         if (message.type === "initialize") {
           socket.write(encodeJsonFrame({ type: "initialize_result", ...hello }));
+          for (const message of afterHello) socket.write(encodeJsonFrame(message));
         } else if (message.type === "foreground_processes") {
           answer(message.requestId, foreground);
         } else if (message.type === "spawn" && message.request) {
@@ -333,5 +343,74 @@ describe("endedSessions", () => {
       { type: "osc", id: ended.id, epoch: ended.epoch, code: 9, data: "done" },
     ]);
     expect(host.endedSessionCount).toBe(0);
+  });
+});
+
+describe("log categories (1.3.0)", () => {
+  function recorder() {
+    const lines: string[] = [];
+    const log = { ...createNoopLogger(), debug: (msg: string) => lines.push(msg) };
+    const self = { ...log, with: () => self };
+    return { log: self, lines };
+  }
+
+  async function logsOf(protocol: string, messages: object[]) {
+    const host = await startFakeHost(
+      { protocol, hostBuildId: "other", pid: process.pid, capabilities: [] },
+      {},
+      messages,
+    );
+    const terminal = recorder();
+    const perf = recorder();
+    const socketPath = host.socketPath;
+    const connection = openHostConnection(socketPath, INITIALIZE);
+    const client = new SocketTerminalHost(
+      {
+        hostId: "abcdef01",
+        socketPath,
+        initialize: INITIALIZE,
+        log: terminal.log,
+        perfLog: perf.log,
+      },
+      connection,
+    );
+    cleanups.push(() => client.drop());
+    await connection;
+    await until(() => terminal.lines.length + perf.lines.length === messages.length);
+    return { terminal: terminal.lines, perf: perf.lines };
+  }
+
+  test("a newer host's perf lines go under perf, and a category this server does not know under terminal", async () => {
+    expect(
+      await logsOf("1.3.0", [
+        { type: "log", level: "debug", msg: "terminal host metrics", cat: "perf" },
+        { type: "log", level: "debug", msg: "traced", cat: "trace" },
+      ]),
+    ).toEqual({ terminal: ["traced"], perf: ["terminal host metrics"] });
+  });
+
+  test("an older host's lines, which carry no category, go under terminal", async () => {
+    expect(await logsOf("1.2.0", [{ type: "log", level: "debug", msg: "older line" }])).toEqual({
+      terminal: ["older line"],
+      perf: [],
+    });
+  });
+
+  test("a server from before the category reads a perf line as an ordinary line", () => {
+    // `log` as a 1.2.0 server parses it: an object schema, which ignores fields it does not name.
+    const before = z.object({
+      type: z.literal("log"),
+      level: HostLogLevelSchema,
+      msg: z.string(),
+      ctx: z.record(z.string(), z.unknown()).optional(),
+    });
+    const line = {
+      type: "log",
+      level: "debug",
+      msg: "terminal host metrics",
+      cat: "perf",
+    } as const;
+    expect(before.safeParse(line).success).toBe(true);
+    expect(HostMessageSchema.parse(line)).toEqual(line);
   });
 });

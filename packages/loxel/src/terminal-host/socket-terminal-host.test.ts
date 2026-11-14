@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { type Server, type Socket, createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,14 +9,21 @@ import { createNoopLogger } from "@bizimind/logger";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 
-import { openHostConnection } from "./host-connection";
+import { HostConnectError, LEAVE_TIMEOUT_MS, openHostConnection } from "./host-connection";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { InitializeMessage } from "./protocol";
 import { TERMINAL_HOST_CAPABILITIES } from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
-import { SocketTerminalHost, type SocketTerminalHostOptions } from "./socket-terminal-host";
+import {
+  RECONNECT_REPORT_INTERVAL_MS,
+  REQUEST_TIMEOUTS_MS,
+  STALLED_AFTER_MS,
+  SocketTerminalHost,
+  type SocketTerminalHostOptions,
+} from "./socket-terminal-host";
 import type { TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
+import { TerminalHostPool } from "./terminal-host-pool";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -30,6 +37,7 @@ const INITIALIZE: InitializeMessage = {
 
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
+  jest.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -109,7 +117,7 @@ async function startProxy(dir: string, target: string) {
 
 function connect(
   socketPath: string,
-  overrides: Pick<SocketTerminalHostOptions, "isProcessAlive" | "connect"> = {},
+  overrides: Partial<Pick<SocketTerminalHostOptions, "isProcessAlive" | "connect" | "log">> = {},
 ) {
   const client = new SocketTerminalHost(
     {
@@ -136,19 +144,26 @@ function connect(
 /** One connection to a {@link startScriptedHost}, and the messages the host got on it. */
 interface ScriptedConnection {
   socket: Socket;
-  received: { type: string; requestId?: number; sessions?: string }[];
+  received: {
+    type: string;
+    requestId?: number;
+    sessions?: string;
+    id?: string;
+    request?: TerminalSpawnRequest;
+  }[];
 }
 
 /**
  * A host as a bare socket, for states the real service passes through too fast to act in: it
- * answers `initialize`, and `list` with no sessions unless told to hold it, and closes a
- * connection that sends `disconnect`. `onMessage` runs after each message is recorded.
+ * answers `initialize`, `list` with no sessions unless told to hold it, and `spawn` with the
+ * session it asks for, and closes a connection that sends `disconnect`; while `holdAll`, it
+ * answers nothing but `initialize`, and closes nothing. `onMessage` runs after each message is recorded.
  */
 async function startScriptedHost() {
   const dir = mkdtempSync(join(tmpdir(), "ths-"));
   const socketPath = join(dir, "host.sock");
   const connections: ScriptedConnection[] = [];
-  const script = { holdList: false, onMessage: () => {} };
+  const script = { holdList: false, holdAll: false, onMessage: () => {} };
   const server: Server = createServer((socket) => {
     const reader = new FrameReader();
     const connection: ScriptedConnection = { socket, received: [] };
@@ -169,12 +184,17 @@ async function startScriptedHost() {
             }),
           );
         }
-        if (message.type === "list" && !script.holdList) {
+        if (message.type === "list" && !script.holdList && !script.holdAll) {
           socket.write(
             encodeJsonFrame({ type: "result", requestId: message.requestId, value: [] }),
           );
         }
-        if (message.type === "disconnect") socket.end();
+        if (message.type === "spawn" && message.request && !script.holdAll) {
+          const { id, epoch, cols, rows, meta } = message.request;
+          const value = { id, epoch, offset: 0, pid: process.pid, cols, rows, meta };
+          socket.write(encodeJsonFrame({ type: "result", requestId: message.requestId, value }));
+        }
+        if (message.type === "disconnect" && !script.holdAll) socket.end();
         script.onMessage();
       }
     });
@@ -190,6 +210,7 @@ async function startScriptedHost() {
   /** Resolves once `condition` holds, checked as each message arrives. */
   const whenReceived = (condition: () => boolean) =>
     new Promise<void>((resolve) => {
+      if (condition()) resolve();
       script.onMessage = () => {
         if (condition()) resolve();
       };
@@ -484,5 +505,213 @@ describe("SocketTerminalHost leaving while it reconnects", () => {
       expect.objectContaining({ type: "initialize" }),
       { type: "disconnect", sessions: "keep" },
     ]);
+  });
+});
+
+/** A logger that keeps what it is given, by level. */
+function recordingLog() {
+  const lines: { level: string; msg: string }[] = [];
+  const log = createNoopLogger();
+  const record = (level: string) => (msg: string) => {
+    lines.push({ level, msg });
+  };
+  const recorder = {
+    ...log,
+    debug: record("debug"),
+    info: record("info"),
+    warn: record("warn"),
+    error: record("error"),
+    with: () => recorder,
+  };
+  return { log: recorder, lines, at: (level: string) => lines.filter((l) => l.level === level) };
+}
+
+/** Let what the last event set off run up to its next timer. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+describe("SocketTerminalHost and a host that stops answering", () => {
+  test("a request the host does not answer fails after its timeout, and the next spawn starts another host", async () => {
+    const stuck = await startScriptedHost();
+    const answering = await startScriptedHost();
+    const stateDir = mkdtempSync(join(tmpdir(), "thu-"));
+    cleanups.push(() => rmSync(stateDir, { recursive: true, force: true }));
+    const launched: string[] = [];
+    const pool = new TerminalHostPool({
+      stateDir,
+      runDir: stateDir,
+      socketDir: stateDir,
+      serverBuild: "test",
+      hostBuildId: "build-a",
+      log: createNoopLogger(),
+      perfLog: createNoopLogger(),
+      launch: (launch) => {
+        launched.push(launch.hostId);
+        const host = launched.length === 1 ? stuck : answering;
+        return Promise.resolve({ pid: process.pid, socketPath: host.socketPath });
+      },
+    });
+    cleanups.push(() => pool.dropAll());
+    await pool.start(() => {});
+    const events: TerminalHostEvent[] = [];
+    pool.onEvent((event) => events.push(event));
+    const first = request("exec sleep 30");
+    await pool.spawn(first);
+
+    jest.useFakeTimers();
+    stuck.script.holdAll = true;
+    const stuckSpawn = request("exec sleep 30");
+    const sent = stuck.whenReceived(() =>
+      stuck.connections[0]!.received.some((message) => message.request?.id === stuckSpawn.id),
+    );
+    const failed = pool.spawn(stuckSpawn);
+    await sent;
+    jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.spawn);
+    await expect(failed).rejects.toThrow("did not answer a spawn request within 10 s");
+    // Its running session is told, and keeps running: nothing ended.
+    expect(events).toEqual([{ type: "unresponsive", id: first.id, epoch: first.epoch }]);
+
+    // Should the host get to the spawn after all, the destroy behind it ends it.
+    const destroyed = stuck.whenReceived(() =>
+      stuck.connections[0]!.received.some(
+        (message) => message.type === "destroy" && message.id === stuckSpawn.id,
+      ),
+    );
+    await destroyed;
+
+    const next = request("exec sleep 30");
+    await pool.spawn(next);
+    expect(launched).toHaveLength(2);
+    expect(answering.connections[0]!.received.some((m) => m.request?.id === next.id)).toBe(true);
+  });
+
+  test("answers again: takes new sessions again", async () => {
+    const host = await startScriptedHost();
+    const { client, events } = connect(host.socketPath);
+    await client.list();
+    const spawned = request("exec sleep 30");
+    await client.spawn(spawned);
+
+    jest.useFakeTimers();
+    host.script.holdAll = true;
+    const listed = host.whenReceived(() => host.connections[0]!.received.at(-1)?.type === "list");
+    const unanswered = client.list();
+    await listed;
+    jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.list);
+    await expect(unanswered).rejects.toThrow("did not answer a list request");
+    expect(client.acceptsNewSessions).toBe(false);
+    expect(events).toEqual([{ type: "unresponsive", id: spawned.id, epoch: spawned.epoch }]);
+
+    host.script.holdAll = false;
+    await client.list();
+    expect(client.acceptsNewSessions).toBe(true);
+  });
+
+  test("a host that cannot be reconnected to is reported unresponsive, retried without flooding the log, and resumed once it answers", async () => {
+    const { socketPath, host } = await startService();
+    const recorded = recordingLog();
+    let blocked = false;
+    let attempted = Promise.withResolvers<void>();
+    const { client, events, outputText } = connect(socketPath, {
+      log: recorded.log,
+      isProcessAlive: () => true,
+      // While blocked, every attempt fails as one to a host that does not answer.
+      connect: (path, initialize) => {
+        attempted.resolve();
+        attempted = Promise.withResolvers<void>();
+        if (!blocked) return openHostConnection(path, initialize);
+        return Promise.reject(new HostConnectError("No answer", { refused: false }));
+      },
+    });
+    const spawned = request("read line; echo after:$line; exec sleep 30");
+    await client.spawn(spawned);
+    await client.attach({ id: spawned.id, attachment: 1 });
+
+    jest.useFakeTimers();
+    blocked = true;
+    const before = events.length;
+    (client as unknown as { connection: { destroy(): void } }).connection.destroy();
+    const started = Date.now();
+    while (Date.now() - started < RECONNECT_REPORT_INTERVAL_MS + STALLED_AFTER_MS) {
+      await attempted.promise;
+      await settle();
+      jest.advanceTimersByTime(STALLED_AFTER_MS);
+    }
+    expect(client.acceptsNewSessions).toBe(false);
+    expect(events.slice(before)).toEqual([
+      { type: "unresponsive", id: spawned.id, epoch: spawned.epoch },
+    ]);
+    // The first failure, one summary five minutes on, and one error: not one line per attempt.
+    expect(recorded.at("warn").map((line) => line.msg)).toEqual([
+      "The connection to the terminal host closed, reconnecting",
+      "Could not reconnect to the terminal host yet; retrying",
+      expect.stringMatching(/^Still cannot reconnect to the terminal host: \d+ attempts in 5 min$/),
+    ]);
+    expect(recorded.at("error").map((line) => line.msg)).toEqual([
+      expect.stringContaining("The terminal host is not responding: no answer for 30 s"),
+    ]);
+
+    const resumed = new Promise<void>((resolve) => {
+      client.onEvent((event) => {
+        if (event.type === "state" && event.state.mode === "resume") resolve();
+      });
+    });
+    // The attempt the last timer set off finds the host answering.
+    blocked = false;
+    await resumed;
+    jest.useRealTimers();
+    expect(client.acceptsNewSessions).toBe(true);
+    expect(events.some((event) => event.type === "exit" || event.type === "lost")).toBe(false);
+    client.write(spawned.id, textEncoder.encode("x\n"));
+    await until(() => outputText(spawned.id).includes("after:x"));
+    expect(host.sessionIds()).toEqual([spawned.id]);
+  });
+
+  test("leaving a connected host that does not close its connection resolves in time", async () => {
+    const host = await startScriptedHost();
+    const { client } = connect(host.socketPath);
+    await client.list();
+    host.script.holdAll = true;
+
+    jest.useFakeTimers();
+    let left = false;
+    const leaving = client.disconnect("keep").then(() => {
+      left = true;
+    });
+    await host.whenReceived(() => host.connections[0]!.received.at(-1)?.type === "disconnect");
+    await settle();
+    expect(left).toBe(false);
+    jest.advanceTimersByTime(LEAVE_TIMEOUT_MS);
+    await leaving;
+    expect(host.connections[0]!.received.at(-1)).toEqual({ type: "disconnect", sessions: "keep" });
+  });
+
+  test("keep to a host that cannot be reached within the bound gives up in time", async () => {
+    const host = await startScriptedHost();
+    const attempted = Promise.withResolvers<void>();
+    const { client } = connect(host.socketPath, {
+      isProcessAlive: () => true,
+      // Every reconnect hangs, as to a host that accepts connections but does not answer.
+      connect: () => {
+        attempted.resolve();
+        return new Promise<never>(() => {});
+      },
+    });
+    await client.list();
+    jest.useFakeTimers();
+    host.connections[0]!.socket.destroy();
+    await attempted.promise;
+    let left = false;
+    const leaving = client.disconnect("keep").then(() => {
+      left = true;
+    });
+    await settle();
+    expect(left).toBe(false);
+    jest.advanceTimersByTime(LEAVE_TIMEOUT_MS);
+    await leaving;
+    expect(left).toBe(true);
   });
 });

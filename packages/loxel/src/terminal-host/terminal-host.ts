@@ -186,6 +186,18 @@ export interface TerminalLostEvent {
 }
 
 /**
+ * The session's host stopped answering, or cannot be reached while its process runs. Nothing has
+ * ended: the program may well still run, and once the host answers again its output resumes and a
+ * client attached meanwhile is reattached. Reported by the client of a host in another process,
+ * never by a host itself, and never sent over the socket.
+ */
+export interface TerminalUnresponsiveEvent {
+  type: "unresponsive";
+  id: string;
+  epoch: string;
+}
+
+/**
  * Output for the attached client, in offset order, only after that client's `state`. `frame` is
  * the renderer's binary output frame for it (`encodeOutputFrame`), and `data` is a view of the
  * frame's payload, not a copy: the frame is sent to the renderer as is, never re-encoded.
@@ -204,6 +216,7 @@ export type TerminalHostEvent =
   | z.infer<typeof TerminalExitEventSchema>
   | TerminalEndedEvent
   | TerminalLostEvent
+  | TerminalUnresponsiveEvent
   | z.infer<typeof TerminalOscEventSchema>;
 
 /**

@@ -107,6 +107,15 @@ export function ensureRunDir(runDir: string): void {
   if ((stat.mode & 0o777) !== 0o700) chmodSync(runDir, 0o700);
 }
 
+/** Ask the host at `pid` to end its sessions and exit, as it takes a SIGTERM; one gone is no error. */
+export function signalHost(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already gone.
+  }
+}
+
 /** True while process `pid` runs (EPERM: it runs, as another user). */
 export function isProcessRunning(pid: number): boolean {
   try {

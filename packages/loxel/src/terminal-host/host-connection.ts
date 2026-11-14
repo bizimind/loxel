@@ -12,6 +12,13 @@ import { FrameReader, encodeJsonFrame } from "./protocol-framing";
 /** How long a host has to answer `initialize`. */
 export const INITIALIZE_TIMEOUT_MS = 5000;
 
+/**
+ * How long a host has to close its socket once the server leaves it (`disconnect` or `terminate`),
+ * and the most a server waits to leave one at all: well within the time a shutting-down server
+ * gives the hosts (`SHUTDOWN_LSP_WAIT_MS` in server.ts), so every host gets a defined outcome.
+ */
+export const LEAVE_TIMEOUT_MS = 2000;
+
 /** Could not connect, or the host did not answer the handshake. */
 export class HostConnectError extends Error {
   /**
@@ -106,6 +113,32 @@ export class HostConnection {
     this.closed = { error: this.error };
     this.handlers?.onClose(this.error);
   }
+}
+
+/**
+ * Send `message` as the last thing on `connection` and wait for the host to close it, at most
+ * `timeoutMs`. True when it did; a connection still open then is destroyed, and false says so.
+ */
+export function sendAndClose(
+  connection: HostConnection,
+  message: object,
+  timeoutMs = LEAVE_TIMEOUT_MS,
+): Promise<boolean> {
+  connection.send(encodeJsonFrame(message));
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      connection.destroy();
+      resolve(false);
+    }, timeoutMs);
+    connection.start({
+      onBody: () => {},
+      onClose: () => {
+        clearTimeout(timer);
+        resolve(true);
+      },
+    });
+    connection.end();
+  });
 }
 
 const REFUSED_CODES = new Set(["ECONNREFUSED", "ENOENT"]);

@@ -973,6 +973,7 @@ const terminalHosts = new TerminalHostPool({
   serverBuild: getCurrentVersion(),
   hostBuildId: await currentHostBuildId(),
   log: logger.child("terminal"),
+  perfLog: logger.child("perf"),
 });
 terminalHosts.onEvent((event) => {
   if (event.type === "output") stress.track("pty-output");
@@ -1132,7 +1133,9 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
           log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
           clientState.terminals.delete(msg.id);
           if (terminalOwners.get(msg.id) === ws) terminalOwners.delete(msg.id);
-          sendTo(ws, { type: "error", message: "Failed to attach terminal" });
+          // The panel says why, a terminal host that did not answer in time for one.
+          const message = err instanceof Error ? err.message : String(err);
+          sendTo(ws, { type: "terminal_notice", id: msg.id, notice: "attach_failed", message });
         });
       break;
     }
@@ -1229,6 +1232,7 @@ function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSi
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
     sendOutput: ({ frame }) => ws.send(frame),
     sendExit: (end) => sendTo(ws, { type: "terminal_exit", id, ...end }),
+    sendNotice: (notice) => sendTo(ws, { type: "terminal_notice", id, ...notice }),
   };
 }
 

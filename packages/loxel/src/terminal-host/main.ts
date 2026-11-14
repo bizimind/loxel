@@ -18,6 +18,7 @@ import { embeddedHostBuildId } from "./host-build-id";
 import type { HostEntry } from "./host-files";
 import { ensureRunDir, hostEntryPath, hostSocketPath, isHostId } from "./host-files";
 import { HostLog } from "./host-log";
+import { HostPerfMonitor } from "./host-perf-monitor";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 
@@ -56,7 +57,11 @@ process.on("unhandledRejection", (reason) => {
   });
 });
 
-const host = new InProcessTerminalHost({ log });
+const perf = new HostPerfMonitor({
+  log: hostLog.logger({ hostId }, { cat: "perf", forwardFrom: "debug" }),
+  sessions: () => host.stats(),
+});
+const host = new InProcessTerminalHost({ log, measureSpawn: (spawn) => perf.measureSpawn(spawn) });
 const service = new TerminalHostService({
   host,
   hostBuildId,
@@ -66,6 +71,7 @@ const service = new TerminalHostService({
 });
 
 function exit(code: number): never {
+  perf.dispose();
   service.close();
   rmSync(socketPath, { force: true });
   rmSync(entryPath, { force: true });
@@ -96,6 +102,7 @@ const entry: HostEntry = {
 };
 writeFileSync(entryPath, JSON.stringify(entry), { mode: 0o600 });
 log.info(`Terminal host ${hostBuildId} listening (pid ${process.pid})`);
+perf.start();
 
 // Tell the launcher the socket is up, then point stdout at /dev/null: the launcher closes its end,
 // and nothing may write to a closed pipe. The lowest free descriptor is reused, which is 1 here.
