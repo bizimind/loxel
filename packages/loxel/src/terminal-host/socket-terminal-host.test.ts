@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { type Server, type Socket, createServer } from "node:net";
+import { type Server, type Socket, createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,12 +13,9 @@ import { openHostConnection } from "./host-connection";
 import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { InitializeMessage } from "./protocol";
+import { TERMINAL_HOST_CAPABILITIES } from "./protocol";
 import { FrameReader, encodeJsonFrame } from "./protocol-framing";
-import {
-  HOST_LOST_EXIT_CODE,
-  SocketTerminalHost,
-  type SocketTerminalHostOptions,
-} from "./socket-terminal-host";
+import { SocketTerminalHost, type SocketTerminalHostOptions } from "./socket-terminal-host";
 import type { TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
 
 const textEncoder = new TextEncoder();
@@ -28,7 +25,7 @@ const INITIALIZE: InitializeMessage = {
   type: "initialize",
   protocol: TERMINAL_HOST_PROTOCOL,
   build: "test",
-  capabilities: [],
+  capabilities: [...TERMINAL_HOST_CAPABILITIES],
 };
 
 const cleanups: (() => void | Promise<void>)[] = [];
@@ -42,20 +39,72 @@ async function startService() {
   const socketPath = join(dir, "host.sock");
   const host = new InProcessTerminalHost({ log: createNoopLogger() });
   const done: string[] = [];
+  let hasServer = false;
   const service = new TerminalHostService({
     host,
     hostBuildId: "build-a",
     log: createNoopLogger(),
-    setLogForward: () => {},
+    // The host forwards its log to the server it has, and stops once that server is gone.
+    setLogForward: (forward) => {
+      hasServer = forward !== null;
+    },
     onDone: (reason) => done.push(reason),
   });
   await service.listen(socketPath);
   cleanups.push(() => {
-    for (const id of host.sessionIds()) host.destroy(id);
+    host.destroyAll();
     service.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { host, service, socketPath, done };
+  return { host, service, socketPath, done, dir, hasServer: () => hasServer };
+}
+
+/**
+ * A socket in front of the host's: `cut()` closes every connection through it and holds the next
+ * ones, as a connection blip whose reconnect is slow, until `release()` lets them through.
+ */
+async function startProxy(dir: string, target: string) {
+  const socketPath = join(dir, "proxy.sock");
+  const open = new Set<Socket>();
+  let held: (() => void)[] | null = null;
+  const server = createServer((client) => {
+    const forward = () => {
+      const upstream = createConnection(target);
+      for (const socket of [client, upstream]) {
+        open.add(socket);
+        socket.on("error", () => {});
+        socket.on("close", () => {
+          open.delete(socket);
+          client.destroy();
+          upstream.destroy();
+        });
+      }
+      // What the client sent while held, its initialize, was buffered until now.
+      client.pipe(upstream);
+      upstream.pipe(client);
+    };
+    if (held) held.push(forward);
+    else forward();
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(socketPath, resolve);
+  });
+  cleanups.push(() => {
+    for (const socket of open) socket.destroy();
+    server.close();
+  });
+  return {
+    socketPath,
+    cut: () => {
+      held = [];
+      for (const socket of open) socket.destroy();
+    },
+    release: () => {
+      const waiting = held ?? [];
+      held = null;
+      for (const forward of waiting) forward();
+    },
+  };
 }
 
 function connect(
@@ -251,7 +300,70 @@ describe("SocketTerminalHost against the host service", () => {
     expect(host.sessionIds()).toEqual([spawned.id]);
   });
 
-  test("reports every session ended with HOST_LOST_EXIT_CODE once the host is gone", async () => {
+  test("a session that ended during a reconnect is reported with its real code after its missed output", async () => {
+    const service = await startService();
+    const proxy = await startProxy(service.dir, service.socketPath);
+    const { client, events, outputText } = connect(proxy.socketPath);
+    const spawned = request("read line; echo final words; exit 4");
+    await client.spawn(spawned);
+    await client.attach({ id: spawned.id, attachment: 1 });
+
+    // The connection drops, and the program ends before the client is back.
+    proxy.cut();
+    await until(() => !service.hasServer());
+    const before = events.length;
+    service.host.write(spawned.id, textEncoder.encode("\n"));
+    await until(() => service.host.endedSessionCount === 1);
+    proxy.release();
+    await until(() => events.some((event) => event.type === "exit"));
+
+    const restored = events.slice(before);
+    expect(restored.find((event) => event.type === "state")).toMatchObject({
+      attachment: 1,
+      state: { mode: "resume" },
+    });
+    expect(outputText(spawned.id)).toContain("final words");
+    expect(restored.filter((event) => event.type === "exit" || event.type === "lost")).toEqual([
+      { type: "exit", id: spawned.id, epoch: spawned.epoch, exitCode: 4 },
+    ]);
+    expect(restored.at(-1)?.type).toBe("exit");
+  });
+
+  test("a session that ended during a reconnect with no client is reported ended at once, and drained later", async () => {
+    const service = await startService();
+    const proxy = await startProxy(service.dir, service.socketPath);
+    const { client, events, outputText } = connect(proxy.socketPath);
+    const spawned = request("read line; echo final words; exit 4");
+    await client.spawn(spawned);
+
+    // Its panel is not mounted: no client is attached when the connection drops.
+    proxy.cut();
+    await until(() => !service.hasServer());
+    service.host.write(spawned.id, textEncoder.encode("\n"));
+    await until(() => service.host.endedSessionCount === 1);
+    proxy.release();
+    await until(() => events.some((event) => event.type === "ended"));
+    expect(events.filter((event) => event.type !== "output")).toEqual([
+      { type: "ended", id: spawned.id, epoch: spawned.epoch, exitCode: 4, outputKept: true },
+    ]);
+    expect(service.host.endedSessionCount).toBe(1);
+
+    // The panel mounts later and gets what it missed, then the exit.
+    await client.attach({ id: spawned.id, attachment: 1 });
+    await until(() => events.some((event) => event.type === "exit"));
+    const state = events.find((event) => event.type === "state");
+    const screen =
+      (state?.type === "state" ? (state.state.snapshot ?? "") : "") + outputText(spawned.id);
+    expect(screen).toContain("final words");
+    expect(events.at(-1)).toEqual({
+      type: "exit",
+      id: spawned.id,
+      epoch: spawned.epoch,
+      exitCode: 4,
+    });
+  });
+
+  test("reports every session lost, with no exit code, once the host is gone", async () => {
     const { socketPath, service, host } = await startService();
     const { client, events } = connect(socketPath, { isProcessAlive: () => false });
     const spawned = request("exec sleep 30");
@@ -266,8 +378,8 @@ describe("SocketTerminalHost against the host service", () => {
     rmSync(socketPath, { force: true });
     await gone;
 
-    expect(events.filter((event) => event.type === "exit")).toEqual([
-      { type: "exit", id: spawned.id, epoch: spawned.epoch, exitCode: HOST_LOST_EXIT_CODE },
+    expect(events.filter((event) => event.type === "exit" || event.type === "lost")).toEqual([
+      { type: "lost", id: spawned.id, epoch: spawned.epoch, reason: "host_lost" },
     ]);
     await expect(client.list()).rejects.toThrow("not available");
   });
@@ -295,8 +407,8 @@ describe("SocketTerminalHost against the host service", () => {
     await firstGone;
 
     // The first server sees its terminals end; the session runs on for the second.
-    expect(first.events.filter((event) => event.type === "exit")).toEqual([
-      { type: "exit", id: spawned.id, epoch: spawned.epoch, exitCode: HOST_LOST_EXIT_CODE },
+    expect(first.events.filter((event) => event.type === "lost")).toEqual([
+      { type: "lost", id: spawned.id, epoch: spawned.epoch, reason: "host_lost" },
     ]);
     first.client.destroy(spawned.id);
     expect(await second.client.list()).toHaveLength(1);

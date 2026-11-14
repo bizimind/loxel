@@ -8,6 +8,7 @@ import type {
   TerminalAttachRequest,
   TerminalHost,
   TerminalHostEvent,
+  TerminalSessionEnd,
   TerminalSessionInfo,
   TerminalSessionMeta,
   TerminalSpawnRequest,
@@ -22,16 +23,50 @@ interface HostedSession {
   program: string;
 }
 
+/** A session whose program ended while ended sessions were kept, until it is attached or destroyed. */
+interface EndedSession {
+  /** As listed, with how it ended. */
+  info: TerminalSessionInfo & { ended: TerminalSessionEnd };
+  /** Its ring and screen; null once let go to stay within the limits, when an attach only gets the exit. */
+  session: TerminalSession | null;
+}
+
+/**
+ * How much ended sessions may hold. Past `withOutput` sessions or `outputBytes` of their rings,
+ * the oldest let go of their output and screen; past `sessions`, the oldest is dropped altogether.
+ * No session is spawned while no server is connected, so ended sessions never hold more than they
+ * did running: the limits bound what piles up across servers that never attach to them.
+ */
+export interface EndedSessionLimits {
+  sessions: number;
+  withOutput: number;
+  outputBytes: number;
+}
+
+export const ENDED_SESSION_LIMITS: EndedSessionLimits = {
+  sessions: 1000,
+  withOutput: 128,
+  outputBytes: 128 * 1024 * 1024,
+};
+
 export class InProcessTerminalHost implements TerminalHost {
   private readonly sessions = new Map<string, HostedSession>();
+  /** Oldest first. */
+  private readonly ended = new Map<string, EndedSession>();
   private readonly listeners = new Set<(event: TerminalHostEvent) => void>();
+  /** Set while ended sessions are kept: called after each session that ended so. */
+  private onKeptEnded: (() => void) | null = null;
 
-  constructor(private readonly runtime: TerminalSessionRuntime) {}
+  constructor(
+    private readonly runtime: TerminalSessionRuntime,
+    private readonly endedLimits: EndedSessionLimits = ENDED_SESSION_LIMITS,
+  ) {}
 
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
     const { id, meta, input } = request;
-    if (this.sessions.has(id)) {
-      return Promise.reject(new Error(`Terminal ${id} is already running`));
+    if (this.sessions.has(id) || this.ended.has(id)) {
+      const state = this.sessions.has(id) ? "running" : "kept, ended";
+      return Promise.reject(new Error(`Terminal ${id} is already ${state}`));
     }
     let session: TerminalSession;
     try {
@@ -59,15 +94,36 @@ export class InProcessTerminalHost implements TerminalHost {
   }
 
   list(): Promise<TerminalSessionInfo[]> {
-    return Promise.resolve([...this.sessions.values()].map((hosted) => this.info(hosted)));
+    const running = [...this.sessions.values()].map((hosted) => this.info(hosted));
+    const ended = [...this.ended.values()].map(({ info }) => info);
+    return Promise.resolve([...running, ...ended]);
   }
 
   async attach(request: TerminalAttachRequest): Promise<void> {
-    await this.sessions.get(request.id)?.session.attach(request.attachment, request.since);
+    const { id, attachment, since } = request;
+    const hosted = this.sessions.get(id);
+    if (hosted) {
+      await hosted.session.attach(attachment, since);
+      return;
+    }
+    const ended = this.ended.get(id);
+    if (!ended) return;
+    const { session } = ended;
+    if (!session) {
+      // Its output was let go of: there is nothing to show, only the exit.
+      this.reportEnded(ended);
+      return;
+    }
+    // The state and the output the client missed, then the exit, which only the attach that still
+    // holds once synced reports. Any other attach (one re-sent under the same number after a
+    // reconnect included), a detach (its server leaving among them), a destroy, or its output let
+    // go of, ends this one's claim: whatever came after decides.
+    const token = await session.attach(attachment, since);
+    if (session.isCurrent(token)) this.reportEnded(ended);
   }
 
   detach(id: string): void {
-    this.sessions.get(id)?.session.detach();
+    (this.sessions.get(id)?.session ?? this.ended.get(id)?.session)?.detach();
   }
 
   write(id: string, data: Uint8Array): void {
@@ -83,10 +139,16 @@ export class InProcessTerminalHost implements TerminalHost {
   }
 
   ack(id: string, syncOffset: number, bytes: number): void {
-    this.sessions.get(id)?.session.ack(syncOffset, bytes);
+    (this.sessions.get(id)?.session ?? this.ended.get(id)?.session)?.ack(syncOffset, bytes);
   }
 
   destroy(id: string): void {
+    const ended = this.ended.get(id);
+    if (ended) {
+      this.ended.delete(id);
+      ended.session?.destroy();
+      return;
+    }
     const hosted = this.sessions.get(id);
     if (!hosted) return;
     this.sessions.delete(id);
@@ -96,6 +158,8 @@ export class InProcessTerminalHost implements TerminalHost {
   setMeta(id: string, meta: TerminalSessionMeta): void {
     const hosted = this.sessions.get(id);
     if (hosted) hosted.meta = meta;
+    const ended = this.ended.get(id);
+    if (ended) ended.info = { ...ended.info, meta };
   }
 
   async foregroundProcesses(): Promise<ForegroundProcesses> {
@@ -119,6 +183,41 @@ export class InProcessTerminalHost implements TerminalHost {
     return [...this.sessions.keys()];
   }
 
+  /** How many ended sessions are kept, until attached or destroyed. */
+  get endedSessionCount(): number {
+    return this.ended.size;
+  }
+
+  /** Detach every session's client, ended sessions' included. */
+  detachAll(): void {
+    for (const id of [...this.sessions.keys(), ...this.ended.keys()]) this.detach(id);
+  }
+
+  /** End every session and forget every ended one. */
+  destroyAll(): void {
+    for (const id of [...this.sessions.keys(), ...this.ended.keys()]) this.destroy(id);
+  }
+
+  /**
+   * From now on, keep a session whose program ends instead of reporting its exit: it is listed
+   * with its exit code, the next attach gets what the client missed and then the exit, and
+   * `destroy` forgets it. The host process does this while no server is connected, so the next one
+   * learns what such a session did. `onEnded` runs after each session that ended so.
+   */
+  keepEndedSessions(onEnded: () => void): void {
+    this.onKeptEnded = onEnded;
+  }
+
+  /** Report exits again. Sessions that ended meanwhile stay until attached or destroyed. */
+  stopKeepingEndedSessions(): void {
+    this.onKeptEnded = null;
+  }
+
+  /** Forget every ended session, for a server that does not know of them. */
+  forgetEndedSessions(): void {
+    for (const id of [...this.ended.keys()]) this.destroy(id);
+  }
+
   onEvent(listener: (event: TerminalHostEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -136,9 +235,50 @@ export class InProcessTerminalHost implements TerminalHost {
   private onSessionExit(session: TerminalSession, exitCode: number): void {
     // A destroyed session exits a little later; by then its ID may already belong to a fresh
     // spawn, which must not be dropped in its place.
-    if (this.sessions.get(session.id)?.session !== session) return;
+    const hosted = this.sessions.get(session.id);
+    if (hosted?.session !== session) return;
     this.sessions.delete(session.id);
-    session.destroy();
-    this.emit({ type: "exit", id: session.id, epoch: session.epoch, exitCode });
+    const onEnded = this.onKeptEnded;
+    if (!onEnded) {
+      session.destroy();
+      this.emit({ type: "exit", id: session.id, epoch: session.epoch, exitCode });
+      return;
+    }
+    session.hangUp();
+    this.runtime.log.info(`Keeping terminal ${session.id.slice(0, 8)}, ended with no server`);
+    const ended = { exitCode, outputKept: true };
+    this.ended.set(session.id, { info: { ...this.info(hosted), ended }, session });
+    this.enforceEndedLimits();
+    onEnded();
+  }
+
+  /** Report an ended session's exit, now that its client has what it missed, and forget it. */
+  private reportEnded({ info, session }: EndedSession): void {
+    this.ended.delete(info.id);
+    session?.destroy();
+    this.emit({ type: "exit", id: info.id, epoch: info.epoch, exitCode: info.ended.exitCode });
+  }
+
+  private enforceEndedLimits(): void {
+    const { log } = this.runtime;
+    for (const ended of this.ended.values()) {
+      if (this.ended.size <= this.endedLimits.sessions) break;
+      log.warn(`Too many ended terminals; forgetting ${ended.info.id.slice(0, 8)} and its exit`);
+      this.destroy(ended.info.id);
+    }
+    const withOutput = [...this.ended.values()].flatMap((ended) =>
+      ended.session ? [{ ended, session: ended.session }] : [],
+    );
+    let bytes = withOutput.reduce((sum, { session }) => sum + session.retainedBytes, 0);
+    let count = withOutput.length;
+    for (const { ended, session } of withOutput) {
+      if (count <= this.endedLimits.withOutput && bytes <= this.endedLimits.outputBytes) break;
+      log.info(`Letting go of the output of ended terminal ${ended.info.id.slice(0, 8)}`);
+      bytes -= session.retainedBytes;
+      count--;
+      session.destroy();
+      ended.session = null;
+      ended.info = { ...ended.info, ended: { ...ended.info.ended, outputKept: false } };
+    }
   }
 }

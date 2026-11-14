@@ -4,7 +4,8 @@ import { createNoopLogger } from "@bizimind/logger";
 
 import { until } from "@/test/until";
 
-import { InProcessTerminalHost } from "./in-process-terminal-host";
+import type { EndedSessionLimits } from "./in-process-terminal-host";
+import { ENDED_SESSION_LIMITS, InProcessTerminalHost } from "./in-process-terminal-host";
 import type { TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
 
 const textEncoder = new TextEncoder();
@@ -32,8 +33,8 @@ function processGone(pid: number): boolean {
   }
 }
 
-function createHost() {
-  const host = new InProcessTerminalHost({ log: createNoopLogger() });
+function createHost(endedLimits: EndedSessionLimits = ENDED_SESSION_LIMITS) {
+  const host = new InProcessTerminalHost({ log: createNoopLogger() }, endedLimits);
   hosts.push(host);
   const events: TerminalHostEvent[] = [];
   host.onEvent((event) => events.push(event));
@@ -206,4 +207,118 @@ describe("InProcessTerminalHost", () => {
     await host.attach({ id: spawned.id, attachment: 1 });
     expect(received).toEqual([]);
   });
+});
+
+describe("InProcessTerminalHost keeping ended sessions", () => {
+  /** Spawn `script` and wait until it has ended and is kept. */
+  async function spawnEnded(host: InProcessTerminalHost, script: string) {
+    let ended = false;
+    host.keepEndedSessions(() => {
+      ended = true;
+    });
+    const spawned = await host.spawn(request(script));
+    await until(() => ended);
+    return spawned;
+  }
+
+  test("a session that ends is listed with its code, and an attach drains it before its exit", async () => {
+    const { host, events, outputText } = createHost();
+    const spawned = await spawnEnded(host, "echo last words; exit 4");
+    expect(events.some((event) => event.type === "exit")).toBe(false);
+    expect(await host.list()).toEqual([
+      expect.objectContaining({ id: spawned.id, ended: { exitCode: 4, outputKept: true } }),
+    ]);
+    expect(host.sessionIds()).toEqual([]);
+
+    // A server connected, which attaches to it.
+    host.stopKeepingEndedSessions();
+    await host.attach({ id: spawned.id, attachment: 1 });
+    const types = events.map((event) => event.type);
+    expect(types.indexOf("state")).toBeLessThan(types.indexOf("exit"));
+    const state = events.find((event) => event.type === "state");
+    const screen =
+      (state?.type === "state" ? (state.state.snapshot ?? "") : "") + outputText(spawned.id);
+    expect(screen).toContain("last words");
+    expect(events.at(-1)).toEqual({
+      type: "exit",
+      id: spawned.id,
+      epoch: spawned.epoch,
+      exitCode: 4,
+    });
+    expect(await host.list()).toEqual([]);
+  });
+
+  test("a destroy forgets an ended session without an exit; stopping reports exits again", async () => {
+    const { host, events } = createHost();
+    const spawned = await spawnEnded(host, "exit 1");
+    host.destroy(spawned.id);
+    expect(await host.list()).toEqual([]);
+
+    host.stopKeepingEndedSessions();
+    const next = await host.spawn(request("exit 2"));
+    await until(() => events.some((event) => event.type === "exit"));
+    expect(events.filter((event) => event.type === "exit")).toEqual([
+      { type: "exit", id: next.id, epoch: next.epoch, exitCode: 2 },
+    ]);
+  });
+
+  test("past the limits, the oldest let go of their output, then are forgotten", async () => {
+    const { host, events } = createHost({ sessions: 2, withOutput: 1, outputBytes: 1024 });
+    // The oldest is forgotten, exit code and all.
+    await spawnEnded(host, "exit 1");
+    const older = await spawnEnded(host, "echo older; exit 2");
+    const newest = await spawnEnded(host, "echo newest; exit 3");
+
+    expect((await host.list()).map(({ id, ended }) => ({ id, ended }))).toEqual([
+      { id: older.id, ended: { exitCode: 2, outputKept: false } },
+      { id: newest.id, ended: { exitCode: 3, outputKept: true } },
+    ]);
+    // Its output let go of, an attach gets only the exit.
+    host.stopKeepingEndedSessions();
+    await host.attach({ id: older.id, attachment: 1 });
+    expect(events.map((event) => event.type)).toEqual(["exit"]);
+    await host.attach({ id: newest.id, attachment: 2 });
+    expect(events.map((event) => event.type)).toEqual(["exit", "state", "exit"]);
+  });
+
+  // Whatever reaches the session between an attach and its sync settling decides instead of it.
+  const paths = ["snapshot", "resume"] as const;
+  const interruptions = [
+    { name: "an attach under the same number", exits: 1, kept: 0 },
+    { name: "an attach under another number", exits: 1, kept: 0 },
+    { name: "a detach", exits: 0, kept: 1 },
+    { name: "a destroy", exits: 0, kept: 0 },
+  ] as const;
+  for (const path of paths) {
+    for (const interruption of interruptions) {
+      test(`a ${path} drain interrupted by ${interruption.name} leaves the exit to what came after`, async () => {
+        const { host, events } = createHost();
+        const spawned = await spawnEnded(host, "echo kept; exit 6");
+        host.stopKeepingEndedSessions();
+        const [info] = await host.list();
+        const since =
+          path === "resume" ? { epoch: spawned.epoch, offset: info!.offset } : undefined;
+        const first = host.attach({ id: spawned.id, attachment: 1, since });
+        let next: Promise<void> = Promise.resolve();
+        if (interruption.name === "an attach under the same number") {
+          next = host.attach({ id: spawned.id, attachment: 1, since });
+        } else if (interruption.name === "an attach under another number") {
+          next = host.attach({ id: spawned.id, attachment: 2, since });
+        } else if (interruption.name === "a detach") {
+          host.detach(spawned.id);
+        } else {
+          host.destroy(spawned.id);
+        }
+        await Promise.all([first, next]);
+
+        const types = events.map((event) => event.type);
+        expect(types.filter((type) => type === "exit")).toHaveLength(interruption.exits);
+        if (interruption.exits > 0) {
+          expect(types.at(-1)).toBe("exit");
+          expect(types.at(-2)).toBe("state");
+        }
+        expect(host.endedSessionCount).toBe(interruption.kept);
+      });
+    }
+  }
 });

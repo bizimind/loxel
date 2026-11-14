@@ -10,7 +10,7 @@
  * As semver. A major bump for any change an older peer would misread; a minor one for a new
  * capability; a patch for a fix that changes no message.
  */
-export const TERMINAL_HOST_PROTOCOL = "1.1.0";
+export const TERMINAL_HOST_PROTOCOL = "1.2.0";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 

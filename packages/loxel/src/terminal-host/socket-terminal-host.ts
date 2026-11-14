@@ -6,9 +6,11 @@
  *   or while it is being restored, they wait in order, and requests are answered once it is.
  * - A connection that closes unasked does not mean the sessions are gone: the client reconnects,
  *   reconciles its sessions with the host's `list()` and re-sends the latest attach of every
- *   session that had a client, resuming from what that client last got. Only when the host is
+ *   session that had a client, resuming from what that client last got. A session that ended
+ *   meanwhile, which a host with capability `endedSessions` lists as such, is reported `ended` at
+ *   once; an attach later gets the output its client missed, then its exit. Only when the host is
  *   confirmed gone (its socket refuses connections, or its process is not running) are its
- *   sessions reported ended, with {@link HOST_LOST_EXIT_CODE}.
+ *   sessions reported `lost`.
  */
 import type { ChildLogger } from "@/api/log-entry-model";
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
@@ -35,12 +37,6 @@ import type {
   TerminalSessionMeta,
   TerminalSpawnRequest,
 } from "./terminal-host";
-
-/**
- * The exit code reported for a session whose host is gone, or that ended while the server was not
- * connected: 128 + SIGHUP, what its shell got when the PTY closed. Not a code the program chose.
- */
-export const HOST_LOST_EXIT_CODE = 129;
 
 /** How long a host may be unreachable before new sessions stop going to it. */
 export const STALLED_AFTER_MS = 30_000;
@@ -638,11 +634,18 @@ export class SocketTerminalHost implements TerminalHost {
       connection.send(encodeJsonFrame({ type: "destroy", id }));
     }
     for (const [id, known] of this.sessions) {
-      if (running.get(id)?.epoch === known.epoch) continue;
+      const listed = running.get(id);
+      if (listed?.epoch === known.epoch) {
+        // Ended meanwhile: whoever routes it learns how now, and an attach drains it later.
+        if (listed.ended) this.emit({ type: "ended", id, epoch: known.epoch, ...listed.ended });
+        continue;
+      }
       if (!known.confirmed) continue;
       this.sessions.delete(id);
+      // A host with `endedSessions` lists such a session with its exit code; one without it, or
+      // that had too many to keep, has none to give.
       this.log.warn(`Terminal ${id.slice(0, 8)} ended while the host was not connected`);
-      this.emit({ type: "exit", id, epoch: known.epoch, exitCode: HOST_LOST_EXIT_CODE });
+      this.emit({ type: "lost", id, epoch: known.epoch, reason: "exit_unknown" });
     }
     for (const [id, known] of this.sessions) {
       if (!known.attach?.sent) continue;
@@ -668,7 +671,7 @@ export class SocketTerminalHost implements TerminalHost {
     // Reported before the gone listeners run, while whoever routes to this host still does.
     for (const [id, known] of lost) {
       this.sessions.delete(id);
-      this.emit({ type: "exit", id, epoch: known.epoch, exitCode: HOST_LOST_EXIT_CODE });
+      this.emit({ type: "lost", id, epoch: known.epoch, reason: "host_lost" });
     }
     this.finish();
   }

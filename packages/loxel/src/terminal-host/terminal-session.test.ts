@@ -298,6 +298,18 @@ describe("TerminalSession", () => {
     expect(expected).toBe(session.outputOffset);
   });
 
+  test("an attach's token stays current across flow-control resyncs, and only its own", async () => {
+    const { session } = spawnScript("exec sleep 30");
+    const token = await session.attach(1);
+    expect(session.isCurrent(token)).toBe(true);
+    // Re-sent under the same number, as after a reconnect: a new attach all the same.
+    const again = await session.attach(1);
+    expect(session.isCurrent(token)).toBe(false);
+    expect(session.isCurrent(again)).toBe(true);
+    session.detach();
+    expect(session.isCurrent(again)).toBe(false);
+  });
+
   test("resume falls back to a snapshot once the ring has evicted the offset", async () => {
     const { session, recorder } = spawnScript(
       String.raw`printf 'hello\n'; sleep 0.2; printf 'more\n'; exec sleep 30`,

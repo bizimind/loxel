@@ -35,6 +35,7 @@ import {
   createFilePathLinkProvider,
 } from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
+import { terminalEndMessage } from "./terminal-end-message";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
@@ -504,8 +505,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       }
       if (msg.type === "terminal_exit" && msg.id === terminalId) {
         exitedRef.current = true;
-        terminal.write(`\r\n\x1b[90m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
-        termLog.info("Terminal exited", { terminalId, exitCode: msg.exitCode });
+        terminal.write(`\r\n\x1b[90m[${terminalEndMessage(msg)}]\x1b[0m\r\n`);
+        const exitCode = msg.reason === "exited" ? msg.exitCode : null;
+        termLog.info("Terminal exited", { terminalId, reason: msg.reason, exitCode });
       }
     });
 
