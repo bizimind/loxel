@@ -185,6 +185,8 @@ Code blocks fenced as ` ```diff ` or ` ```patch ` show the change as a diff belo
 
 A `:::localdb` block puts a database view inside the document: a Table, Kanban, Calendar, Gantt, Graph or Form, for task boards, decision logs or anything else you want to track next to your notes. Add one from the block menu: **Data > Database Widget**. Widget data is stored per project and updates live in every open editor that shows it.
 
+Images referenced by relative path (`![alt](./diagram.png)`) render inline, resolved against the markdown file's location; `http(s)` and `data:` URLs render as-is. Paste or drop image files (PNG, JPEG, GIF, WebP, SVG, up to 10 MB) to upload them: in a repo file they are stored next to it under `assets/` and inserted as `![name](./assets/name-<timestamp>.png)`; in a [draft](/docs/drafts) they are stored alongside the draft. The markdown keeps the relative path you see, so the file stays portable. A failed upload shows a toast and inserts nothing; an image that cannot be loaded shows a dashed placeholder with its alt text.
+
 ---
 
 ## Conflict detection
