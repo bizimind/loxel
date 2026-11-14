@@ -281,12 +281,44 @@ describe("InProcessTerminalHost keeping ended sessions", () => {
     expect(events.map((event) => event.type)).toEqual(["exit", "state", "exit"]);
   });
 
-  test("an attach that finds no server connected anymore leaves the exit for the next one", async () => {
-    const { host, events } = createHost();
-    const spawned = await spawnEnded(host, "echo kept; exit 6");
-    // Still keeping ended sessions, as while no server is connected: the drain reports nothing.
-    await host.attach({ id: spawned.id, attachment: 1 });
-    expect(events.some((event) => event.type === "exit")).toBe(false);
-    expect(host.endedSessionCount).toBe(1);
-  });
+  // Whatever reaches the session between an attach and its sync settling decides instead of it.
+  const paths = ["snapshot", "resume"] as const;
+  const interruptions = [
+    { name: "an attach under the same number", exits: 1, kept: 0 },
+    { name: "an attach under another number", exits: 1, kept: 0 },
+    { name: "a detach", exits: 0, kept: 1 },
+    { name: "a destroy", exits: 0, kept: 0 },
+  ] as const;
+  for (const path of paths) {
+    for (const interruption of interruptions) {
+      test(`a ${path} drain interrupted by ${interruption.name} leaves the exit to what came after`, async () => {
+        const { host, events } = createHost();
+        const spawned = await spawnEnded(host, "echo kept; exit 6");
+        host.stopKeepingEndedSessions();
+        const [info] = await host.list();
+        const since =
+          path === "resume" ? { epoch: spawned.epoch, offset: info!.offset } : undefined;
+        const first = host.attach({ id: spawned.id, attachment: 1, since });
+        let next: Promise<void> = Promise.resolve();
+        if (interruption.name === "an attach under the same number") {
+          next = host.attach({ id: spawned.id, attachment: 1, since });
+        } else if (interruption.name === "an attach under another number") {
+          next = host.attach({ id: spawned.id, attachment: 2, since });
+        } else if (interruption.name === "a detach") {
+          host.detach(spawned.id);
+        } else {
+          host.destroy(spawned.id);
+        }
+        await Promise.all([first, next]);
+
+        const types = events.map((event) => event.type);
+        expect(types.filter((type) => type === "exit")).toHaveLength(interruption.exits);
+        if (interruption.exits > 0) {
+          expect(types.at(-1)).toBe("exit");
+          expect(types.at(-2)).toBe("state");
+        }
+        expect(host.endedSessionCount).toBe(interruption.kept);
+      });
+    }
+  }
 });

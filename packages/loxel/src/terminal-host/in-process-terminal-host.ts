@@ -109,18 +109,17 @@ export class InProcessTerminalHost implements TerminalHost {
     const ended = this.ended.get(id);
     if (!ended) return;
     const { session } = ended;
-    if (session) {
-      // The state and the output the client missed, then the exit.
-      const current = await session.attach(attachment, since);
-      // Superseded meanwhile by another attach (even one re-sent with the same number after a
-      // reconnect) or a detach, which decides instead. One whose output was let go of meanwhile
-      // has nothing left to show, only the exit.
-      if (ended.session === session && !current) return;
+    if (!session) {
+      // Its output was let go of: there is nothing to show, only the exit.
+      this.reportEnded(ended);
+      return;
     }
-    // Forgotten meanwhile, or already reported by an attach that superseded this one; or its server
-    // left meanwhile, and the exit waits for the next one.
-    if (this.ended.get(id) !== ended || this.onKeptEnded) return;
-    this.reportEnded(ended);
+    // The state and the output the client missed, then the exit, which only the attach that still
+    // holds once synced reports. Any other attach (one re-sent under the same number after a
+    // reconnect included), a detach (its server leaving among them), a destroy, or its output let
+    // go of, ends this one's claim: whatever came after decides.
+    const token = await session.attach(attachment, since);
+    if (session.isCurrent(token)) this.reportEnded(ended);
   }
 
   detach(id: string): void {

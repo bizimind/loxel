@@ -298,17 +298,16 @@ describe("TerminalSession", () => {
     expect(expected).toBe(session.outputOffset);
   });
 
-  test("an attach resolves to whether it is still current, a re-send under its number superseding it", async () => {
+  test("an attach's token stays current across flow-control resyncs, and only its own", async () => {
     const { session } = spawnScript("exec sleep 30");
-    // A reconnect re-sends the pending attach with the same number while its snapshot is pending.
-    const first = session.attach(1);
+    const token = await session.attach(1);
+    expect(session.isCurrent(token)).toBe(true);
+    // Re-sent under the same number, as after a reconnect: a new attach all the same.
+    const again = await session.attach(1);
+    expect(session.isCurrent(token)).toBe(false);
+    expect(session.isCurrent(again)).toBe(true);
     session.detach();
-    const second = session.attach(1);
-    expect(await first).toBe(false);
-    expect(await second).toBe(true);
-    const detached = session.attach(2);
-    session.detach();
-    expect(await detached).toBe(false);
+    expect(session.isCurrent(again)).toBe(false);
   });
 
   test("resume falls back to a snapshot once the ring has evicted the offset", async () => {
