@@ -51,7 +51,7 @@ If Loxel ever has to end terminals it can't talk to when it starts, after you in
 
 After an update, the terminals you kept keep running as they were, on the version of Loxel's terminal engine they started with, while new terminals use the updated one. Such a terminal's tab shows a small clock icon, and its tooltip says so. To move it to the current version, right-click its tab and choose **Restart Terminal**. Loxel asks first, and names the program still running in it when it can tell, since it ends with the shell; then a new shell starts in the same tab and folder.
 
-Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
+Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Every open terminal keeps its scrollback in memory, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 
 ---
 

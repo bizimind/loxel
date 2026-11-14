@@ -100,6 +100,17 @@ async function startIncompatibleHost(
   return { received };
 }
 
+/** A socket at `path` that closes every connection unanswered: a host that runs but does not answer. */
+async function startSilentSocket(path: string): Promise<void> {
+  const server: Server = createServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => {
+    server.listen(path, resolve);
+  });
+  cleanups.push(() => {
+    server.close();
+  });
+}
+
 function spawnRequest(script: string): TerminalSpawnRequest {
   return {
     id: crypto.randomUUID(),
@@ -244,6 +255,50 @@ describe("TerminalHostPool", () => {
     expect(
       [goneLog, `${goneLog}.stderr`, liveLog, recentLog].map((log) => existsSync(log)),
     ).toEqual([false, false, true, true]);
+  });
+
+  test("keeps the binary of a host whose discovery failed, by the build its entry names", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    // The host does not answer, and is left be.
+    const socket = hostSocketPath(runDir, "34343434");
+    await startSilentSocket(socket);
+    writeFileSync(
+      hostEntryPath(runDir, "34343434"),
+      JSON.stringify({ pid: process.pid, build: "unchecked", protocol: "1.0.0", socket }),
+    );
+    for (const build of ["unchecked", "unused"]) {
+      mkdirSync(join(hostBinDir(stateDir), build), { recursive: true });
+    }
+    const pool = new TerminalHostPool({
+      stateDir,
+      runDir,
+      socketDir: runDir,
+      serverBuild: "test",
+      hostBuildId: "current",
+      // A failure discovery did not foresee, here in logging what it found.
+      log: {
+        ...createNoopLogger(),
+        warn: () => {
+          throw new Error("unforeseen");
+        },
+      },
+    });
+    cleanups.push(() => pool.dropAll());
+
+    await startPool(pool);
+    expect(existsSync(join(hostBinDir(stateDir), "unchecked"))).toBe(true);
+    expect(existsSync(join(hostBinDir(stateDir), "unused"))).toBe(false);
+  });
+
+  test("removes no binary while a host that may be running has no known build", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    // A socket with no entry that does not answer: a host that runs, of a build nothing names.
+    await startSilentSocket(hostSocketPath(runDir, "56565656"));
+    mkdirSync(join(hostBinDir(stateDir), "unknown"), { recursive: true });
+    const { pool } = createPool(stateDir, runDir);
+
+    await startPool(pool);
+    expect(existsSync(join(hostBinDir(stateDir), "unknown"))).toBe(true);
   });
 
   test("a host that is gone reports its sessions ended, and the next spawn starts a new one", async () => {

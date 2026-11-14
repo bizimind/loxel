@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { type Socket, createConnection, createServer } from "node:net";
+import { type Server, type Socket, createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,8 @@ import { TerminalHostService } from "./host-service";
 import { InProcessTerminalHost } from "./in-process-terminal-host";
 import type { InitializeMessage } from "./protocol";
 import { TERMINAL_HOST_CAPABILITIES } from "./protocol";
-import { SocketTerminalHost } from "./socket-terminal-host";
+import { FrameReader, encodeJsonFrame } from "./protocol-framing";
+import { SocketTerminalHost, type SocketTerminalHostOptions } from "./socket-terminal-host";
 import type { TerminalHostEvent, TerminalSpawnRequest } from "./terminal-host";
 
 const textEncoder = new TextEncoder();
@@ -108,7 +109,7 @@ async function startProxy(dir: string, target: string) {
 
 function connect(
   socketPath: string,
-  overrides: { isProcessAlive?: (pid: number) => boolean } = {},
+  overrides: Pick<SocketTerminalHostOptions, "isProcessAlive" | "connect"> = {},
 ) {
   const client = new SocketTerminalHost(
     {
@@ -130,6 +131,70 @@ function connect(
       .map((data) => textDecoder.decode(data))
       .join("");
   return { client, events, outputText };
+}
+
+/** One connection to a {@link startScriptedHost}, and the messages the host got on it. */
+interface ScriptedConnection {
+  socket: Socket;
+  received: { type: string; requestId?: number; sessions?: string }[];
+}
+
+/**
+ * A host as a bare socket, for states the real service passes through too fast to act in: it
+ * answers `initialize`, and `list` with no sessions unless told to hold it, and closes a
+ * connection that sends `disconnect`. `onMessage` runs after each message is recorded.
+ */
+async function startScriptedHost() {
+  const dir = mkdtempSync(join(tmpdir(), "ths-"));
+  const socketPath = join(dir, "host.sock");
+  const connections: ScriptedConnection[] = [];
+  const script = { holdList: false, onMessage: () => {} };
+  const server: Server = createServer((socket) => {
+    const reader = new FrameReader();
+    const connection: ScriptedConnection = { socket, received: [] };
+    connections.push(connection);
+    socket.on("data", (chunk: Buffer) => {
+      for (const body of reader.push(chunk)) {
+        if (body.kind !== "json") continue;
+        const message = body.value as ScriptedConnection["received"][number];
+        connection.received.push(message);
+        if (message.type === "initialize") {
+          socket.write(
+            encodeJsonFrame({
+              type: "initialize_result",
+              protocol: TERMINAL_HOST_PROTOCOL,
+              hostBuildId: "build-a",
+              pid: process.pid,
+              capabilities: [],
+            }),
+          );
+        }
+        if (message.type === "list" && !script.holdList) {
+          socket.write(
+            encodeJsonFrame({ type: "result", requestId: message.requestId, value: [] }),
+          );
+        }
+        if (message.type === "disconnect") socket.end();
+        script.onMessage();
+      }
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(socketPath, resolve);
+  });
+  cleanups.push(() => {
+    for (const { socket } of connections) socket.destroy();
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  /** Resolves once `condition` holds, checked as each message arrives. */
+  const whenReceived = (condition: () => boolean) =>
+    new Promise<void>((resolve) => {
+      script.onMessage = () => {
+        if (condition()) resolve();
+      };
+    });
+  return { socketPath, connections, script, whenReceived };
 }
 
 function request(
@@ -361,5 +426,63 @@ describe("SocketTerminalHost against the host service", () => {
     (client as unknown as { connection: { destroy(): void } }).connection.destroy();
     await until(() => !host.sessionIds().includes(unknown.id));
     expect(host.sessionIds()).toEqual([known.id]);
+  });
+});
+
+describe("SocketTerminalHost leaving while it reconnects", () => {
+  /** A connected client, and how to drop its connection from the host's side. */
+  async function connectedClient(host: Awaited<ReturnType<typeof startScriptedHost>>) {
+    const { client } = connect(host.socketPath);
+    await client.list();
+    return { client, dropConnection: () => host.connections[0]!.socket.destroy() };
+  }
+
+  test("keep reaches the host over the connection being restored", async () => {
+    const host = await startScriptedHost();
+    const { client, dropConnection } = await connectedClient(host);
+    host.script.holdList = true;
+    const restoring = host.whenReceived(
+      () => host.connections[1]?.received.at(-1)?.type === "list",
+    );
+    dropConnection();
+    await restoring;
+
+    await client.disconnect("keep");
+    expect(host.connections[1]!.received.at(-1)).toEqual({ type: "disconnect", sessions: "keep" });
+  });
+
+  test("keep waits for the reconnect under way, then reaches the host on its own connection", async () => {
+    const host = await startScriptedHost();
+    // The reconnect's connection settles only when the test lets it: until then
+    // its `initialize` may still be on its way, and a keep sent before it would be superseded.
+    const order: string[] = [];
+    const reconnectSettles = Promise.withResolvers<void>();
+    let opened = 0;
+    const { client } = connect(host.socketPath, {
+      connect: (socketPath, initialize) => {
+        opened++;
+        order.push(`connect ${opened}`);
+        const connection = openHostConnection(socketPath, initialize);
+        if (opened > 1) return connection;
+        return connection.then(async (open) => {
+          await reconnectSettles.promise;
+          order.push("reconnect settled");
+          return open;
+        });
+      },
+    });
+    await client.list();
+    const reconnecting = host.whenReceived(() => host.connections.length === 2);
+    host.connections[0]!.socket.destroy();
+    await reconnecting;
+
+    const left = client.disconnect("keep");
+    reconnectSettles.resolve();
+    await left;
+    expect(order).toEqual(["connect 1", "reconnect settled", "connect 2"]);
+    expect(host.connections[2]!.received).toEqual([
+      expect.objectContaining({ type: "initialize" }),
+      { type: "disconnect", sessions: "keep" },
+    ]);
   });
 });

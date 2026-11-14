@@ -80,6 +80,8 @@ export interface SocketTerminalHostOptions {
   log: ChildLogger;
   /** Replaces the process check, for tests. */
   isProcessAlive?: (pid: number) => boolean;
+  /** Replaces {@link openHostConnection} after the first connection, for tests. */
+  connect?: typeof openHostConnection;
 }
 
 type State = "connecting" | "connected" | "reconnecting" | "gone";
@@ -98,6 +100,8 @@ export class SocketTerminalHost implements TerminalHost {
   private readonly listeners = new Set<(event: TerminalHostEvent) => void>();
   private readonly goneListeners = new Set<() => void>();
   private lastRequestId = 0;
+  /** The connection a reconnect is opening, until it is open or failed. */
+  private connectAttempt: Promise<HostConnection> | null = null;
   /** When the current run of reconnect attempts started, while there is one. */
   private reconnectingSince: number | null = null;
   private readonly log: ChildLogger;
@@ -288,23 +292,47 @@ export class SocketTerminalHost implements TerminalHost {
     connection?.destroy();
   }
 
-  /** `ends`: the message ends the sessions, which a SIGTERM does too when it cannot be sent. */
+  /**
+   * `ends`: the message ends the sessions, which a SIGTERM does too when it cannot be sent. One
+   * that keeps them must reach the host even while the connection is being restored, or the host,
+   * in the grace period since the connection dropped, ends them when it runs out.
+   */
   private leave(message: object, ends: boolean): Promise<void> {
     if (this.state === "gone") return Promise.resolve();
-    const connection = this.state === "connected" ? this.connection : null;
+    // Connected, or restoring a connection that has done its handshake.
+    const connection = this.connection;
+    const attempt = this.connectAttempt;
     const pid = this.hello?.pid;
-    if (connection) connection.send(encodeJsonFrame(message));
     this.finish();
-    if (!connection) {
-      // Reconnecting to it: the host takes SIGTERM as an order to end its sessions. A host still
-      // starting has none yet, and exits once its first connection closes.
-      if (ends && pid !== undefined) signalHost(pid);
+    if (connection) return sendAndClose(connection, message);
+    // A host still starting has no sessions yet, and exits once its first connection closes.
+    if (pid === undefined) return Promise.resolve();
+    // Reconnecting to it: the host takes SIGTERM as an order to end its sessions.
+    if (ends) {
+      signalHost(pid);
       return Promise.resolve();
     }
-    return new Promise((resolve) => {
-      connection.start({ onBody: () => {}, onClose: () => resolve() });
-      connection.end();
-    });
+    return this.leaveOverNewConnection(message, attempt);
+  }
+
+  /**
+   * Send `message` over a connection of its own, once the attempt to reconnect under way, if any,
+   * has settled: its `initialize` must reach the host first, or the host would take it as the
+   * newer server and ignore the message.
+   */
+  private async leaveOverNewConnection(
+    message: object,
+    attempt: Promise<HostConnection> | null,
+  ): Promise<void> {
+    await attempt?.catch(() => {});
+    let connection: HostConnection;
+    try {
+      connection = await this.connect();
+    } catch (err) {
+      this.log.warn("Could not reach the terminal host to keep its sessions", { error: err });
+      return;
+    }
+    await sendAndClose(connection, message);
   }
 
   /** Stop using the host: nothing more is sent, requests fail, and gone listeners run. */
@@ -501,7 +529,7 @@ export class SocketTerminalHost implements TerminalHost {
       }
       let connection: HostConnection;
       try {
-        connection = await openHostConnection(this.options.socketPath, this.options.initialize);
+        connection = await this.openForReconnect();
       } catch (err) {
         if (this.state !== "reconnecting") return;
         if (err instanceof HostConnectError && err.refused) {
@@ -519,6 +547,22 @@ export class SocketTerminalHost implements TerminalHost {
       await this.restore(connection);
       return;
     }
+  }
+
+  /** Open a connection to restore, noted until it settles so that leaving meanwhile waits for it. */
+  private openForReconnect(): Promise<HostConnection> {
+    const opening = this.connect();
+    this.connectAttempt = opening;
+    const settled = () => {
+      if (this.connectAttempt === opening) this.connectAttempt = null;
+    };
+    opening.then(settled, settled);
+    return opening;
+  }
+
+  private connect(): Promise<HostConnection> {
+    const connect = this.options.connect ?? openHostConnection;
+    return connect(this.options.socketPath, this.options.initialize);
   }
 
   /** Bring the client in line with the host over a fresh connection, then resume sending. */
@@ -635,6 +679,15 @@ export class SocketTerminalHost implements TerminalHost {
   private goneError(): Error {
     return new Error(`Terminal host ${this.hostId} is not available`);
   }
+}
+
+/** Send `message` as the last thing on `connection`; resolves once the host has closed it. */
+function sendAndClose(connection: HostConnection, message: object): Promise<void> {
+  connection.send(encodeJsonFrame(message));
+  return new Promise((resolve) => {
+    connection.start({ onBody: () => {}, onClose: () => resolve() });
+    connection.end();
+  });
 }
 
 function signalHost(pid: number): void {
