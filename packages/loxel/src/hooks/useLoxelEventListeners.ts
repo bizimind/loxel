@@ -8,6 +8,7 @@ import { useEffect } from "react";
 
 import { onLoxelEvent } from "@/lib/loxel-events";
 import {
+  createAgent,
   createBrowser,
   createCodeEditor,
   createDrawing,
@@ -17,7 +18,6 @@ import {
   duplicatePatchDiff,
   handleFileDeleted,
   handleFileMoved,
-  createAgent,
   openCompareFiles,
   openDiff,
   openLocalDb,

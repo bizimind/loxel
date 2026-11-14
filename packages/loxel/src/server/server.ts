@@ -6,6 +6,7 @@ import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
+import { parseAgentClientMessage } from "@/api/agent-session-model";
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
@@ -15,11 +16,10 @@ import type {
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
+import { isUuid } from "@/lib/uuid";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
-import { AgentManager, type AgentSocket, type AgentSocketData } from "./agent/agent-manager";
-import { agentStartGate } from "./agent/agent-start-gate";
-import { claudeSdkBackend } from "./agent/claude-sdk-transport";
+import { type AgentClient, createClaudeAgentManager } from "./agent";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
@@ -880,13 +880,6 @@ const terminalManager = new TerminalManager(terminalHosts, {
   },
 });
 const notificationStore = new NotificationStore();
-
-const agentManager = new AgentManager(claudeSdkBackend, agentStartGate);
-
-/** An agent panel's socket, as the agent manager sees it. */
-function agentSocket(ws: ServerWebSocket<WsData>, data: AgentSocketData): AgentSocket {
-  return { data, send: (text) => ws.send(text), close: (code, reason) => ws.close(code, reason) };
-}
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
 const formatService = new FormatService();
 const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
@@ -917,6 +910,36 @@ const schemaDownloads = new SchemaDownloads({
 });
 tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
 const yamlLspManager = new YamlLspManager({}, (url) => schemaDownloads.contentFor(url));
+// Agent panels: Claude Code sessions driven through the Agent SDK (see docs/AGENT_PANEL.md). The agent's own
+// commands get the `LOXEL_*` variables a terminal's shell gets, so `loxel` works from them.
+const agentManager = createClaudeAgentManager({ LOXEL: "1", LOXEL_PORT: String(config.port) });
+const agentClients = new WeakMap<ServerWebSocket<WsData>, AgentClient>();
+
+/** The socket's client handle, the same object for every message so detach can match it. */
+function agentClient(ws: ServerWebSocket<WsData>): AgentClient {
+  let client = agentClients.get(ws);
+  if (!client) {
+    client = { send: (message) => ws.send(JSON.stringify(message)) };
+    agentClients.set(ws, client);
+  }
+  return client;
+}
+
+function handleAgentMessage(ws: ServerWebSocket<WsData>, agentId: string, message: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return;
+  }
+  const result = parseAgentClientMessage(parsed);
+  if (!result) {
+    log.warn("Ignored a malformed agent message");
+    return;
+  }
+  void agentManager.handle(agentId, agentClient(ws), result);
+}
+
 // A chosen toolchain reaches everything that shares the worktree's resolution (language servers,
 // terminals, format on save, the status bar) without a restart.
 for (const { onOverrideChange, refresh } of toolchainStatusModules) onOverrideChange(refresh);
@@ -1060,9 +1083,6 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
 
     // --- Notifications ---
 
-    case "agent_close":
-      agentManager.close(msg.agentId);
-      break;
     case "notification_dismiss": {
       if (notificationStore.dismiss(msg.id)) {
         broadcastAll({ type: "notification_dismissed", id: msg.id });
@@ -1261,8 +1281,9 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/ws/agent") {
-      const data: WsData = { type: "agent", session: null, client: null };
-      const upgraded = server.upgrade(req, { data });
+      const agentId = url.searchParams.get("id");
+      if (!agentId || !isUuid(agentId)) return new Response("Invalid agent id", { status: 400 });
+      const upgraded = server.upgrade(req, { data: { type: "agent" as const, agentId } });
       if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
       return undefined;
     }
@@ -1342,7 +1363,7 @@ const server = Bun.serve<WsData>({
 
     close(ws) {
       if (ws.data?.type === "agent") {
-        agentManager.detach(agentSocket(ws, ws.data));
+        agentManager.detach(ws.data.agentId, agentClient(ws));
         return;
       }
       if (ws.data?.type === "yaml-lsp") {
@@ -1368,9 +1389,7 @@ const server = Bun.serve<WsData>({
       // Shutdown waits for language servers to exit: nothing may start again behind its teardown.
       if (shuttingDown) return;
       if (ws.data?.type === "agent") {
-        if (typeof message === "string") {
-          void agentManager.handleMessage(agentSocket(ws, ws.data), message);
-        }
+        if (typeof message === "string") handleAgentMessage(ws, ws.data.agentId, message);
         return;
       }
       if (ws.data?.type === "yaml-lsp") {
@@ -1444,8 +1463,6 @@ function startIdleTimer(): void {
       idleTimer = null;
       const destroyed = terminalManager.destroyOrphans();
       if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-      const agents = agentManager.disposeDetached();
-      if (agents > 0) log.info(`Ended ${agents} agent session(s) no window shows`);
       if (ownedByApp) return;
       log.info("Idle timeout reached, shutting down");
       shutdown();
@@ -1532,10 +1549,10 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
       ? terminalHosts.disconnectAll("end")
       : Promise.resolve(terminalHosts.dropAll());
   formatService.destroy();
-  agentManager.disposeAll();
-  const lspServersStopped = Promise.all(
-    [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
-  );
+  const lspServersStopped = Promise.all([
+    ...[yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
+    agentManager.destroyAll(),
+  ]);
   gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();

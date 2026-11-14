@@ -1,316 +1,512 @@
 /**
- * The agent panel's session model, shared by the server and the renderer: what an agent session
- * shows (transcript, pending interactions, status, settings) and the WebSocket messages on
- * `/ws/agent`. It is independent of how the server talks to the agent (see
- * `src/server/agent/agent-transport.ts`), so a different transport can feed the same UI.
+ * The agent panel's model, independent of how the agent is driven: a transport (today the Claude
+ * Code Agent SDK transport in `src/server/agent/`) turns what the agent says into
+ * {@link AgentEvent}s, and {@link applyAgentEvent} folds them into an {@link AgentState}. The server
+ * keeps the state for every session and sends it whole on attach, then each event; the renderer
+ * folds the same events with the same function, so both sides always agree.
  */
+import { z } from "zod";
 
-/** What the agent is doing, as the tab and the panel header show it. */
-export type AgentStatus =
-  | "starting"
-  | "idle"
-  | "working"
-  | "needs_input"
-  | "failed"
-  /** The session continues in a terminal (`claude --resume`); the panel waits to resume it. */
-  | "handed_off";
+/** What the session is doing, as the tab and the sidebar show it. */
+export type AgentStatus = "starting" | "idle" | "working" | "needs_input" | "failed" | "exited";
 
-export const PERMISSION_MODES = [
+const PermissionModeSchema = z.enum([
   "default",
   "acceptEdits",
   "plan",
   "auto",
   "dontAsk",
   "bypassPermissions",
-] as const;
-export type AgentPermissionMode = (typeof PERMISSION_MODES)[number];
+]);
 
-export const PERMISSION_MODE_LABELS: Record<AgentPermissionMode, string> = {
-  default: "Ask before edits",
-  acceptEdits: "Accept edits",
-  plan: "Plan mode",
-  auto: "Auto",
-  dontAsk: "Don't ask (deny)",
-  bypassPermissions: "Bypass permissions",
-};
+export type AgentPermissionMode = z.infer<typeof PermissionModeSchema>;
 
-export function isPermissionMode(value: unknown): value is AgentPermissionMode {
-  return typeof value === "string" && (PERMISSION_MODES as readonly string[]).includes(value);
+export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = PermissionModeSchema.options;
+
+export function isAgentPermissionMode(value: unknown): value is AgentPermissionMode {
+  return PermissionModeSchema.safeParse(value).success;
 }
-
-export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-export type AgentEffort = (typeof EFFORT_LEVELS)[number];
-
-export function isEffort(value: unknown): value is AgentEffort {
-  return typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value);
-}
-
-export interface ToolResult {
-  text: string;
-  isError: boolean;
-}
-
-/**
- * One entry of the transcript. `parentToolUseId` is the subagent (`Agent`/`Task` tool call) that
- * produced the entry, or null for the main conversation.
- */
-export type TranscriptItem =
-  | {
-      kind: "user";
-      id: string;
-      text: string;
-      imageCount: number;
-      /** Sent while the agent was busy and not taken in yet. */
-      queued?: boolean;
-    }
-  | {
-      kind: "assistant";
-      id: string;
-      text: string;
-      parentToolUseId: string | null;
-      streaming?: boolean;
-    }
-  | {
-      kind: "thinking";
-      id: string;
-      text: string;
-      parentToolUseId: string | null;
-      streaming?: boolean;
-    }
-  | {
-      kind: "tool";
-      /** The tool use id, which its result and its subagent's entries refer to. */
-      id: string;
-      name: string;
-      input: unknown;
-      parentToolUseId: string | null;
-      result?: ToolResult;
-    }
-  | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
-
-export interface AgentQuestionOption {
-  label: string;
-  description: string;
-  preview?: string;
-}
-
-export interface AgentQuestion {
-  /** The question text, which also keys its answer. */
-  question: string;
-  header: string;
-  multiSelect: boolean;
-  options: AgentQuestionOption[];
-}
-
-/** Where an "always allow" rule is saved. */
-export const PERMISSION_DESTINATIONS = [
-  "session",
-  "localSettings",
-  "projectSettings",
-  "userSettings",
-] as const;
-export type PermissionDestination = (typeof PERMISSION_DESTINATIONS)[number];
-
-export const PERMISSION_DESTINATION_LABELS: Record<PermissionDestination, string> = {
-  session: "this session",
-  localSettings: "this project (just you)",
-  projectSettings: "this project (shared)",
-  userSettings: "all projects",
-};
-
-export function isPermissionDestination(value: unknown): value is PermissionDestination {
-  return (
-    typeof value === "string" && (PERMISSION_DESTINATIONS as readonly string[]).includes(value)
-  );
-}
-
-/** An "always allow" choice the agent offered, described for the user. */
-export interface PermissionSuggestion {
-  id: string;
-  /** What it allows, e.g. `Bash(npm test:*)` or `Edit files in /repo/src`. */
-  label: string;
-  destination: PermissionDestination;
-  /** Whether the user may save it somewhere else (rules and directories can, a mode switch cannot). */
-  movable: boolean;
-}
-
-export type AgentInteraction =
-  | { kind: "question"; id: string; questions: AgentQuestion[] }
-  | {
-      kind: "permission";
-      id: string;
-      toolName: string;
-      /** The agent's own wording of the request, when it gave one. */
-      title?: string;
-      description?: string;
-      decisionReason?: string;
-      blockedPath?: string;
-      input: unknown;
-      suggestions: PermissionSuggestion[];
-      /** False when the agent's settings forbid remembering this permission. */
-      allowAlways: boolean;
-    }
-  | { kind: "plan"; id: string; plan: string; planFilePath?: string };
-
-export type InteractionResponse =
-  /** `answers` maps question text to the chosen label(s), joined with ", " for multi-select. */
-  | { kind: "question"; answers: Record<string, string> }
-  | { kind: "question"; dismissed: true }
-  | {
-      kind: "permission";
-      decision: "allow";
-      /** Suggestions to apply as well, each optionally saved somewhere else. */
-      always?: { id: string; destination?: PermissionDestination }[];
-    }
-  | { kind: "permission"; decision: "deny"; message?: string; stop?: boolean }
-  | { kind: "plan"; decision: "approve"; mode: AgentPermissionMode }
-  | { kind: "plan"; decision: "keep_planning"; feedback: string };
 
 export interface AgentCommand {
+  /** Without the leading slash. */
   name: string;
   description: string;
   argumentHint: string;
 }
 
+/** The pickable models: the catalog without its "default" alias, which repeats one of them. */
+export function pickableModels(models: readonly AgentModel[]): readonly AgentModel[] {
+  return models.filter((m) => m.value !== "default");
+}
+
+/** The catalog entry the session's model is: matched by alias or by the id an alias stands for. */
+export function currentModel(state: AgentState): AgentModel | null {
+  const id = state.model;
+  if (!id) return null;
+  // A pickable entry first, so the menu can check it; then any, the "default" alias included.
+  for (const models of [pickableModels(state.models), state.models]) {
+    const found = models.find((m) => m.value === id) ?? models.find((m) => m.resolvedModel === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * A model's concrete name, such as "Opus 5.5": the catalog's description starts with it
+ * ("Opus 5.5 · Best for everyday, complex tasks"), where its display name may be an alias.
+ */
+export function modelName(model: AgentModel): string {
+  const named = model.description.split(" · ")[0]?.trim();
+  return named || model.displayName;
+}
+
+/** The session's model as the composer shows it, or null until it is known. */
+export function modelLabel(state: AgentState): string | null {
+  const model = currentModel(state);
+  if (model) return modelName(model);
+  return state.model ? modelIdName(state.model) : null;
+}
+
+/** A name for a model id before the catalog arrives: `claude-opus-5-5` → "Opus 5.5". */
+export function modelIdName(id: string): string {
+  const match = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id);
+  if (match)
+    return `${match[1]!.charAt(0).toUpperCase()}${match[1]!.slice(1)} ${match[2]}.${match[3]}`;
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
 export interface AgentModel {
-  /** What to switch to (an alias such as `sonnet`, or a model id). */
+  /** What `set_model` takes: an alias (`opus`) or a full model id. */
   value: string;
-  /** The model id the alias stands for, as the agent reports its current model. */
-  resolvedModel?: string;
+  /** The model id an alias stands for, which the session reports as its model. */
+  resolvedModel: string | null;
   displayName: string;
   description: string;
-  effortLevels: AgentEffort[];
+  effortLevels: readonly string[];
 }
 
-export interface AgentSessionInfo {
-  /** The agent's own session id once it has one; used to resume after a restart. */
-  sessionId: string | null;
-  cwd: string;
-  model: string | null;
-  effort: AgentEffort | null;
-  permissionMode: AgentPermissionMode;
-  agentVersion: string | null;
-  commands: AgentCommand[];
-  models: AgentModel[];
-  costUsd: number | null;
-  /** Why the session failed, when `status` is `failed`. */
-  error: string | null;
+/** How a "don't ask again" answer would change the permission rules, as the agent suggests it. */
+export interface PermissionSuggestion {
+  /** The agent's own update object, sent back unchanged (with `destination` replaced) to apply it. */
+  update: Record<string, unknown>;
+  /** What it does, for the button: `Bash(npm --version)`, or the mode it switches to. */
+  label: string;
+  /** Where the agent would save it: `session`, `localSettings`, `projectSettings`, `userSettings`. */
+  destination: string;
 }
 
-export interface AgentSnapshot {
-  status: AgentStatus;
-  info: AgentSessionInfo;
-  items: TranscriptItem[];
-  interactions: AgentInteraction[];
+export interface AgentQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: readonly { label: string; description: string }[];
 }
 
-export interface AgentImage {
-  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
-  /** Base64 without the data URL prefix. */
-  data: string;
-}
-
-/** `queue` waits for the current turn to finish; `steer` reaches the agent mid-turn. */
-export type AgentDelivery = "queue" | "steer";
-
-/** Client-to-server messages on `/ws/agent`. */
-export type AgentClientMessage =
+/** Something the agent waits on the user for. */
+export type AgentRequest =
   | {
-      type: "attach";
-      agentId: string;
-      cwd: string;
-      /** The agent session to resume when the server has no live session for `agentId`. */
-      resumeSessionId?: string;
-      /** The session was handed off to a terminal: show it, but do not start it until resumed. */
-      handedOff?: boolean;
+      kind: "permission";
+      requestId: string;
+      /** The tool's name, as rules and summaries know it (`Bash`, `mcp__server__tool`). */
+      toolName: string;
+      /** What the agent calls it in its dialogs. */
+      displayName: string;
+      toolUseId: string;
+      input: Record<string, unknown>;
+      /** The agent's own one-line account of the call; the input is what actually runs. */
+      description?: string;
+      /** Why it asks rather than runs. */
+      reason?: string;
+      suggestions: readonly PermissionSuggestion[];
+      /** Offer no "don't ask again": accepting would save a rule broader than the ask. */
+      suppressAlwaysAllow: boolean;
+      /** Do not preselect approve: the ask must not be one stray keystroke away. */
+      defaultToNo: boolean;
     }
-  | { type: "send"; text: string; images?: AgentImage[]; delivery: AgentDelivery }
-  | { type: "interrupt" }
-  | { type: "respond"; interactionId: string; response: InteractionResponse }
-  | { type: "set_model"; model: string }
-  | { type: "set_effort"; effort: AgentEffort }
-  | { type: "set_permission_mode"; mode: AgentPermissionMode }
-  /** Stop the session here so it can continue in a terminal. */
-  | { type: "hand_off" }
-  /**
-   * Pick the session up again, with whatever happened in the terminal; `fresh` starts a new
-   * conversation instead (when the saved one cannot be resumed).
-   */
-  | { type: "resume"; fresh?: boolean };
+  | {
+      kind: "question";
+      requestId: string;
+      toolUseId: string;
+      input: Record<string, unknown>;
+      questions: readonly AgentQuestion[];
+    }
+  | {
+      kind: "plan";
+      requestId: string;
+      toolUseId: string;
+      input: Record<string, unknown>;
+      plan: string;
+      planFilePath?: string;
+    };
 
-/** Server-to-client messages on `/ws/agent`. */
-export type AgentServerMessage =
-  | { type: "snapshot"; snapshot: AgentSnapshot }
-  /** Insert or replace a transcript item by id. */
-  | { type: "item"; item: TranscriptItem }
-  /** Stream more text into an assistant or thinking item. */
-  | { type: "append"; id: string; text: string }
-  | { type: "interaction"; interaction: AgentInteraction }
-  | { type: "interaction_resolved"; id: string }
+/** One entry of the transcript. */
+export type TranscriptItem =
+  | { kind: "user"; id: string; text: string; imageCount: number; queued: boolean }
+  | { kind: "text"; id: string; text: string; streaming: boolean; parentToolUseId: string | null }
+  | {
+      kind: "thinking";
+      id: string;
+      text: string;
+      streaming: boolean;
+      parentToolUseId: string | null;
+    }
+  | {
+      kind: "tool";
+      /** The tool_use id, which its result and any subagent's messages refer to. */
+      id: string;
+      name: string;
+      input: unknown;
+      result: { text: string; isError: boolean } | null;
+      parentToolUseId: string | null;
+    }
+  | { kind: "notice"; id: string; level: "info" | "error"; text: string };
+
+export interface ContextUsage {
+  percentage: number;
+  totalTokens: number;
+  maxTokens: number;
+}
+
+export interface AgentState {
+  /** The agent's own session id, which `--resume` takes. */
+  sessionId: string | null;
+  agentVersion: string | null;
+  /** What the agent's turn is doing; {@link agentDisplayStatus} adds pending requests. */
+  status: AgentStatus;
+  model: string | null;
+  effort: string | null;
+  permissionMode: AgentPermissionMode | null;
+  /** Protocol features the running agent advertises; features gate on them. */
+  capabilities: readonly string[];
+  commands: readonly AgentCommand[];
+  models: readonly AgentModel[];
+  items: readonly TranscriptItem[];
+  pending: readonly AgentRequest[];
+  contextUsage: ContextUsage | null;
+  /** Total cost the agent reported for this process, in USD. */
+  costUsd: number;
+  /** Why the process stopped or failed, when it did. */
+  error: string | null;
+  /** The session continues in a terminal; this panel resumes it on request. */
+  handedOff: boolean;
+}
+
+export const INITIAL_AGENT_STATE: AgentState = {
+  sessionId: null,
+  agentVersion: null,
+  status: "starting",
+  model: null,
+  effort: null,
+  permissionMode: null,
+  capabilities: [],
+  commands: [],
+  models: [],
+  items: [],
+  pending: [],
+  contextUsage: null,
+  costUsd: 0,
+  error: null,
+  handedOff: false,
+};
+
+export type AgentEvent =
+  | {
+      type: "session";
+      sessionId: string;
+      agentVersion: string;
+      model: string;
+      permissionMode: AgentPermissionMode | null;
+      capabilities: readonly string[];
+    }
+  /** The commands and models the agent offers; a field left out keeps what the state has. */
+  | { type: "catalog"; commands?: readonly AgentCommand[]; models?: readonly AgentModel[] }
   | { type: "status"; status: AgentStatus }
-  | { type: "info"; info: AgentSessionInfo }
-  /** The session stopped here; `command` continues it in a terminal started in `cwd`. */
-  | { type: "handed_off"; command: string; cwd: string };
+  | { type: "permission_mode"; mode: AgentPermissionMode }
+  | { type: "model"; model: string }
+  | { type: "effort"; effort: string }
+  | { type: "user_message"; id: string; text: string; imageCount: number; queued: boolean }
+  /** A queued user message the agent has taken into a turn. */
+  | { type: "user_message_delivered"; id: string }
+  /** Streamed text for a text or thinking item; creates the item on its first delta. */
+  | {
+      type: "delta";
+      id: string;
+      kind: "text" | "thinking";
+      text: string;
+      parentToolUseId: string | null;
+    }
+  /** A finished item; replaces a streamed one with the same id. */
+  | { type: "item"; item: TranscriptItem }
+  | { type: "tool_result"; toolUseId: string; text: string; isError: boolean }
+  | { type: "request"; request: AgentRequest }
+  | { type: "request_resolved"; requestId: string }
+  | { type: "turn_result"; isError: boolean; costUsd: number; errorText: string | null }
+  | { type: "context_usage"; usage: ContextUsage }
+  | { type: "handed_off"; handedOff: boolean }
+  | { type: "exited"; error: string | null };
 
-/** Apply a server message to a snapshot. Pure, shared by the renderer and tests. */
-export function applyAgentMessage(snapshot: AgentSnapshot, msg: AgentServerMessage): AgentSnapshot {
-  switch (msg.type) {
-    case "snapshot":
-      return msg.snapshot;
-    case "item": {
-      const index = snapshot.items.findIndex((item) => item.id === msg.item.id);
-      if (index === -1) return { ...snapshot, items: [...snapshot.items, msg.item] };
-      const items = snapshot.items.slice();
-      items[index] = msg.item;
-      return { ...snapshot, items };
-    }
-    case "append": {
-      const index = snapshot.items.findIndex((item) => item.id === msg.id);
-      const item = snapshot.items[index];
-      if (!item || (item.kind !== "assistant" && item.kind !== "thinking")) return snapshot;
-      const items = snapshot.items.slice();
-      items[index] = { ...item, text: item.text + msg.text };
-      return { ...snapshot, items };
-    }
-    case "interaction":
+/** What the tab shows: a session waiting on an answer needs input whatever its turn is doing. */
+export function agentDisplayStatus(state: AgentState): AgentStatus {
+  return state.pending.length > 0 && state.status !== "exited" && state.status !== "failed"
+    ? "needs_input"
+    : state.status;
+}
+
+function upsertItem(items: readonly TranscriptItem[], item: TranscriptItem): TranscriptItem[] {
+  const index = items.findIndex((existing) => existing.id === item.id);
+  if (index === -1) return [...items, item];
+  const next = items.slice();
+  next[index] = item;
+  return next;
+}
+
+function updateItem(
+  items: readonly TranscriptItem[],
+  id: string,
+  update: (item: TranscriptItem) => TranscriptItem,
+): readonly TranscriptItem[] {
+  const index = items.findIndex((item) => item.id === id);
+  if (index === -1) return items;
+  const next = items.slice();
+  next[index] = update(items[index]!);
+  return next;
+}
+
+/** Folds one event into the state. Pure: the server and the renderer both run it. */
+export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentState {
+  switch (event.type) {
+    case "session":
       return {
-        ...snapshot,
-        interactions: [
-          ...snapshot.interactions.filter((i) => i.id !== msg.interaction.id),
-          msg.interaction,
+        ...state,
+        sessionId: event.sessionId,
+        agentVersion: event.agentVersion,
+        model: event.model,
+        permissionMode: event.permissionMode ?? state.permissionMode,
+        capabilities: event.capabilities,
+      };
+    case "catalog":
+      return {
+        ...state,
+        commands: event.commands ?? state.commands,
+        models: event.models ?? state.models,
+      };
+    case "status":
+      return { ...state, status: event.status };
+    case "permission_mode":
+      return { ...state, permissionMode: event.mode };
+    case "model":
+      return { ...state, model: event.model };
+    case "effort":
+      return { ...state, effort: event.effort };
+    case "user_message":
+      return {
+        ...state,
+        items: upsertItem(state.items, {
+          kind: "user",
+          id: event.id,
+          text: event.text,
+          imageCount: event.imageCount,
+          queued: event.queued,
+        }),
+      };
+    case "user_message_delivered":
+      return {
+        ...state,
+        items: updateItem(state.items, event.id, (item) =>
+          item.kind === "user" ? { ...item, queued: false } : item,
+        ),
+      };
+    case "delta": {
+      const existing = state.items.find((item) => item.id === event.id);
+      if (existing && (existing.kind === "text" || existing.kind === "thinking")) {
+        return {
+          ...state,
+          items: updateItem(state.items, event.id, () => ({
+            ...existing,
+            text: existing.text + event.text,
+          })),
+        };
+      }
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          {
+            kind: event.kind,
+            id: event.id,
+            text: event.text,
+            streaming: true,
+            parentToolUseId: event.parentToolUseId,
+          },
         ],
       };
-    case "interaction_resolved":
-      return { ...snapshot, interactions: snapshot.interactions.filter((i) => i.id !== msg.id) };
-    case "status":
-      return { ...snapshot, status: msg.status };
-    case "info":
-      return { ...snapshot, info: msg.info };
+    }
+    case "item":
+      return { ...state, items: upsertItem(state.items, event.item) };
+    case "tool_result":
+      return {
+        ...state,
+        items: updateItem(state.items, event.toolUseId, (item) =>
+          item.kind === "tool"
+            ? { ...item, result: { text: event.text, isError: event.isError } }
+            : item,
+        ),
+      };
+    case "request": {
+      const pending = [
+        ...state.pending.filter((r) => r.requestId !== event.request.requestId),
+        event.request,
+      ];
+      return { ...state, pending };
+    }
+    case "request_resolved":
+      return { ...state, pending: state.pending.filter((r) => r.requestId !== event.requestId) };
+    case "turn_result":
+      return {
+        ...state,
+        costUsd: event.costUsd,
+        // Streaming never outlives its turn: an interrupted block keeps the text it got.
+        items: [
+          ...state.items.map((item) =>
+            (item.kind === "text" || item.kind === "thinking") && item.streaming
+              ? { ...item, streaming: false }
+              : item,
+          ),
+          ...(event.isError && event.errorText
+            ? [
+                {
+                  kind: "notice" as const,
+                  id: `turn-error-${state.items.length}`,
+                  level: "error" as const,
+                  text: event.errorText,
+                },
+              ]
+            : []),
+        ],
+      };
+    case "context_usage":
+      return { ...state, contextUsage: event.usage };
     case "handed_off":
-      return { ...snapshot, status: "handed_off", interactions: [] };
+      if (!event.handedOff) return { ...state, handedOff: false };
+      // The process is gone: nothing it asked can be answered here, and nothing streams.
+      return {
+        ...state,
+        handedOff: true,
+        pending: [],
+        items: state.items.map((item) =>
+          (item.kind === "text" || item.kind === "thinking") && item.streaming
+            ? { ...item, streaming: false }
+            : item,
+        ),
+      };
+    case "exited":
+      return {
+        ...state,
+        status: event.error ? "failed" : "exited",
+        error: event.error,
+        pending: [],
+      };
     default: {
-      const unknown: never = msg;
-      return unknown;
+      // An event a newer server sends that this renderer does not know changes nothing.
+      const _unknown: never = event;
+      return state;
     }
   }
 }
 
-export function emptyAgentSnapshot(cwd: string): AgentSnapshot {
-  return {
-    status: "starting",
-    info: {
-      sessionId: null,
-      cwd,
-      model: null,
-      effort: null,
-      permissionMode: "default",
-      agentVersion: null,
-      commands: [],
-      models: [],
-      costUsd: null,
-      error: null,
-    },
-    items: [],
-    interactions: [],
-  };
+// ---------------------------------------------------------------------------
+// The agent socket: `/ws/agent?id=<agentId>`, one per mounted agent panel.
+// ---------------------------------------------------------------------------
+
+/** Where a "don't ask again" rule is saved. */
+const DestinationSchema = z.enum(["session", "localSettings", "projectSettings", "userSettings"]);
+export type PermissionDestination = z.infer<typeof DestinationSchema>;
+
+/** Base64 of a pasted image, capped well under the socket's message limit. */
+export const MAX_IMAGE_BASE64_LENGTH = 7_000_000;
+
+/** An image attached to a prompt, base64 without the data-URL prefix. */
+const AgentImageSchema = z.object({
+  mediaType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+  data: z.string().max(MAX_IMAGE_BASE64_LENGTH),
+});
+export type AgentImage = z.infer<typeof AgentImageSchema>;
+
+/** The user's answer to an {@link AgentRequest}. */
+const AgentResponseSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("permission"),
+    allow: z.boolean(),
+    /**
+     * The request's suggestions to apply, by index, each at the destination the user picked. The
+     * server builds the rules from its own copy of the request, so a client can only accept what
+     * the agent suggested.
+     */
+    alwaysAllow: z
+      .array(z.object({ index: z.number().int().nonnegative(), destination: DestinationSchema }))
+      .optional(),
+    /** Why not, for the agent (deny only). */
+    message: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("question"),
+    /** Answers by question text: one label, labels joined by ", ", or free text. */
+    answers: z.record(z.string(), z.string()),
+  }),
+  z.object({
+    kind: z.literal("plan"),
+    approve: z.boolean(),
+    /** The mode to continue in once approved. */
+    mode: PermissionModeSchema.optional(),
+    /** What to change, when the user keeps planning. */
+    feedback: z.string().optional(),
+  }),
+]);
+export type AgentResponse = z.infer<typeof AgentResponseSchema>;
+
+const AgentClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("attach"),
+    /** The panel's worktree, where the agent runs. */
+    worktreePath: z.string(),
+    /** The agent session the panel showed before, to resume after a restart. */
+    resumeSessionId: z.string().optional(),
+    /** The last sequence number the client applied; it only needs the events after it. */
+    sinceSeq: z.number().int().nonnegative().optional(),
+    /** The session instance `sinceSeq` counts in; any other instance sends a snapshot. */
+    instanceId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("send"),
+    id: z.uuid(),
+    text: z.string(),
+    images: z.array(AgentImageSchema).optional(),
+    /** `queue` waits for the running turn; `steer` folds into it now. */
+    delivery: z.enum(["queue", "steer"]),
+  }),
+  z.object({ type: z.literal("interrupt") }),
+  z.object({ type: z.literal("respond"), requestId: z.string(), response: AgentResponseSchema }),
+  z.object({ type: z.literal("set_permission_mode"), mode: PermissionModeSchema }),
+  z.object({ type: z.literal("set_model"), model: z.string() }),
+  z.object({ type: z.literal("set_effort"), effort: z.string() }),
+  z.object({ type: z.literal("refresh_context_usage") }),
+  /** Stop the process so the session can continue in a terminal. */
+  z.object({ type: z.literal("hand_off") }),
+  /** Start the process again on the same session, after a hand-off or an exit. */
+  z.object({ type: z.literal("resume") }),
+  /** The panel closed: stop the process for good. */
+  z.object({ type: z.literal("destroy") }),
+]);
+export type AgentClientMessage = z.infer<typeof AgentClientMessageSchema>;
+
+/** A message from an agent panel, or null if it is not one. */
+export function parseAgentClientMessage(value: unknown): AgentClientMessage | null {
+  const result = AgentClientMessageSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
+
+export type AgentServerMessage =
+  /** `instanceId` names this server session's numbering; a restarted server has a new one. */
+  | { type: "snapshot"; instanceId: string; seq: number; state: AgentState }
+  | { type: "event"; seq: number; event: AgentEvent }
+  | { type: "error"; message: string };

@@ -1,92 +1,71 @@
 /**
- * The agent panel: a native view of a Claude Code session the server drives. A header with the
- * session's state, model, effort and permission mode; the transcript; the cards for what the agent
- * needs from the user; and the composer. "Continue in terminal" hands the same session to the
- * `claude` TUI in a Loxel terminal for anything this view does not cover.
+ * The agent panel: a Claude Code session driven by Loxel instead of shown in a terminal. A quiet
+ * transcript with what waits on the user raised in place, and one composer surface whose footer
+ * holds the session's model, effort and mode, with a status line above it and a hand-off to a
+ * terminal for anything the panel does not show.
  */
 import type { DockviewPanelApi } from "dockview-react";
-import { ChevronDownIcon, PlayIcon, SquareTerminalIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
-import {
-  PERMISSION_MODE_LABELS,
-  PERMISSION_MODES,
-  type AgentClientMessage,
-} from "@/api/agent-session-model";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import type { AgentPanelParams } from "@/lib/panel-creators";
-import { cn } from "@/lib/utils";
+import { type AgentRequest, type AgentState, agentDisplayStatus } from "@/api/agent-session-model";
+import { fetchJson } from "@/api/client";
+import { frontendLog } from "@/lib/frontend-logger";
+import { isUuid } from "@/lib/uuid";
 import { WINDOW_ID } from "@/lib/window-id";
-import { requestOpen } from "@/open-request";
+import { useAgentStatusStore } from "@/store/agent-status";
 
-import { STATUS_DOT_CLASS, STATUS_LABELS } from "./agent-status";
 import { AgentComposer } from "./AgentComposer";
-import { AgentInteractionCard } from "./AgentInteractions";
+import { AgentControls, AgentStatusLine } from "./AgentControls";
+import { AgentRequestCard, REQUEST_CARD_ATTR } from "./AgentRequestCard";
 import { AgentTranscript } from "./AgentTranscript";
 import { useAgentSession } from "./use-agent-session";
 
-function HeaderMenu<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: ReactNode;
-  value: T | null;
-  options: readonly { value: T; label: string }[];
-  onChange: (value: T) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        disabled={disabled}
-        className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
-      >
-        {label}
-        <ChevronDownIcon className="size-3" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        <DropdownMenuRadioGroup
-          value={value ?? ""}
-          onValueChange={(next) => {
-            const option = options.find((o) => o.value === next);
-            if (option) onChange(option.value);
-          }}
-        >
-          {options.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
-              {option.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+const uiLog = frontendLog.child("ui");
+
+export interface AgentPanelParams {
+  agentId: string;
+  worktreePath: string;
+  /** Claude Code's session id once the server has one, so a restart can resume it. */
+  sessionId?: string;
 }
 
-/** Keep the transcript pinned to the bottom while the user has not scrolled up. */
+function StoppedNote({ state }: { state: AgentState }) {
+  if (state.handedOff) {
+    return (
+      <p className="text-muted-foreground text-center text-[13px]">
+        This session continues in a terminal. Quit Claude there before resuming it here.
+      </p>
+    );
+  }
+  if (state.status === "failed" && state.error) {
+    return (
+      <p className="text-destructive text-center text-[13px] whitespace-pre-wrap">{state.error}</p>
+    );
+  }
+  if (state.status === "exited") {
+    return <p className="text-muted-foreground text-center text-[13px]">The session stopped.</p>;
+  }
+  return null;
+}
+
+/** Keeps the transcript pinned to its end while it grows, unless the user scrolled up. */
 function useStickToBottom(dependency: unknown) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
-    const element = ref.current;
-    if (element && pinned.current) element.scrollTop = element.scrollHeight;
-  }, [dependency]);
-  const onScroll = useCallback(() => {
-    const element = ref.current;
-    if (!element) return;
-    pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+    const el = ref.current;
+    if (!el) return;
+    const onScroll = () => {
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
   }, []);
-  return { ref, onScroll };
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [dependency]);
+  return ref;
 }
 
 export function AgentPanel({
@@ -96,167 +75,116 @@ export function AgentPanel({
   params: AgentPanelParams;
   panelApi: DockviewPanelApi;
 }) {
-  const { agentId, worktreePath, sessionId, handedOff } = params;
-  const paramsRef = useRef(params);
-  paramsRef.current = params;
-  const updateParams = useCallback(
-    (patch: Partial<AgentPanelParams>) =>
-      panelApi.updateParameters({ ...paramsRef.current, ...patch }),
-    [panelApi],
-  );
-  const onSessionId = useCallback((id: string) => updateParams({ sessionId: id }), [updateParams]);
-  const onHandedOff = useCallback(
-    (command: string, cwd: string) => {
-      void requestOpen(window.location.origin, {
-        terminal: { cwd, command, title: "Claude" },
-        pinWtPath: worktreePath,
-        windowId: WINDOW_ID,
-      });
-    },
-    [worktreePath],
-  );
-
-  const { snapshot, connected, send } = useAgentSession({
-    agentId,
-    cwd: worktreePath,
-    sessionId,
-    handedOff,
-    onSessionId,
-    onHandedOff,
+  const session = useAgentSession({
+    agentId: params.agentId,
+    worktreePath: params.worktreePath,
+    sessionId: params.sessionId,
   });
-  const { status, info, items, interactions } = snapshot;
+  const { state, send, error } = session;
+  const status = agentDisplayStatus(state);
+  const scrollRef = useStickToBottom(state);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  // Remember a hand-off across restarts, so a restored panel waits instead of running the session
-  // beside the terminal's `claude --resume`.
   useEffect(() => {
-    if (status === "handed_off" && !paramsRef.current.handedOff) updateParams({ handedOff: true });
-    if ((status === "idle" || status === "working") && paramsRef.current.handedOff) {
-      updateParams({ handedOff: false });
+    useAgentStatusStore.getState().setStatus(params.agentId, status);
+  }, [params.agentId, status]);
+
+  // The layout keeps the session id, so a server restart resumes this conversation.
+  useEffect(() => {
+    if (state.sessionId && state.sessionId !== params.sessionId) {
+      panelApi.updateParameters({ sessionId: state.sessionId });
     }
-  }, [status, updateParams]);
-  const running = status !== "failed" && status !== "handed_off" && status !== "starting";
-  const command = useCallback((message: AgentClientMessage) => send(message), [send]);
-  // Follows text streaming into the last item too, not only new items.
-  const last = items.at(-1);
-  const lastLength = last && "text" in last ? last.text.length : 0;
-  const { ref: scrollRef, onScroll } = useStickToBottom(
-    `${items.length}:${interactions.length}:${lastLength}`,
+  }, [state.sessionId, params.sessionId, panelApi]);
+
+  // The terminal opens once the server reports the process gone, so the two never run at once.
+  const handOffRequested = useRef(false);
+  useEffect(() => {
+    if (!handOffRequested.current || !state.handedOff || !state.sessionId) return;
+    handOffRequested.current = false;
+    if (!isUuid(state.sessionId)) return;
+    fetchJson("/open", {
+      method: "POST",
+      body: JSON.stringify({
+        terminal: {
+          cwd: params.worktreePath,
+          command: `claude --resume ${state.sessionId}`,
+          title: "Claude",
+        },
+        pinWtPath: params.worktreePath,
+        windowId: WINDOW_ID,
+      }),
+    }).catch((err: unknown) => {
+      uiLog.error("Could not open the session in a terminal", { error: err });
+    });
+  }, [state.handedOff, state.sessionId, params.worktreePath]);
+
+  const continueInTerminal = () => {
+    if (state.sessionId && send({ type: "hand_off" })) handOffRequested.current = true;
+  };
+
+  const showRequest = () => {
+    const card = scrollRef.current?.querySelector(`[${REQUEST_CARD_ATTR}]`);
+    if (!(card instanceof HTMLElement)) return;
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+    card.focus({ preventScroll: true });
+  };
+
+  const renderRequest = useCallback(
+    (request: AgentRequest) => (
+      <AgentRequestCard
+        request={request}
+        respond={(response) => {
+          send({ type: "respond", requestId: request.requestId, response });
+          composerRef.current?.focus();
+        }}
+      />
+    ),
+    [send],
   );
 
-  // The agent reports its model by id; the list names models by alias with the id they stand for.
-  const currentModel = info.models.find(
-    (m) => m.value === info.model || (m.resolvedModel && m.resolvedModel === info.model),
-  );
-  const effortLevels = (currentModel ?? info.models[0])?.effortLevels ?? [];
+  const working = status === "working" || status === "needs_input";
+  const canSend = !state.handedOff && status !== "exited" && status !== "failed";
 
   return (
     <div className="bg-editor-surface flex h-full min-h-0 flex-col">
-      <div className="border-border flex h-8 shrink-0 items-center gap-1 border-b px-2">
-        <span className="flex items-center gap-1.5 pr-1 text-[11px]">
-          <span className={cn("size-2 rounded-full", STATUS_DOT_CLASS[status])} />
-          <span className="text-foreground">
-            {connected ? STATUS_LABELS[status] : "Reconnecting…"}
-          </span>
-        </span>
-        <HeaderMenu
-          label={currentModel?.displayName ?? info.model ?? "Model"}
-          value={currentModel?.value ?? info.model}
-          options={info.models.map((m) => ({ value: m.value, label: m.displayName }))}
-          onChange={(model) => command({ type: "set_model", model })}
-          disabled={!running}
-        />
-        {effortLevels.length > 0 && (
-          <HeaderMenu
-            label={`Effort: ${info.effort ?? "default"}`}
-            value={info.effort}
-            options={effortLevels.map((e) => ({ value: e, label: e }))}
-            onChange={(effort) => command({ type: "set_effort", effort })}
-            disabled={!running}
-          />
-        )}
-        <HeaderMenu
-          label={PERMISSION_MODE_LABELS[info.permissionMode]}
-          value={info.permissionMode}
-          options={PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_MODE_LABELS[m] }))}
-          onChange={(mode) => command({ type: "set_permission_mode", mode })}
-          disabled={!running}
-        />
-        <span className="ml-auto flex items-center gap-2">
-          {info.costUsd !== null && (
-            <span className="text-muted-foreground text-[11px]" title="Cost of this session so far">
-              ${info.costUsd.toFixed(2)}
-            </span>
-          )}
-          {info.agentVersion && (
-            <span className="text-muted-foreground text-[11px]">
-              Claude Code {info.agentVersion}
-            </span>
-          )}
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={!info.sessionId || status === "handed_off"}
-            title="Continue this conversation in the Claude Code terminal UI"
-            onClick={() => command({ type: "hand_off" })}
-          >
-            <SquareTerminalIcon />
-            Continue in terminal
-          </Button>
-        </span>
-      </div>
-
-      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[860px] flex-col px-8 py-6">
-          {items.length === 0 && status !== "failed" && (
-            <div className="text-muted-foreground py-16 text-center text-sm">
-              {status === "starting"
-                ? "Starting Claude Code…"
-                : `Claude Code in ${info.cwd.split("/").pop() ?? info.cwd}. Ask anything, or type / for commands and skills.`}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[820px] space-y-5 px-10 pt-10 pb-6 max-md:px-5">
+          {state.items.length === 0 && state.pending.length === 0 && (
+            <div className="pt-[18vh] text-center">
+              <p className="text-foreground text-[18px] font-semibold">
+                {status === "starting" ? "Starting Claude Code…" : "What should Claude work on?"}
+              </p>
+              <p className="text-muted-foreground mt-1.5 text-[13px]">
+                Type / for commands and skills. Enter sends, and queues while Claude works.
+              </p>
             </div>
           )}
-          <AgentTranscript items={items} />
+          <AgentTranscript
+            items={state.items}
+            pending={state.pending}
+            renderRequest={renderRequest}
+          />
+          <StoppedNote state={state} />
         </div>
       </div>
-
-      <div className="mx-auto flex w-full max-w-[860px] shrink-0 flex-col gap-2 px-8 pb-4">
-        {interactions.map((interaction) => (
-          <AgentInteractionCard
-            key={interaction.id}
-            interaction={interaction}
-            respond={(response) =>
-              command({ type: "respond", interactionId: interaction.id, response })
-            }
-          />
-        ))}
-        {(status === "handed_off" || status === "failed") && (
-          <div className="border-border bg-background flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-xs">
-            <span className="text-muted-foreground flex-1">
-              {status === "handed_off"
-                ? "This conversation continues in a terminal. Resume it here when you are done there; exit Claude Code in the terminal first."
-                : (info.error ?? "Claude Code stopped.")}
-            </span>
-            {status === "failed" && info.sessionId && (
-              <Button
-                size="sm"
-                variant="ghost"
-                title="Start a new conversation instead of resuming this one"
-                onClick={() => command({ type: "resume", fresh: true })}
-              >
-                New conversation
-              </Button>
-            )}
-            <Button size="sm" onClick={() => command({ type: "resume" })}>
-              <PlayIcon />
-              {info.sessionId ? "Resume here" : "Start again"}
-            </Button>
-          </div>
-        )}
+      <div className="mx-auto w-full max-w-[820px] px-10 pb-3 max-md:px-5">
+        {error && <p className="text-destructive mb-1 px-1 text-[12px]">{error}</p>}
+        <AgentStatusLine
+          state={state}
+          send={send}
+          onShowRequest={showRequest}
+          onContinueInTerminal={continueInTerminal}
+        />
         <AgentComposer
-          commands={info.commands}
-          working={status === "working" || status === "needs_input"}
-          disabled={!running || !connected}
-          onSend={(text, images, delivery) => command({ type: "send", text, images, delivery })}
-          onInterrupt={() => command({ type: "interrupt" })}
+          commands={state.commands}
+          working={working}
+          disabled={!canSend}
+          textareaRef={composerRef}
+          controls={<AgentControls state={state} send={send} />}
+          onSend={(text, images, delivery) =>
+            send({ type: "send", id: crypto.randomUUID(), text, images, delivery })
+          }
+          onInterrupt={() => send({ type: "interrupt" })}
         />
       </div>
     </div>

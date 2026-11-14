@@ -9,11 +9,13 @@ import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
+import { destroyAgentSession } from "@/components/agent/use-agent-session";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
+import { useAgentStatusStore } from "@/store/agent-status";
 import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
@@ -78,11 +80,6 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         uiLog.info("Panel removed", { panelType: removedDef.type, panelId: event.id });
       }
 
-      if (removedDef?.type === "agent") {
-        const agentId = (event.params as { agentId?: string })?.agentId;
-        if (agentId) wsClient.send({ type: "agent_close", agentId });
-      }
-
       if (removedDef?.type === "terminal") {
         const terminalId = (event.params as { terminalId?: string })?.terminalId;
         if (terminalId) {
@@ -90,6 +87,14 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
           usePanelNotificationStore.getState().unregisterPanel(terminalId);
         }
         getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
+      }
+
+      if (removedDef?.type === "agent") {
+        const agentId = (event.params as { agentId?: string })?.agentId;
+        if (agentId) {
+          destroyAgentSession(agentId);
+          useAgentStatusStore.getState().remove(agentId);
+        }
       }
 
       // Notify server when the last panel showing an external file closes, so its watcher can

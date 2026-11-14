@@ -1,165 +1,120 @@
-/**
- * Agent sessions by panel (`agentId`) and the `/ws/agent` socket protocol. Each socket belongs to
- * one panel: its first message attaches it to that panel's session, creating the session (and
- * resuming the saved agent session, after a server restart) when the server has none.
- */
-import { z } from "zod";
-
-import {
-  EFFORT_LEVELS,
-  PERMISSION_DESTINATIONS,
-  PERMISSION_MODES,
-  type AgentClientMessage,
-  type AgentServerMessage,
-} from "@/api/agent-session-model";
+import type { AgentClientMessage, AgentEvent } from "@/api/agent-session-model";
+import { isUuid } from "@/lib/uuid";
 
 import { logger } from "../logger";
-import { AgentSession, type AgentClient, type AgentStartGate } from "./agent-session";
-import type { AgentBackend } from "./agent-transport";
+import { AgentSession, type AgentClient, type AgentTransportFactory } from "./agent-session";
 
 const log = logger.child("agent");
 
-const imageSchema = z.object({
-  mediaType: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
-  data: z.string(),
-});
-
-const responseSchema = z.union([
-  z.object({ kind: z.literal("question"), answers: z.record(z.string(), z.string()) }),
-  z.object({ kind: z.literal("question"), dismissed: z.literal(true) }),
-  z.object({
-    kind: z.literal("permission"),
-    decision: z.literal("allow"),
-    always: z
-      .array(z.object({ id: z.string(), destination: z.enum(PERMISSION_DESTINATIONS).optional() }))
-      .optional(),
-  }),
-  z.object({
-    kind: z.literal("permission"),
-    decision: z.literal("deny"),
-    message: z.string().optional(),
-    stop: z.boolean().optional(),
-  }),
-  z.object({
-    kind: z.literal("plan"),
-    decision: z.literal("approve"),
-    mode: z.enum(PERMISSION_MODES),
-  }),
-  z.object({ kind: z.literal("plan"), decision: z.literal("keep_planning"), feedback: z.string() }),
-]);
-
-const clientMessageSchema: z.ZodType<AgentClientMessage> = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("attach"),
-    agentId: z.string().min(1),
-    cwd: z.string().min(1),
-    resumeSessionId: z.uuid().optional(),
-    handedOff: z.boolean().optional(),
-  }),
-  z.object({
-    type: z.literal("send"),
-    text: z.string(),
-    images: z.array(imageSchema).optional(),
-    delivery: z.enum(["queue", "steer"]),
-  }),
-  z.object({ type: z.literal("interrupt") }),
-  z.object({ type: z.literal("respond"), interactionId: z.string(), response: responseSchema }),
-  z.object({ type: z.literal("set_model"), model: z.string().min(1) }),
-  z.object({ type: z.literal("set_effort"), effort: z.enum(EFFORT_LEVELS) }),
-  z.object({ type: z.literal("set_permission_mode"), mode: z.enum(PERMISSION_MODES) }),
-  z.object({ type: z.literal("hand_off") }),
-  z.object({ type: z.literal("resume"), fresh: z.boolean().optional() }),
-]);
-
-/** What the server keeps on an agent socket. */
-export interface AgentSocketData {
-  type: "agent";
-  session: AgentSession | null;
-  client: AgentClient | null;
-  /** Set when the socket closes, so a late attach does not bind a dead socket. */
-  closed?: boolean;
-}
-
-export interface AgentSocket {
-  data: AgentSocketData;
-  send(data: string): unknown;
-  close(code?: number, reason?: string): void;
-}
-
-export class AgentManager {
-  private readonly sessions = new Map<string, AgentSession>();
-
-  constructor(
-    private readonly backend: AgentBackend,
-    private readonly gate: AgentStartGate,
-  ) {}
-
-  async handleMessage(ws: AgentSocket, raw: string): Promise<void> {
-    let message: AgentClientMessage;
-    try {
-      message = clientMessageSchema.parse(JSON.parse(raw));
-    } catch (err) {
-      log.warn("Malformed agent message", { error: err });
-      return;
-    }
-
-    if (message.type === "attach") {
-      await this.attach(ws, message);
-      return;
-    }
-    await ws.data.session?.handle(message, ws.data.client ?? undefined);
-  }
-
-  /** The panel closed: end its session. */
-  close(agentId: string): void {
-    this.sessions.get(agentId)?.dispose();
-    this.sessions.delete(agentId);
-  }
-
-  /** Bind the socket to the panel's session, creating (and starting) it if the server has none. */
-  private async attach(
-    ws: AgentSocket,
-    { agentId, cwd, resumeSessionId, handedOff }: Extract<AgentClientMessage, { type: "attach" }>,
-  ): Promise<void> {
-    if (ws.data.session || ws.data.closed) return;
-    const client: AgentClient = {
-      send: (message: AgentServerMessage) => ws.send(JSON.stringify(message)),
-    };
-    let session = this.sessions.get(agentId);
-    if (!session) {
-      session = new AgentSession(this.backend, agentId, cwd, this.gate);
-      this.sessions.set(agentId, session);
-      void session.start(resumeSessionId, { handedOff: handedOff === true });
-    }
-    ws.data.session = session;
-    ws.data.client = client;
-    session.attach(client);
-  }
-
-  detach(ws: AgentSocket): void {
-    ws.data.closed = true;
-    if (ws.data.session && ws.data.client) ws.data.session.detach(ws.data.client);
-    ws.data.session = null;
-    ws.data.client = null;
-  }
-
+export interface AgentManagerDeps {
+  createTransport: AgentTransportFactory;
   /**
-   * End the sessions no window is attached to, like orphaned terminals once their grace period is
-   * over; a panel that comes back resumes its session by id. Returns how many ended.
+   * The conversation so far of a session being resumed, for a panel that lost it, or null when
+   * the agent has no such session (it never got a message, so there is nothing to resume).
    */
-  disposeDetached(): number {
-    let count = 0;
-    for (const [agentId, session] of this.sessions) {
-      if (session.hasClients) continue;
-      session.dispose();
-      this.sessions.delete(agentId);
-      count += 1;
+  loadHistory(sessionId: string): Promise<readonly AgentEvent[] | null>;
+  /** What a session in this worktree starts with (model, effort, mode), before its process answers. */
+  startingEvents(worktreePath: string): Promise<readonly AgentEvent[]>;
+}
+
+/**
+ * Agent sessions by panel id. A session is created by its panel's first attach and lives until
+ * the panel sends `destroy` or the server stops; reattaching (a reload, a worktree switch, another
+ * window) only adds a client. A session is registered before anything is awaited, so a `destroy`
+ * that arrives while it is still being created stops it.
+ */
+export class AgentManager {
+  private readonly sessions = new Map<string, Promise<AgentSession>>();
+
+  constructor(private readonly deps: AgentManagerDeps) {}
+
+  async handle(agentId: string, client: AgentClient, message: AgentClientMessage): Promise<void> {
+    try {
+      if (message.type === "attach") {
+        await this.attach(agentId, client, message);
+        return;
+      }
+      const session = await this.sessions.get(agentId);
+      if (!session) {
+        client.send({ type: "error", message: "This agent session is not attached" });
+        return;
+      }
+      if (message.type === "destroy") this.sessions.delete(agentId);
+      await session.handle(message);
+    } catch (err) {
+      log.warn("Agent request failed", { error: err, type: message.type });
+      client.send({ type: "error", message: err instanceof Error ? err.message : String(err) });
     }
-    return count;
   }
 
-  disposeAll(): void {
-    for (const session of this.sessions.values()) session.dispose();
+  detach(agentId: string, client: AgentClient): void {
+    void this.sessions.get(agentId)?.then(
+      (session) => session.detach(client),
+      () => {},
+    );
+  }
+
+  async destroyAll(): Promise<void> {
+    const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    await Promise.all(
+      sessions.map((s) =>
+        s.then(
+          (session) => session.destroy(),
+          () => {},
+        ),
+      ),
+    );
+  }
+
+  private async attach(
+    agentId: string,
+    client: AgentClient,
+    message: Extract<AgentClientMessage, { type: "attach" }>,
+  ): Promise<void> {
+    const since = { seq: message.sinceSeq, instanceId: message.instanceId };
+    const existing = this.sessions.get(agentId);
+    if (existing) {
+      (await existing).attach(client, since);
+      return;
+    }
+    const resumeId = message.resumeSessionId;
+    if (resumeId !== undefined && !isUuid(resumeId)) {
+      throw new Error("Invalid session id");
+    }
+    const creation = this.create(message.worktreePath, resumeId);
+    const entry = creation.then(({ session }) => session);
+    // Its failure is reported below; others awaiting the entry see it too.
+    entry.catch(() => {});
+    this.sessions.set(agentId, entry);
+    let created: { session: AgentSession; resume: boolean };
+    try {
+      created = await creation;
+    } catch (err) {
+      this.sessions.delete(agentId);
+      throw err;
+    }
+    log.info("Agent session created", { agentId, resumed: created.resume });
+    created.session.attach(client);
+    // A destroy that came meanwhile has already destroyed it, which makes this start a no-op.
+    await created.session.start(created.resume);
+  }
+
+  private async create(
+    worktreePath: string,
+    resumeId: string | undefined,
+  ): Promise<{ session: AgentSession; resume: boolean }> {
+    const [history, starting] = await Promise.all([
+      resumeId ? this.deps.loadHistory(resumeId) : null,
+      this.deps.startingEvents(worktreePath).catch(() => []),
+    ]);
+    // A session that never got a message has no transcript; it starts afresh under its own id.
+    const resume = history !== null;
+    const session = new AgentSession(
+      { worktreePath, sessionId: resumeId ?? crypto.randomUUID(), resume },
+      this.deps.createTransport,
+      [...starting, ...(history ?? [])],
+    );
+    return { session, resume };
   }
 }

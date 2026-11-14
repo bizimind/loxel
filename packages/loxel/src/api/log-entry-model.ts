@@ -11,7 +11,6 @@ export const LOG_CATEGORIES = [
   "server",
   "git",
   "terminal",
-  "agent",
   "files",
   "watcher",
   "detached",
@@ -35,6 +34,7 @@ export const LOG_CATEGORIES = [
   "keychain",
   "secret-store",
   "perf",
+  "agent",
 ] as const;
 
 export type LogCategory = (typeof LOG_CATEGORIES)[number] | LspName;

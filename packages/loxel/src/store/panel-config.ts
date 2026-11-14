@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRightIcon,
-  BotIcon,
   DatabaseIcon,
   FileDiffIcon,
   FileTextIcon,
@@ -12,6 +11,7 @@ import {
   MessageSquareIcon,
   PencilRulerIcon,
   ScrollTextIcon,
+  BotIcon,
   SquareTerminalIcon,
 } from "lucide-react";
 
@@ -169,11 +169,11 @@ export const CENTER_PANELS = [
     component: "agent",
     tabComponent: "agentTab",
     icon: BotIcon,
-    quickstartLabel: "New Agent",
+    quickstartLabel: "New Claude Session",
     actionId: null,
     createEvent: "loxel-create-agent",
     openEvent: null,
-    titlePrefix: "Agent",
+    titlePrefix: "Claude",
     kind: "connected-process" as const,
     singleton: false,
   },

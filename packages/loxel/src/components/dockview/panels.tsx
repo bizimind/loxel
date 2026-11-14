@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { AgentPanel } from "@/components/agent/AgentPanel";
+import { AgentPanel, type AgentPanelParams } from "@/components/agent/AgentPanel";
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
@@ -31,7 +31,7 @@ import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
-import type { AgentPanelParams, PatchDiffParams } from "@/lib/panel-creators";
+import type { PatchDiffParams } from "@/lib/panel-creators";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
@@ -154,7 +154,7 @@ function TerminalPanelComponent(
   );
 }
 
-/** A native view of a Claude Code session, in the center group. */
+/** A Claude Code session driven by Loxel (see docs/AGENT_PANEL.md). */
 function AgentPanelComponent(props: IDockviewPanelProps<AgentPanelParams>) {
   return (
     <PanelContext.Provider value={{ worktreePath: props.params.worktreePath }}>
@@ -362,7 +362,6 @@ export const centerComponents = wrapPanelComponents(
 
 /** Custom tab components for center panels. */
 export const centerTabComponents = {
-  agentTab: AgentTab,
   browserTab: BrowserTab,
   codeEditorTab: CodeEditorTab,
   compareTab: CompareTab,
@@ -372,6 +371,7 @@ export const centerTabComponents = {
   excalidrawEditorTab: ExcalidrawEditorTab,
   mediaTab: MediaTab,
   terminalTab: TerminalTab,
+  agentTab: AgentTab,
   localDbTab: LocalDbTab,
   virtualDocumentTab: VirtualDocumentTab,
 };

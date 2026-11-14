@@ -1,41 +1,59 @@
 /**
- * Runs Claude Code through the Claude Agent SDK: one long-lived streaming `query()` per session,
- * spawning the user's own installed `claude` with their settings, CLAUDE.md, skills, plugins and
- * MCP servers. See `agent-transport.ts` for the contract.
+ * Drives the user's installed Claude Code through the Claude Agent SDK: one long-lived streaming
+ * `query()` per session. The SDK speaks the same stream-json protocol underneath, so its messages
+ * go through the shared {@link ClaudeStreamNormalizer}; what differs is that the SDK owns the
+ * process, the control requests and the `can_use_tool` round trip. See docs/AGENT_PANEL.md.
  */
 import {
-  getSessionMessages,
-  query,
+  query as sdkQuery,
   type CanUseTool,
-  type PermissionMode,
+  type Options,
   type PermissionResult,
+  type PermissionUpdate,
   type Query,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import {
-  isEffort,
-  isPermissionMode,
-  type AgentEffort,
-  type AgentModel,
-  type AgentSessionInfo,
+  type AgentPermissionMode,
+  type AgentRequest,
+  type AgentResponse,
+  isAgentPermissionMode,
 } from "@/api/agent-session-model";
-import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
+import { withoutAgentEnv } from "@/coding-agent-env";
+import { isRecord } from "@/lib/is-record";
 
 import { logger } from "../logger";
-import { buildSpawnEnv, refreshLoginShellEnv } from "../shell-env";
-import type {
-  AgentBackend,
-  AgentOutgoingMessage,
-  AgentTransport,
-  AgentTransportStartOptions,
-} from "./agent-transport";
-import { ClaudeMessageTranslator, parseCommands } from "./claude-message-translator";
-import type { ClaudePermissionUpdate, ClaudeToolRequest } from "./claude-permissions";
+import type { AgentLaunch, AgentTransport, AgentTransportHandlers } from "./agent-transport";
+import {
+  ClaudeStreamNormalizer,
+  initialStatus,
+  parseCommands,
+  parseModels,
+  parsePermissionRequest,
+} from "./claude-stream-normalizer";
 
 const log = logger.child("agent");
 
-/** User messages waiting for the SDK to read them; the SDK's streaming-input prompt. */
+/** How long `stop()` waits for the interrupt it sends first. */
+const STOP_INTERRUPT_MS = 2000;
+
+/** The SDK's `query`, replaced by a scripted one in tests. */
+export type QueryFunction = (params: {
+  prompt: AsyncIterable<SDKUserMessage>;
+  options: Options;
+}) => Query;
+
+/** How the transport runs the user's `claude`. */
+export interface ClaudeSdkTarget {
+  /** The user's own `claude`; the SDK's bundled binary is never used. */
+  binary: string;
+  env: Record<string, string | undefined>;
+  /** `LOXEL_*` variables for the agent's commands, as terminals have them. */
+  loxelEnv: Record<string, string>;
+}
+
+/** User messages waiting for the SDK to read them: the streaming-input prompt. */
 class MessageQueue implements AsyncIterable<SDKUserMessage> {
   private readonly pending: SDKUserMessage[] = [];
   private waiting: ((result: IteratorResult<SDKUserMessage>) => void) | null = null;
@@ -43,13 +61,10 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
 
   push(message: SDKUserMessage): void {
     if (this.closed) return;
-    if (this.waiting) {
-      const resolve = this.waiting;
-      this.waiting = null;
-      resolve({ value: message, done: false });
-      return;
-    }
-    this.pending.push(message);
+    const waiting = this.waiting;
+    this.waiting = null;
+    if (waiting) waiting({ value: message, done: false });
+    else this.pending.push(message);
   }
 
   close(): void {
@@ -72,192 +87,293 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
-/** The user's `claude` on the login-shell PATH, refreshing the captured PATH once on a miss. */
-export async function findClaudeExecutable(): Promise<string | null> {
-  const lookup = () => Bun.which("claude", { PATH: buildSpawnEnv().PATH ?? "" });
-  const found = lookup();
-  if (found) return found;
-  await refreshLoginShellEnv();
-  return lookup();
-}
-
-function agentEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(buildSpawnEnv())) {
-    if (value !== undefined) env[name] = value;
+/** The permission result for the user's response to a pending request. */
+export function permissionResult(request: AgentRequest, response: AgentResponse): PermissionResult {
+  if (response.kind === "question" && request.kind === "question") {
+    return { behavior: "allow", updatedInput: { ...request.input, answers: response.answers } };
   }
-  // A Loxel started from an agent's session must not make the agent think it runs inside one.
-  for (const name of CODING_AGENT_ENV_VARS) delete env[name];
-  return env;
-}
-
-function toModels(models: readonly unknown[]): AgentModel[] {
-  return models.flatMap((model) => {
-    if (typeof model !== "object" || model === null) return [];
-    const { value, resolvedModel, displayName, description, supportedEffortLevels } =
-      model as Record<string, unknown>;
-    if (typeof value !== "string") return [];
-    return [
-      {
-        value,
-        ...(typeof resolvedModel === "string" ? { resolvedModel } : {}),
-        displayName: typeof displayName === "string" ? displayName : value,
-        description: typeof description === "string" ? description : "",
-        effortLevels: Array.isArray(supportedEffortLevels)
-          ? supportedEffortLevels.filter(isEffort)
-          : [],
-      },
-    ];
-  });
-}
-
-function toUserMessage({ uuid, text, images, delivery }: AgentOutgoingMessage): SDKUserMessage {
-  const content = [
-    ...images.map((image) => ({
-      type: "image" as const,
-      source: { type: "base64" as const, media_type: image.mediaType, data: image.data },
-    })),
-    ...(text ? [{ type: "text" as const, text }] : []),
-  ];
+  if (response.kind === "plan" && request.kind === "plan") {
+    if (!response.approve) {
+      return {
+        behavior: "deny",
+        message: response.feedback?.trim() || "The user wants to keep planning.",
+      };
+    }
+    return {
+      behavior: "allow",
+      updatedInput: request.input,
+      ...(response.mode
+        ? { updatedPermissions: [{ type: "setMode", mode: response.mode, destination: "session" }] }
+        : {}),
+    };
+  }
+  if (response.kind === "permission" && response.allow && request.kind === "permission") {
+    // Only the agent's own suggestions, rebuilt from the request this side holds. They are the
+    // agent's own update objects, which the CLI validates; only `destination` is the user's.
+    const updates = request.suppressAlwaysAllow
+      ? []
+      : (response.alwaysAllow ?? []).flatMap(({ index, destination }) => {
+          const suggestion = request.suggestions[index];
+          return suggestion ? [{ ...suggestion.update, destination } as PermissionUpdate] : [];
+        });
+    return {
+      behavior: "allow",
+      updatedInput: request.input,
+      ...(updates.length > 0 ? { updatedPermissions: updates } : {}),
+    };
+  }
   return {
-    type: "user",
-    message: { role: "user", content },
-    parent_tool_use_id: null,
-    uuid: uuid as SDKUserMessage["uuid"],
-    origin: { kind: "human" },
-    // Steering reaches the agent at its next step; a queued message waits for the turn to end.
-    priority: delivery === "steer" ? "next" : "later",
+    behavior: "deny",
+    message: (response.kind === "permission" && response.message?.trim()) || "The user declined.",
   };
 }
 
-class ClaudeSdkTransport implements AgentTransport {
-  private closed = false;
-  /** Settles when the SDK's message stream ends, which it does once the CLI has exited. */
-  finished: Promise<void> = Promise.resolve();
-
-  constructor(
-    private readonly q: Query,
-    private readonly input: MessageQueue,
-  ) {}
-
-  send(message: AgentOutgoingMessage): void {
-    this.input.push(toUserMessage(message));
-  }
-
-  async interrupt(): Promise<void> {
-    await this.q.interrupt();
-  }
-
-  async setModel(model: string): Promise<void> {
-    await this.q.setModel(model);
-  }
-
-  async setEffort(effort: AgentEffort): Promise<void> {
-    await this.q.applyFlagSettings({ effortLevel: effort });
-  }
-
-  async setPermissionMode(mode: PermissionMode): Promise<void> {
-    await this.q.setPermissionMode(mode);
-  }
-
-  close(): Promise<void> {
-    if (!this.closed) {
-      this.closed = true;
-      this.input.close();
-      this.q.close();
-    }
-    return this.finished;
-  }
-
-  get isClosed(): boolean {
-    return this.closed;
-  }
-}
-
-function toToolRequest(
+/** The SDK's `canUseTool` arguments as the `can_use_tool` control request the normalizer parses. */
+function canUseToolRequest(
   toolName: string,
   input: Record<string, unknown>,
   options: Parameters<CanUseTool>[2],
-): ClaudeToolRequest {
+): Record<string, unknown> {
   return {
-    toolName,
+    subtype: "can_use_tool",
+    tool_name: toolName,
     input,
-    // The SDK's PermissionUpdate is the same JSON the CLI sends; declared locally for other transports.
-    suggestions: (options.suggestions ?? []) as ClaudePermissionUpdate[],
-    title: options.title,
+    tool_use_id: options.toolUseID,
+    permission_suggestions: options.suggestions ?? [],
+    decision_reason: options.decisionReason,
+    display_name: options.displayName,
     description: options.description,
-    decisionReason: options.decisionReason,
-    blockedPath: options.blockedPath,
-    suppressAlwaysAllowRule: options.suppressAlwaysAllowRule,
+    title: options.title,
+    blocked_path: options.blockedPath,
+    suppress_always_allow_rule: options.suppressAlwaysAllowRule,
+    default_to_no: options.defaultToNo,
   };
 }
 
-export const claudeSdkBackend: AgentBackend = {
-  async start({ cwd, resumeSessionId, sink }: AgentTransportStartOptions): Promise<AgentTransport> {
-    const executable = await findClaudeExecutable();
-    if (!executable) {
-      throw new Error(
-        "Claude Code is not installed: no `claude` on your login shell's PATH. Install it, then reopen this panel.",
-      );
+interface PendingTool {
+  request: AgentRequest;
+  resolve(result: PermissionResult): void;
+}
+
+export class ClaudeSdkTransport implements AgentTransport {
+  private q: Query | null = null;
+  private readonly input = new MessageQueue();
+  private readonly normalizer = new ClaudeStreamNormalizer();
+  private readonly pendingTools = new Map<string, PendingTool>();
+  private stopping = false;
+  /** Settles when the SDK's message stream ends, which it does once the CLI has exited. */
+  private finished: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly launch: AgentLaunch,
+    /** Where and how to run `claude`; throws, with a reason for the user, if it may not run. */
+    private readonly target: (launch: AgentLaunch) => ClaudeSdkTarget,
+    private readonly handlers: AgentTransportHandlers,
+    private readonly query: QueryFunction = sdkQuery,
+  ) {}
+
+  async start(): Promise<void> {
+    const { binary, env, loxelEnv } = this.target(this.launch);
+    const spawnEnv: Record<string, string> = {};
+    const merged = {
+      ...withoutAgentEnv(env),
+      ...loxelEnv,
+      LOXEL_WORKTREE: this.launch.worktreePath,
+    };
+    for (const [name, value] of Object.entries(merged)) {
+      if (value !== undefined) spawnEnv[name] = value;
     }
 
-    const input = new MessageQueue();
-    const translator = new ClaudeMessageTranslator();
-    const canUseTool: CanUseTool = async (toolName, toolInput, options) =>
-      (await sink.requestTool(
-        toToolRequest(toolName, toolInput, options),
-        options.signal,
-      )) as PermissionResult;
-
-    const q = query({
-      prompt: input,
+    const q = this.query({
+      prompt: this.input,
       options: {
-        cwd,
-        pathToClaudeCodeExecutable: executable,
-        env: agentEnv(),
-        // Without the preset the SDK sends an empty system prompt, unlike the TUI.
+        cwd: this.launch.worktreePath,
+        pathToClaudeCodeExecutable: binary,
+        env: spawnEnv,
+        // Without the preset the SDK sends an empty system prompt, unlike `claude` itself.
         systemPrompt: { type: "preset", preset: "claude_code" },
-        // Without a handler AskUserQuestion and the plan-mode tools are left out of the toolset.
-        canUseTool,
+        // Without a handler AskUserQuestion and the plan mode tools are left out of the toolset.
+        canUseTool: (toolName, toolInput, options) => this.canUseTool(toolName, toolInput, options),
         includePartialMessages: true,
-        // Echo user messages as the agent takes them in, so queued messages can be marked sent.
+        // Echo each user message once the CLI takes it, which is when a queued one is delivered.
         extraArgs: { "replay-user-messages": null },
-        ...(resumeSessionId ? { resume: resumeSessionId } : {}),
+        ...(this.launch.resume
+          ? { resume: this.launch.sessionId }
+          : { sessionId: this.launch.sessionId }),
         stderr: (data) => log.debug("claude stderr", { data: data.slice(0, 2000) }),
       },
     });
-    const transport = new ClaudeSdkTransport(q, input);
+    this.q = q;
+    this.finished = this.readLoop(q);
 
-    void q
-      .initializationResult()
-      .then((init) => {
-        const patch: Partial<AgentSessionInfo> = {
-          commands: parseCommands(init.commands),
-          models: toModels(init.models),
-        };
-        const mode: unknown = (init as Record<string, unknown>).current_permission_mode;
-        if (isPermissionMode(mode)) patch.permissionMode = mode;
-        sink.update({ type: "info", patch });
-      })
-      .catch((err: unknown) => log.warn("Agent initialization failed", { error: err }));
+    const init: Record<string, unknown> = { ...(await q.initializationResult()) };
+    // The model and effort the session starts with, after the user's and the project's settings
+    // and env overrides; the init message only comes with the first turn. `getSettings` is in the
+    // SDK at runtime but not in its types, so it is looked up, and its absence tolerated.
+    const getSettings: unknown = Reflect.get(q, "getSettings");
+    const settings: unknown =
+      typeof getSettings === "function"
+        ? await Promise.resolve(getSettings.call(q)).catch(() => null)
+        : null;
+    const applied = isRecord(settings) && isRecord(settings.applied) ? settings.applied : {};
+    this.handlers.onEvents([
+      { type: "catalog", commands: parseCommands(init.commands), models: parseModels(init.models) },
+      ...(typeof applied.model === "string"
+        ? [{ type: "model" as const, model: applied.model }]
+        : []),
+      ...(typeof applied.effort === "string"
+        ? [{ type: "effort" as const, effort: applied.effort }]
+        : []),
+      ...(isAgentPermissionMode(init.current_permission_mode)
+        ? [{ type: "permission_mode" as const, mode: init.current_permission_mode }]
+        : []),
+      { type: "status", status: initialStatus(init) },
+    ]);
+  }
 
-    transport.finished = (async () => {
-      try {
-        for await (const message of q) {
-          for (const update of translator.translate(message)) sink.update(update);
-        }
-        if (!transport.isClosed) sink.exit("Claude Code exited.");
-      } catch (err) {
-        if (transport.isClosed) return;
-        log.warn("Agent process failed", { error: err });
-        sink.exit(err instanceof Error ? err.message : String(err));
+  send({ id, text, images, delivery }: Parameters<AgentTransport["send"]>[0]): void {
+    this.normalizer.noteSent(id);
+    const content = [
+      ...images.map((image) => ({
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: image.mediaType, data: image.data },
+      })),
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ];
+    this.input.push({
+      type: "user",
+      // A UUID the panel minted (the socket schema checks it), echoed back once the CLI takes it.
+      uuid: id as SDKUserMessage["uuid"],
+      message: { role: "user", content },
+      parent_tool_use_id: null,
+      // `now` folds the message into the running turn; `next` waits for it to finish.
+      priority: delivery === "steer" ? "now" : "next",
+      origin: { kind: "human" },
+    });
+  }
+
+  async interrupt(): Promise<void> {
+    await this.requireQuery().interrupt();
+  }
+
+  respond(request: AgentRequest, response: AgentResponse): void {
+    const pending = this.pendingTools.get(request.requestId);
+    if (!pending) return;
+    this.pendingTools.delete(request.requestId);
+    this.handlers.onEvents([{ type: "request_resolved", requestId: request.requestId }]);
+    pending.resolve(permissionResult(pending.request, response));
+  }
+
+  async setPermissionMode(mode: AgentPermissionMode): Promise<void> {
+    await this.requireQuery().setPermissionMode(mode);
+    this.handlers.onEvents([{ type: "permission_mode", mode }]);
+  }
+
+  async setModel(model: string): Promise<void> {
+    await this.requireQuery().setModel(model);
+    this.handlers.onEvents([{ type: "model", model }]);
+  }
+
+  async setEffort(effort: string): Promise<void> {
+    // The panel only offers the levels the model lists; the CLI rejects anything else.
+    const effortLevel = effort as Parameters<Query["applyFlagSettings"]>[0]["effortLevel"];
+    await this.requireQuery().applyFlagSettings({ effortLevel });
+    this.handlers.onEvents([{ type: "effort", effort }]);
+  }
+
+  async refreshContextUsage(): Promise<void> {
+    const usage: unknown = await this.requireQuery().getContextUsage({ detail: "summary" });
+    if (!isRecord(usage)) return;
+    // The SDK passes the CLI's answer through; accept both of the names it has used.
+    const percentage = usage.percentage;
+    const totalTokens = usage.totalTokens ?? usage.total_tokens;
+    const maxTokens = usage.maxTokens ?? usage.raw_max_tokens;
+    if (
+      typeof percentage !== "number" ||
+      typeof totalTokens !== "number" ||
+      typeof maxTokens !== "number"
+    ) {
+      return;
+    }
+    this.handlers.onEvents([
+      { type: "context_usage", usage: { percentage, totalTokens, maxTokens } },
+    ]);
+  }
+
+  async stop(): Promise<void> {
+    const q = this.q;
+    if (!q) return;
+    this.stopping = true;
+    this.denyPending("The session stopped.");
+    // A running turn would hold the process up, so interrupt it first; closing the query then
+    // ends the CLI. The message stream ends once the process has exited.
+    await Promise.race([q.interrupt().catch(() => {}), Bun.sleep(STOP_INTERRUPT_MS)]);
+    this.input.close();
+    q.close();
+    await this.finished;
+  }
+
+  private requireQuery(): Query {
+    if (!this.q || this.stopping) throw new Error("The agent process is not running");
+    return this.q;
+  }
+
+  private canUseTool(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    options: Parameters<CanUseTool>[2],
+  ): Promise<PermissionResult> {
+    const request = parsePermissionRequest(
+      options.requestId,
+      canUseToolRequest(toolName, toolInput, options),
+    );
+    if (!request) {
+      return Promise.resolve({ behavior: "deny", message: "Loxel could not read this request." });
+    }
+    return new Promise((resolve) => {
+      if (options.signal.aborted) {
+        resolve({ behavior: "deny", message: "Interrupted." });
+        return;
       }
-    })();
+      // An interrupt aborts the request, and its card is withdrawn.
+      options.signal.addEventListener(
+        "abort",
+        () => {
+          if (!this.pendingTools.delete(request.requestId)) return;
+          this.handlers.onEvents([{ type: "request_resolved", requestId: request.requestId }]);
+          resolve({ behavior: "deny", message: "Interrupted." });
+        },
+        { once: true },
+      );
+      this.pendingTools.set(request.requestId, { request, resolve });
+      this.handlers.onEvents([{ type: "request", request }]);
+    });
+  }
 
-    return transport;
-  },
+  private denyPending(message: string): void {
+    for (const [requestId, pending] of this.pendingTools) {
+      this.handlers.onEvents([{ type: "request_resolved", requestId }]);
+      pending.resolve({ behavior: "deny", message });
+    }
+    this.pendingTools.clear();
+  }
 
-  async loadHistory(sessionId: string, cwd: string): Promise<unknown[]> {
-    return getSessionMessages(sessionId, { dir: cwd });
-  },
-};
+  private async readLoop(q: Query): Promise<void> {
+    let error: string | null = null;
+    try {
+      for await (const message of q) {
+        const events = this.normalizer.normalize(message);
+        if (events.length > 0) this.handlers.onEvents(events);
+      }
+      if (!this.stopping) error = "Claude Code exited.";
+    } catch (err) {
+      if (!this.stopping) {
+        log.warn("The agent process failed", { error: err });
+        error = err instanceof Error ? err.message : String(err);
+      }
+    }
+    this.q = null;
+    this.denyPending("The agent stopped.");
+    this.handlers.onExit(error);
+  }
+}

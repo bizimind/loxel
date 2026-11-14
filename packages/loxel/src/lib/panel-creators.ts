@@ -295,35 +295,26 @@ export function createTerminal({
   );
 }
 
-/** The params of an agent panel; `sessionId` resumes its conversation after a server restart. */
-export interface AgentPanelParams {
-  agentId: string;
-  worktreePath: string;
-  sessionId?: string;
-  /** The session continues in a terminal; set until it is resumed in the panel. */
-  handedOff?: boolean;
-}
-
+/** A new Claude Code session in an agent panel, in the active worktree. */
 export function createAgent({ placement, focus }: PanelOpenOptions = {}): void {
   const cApi = getCenterApi();
-  if (!cApi) return;
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  if (!worktreePath) return;
+  if (!cApi || !worktreePath) return;
   const agentId = crypto.randomUUID();
-  const params: AgentPanelParams = { agentId, worktreePath };
+  const panelId = `agent-${agentId}`;
+  uiLog.info("Panel created", { panelType: "agent", panelId });
   addPlacedPanel(
     cApi,
     placement,
     {
-      id: `agent-${agentId}`,
+      id: panelId,
       component: "agent",
       tabComponent: "agentTab",
-      title: nextPanelTitle(cApi, "Agent"),
-      params,
+      title: nextPanelTitle(cApi, "Claude"),
+      params: { agentId, worktreePath },
     },
     focus,
   );
-  uiLog.info("Panel created", { panelType: "agent", panelId: `agent-${agentId}` });
 }
 
 export async function createEditor(options?: {

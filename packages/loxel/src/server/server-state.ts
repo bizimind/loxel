@@ -5,7 +5,6 @@ import type { LspName } from "@/api/log-entry-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { isWithin } from "@/lib/project-file-helpers";
 
-import type { AgentSocketData } from "./agent/agent-manager";
 import type { DetachedFilesService } from "./detached-files-service";
 import type { ExternalFilesService } from "./external-files-service";
 import type { ExternalFoldersService, FileTree } from "./external-folders-service";
@@ -169,4 +168,8 @@ export interface WorktreeLspData {
 }
 
 /** WS data tag for routing app vs language-server connections. */
-export type WsData = { type: "app" } | { type: "yaml-lsp" } | WorktreeLspData | AgentSocketData;
+export type WsData =
+  | { type: "app" }
+  | { type: "yaml-lsp" }
+  | { type: "agent"; agentId: string }
+  | WorktreeLspData;

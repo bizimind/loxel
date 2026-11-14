@@ -1,144 +1,151 @@
 /**
- * The agent panel's connection to its server session over `/ws/agent`: attaches on connect,
- * applies the server's messages to a local snapshot, and reconnects with backoff. A reconnect
- * after a server restart names the agent session to resume, so the conversation continues.
+ * Connects an agent panel to its server session over `/ws/agent`: attaches, folds the events the
+ * server sends into the same {@link AgentState} the server keeps, and reconnects after a dropped
+ * socket or a server restart, resuming with the last sequence number it applied (or, against a
+ * restarted server, the agent session id, which brings the conversation back from its transcript).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { create } from "zustand";
 
 import {
-  applyAgentMessage,
-  emptyAgentSnapshot,
   type AgentClientMessage,
   type AgentServerMessage,
-  type AgentSnapshot,
-  type AgentStatus,
+  type AgentState,
+  applyAgentEvent,
+  INITIAL_AGENT_STATE,
 } from "@/api/agent-session-model";
+import { isRecord } from "@/lib/is-record";
 
-/** Each agent panel's status, for its tab. */
-export const useAgentStatusStore = create<{
-  statuses: Record<string, AgentStatus>;
-  set: (agentId: string, status: AgentStatus | null) => void;
-}>((set) => ({
-  statuses: {},
-  set: (agentId, status) =>
-    set((state) => {
-      const statuses = { ...state.statuses };
-      if (status) statuses[agentId] = status;
-      else delete statuses[agentId];
-      return { statuses };
-    }),
-}));
+const RECONNECT_MS = [250, 500, 1000, 2000, 4000];
 
-const RECONNECT_MIN_MS = 500;
-const RECONNECT_MAX_MS = 10_000;
+export function agentSocketUrl(agentId: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/agent?id=${encodeURIComponent(agentId)}`;
+}
 
 function parseServerMessage(data: unknown): AgentServerMessage | null {
   if (typeof data !== "string") return null;
   try {
     const parsed: unknown = JSON.parse(data);
-    // The server is this app's own process; its messages are the shared model.
-    if (typeof parsed === "object" && parsed !== null && "type" in parsed) {
-      return parsed as AgentServerMessage;
-    }
+    // The server is this app's own; the shape is checked only as far as routing needs.
+    return isRecord(parsed) && typeof parsed.type === "string"
+      ? (parsed as AgentServerMessage)
+      : null;
   } catch {
-    // Not JSON: ignore.
+    return null;
   }
-  return null;
 }
 
-export interface UseAgentSessionOptions {
+export interface AgentSessionTarget {
   agentId: string;
-  cwd: string;
-  /** The agent session to resume if the server has no live session for this panel. */
+  worktreePath: string;
+  /** The agent session the panel showed before, kept in its params across restarts. */
   sessionId?: string;
-  /** The panel was last handed off to a terminal: the server must not start it on attach. */
-  handedOff?: boolean;
-  onSessionId: (sessionId: string) => void;
-  onHandedOff: (command: string, cwd: string) => void;
 }
 
-export function useAgentSession({
-  agentId,
-  cwd,
-  sessionId,
-  handedOff,
-  onSessionId,
-  onHandedOff,
-}: UseAgentSessionOptions) {
-  const [snapshot, setSnapshot] = useState<AgentSnapshot>(() => emptyAgentSnapshot(cwd));
+export interface AgentSessionHandle {
+  state: AgentState;
+  connected: boolean;
+  /** The last error the server reported for a request, until the next one succeeds. */
+  error: string | null;
+  /** Sends a message; false when the socket is not connected (the error says so). */
+  send: (message: AgentClientMessage) => boolean;
+  clearError: () => void;
+}
+
+export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle {
+  const [state, setState] = useState<AgentState>(INITIAL_AGENT_STATE);
   const [connected, setConnected] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
-  const sessionIdRef = useRef(sessionId);
-  const handedOffRef = useRef(handedOff);
-  handedOffRef.current = handedOff;
-  const callbacks = useRef({ onSessionId, onHandedOff });
-  callbacks.current = { onSessionId, onHandedOff };
+  const [error, setError] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const seqRef = useRef<number | undefined>(undefined);
+  const instanceRef = useRef<string | undefined>(undefined);
+  const sessionIdRef = useRef(target.sessionId);
+  const { agentId, worktreePath } = target;
+
+  useEffect(() => {
+    sessionIdRef.current = target.sessionId ?? sessionIdRef.current;
+  }, [target.sessionId]);
 
   useEffect(() => {
     let disposed = false;
-    let retryMs = RECONNECT_MIN_MS;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/agent`);
-      socketRef.current = ws;
-      ws.addEventListener("open", () => {
-        retryMs = RECONNECT_MIN_MS;
+      const ws = new WebSocket(agentSocketUrl(agentId));
+      wsRef.current = ws;
+      ws.onopen = () => {
+        attempt = 0;
+        setConnected(true);
         const attach: AgentClientMessage = {
           type: "attach",
-          agentId,
-          cwd,
+          worktreePath,
           ...(sessionIdRef.current ? { resumeSessionId: sessionIdRef.current } : {}),
-          ...(handedOffRef.current ? { handedOff: true } : {}),
+          ...(seqRef.current !== undefined && instanceRef.current
+            ? { sinceSeq: seqRef.current, instanceId: instanceRef.current }
+            : {}),
         };
         ws.send(JSON.stringify(attach));
-      });
-      ws.addEventListener("message", (event) => {
+      };
+      ws.onmessage = (event) => {
         const message = parseServerMessage(event.data);
         if (!message) return;
-        // Usable once attached: messages sent before the snapshot would reach no session.
-        if (message.type === "snapshot") setConnected(true);
-        if (message.type === "handed_off")
-          callbacks.current.onHandedOff(message.command, message.cwd);
-        setSnapshot((current) => {
-          const next = applyAgentMessage(current, message);
-          const id = next.info.sessionId;
-          if (id && id !== sessionIdRef.current) {
-            sessionIdRef.current = id;
-            queueMicrotask(() => callbacks.current.onSessionId(id));
-          }
-          return next;
-        });
-      });
-      ws.addEventListener("close", () => {
-        if (socketRef.current === ws) socketRef.current = null;
+        if (message.type === "error") {
+          setError(message.message);
+          return;
+        }
+        if (message.type === "snapshot") {
+          seqRef.current = message.seq;
+          instanceRef.current = message.instanceId;
+          sessionIdRef.current = message.state.sessionId ?? sessionIdRef.current;
+          setState(message.state);
+          return;
+        }
+        // An event at or below what was applied is a duplicate from a replay.
+        if (seqRef.current !== undefined && message.seq <= seqRef.current) return;
+        seqRef.current = message.seq;
+        setState((prev) => applyAgentEvent(prev, message.event));
+      };
+      ws.onclose = () => {
+        if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (disposed) return;
-        retryTimer = setTimeout(connect, retryMs);
-        retryMs = Math.min(retryMs * 2, RECONNECT_MAX_MS);
-      });
+        const delay = RECONNECT_MS[Math.min(attempt, RECONNECT_MS.length - 1)];
+        attempt += 1;
+        retry = setTimeout(connect, delay);
+      };
     };
     connect();
 
     return () => {
       disposed = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      socketRef.current?.close();
-      socketRef.current = null;
+      if (retry) clearTimeout(retry);
+      wsRef.current?.close();
+      wsRef.current = null;
     };
-  }, [agentId, cwd]);
-
-  useEffect(() => {
-    useAgentStatusStore.getState().set(agentId, snapshot.status);
-  }, [agentId, snapshot.status]);
-  useEffect(() => () => useAgentStatusStore.getState().set(agentId, null), [agentId]);
+  }, [agentId, worktreePath]);
 
   const send = useCallback((message: AgentClientMessage) => {
-    const ws = socketRef.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setError("Not connected to the Loxel server");
+      return false;
+    }
+    setError(null);
+    ws.send(JSON.stringify(message));
+    return true;
   }, []);
 
-  return { snapshot, connected, send };
+  const clearError = useCallback(() => setError(null), []);
+
+  return { state, connected, error, send, clearError };
+}
+
+/** Ends a closed panel's session on the server, which keeps it while no panel is attached. */
+export function destroyAgentSession(agentId: string): void {
+  const ws = new WebSocket(agentSocketUrl(agentId));
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "destroy" } satisfies AgentClientMessage));
+    ws.close();
+  };
 }
