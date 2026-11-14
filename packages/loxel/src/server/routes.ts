@@ -2933,14 +2933,21 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 
 // GET /api/version
 function handleGetVersion(_req: Request, ctx: RouteContext): Response {
-  // appOwned: started by the desktop app, so it exits with that app. shuttingDown: about to exit,
-  // so clients wait for its replacement instead of using it (see SHARED_SERVER.md).
-  return json({
+  return json(versionInfo(ctx.isShuttingDown()));
+}
+
+/**
+ * What `GET /api/version` answers. appOwned: started by the desktop app, so it exits with that
+ * app. shuttingDown: about to exit, so clients wait for its replacement instead of using it (see
+ * SHARED_SERVER.md).
+ */
+export function versionInfo(shuttingDown: boolean) {
+  return {
     version: getCurrentVersion(),
     isDev: config.isDev,
     appOwned: config.parentPid !== null,
-    shuttingDown: ctx.isShuttingDown(),
-  });
+    shuttingDown,
+  };
 }
 
 // ---------------------------------------------------------------------------

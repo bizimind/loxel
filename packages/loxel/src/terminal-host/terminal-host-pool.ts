@@ -145,7 +145,7 @@ export class TerminalHostPool implements TerminalHost {
       this.knownHostIds().map((hostId) =>
         this.discover(hostId).catch((err: unknown) => {
           this.log.error(`Could not check terminal host ${hostId}`, { error: err });
-          return { hostId, build: "", host: null };
+          return { hostId, build: this.readEntry(hostId)?.build ?? null, host: null };
         }),
       ),
     );
@@ -153,6 +153,8 @@ export class TerminalHostPool implements TerminalHost {
     const ended: EndedHost[] = [];
     const keepBuilds = new Set([this.options.hostBuildId]);
     const liveHostIds = new Set<string>();
+    /** False once a host that may be running has no known build: any binary may be its. */
+    let buildsKnown = true;
     for (const result of found) {
       if (!result) continue;
       if ("ended" in result) {
@@ -160,7 +162,8 @@ export class TerminalHostPool implements TerminalHost {
         continue;
       }
       liveHostIds.add(result.hostId);
-      keepBuilds.add(result.build);
+      if (result.build === null) buildsKnown = false;
+      else keepBuilds.add(result.build);
       if (!result.host) continue;
       for (const info of result.sessions) {
         if (this.owners.has(info.id)) {
@@ -177,7 +180,7 @@ export class TerminalHostPool implements TerminalHost {
     if (sessions.length > 0) {
       this.log.info(`Reattached ${sessions.length} terminal(s) from ${this.hosts.size} host(s)`);
     }
-    this.collectGarbage(keepBuilds, liveHostIds);
+    this.collectGarbage(buildsKnown ? keepBuilds : null, liveHostIds);
     return { ended };
   }
 
@@ -296,13 +299,14 @@ export class TerminalHostPool implements TerminalHost {
 
   /**
    * Handshake with the host `hostId`. Null when it is gone (its entry is removed); without `host`
-   * when it is running but not usable, so its files are kept.
+   * when it is running but not usable, so its files are kept. `build` is null when neither the
+   * host nor its entry says which it is.
    */
   private async discover(
     hostId: string,
   ): Promise<
     | { hostId: string; build: string; host: SocketTerminalHost; sessions: TerminalSessionInfo[] }
-    | { hostId: string; build: string; host: null }
+    | { hostId: string; build: string | null; host: null }
     | { ended: EndedHost }
     | null
   > {
@@ -314,7 +318,7 @@ export class TerminalHostPool implements TerminalHost {
     } catch (err) {
       if (!(err instanceof HostConnectError && err.refused)) {
         this.log.warn(`Terminal host ${hostId} did not answer; leaving it be`, { error: err });
-        return { hostId, build: entry?.build ?? "", host: null };
+        return { hostId, build: entry?.build ?? null, host: null };
       }
       // Its socket was removed under it (a purge of the temporary directory): the host runs, but
       // nothing can reach it or its sessions again.
@@ -457,15 +461,24 @@ export class TerminalHostPool implements TerminalHost {
 
   /**
    * Remove `bin/<hostBuildId>` directories of builds no live host runs and that are not this
-   * build's, and logs of hosts that are gone, once they are a day old.
+   * build's, and logs of hosts that are gone, once they are a day old. `keepBuilds` is null when
+   * a live host's build is unknown: no binary is removed then, since it may be that host's.
    */
-  private collectGarbage(keepBuilds: Set<string>, liveHostIds: Set<string>): void {
+  private collectGarbage(keepBuilds: Set<string> | null, liveHostIds: Set<string>): void {
+    if (keepBuilds) this.removeUnusedBinaries(keepBuilds);
+    this.removeStaleLogs(liveHostIds);
+  }
+
+  private removeUnusedBinaries(keepBuilds: Set<string>): void {
     const binDir = hostBinDir(this.options.stateDir);
     for (const build of readdirOrEmpty(binDir)) {
       if (keepBuilds.has(build)) continue;
       this.log.info(`Removing the unused terminal host binary ${build}`);
       rmSync(join(binDir, build), { recursive: true, force: true });
     }
+  }
+
+  private removeStaleLogs(liveHostIds: Set<string>): void {
     const logsDir = hostLogsDir(this.options.stateDir);
     const now = Date.now();
     for (const name of readdirOrEmpty(logsDir)) {

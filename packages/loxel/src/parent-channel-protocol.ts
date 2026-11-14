@@ -13,6 +13,12 @@ import { z } from "zod";
 /** The server's descriptor for the channel: the first one after stdin, stdout and stderr. */
 export const PARENT_CHANNEL_FD = 3;
 
+/**
+ * How long a launching app waits for a server that a previous run of it left shutting down. A
+ * stopping server lets go of the port within it, or the launch fails.
+ */
+export const STOPPING_SERVER_WAIT_MS = 15_000;
+
 /** What a shutdown the app asks for does to the terminals: `end` them, or `keep` them running. */
 export const ShutdownTerminalsSchema = z.enum(["end", "keep"]);
 export type ShutdownTerminals = z.infer<typeof ShutdownTerminalsSchema>;

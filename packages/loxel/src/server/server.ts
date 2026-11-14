@@ -16,7 +16,7 @@ import type {
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
-import type { ShutdownTerminals } from "@/parent-channel-protocol";
+import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
@@ -47,7 +47,7 @@ import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
-import { handleRequest } from "./routes";
+import { handleRequest, versionInfo } from "./routes";
 import { SchemaConsent } from "./schema-consent";
 import { SchemaDownloads } from "./schema-downloads";
 import { SchemaService } from "./schema-service";
@@ -96,21 +96,72 @@ const PARENT_CHECK_MS = 2000;
 
 /** Set once startup is done, and a shutdown has a server to tear down. */
 let serving = false;
+/** Set by the first stop that arrives during startup; any later one (the channel closing) is moot. */
+let stoppingInStartup = false;
+/**
+ * Resolved once startup has reached the terminal hosts, with how to leave them: a stop during
+ * startup waits for it, so the shells get the fate the app asked for rather than the hosts' grace
+ * period.
+ */
+const terminalHostsReached =
+  Promise.withResolvers<(terminals: ShutdownTerminals) => Promise<void>>();
+/**
+ * How long a stop during startup holds the port while it waits for startup to reach the terminal
+ * hosts and leaves them: well within the time a relaunched app waits for it, so the app never
+ * gives up on it and fails to launch.
+ */
+const STARTUP_STOP_WAIT_MS = STOPPING_SERVER_WAIT_MS - 5000;
 
 /**
- * Stop the server as the app asks, or once the app is gone. One still starting has nothing to tear
- * down, and exits at once, as SIGTERM's default action did before it handled the signal; the
- * terminal hosts it reached take the closed connections as a crash, and keep the shells for the
- * grace period.
+ * Stop the server as the app asks, or once the app is gone. One still starting has nothing else to
+ * tear down: it leaves the terminal hosts as asked, once startup has reached them, and exits. Gone
+ * without a word (`drop`), it exits at once, and the hosts it reached take the closed connections
+ * as a crash, keeping the shells for the grace period.
  */
 function leaveWithApp(terminals: TerminalsOnShutdown): void {
+  if (stoppingInStartup) return;
   if (serving) {
     shutdown(0, terminals);
     return;
   }
-  log.info("Stopping before startup finished");
-  logger.shutdown();
-  process.exit(0);
+  stoppingInStartup = true;
+  log.info(`Stopping before startup finished (terminals: ${terminals})`);
+  const hostsLeft =
+    terminals !== "drop" && holdPortWhileStopping()
+      ? Promise.race([
+          terminalHostsReached.promise.then((leave) => leave(terminals)),
+          Bun.sleep(STARTUP_STOP_WAIT_MS),
+        ])
+      : Promise.resolve();
+  void hostsLeft
+    .catch((err: unknown) => log.error("Could not leave the terminal hosts", { error: err }))
+    .finally(() => {
+      logger.shutdown();
+      process.exit(0);
+    });
+}
+
+/**
+ * Take the port until exit, answering only that this server is shutting down: an app relaunched
+ * meanwhile then waits for it, rather than starting a server that would take the terminal hosts
+ * while this one leaves them. False when another server has the port, and with it the hosts,
+ * which this one must then leave alone.
+ */
+function holdPortWhileStopping(): boolean {
+  try {
+    Bun.serve({
+      port: config.port,
+      hostname: "127.0.0.1",
+      fetch: (req) =>
+        new URL(req.url).pathname === "/api/version"
+          ? Response.json(versionInfo(true))
+          : new Response("Shutting down", { status: 503 }),
+    });
+    return true;
+  } catch (err) {
+    log.warn(`Port ${config.port} is in use; leaving the terminal hosts alone`, { error: err });
+    return false;
+  }
 }
 
 if (config.parentPid !== null) {
@@ -1300,9 +1351,12 @@ const routeContext: RouteContext = {
 };
 
 // A server that cannot have the port must fail before it touches the terminal hosts: taking them
-// over would cut the running server off from its terminals.
+// over would cut the running server off from its terminals. One stopping during startup holds the
+// port itself.
 try {
-  Bun.listen({ hostname: "127.0.0.1", port: config.port, socket: { data: () => {} } }).stop(true);
+  if (!stoppingInStartup) {
+    Bun.listen({ hostname: "127.0.0.1", port: config.port, socket: { data: () => {} } }).stop(true);
+  }
 } catch (err) {
   throw new Error(`Port ${config.port} is in use; not starting`, { cause: err });
 }
@@ -1318,10 +1372,15 @@ try {
 } catch (err) {
   log.error("Could not reach the running terminal hosts", { error: err });
 }
+terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminals));
 
 // Clients spawn language servers and terminals as soon as they connect, so let the login-shell PATH
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
+
+// Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
+// from here to `serving = true` waits, so a stop cannot arrive in between.
+if (stoppingInStartup) await new Promise<never>(() => {});
 
 const server = Bun.serve<WsData>({
   port: config.port,
