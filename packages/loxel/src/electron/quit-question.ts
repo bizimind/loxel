@@ -16,14 +16,20 @@ import {
   QuitReplySchema,
   quitConfirmation,
 } from "../lib/quit-terminals";
-import { QUIT_ANSWER, QUIT_QUESTION, QUIT_QUESTION_SHOWN } from "./ipc-channels";
+import {
+  QUIT_ANSWER,
+  QUIT_QUESTION,
+  QUIT_QUESTION_SHOWN,
+  QUIT_QUESTION_WITHDRAWN,
+} from "./ipc-channels";
 
 /**
  * How long listing the terminals may take before the question is asked without the list. Longer
- * than the server's own wait for a terminal host that does not tell its foreground programs, so a
- * slow host costs its terminals' programs, not the whole list.
+ * than the server's own wait for a terminal host's foreground programs
+ * (`REQUEST_TIMEOUTS_MS.foreground_processes`, 5 seconds), so a slow host costs only its own
+ * terminals' programs, which are then counted, not the whole list.
  */
-const LIST_TIMEOUT_MS = 5000;
+const LIST_TIMEOUT_MS = 8000;
 
 /** How long a window has to put the question on screen before it is asked natively instead. */
 const SHOW_TIMEOUT_MS = 3000;
@@ -31,11 +37,6 @@ const SHOW_TIMEOUT_MS = 3000;
 export interface QuitQuestionOptions {
   /** The window to ask in, read once the terminals are listed; undefined when none is open. */
   window: () => BrowserWindow | undefined;
-  /**
-   * Whether a native dialog may ask when no window can. A hidden demo has no one to answer one,
-   * and a modal dialog would hold its quit forever: the terminals end there, as Quit did before.
-   */
-  nativeFallback: boolean;
   /** Aborted when the quit is decided some other way meanwhile (Quit and Keep Terminals). */
   signal: AbortSignal;
 }
@@ -58,7 +59,6 @@ export async function askBeforeQuitting(
     console.warn("[electron] The window did not show the quit question; asking natively");
   }
   if (options.signal.aborted) return "cancel";
-  if (!options.nativeFallback) return "end";
   return askNatively(confirmation);
 }
 
@@ -86,8 +86,9 @@ let nextQuestionId = 1;
 
 /**
  * Ask in `win`'s renderer (`QuitQuestionHost`). `unshown` when the renderer does not report the
- * question on screen in time, or is gone: hung, crashed or still loading. A window closed after
- * showing it is a Cancel.
+ * question on screen in time, or loses it: hung, crashed, still loading, or reloading. A window
+ * closed after showing it is a Cancel. A question main stops waiting on without the renderer's
+ * answer is withdrawn from the window, so no answer is left that nothing hears.
  */
 function askInWindow(
   win: BrowserWindow,
@@ -108,21 +109,28 @@ function askInWindow(
     const onAnswer = (event: IpcMainEvent, raw: unknown) => {
       const reply = QuitReplySchema.safeParse(raw);
       if (!fromThisWindow(event) || !reply.success || reply.data.id !== question.id) return;
-      finish(reply.data.answer);
+      finish(reply.data.answer, true);
     };
     const onClosed = () => finish(shown ? "cancel" : "unshown");
     const onGone = () => finish("unshown");
+    const onNavigation = (details: { isMainFrame: boolean; isSameDocument: boolean }) => {
+      if (details.isMainFrame && !details.isSameDocument) finish("unshown");
+    };
     const onAbort = () => finish("cancel");
     const cancelShowTimeout = awakeTimeout(SHOW_TIMEOUT_MS, () => {
       if (!shown) finish("unshown");
     });
-    function finish(answer: QuitAnswer | "unshown"): void {
+    function finish(answer: QuitAnswer | "unshown", answered = false): void {
       cancelShowTimeout();
       ipcMain.removeListener(QUIT_QUESTION_SHOWN, onShown);
       ipcMain.removeListener(QUIT_ANSWER, onAnswer);
       win.removeListener("closed", onClosed);
-      if (!contents.isDestroyed()) contents.removeListener("render-process-gone", onGone);
       signal.removeEventListener("abort", onAbort);
+      if (!contents.isDestroyed()) {
+        contents.removeListener("render-process-gone", onGone);
+        contents.removeListener("did-start-navigation", onNavigation);
+        if (!answered) contents.send(QUIT_QUESTION_WITHDRAWN, question.id);
+      }
       resolve(answer);
     }
 
@@ -130,6 +138,7 @@ function askInWindow(
     ipcMain.on(QUIT_ANSWER, onAnswer);
     win.once("closed", onClosed);
     contents.once("render-process-gone", onGone);
+    contents.on("did-start-navigation", onNavigation);
     signal.addEventListener("abort", onAbort, { once: true });
     // A quit from the Dock may come while another app is in front.
     if (win.isMinimized()) win.restore();

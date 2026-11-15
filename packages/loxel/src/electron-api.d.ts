@@ -93,6 +93,8 @@ interface Window {
      * The renderer reports it shown with `quitQuestionShown`, then the answer.
      */
     onQuitQuestion: (callback: (question: unknown) => void) => () => void;
+    /** Main no longer waits on the quit question with this ID: take it down. */
+    onQuitQuestionWithdrawn: (callback: (id: unknown) => void) => () => void;
     /** The quit question with this ID is on screen. */
     quitQuestionShown: (id: number) => void;
     /** The user's answer to a quit question. */

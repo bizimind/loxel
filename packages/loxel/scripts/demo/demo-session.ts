@@ -5,7 +5,6 @@ import { $ } from "bun";
 
 import { withoutAgentEnv } from "../../src/coding-agent-env";
 import { DEMO_WINDOW_SIZE } from "../../src/electron/env";
-import { APP_QUIT_ENDING_TERMINALS } from "../../src/electron/ipc-channels";
 import {
   demoEnv,
   demoServer,
@@ -88,14 +87,7 @@ export async function launchDemo({
         });
         return Buffer.from(png, "base64");
       },
-      close: async () => {
-        // Quit Loxel would first ask about the shots' agents and dev servers: end them instead,
-        // as the command palette's Quit and End Terminals does.
-        await app.evaluate(({ ipcMain }, channel) => {
-          ipcMain.emit(channel);
-        }, APP_QUIT_ENDING_TERMINALS);
-        await app.close();
-      },
+      close: () => app.close(),
     };
   } catch (error) {
     await app.close().catch(() => {});

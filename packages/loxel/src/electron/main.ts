@@ -78,6 +78,7 @@ import {
   type ShutdownTerminals,
   encodeParentMessage,
 } from "../parent-channel-protocol";
+import { persistedWhenQuitting } from "../server/persisted-settings";
 import { isHttpUrl } from "../url-utils";
 import {
   installAppUpdater,
@@ -122,6 +123,7 @@ import {
   unplannedQuit,
 } from "./quit-plan";
 import { askBeforeQuitting } from "./quit-question";
+import { readLaunchSettings } from "./settings-row";
 import {
   type BrowserPanelFrame,
   configurePasskeys,
@@ -367,6 +369,7 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   followNativeTheme(win);
+  appWindows.add(win);
 
   if (IS_DEMO_HIDDEN) {
     win.setIgnoreMouseEvents(true);
@@ -376,6 +379,7 @@ async function createWindow(): Promise<BrowserWindow> {
   // When the BrowserWindow is gone, ask the server to promote this window's
   // session-scoped layout to canonical so the next solo window restores it.
   win.on("closed", () => {
+    appWindows.delete(win);
     promoteLayoutForWindow(windowId);
   });
 
@@ -487,6 +491,27 @@ function startServerToStop(): void {
   }
 }
 
+/**
+ * Apply the persisted settings main follows before any window has reported them: the theme the
+ * first window opens in, and "When quitting Loxel". Unread (`undefined`), both keep their defaults.
+ */
+function applyLaunchSettings(raw: string | null | undefined): void {
+  if (raw === undefined) return;
+  applyPersistedTheme(raw);
+  whenQuitting = persistedWhenQuitting(raw);
+  buildAppMenu();
+}
+
+/** Loxel's own windows, which can ask before a quit; not browser panel popups. */
+const appWindows = new Set<BrowserWindow>();
+
+/** The window to ask in: the focused one of Loxel's, or else any of them. */
+function windowToAskIn(): BrowserWindow | undefined {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && appWindows.has(focused)) return focused;
+  return appWindows.values().next().value;
+}
+
 /** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */
 const quitPlans = new QuitPlans();
 
@@ -497,8 +522,8 @@ function quitApp(plan: QuitPlan): void {
 }
 
 /**
- * The "When quitting Loxel" setting, as the renderer reports it once its settings load: what Quit
- * Loxel, the Dock's Quit and logout do to the terminals. The default until a window reports it.
+ * The "When quitting Loxel" setting: what Quit Loxel, the Dock's Quit and logout do to the
+ * terminals. Read from the persisted settings at launch, then as each window's renderer reports it.
  */
 let whenQuitting: WhenQuitting = DEFAULT_WHEN_QUITTING;
 
@@ -519,25 +544,34 @@ let quitQuestion: AbortController | null = null;
 
 /**
  * What a quit that names no plan does (Quit Loxel, the Dock): the setting's plan, or the question
- * first. An update install decides the terminals itself, and logout must not be held up.
+ * first. An update install decides the terminals itself, and logout must not be held up. A hidden
+ * demo has no one to answer, and its driver quits it.
  */
 function unplannedQuitPlan(): QuitPlan | typeof ASK {
-  return unplannedQuit(whenQuitting, !systemPoweringOff() && !isInstallingUpdate());
+  const canAsk = !systemPoweringOff() && !isInstallingUpdate() && !IS_DEMO_HIDDEN;
+  return unplannedQuit(whenQuitting, canAsk);
 }
 
-/** Ask before quitting, then quit with the plan the user chose. A second ⌘Q meanwhile waits too. */
+/**
+ * Ask before quitting, then quit with the plan the user chose. A second ⌘Q meanwhile brings the
+ * question to the front again rather than asking twice.
+ */
 function askThenQuit(): void {
-  if (quitQuestion) return;
+  if (quitQuestion) {
+    app.focus({ steal: true });
+    return;
+  }
   const controller = new AbortController();
   quitQuestion = controller;
-  askBeforeQuitting(SERVER_URL, {
-    window: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0],
-    nativeFallback: !IS_DEMO_HIDDEN,
-    signal: controller.signal,
-  })
+  askBeforeQuitting(SERVER_URL, { window: windowToAskIn, signal: controller.signal })
     .catch((err: unknown) => {
-      console.error("[electron] Could not ask before quitting; quitting as Quit Loxel did", err);
-      return "end" as const;
+      // Nothing was answered: keep the terminals, which the next launch reattaches, rather than
+      // end programs the user was to be asked about.
+      console.error(
+        "[electron] Could not ask before quitting; quitting keeping the terminals",
+        err,
+      );
+      return "keep" as const;
     })
     .then((answer) => {
       if (quitQuestion === controller) quitQuestion = null;
@@ -1088,7 +1122,7 @@ app.whenReady().then(async () => {
     browserSession.setPermissionCheckHandler(localFontsCheckHandler(() => false));
 
     buildAppMenu();
-    await applyPersistedTheme(SERVER_URL);
+    applyLaunchSettings(await readLaunchSettings(SERVER_URL));
     await createWindow();
     const opensAtLaunch = launchOpens;
     launchOpens = null;

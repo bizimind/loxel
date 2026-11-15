@@ -31,6 +31,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     quitEndingTerminals: () => {},
     setWhenQuitting: () => {},
     onQuitQuestion: () => () => {},
+    onQuitQuestionWithdrawn: () => () => {},
     quitQuestionShown: () => {},
     answerQuitQuestion: () => {},
     ...overrides,

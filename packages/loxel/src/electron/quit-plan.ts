@@ -25,8 +25,8 @@ export const ASK = "ask";
 /**
  * What a quit that names no plan does: Quit Loxel (⌘Q), the Dock's Quit, logout. It follows the
  * "When quitting Loxel" setting. `canAsk` is false where no one can be asked (logout and shutdown,
- * which must not be held up; an update install, which decides the terminals itself; a hidden demo):
- * asking then ends the terminals, as Quit always did.
+ * which must not be held up; an update install, which decides the terminals itself; a hidden demo,
+ * which its driver quits): asking then ends the terminals, as Quit always did.
  */
 export function unplannedQuit(setting: WhenQuitting, canAsk: boolean): QuitPlan | typeof ASK {
   if (setting === "ask") return canAsk ? ASK : QUIT;
@@ -57,7 +57,8 @@ export class QuitPlans {
   begin(unplanned: QuitPlan | typeof ASK): QuitPlan | typeof ASK {
     const plan = this.requested ?? unplanned;
     this.requested = null;
-    if (plan !== ASK) this.plan = plan;
+    // A quit cancelled to ask leaves no plan of its own behind.
+    this.plan = plan === ASK ? QUIT : plan;
     return plan;
   }
 

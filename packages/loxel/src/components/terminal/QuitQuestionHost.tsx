@@ -48,6 +48,14 @@ export function QuitQuestionHost() {
     });
   }, []);
 
+  useEffect(
+    () =>
+      window.electronAPI?.onQuitQuestionWithdrawn((id) => {
+        setQuestion((current) => (current?.id === id ? null : current));
+      }),
+    [],
+  );
+
   useEffect(() => {
     if (!question) return;
     requestAnimationFrame(() => keepRef.current?.focus());

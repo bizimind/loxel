@@ -9,7 +9,6 @@ import { type BrowserWindow, ipcMain, nativeTheme } from "electron";
 import { asThemePreference } from "../lib/theme-preference";
 import { persistedTheme } from "../server/persisted-settings";
 import { SET_THEME_SOURCE } from "./ipc-channels";
-import { readSettingsRow } from "./settings-row";
 
 /** The renderer's `--background` in each theme (`src/index.css`); keep the two in step. */
 const WINDOW_BACKGROUND = { dark: "#191a1c", light: "#ffffff" } as const;
@@ -18,9 +17,6 @@ const WINDOW_BACKGROUND = { dark: "#191a1c", light: "#ffffff" } as const;
 export function windowBackgroundColor(): string {
   return nativeTheme.shouldUseDarkColors ? WINDOW_BACKGROUND.dark : WINDOW_BACKGROUND.light;
 }
-
-/** How long launch waits for the theme setting before opening the first window without it. */
-const SETTINGS_READ_TIMEOUT_MS = 2000;
 
 /** Loxel's own windows, whose background follows the theme (not browser panel popups). */
 const appWindows = new Set<BrowserWindow>();
@@ -43,15 +39,10 @@ export function installNativeTheme(): void {
 }
 
 /**
- * Apply the persisted theme setting, read from the server, before the first window opens. If it
- * cannot be read in time, the OS appearance stays in effect until the window's renderer reports
+ * Apply the persisted theme setting (the settings row, `readLaunchSettings`) before the first
+ * window opens. Without it, the OS appearance stays in effect until the window's renderer reports
  * the setting.
  */
-export async function applyPersistedTheme(serverUrl: string): Promise<void> {
-  try {
-    const raw = await readSettingsRow(serverUrl, AbortSignal.timeout(SETTINGS_READ_TIMEOUT_MS));
-    nativeTheme.themeSource = persistedTheme(raw);
-  } catch (err) {
-    console.warn("[electron] Cannot read the theme setting; following the OS until it loads", err);
-  }
+export function applyPersistedTheme(raw: string | null): void {
+  nativeTheme.themeSource = persistedTheme(raw);
 }

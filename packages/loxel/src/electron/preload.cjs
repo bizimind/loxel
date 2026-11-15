@@ -31,6 +31,7 @@ const APP_RESTART = "app:restart";
 const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
 const SET_WHEN_QUITTING = "quit:set-when-quitting";
 const QUIT_QUESTION = "quit:question";
+const QUIT_QUESTION_WITHDRAWN = "quit:question-withdrawn";
 const QUIT_QUESTION_SHOWN = "quit:question-shown";
 const QUIT_ANSWER = "quit:answer";
 
@@ -127,6 +128,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_event, question) => callback(question);
     ipcRenderer.on(QUIT_QUESTION, handler);
     return () => ipcRenderer.removeListener(QUIT_QUESTION, handler);
+  },
+  onQuitQuestionWithdrawn: (callback) => {
+    const handler = (_event, id) => callback(id);
+    ipcRenderer.on(QUIT_QUESTION_WITHDRAWN, handler);
+    return () => ipcRenderer.removeListener(QUIT_QUESTION_WITHDRAWN, handler);
   },
   quitQuestionShown: (id) => ipcRenderer.send(QUIT_QUESTION_SHOWN, id),
   answerQuitQuestion: (reply) => ipcRenderer.send(QUIT_ANSWER, reply),

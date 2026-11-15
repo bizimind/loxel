@@ -11,6 +11,7 @@ import {
   QUIT_ANSWER,
   QUIT_QUESTION,
   QUIT_QUESTION_SHOWN,
+  QUIT_QUESTION_WITHDRAWN,
   SET_THEME_SOURCE,
   SET_WHEN_QUITTING,
   UPDATE_CHECK,
@@ -103,6 +104,18 @@ describe("window preload", () => {
     expect(callback).toHaveBeenCalledWith({ id: 1 });
     unsubscribe();
     expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(QUIT_QUESTION, listener);
+
+    const onWithdrawn = mock((_id: unknown) => {});
+    const stopWithdrawn = api.onQuitQuestionWithdrawn(onWithdrawn);
+    const [withdrawnChannel, withdrawnListener] = ipcRenderer.on.mock.lastCall ?? [];
+    expect(withdrawnChannel).toBe(QUIT_QUESTION_WITHDRAWN);
+    withdrawnListener?.({}, 1);
+    expect(onWithdrawn).toHaveBeenCalledWith(1);
+    stopWithdrawn();
+    expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(
+      QUIT_QUESTION_WITHDRAWN,
+      withdrawnListener,
+    );
 
     api.quitQuestionShown(1);
     expect(ipcRenderer.send).toHaveBeenLastCalledWith(QUIT_QUESTION_SHOWN, 1);

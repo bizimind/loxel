@@ -12,6 +12,7 @@ const quitQuestionShown = jest.fn((_id: number) => {});
 const answerQuitQuestion = jest.fn((_reply: unknown) => {});
 const setWhenQuitting = jest.fn((_setting: unknown) => {});
 let ask: ((question: unknown) => void) | null = null;
+let withdraw: ((id: unknown) => void) | null = null;
 
 const QUESTION: QuitQuestion = {
   id: 7,
@@ -40,6 +41,7 @@ beforeEach(() => {
   answerQuitQuestion.mockClear();
   setWhenQuitting.mockClear();
   ask = null;
+  withdraw = null;
   useSettingsStore.setState((s) => ({ terminal: { ...s.terminal, whenQuitting: "ask" } }));
   window.electronAPI = stubElectronAPI({
     quitQuestionShown,
@@ -49,6 +51,12 @@ beforeEach(() => {
       ask = callback;
       return () => {
         ask = null;
+      };
+    },
+    onQuitQuestionWithdrawn: (callback) => {
+      withdraw = callback;
+      return () => {
+        withdraw = null;
       };
     },
   });
@@ -95,6 +103,18 @@ describe("QuitQuestionHost", () => {
     expect(setWhenQuitting).toHaveBeenLastCalledWith("ask");
     act(() => useSettingsStore.getState().updateTerminal({ whenQuitting: "keep" }));
     expect(setWhenQuitting).toHaveBeenLastCalledWith("keep");
+  });
+
+  test("takes down a question main withdrew, and only that one", () => {
+    renderHost();
+    askQuestion();
+    const deliver = withdraw;
+    if (!deliver) throw new Error("The host did not listen for withdrawals");
+    act(() => deliver(6));
+    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    act(() => deliver(7));
+    expect(document.querySelector("dialog[open]")).toBeNull();
+    expect(answerQuitQuestion).not.toHaveBeenCalled();
   });
 
   test("ignores a malformed question, so main asks natively", () => {
