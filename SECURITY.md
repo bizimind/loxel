@@ -17,7 +17,7 @@ The hosted services (bizimind.io, `loxel.bizimind.io`, and `channels.loxel.bizim
 
 **Preferred:** Use [GitHub's private vulnerability reporting](https://github.com/bizimind/loxel/security/advisories/new) to report security issues directly. This keeps the discussion private and lets us coordinate the fix and disclosure with you.
 
-**Alternative:** Email **ori.100000@gmail.com**.
+**Alternative:** Email **security@bizimind.io**.
 
 Please include:
 
