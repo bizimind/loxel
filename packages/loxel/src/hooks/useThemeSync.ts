@@ -6,6 +6,8 @@ import { applyThemeStylesheet } from "@/lib/theme-stylesheet";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
+import { useSettingsHydrated } from "./useSettingsHydrated";
+
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 function subscribeSystemDark(onChange: () => void): () => void {
@@ -16,14 +18,6 @@ function subscribeSystemDark(onChange: () => void): () => void {
 
 function getSystemDark(): boolean {
   return window.matchMedia(DARK_QUERY).matches;
-}
-
-function subscribeSettingsHydration(onChange: () => void): () => void {
-  return useSettingsStore.persist.onFinishHydration(onChange);
-}
-
-function getSettingsHydrated(): boolean {
-  return useSettingsStore.persist.hasHydrated();
 }
 
 /**
@@ -38,7 +32,7 @@ function getSettingsHydrated(): boolean {
 export function useThemeSync(): void {
   const theme = useSettingsStore((s) => s.theme);
   const themes = useSettingsStore((s) => s.themes);
-  const hydrated = useSyncExternalStore(subscribeSettingsHydration, getSettingsHydrated);
+  const hydrated = useSettingsHydrated();
   const systemDark = useSyncExternalStore(subscribeSystemDark, getSystemDark);
   const darkMode = theme === "system" ? systemDark : theme === "dark";
 

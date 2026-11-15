@@ -32,6 +32,12 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     setNotificationSites: () => {},
     respondToNotificationPermission: () => {},
     clickBrowserNotification: () => {},
+    quitEndingTerminals: () => {},
+    setWhenQuitting: () => {},
+    onQuitQuestion: () => () => {},
+    onQuitQuestionWithdrawn: () => () => {},
+    quitQuestionShown: () => {},
+    answerQuitQuestion: () => {},
     ...overrides,
   };
 }

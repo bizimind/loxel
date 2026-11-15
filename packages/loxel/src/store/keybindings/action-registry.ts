@@ -113,6 +113,7 @@ export type ActionId =
   | "worktree.manageRepoTrust"
   | "app.settings"
   | "app.quitKeepingTerminals"
+  | "app.quitEndingTerminals"
   | "app.restart"
   | ThemeActionId;
 
@@ -456,10 +457,17 @@ export const ACTIONS: readonly ActionDef[] = [
     category: "app",
     isCurrent: () => useSettingsStore.getState().theme === theme,
   })),
-  // Also in the app menu, where Quit and Keep Terminals has ⌥⌘Q. Only the desktop app can quit.
+  // Both explicit quits, whatever Quit Loxel does. The app menu offers the one it doesn't on ⌥⌘Q.
+  // Only the desktop app can quit.
   {
     id: "app.quitKeepingTerminals",
     label: "Quit and Keep Terminals",
+    category: "app",
+    isEnabled: isDesktopApp,
+  },
+  {
+    id: "app.quitEndingTerminals",
+    label: "Quit and End Terminals",
     category: "app",
     isEnabled: isDesktopApp,
   },

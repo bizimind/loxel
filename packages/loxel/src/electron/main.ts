@@ -11,6 +11,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  powerMonitor,
   session,
   shell,
   type WebFrameMain,
@@ -20,6 +21,11 @@ import { z } from "zod";
 
 import { DEFAULT_SERVER_PORT } from "../app-ports";
 import { demoPort } from "../demo-instance";
+import {
+  DEFAULT_WHEN_QUITTING,
+  type WhenQuitting,
+  WhenQuittingSchema,
+} from "../lib/quit-terminals";
 import { getDek, initDek } from "./dek";
 import {
   DEMO_INSTANCE,
@@ -72,6 +78,7 @@ import {
   type ShutdownTerminals,
   encodeParentMessage,
 } from "../parent-channel-protocol";
+import { persistedWhenQuitting } from "../server/persisted-settings";
 import { isHttpUrl } from "../url-utils";
 import {
   installAppUpdater,
@@ -79,16 +86,19 @@ import {
   scheduleAutomaticUpdateCheck,
   terminalsForUpdateInstall,
 } from "./app-updater";
+import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
 import {
+  APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
   APP_RESTART,
   GET_WINDOW_FULL_SCREEN,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
+  SET_WHEN_QUITTING,
   WINDOW_FOCUS_CHANGE,
   WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
@@ -99,19 +109,19 @@ import {
 } from "./javascript-dialogs";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
+import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
 import {
-  applyPersistedTheme,
-  followNativeTheme,
-  installNativeTheme,
-  windowBackgroundColor,
-} from "./native-theme";
-import {
+  ASK,
+  QUIT,
   QUIT_KEEPING_TERMINALS,
   type QuitPlan,
   QuitPlans,
   RESTART,
   planAtWillQuit,
+  unplannedQuit,
 } from "./quit-plan";
+import { askBeforeQuitting, bringQuitQuestionToFront } from "./quit-question";
+import { readLaunchSettings } from "./settings-row";
 import {
   type BrowserPanelFrame,
   configurePasskeys,
@@ -233,7 +243,7 @@ function scheduleServerRestart(): void {
       "Loxel Stopped Working",
       `Loxel's server crashed ${SERVER_MAX_CRASH_RESTARTS} times in a row. Open Loxel again to restart it.`,
     );
-    app.quit();
+    quitApp(QUIT);
     return;
   }
 
@@ -356,7 +366,7 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
 
-  followNativeTheme(win);
+  registerAppWindow(win);
 
   if (IS_DEMO_HIDDEN) {
     win.setIgnoreMouseEvents(true);
@@ -477,6 +487,24 @@ function startServerToStop(): void {
   }
 }
 
+/**
+ * Apply the persisted settings main follows before any window has reported them: the theme the
+ * first window opens in, and "When quitting Loxel". Unread (`undefined`), both keep their defaults.
+ */
+function applyLaunchSettings(raw: string | null | undefined): void {
+  if (raw === undefined) return;
+  applyPersistedTheme(raw);
+  whenQuitting = persistedWhenQuitting(raw);
+  buildAppMenu();
+}
+
+/** The window to ask in before a quit: the focused one of Loxel's own, or else any of them. */
+function windowToAskIn(): BrowserWindow | undefined {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && isAppWindow(focused)) return focused;
+  return appWindowList()[0];
+}
+
 /** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */
 const quitPlans = new QuitPlans();
 
@@ -484,6 +512,65 @@ const quitPlans = new QuitPlans();
 function quitApp(plan: QuitPlan): void {
   quitPlans.request(plan);
   app.quit();
+}
+
+/**
+ * The "When quitting Loxel" setting: what Quit Loxel, the Dock's Quit and logout do to the
+ * terminals. Read from the persisted settings at launch, then as each window's renderer reports it.
+ */
+let whenQuitting: WhenQuitting = DEFAULT_WHEN_QUITTING;
+
+/**
+ * When macOS last said it is logging out, shutting down or restarting, whose quit must not wait on
+ * a question. Another app can still cancel a logout, and no event says so: after a minute, a quit is
+ * the user's again.
+ */
+let poweringOffAt: number | null = null;
+const POWER_OFF_QUIT_WINDOW_MS = 60_000;
+
+function systemPoweringOff(): boolean {
+  return poweringOffAt !== null && Date.now() - poweringOffAt < POWER_OFF_QUIT_WINDOW_MS;
+}
+
+/** The question asked before a quit, while the user (or the terminals' listing) has not answered. */
+let quitQuestion: AbortController | null = null;
+
+/**
+ * What a quit that names no plan does (Quit Loxel, the Dock): the setting's plan, or the question
+ * first. An update install decides the terminals itself, and logout must not be held up. A hidden
+ * demo has no one to answer, and its driver quits it.
+ */
+function unplannedQuitPlan(): QuitPlan | typeof ASK {
+  const canAsk = !systemPoweringOff() && !isInstallingUpdate() && !IS_DEMO_HIDDEN;
+  return unplannedQuit(whenQuitting, canAsk);
+}
+
+/**
+ * Ask before quitting, then quit with the plan the user chose. A second ⌘Q meanwhile brings the
+ * question to the front again rather than asking twice.
+ */
+function askThenQuit(): void {
+  if (quitQuestion) {
+    bringQuitQuestionToFront();
+    return;
+  }
+  const controller = new AbortController();
+  quitQuestion = controller;
+  askBeforeQuitting(SERVER_URL, { window: windowToAskIn, signal: controller.signal })
+    .catch((err: unknown) => {
+      // Nothing was answered: keep the terminals, which the next launch reattaches, rather than
+      // end programs the user was to be asked about.
+      console.error(
+        "[electron] Could not ask before quitting; quitting keeping the terminals",
+        err,
+      );
+      return "keep" as const;
+    })
+    .then((answer) => {
+      if (quitQuestion === controller) quitQuestion = null;
+      if (answer === "end") quitApp(QUIT);
+      else if (answer === "keep") quitApp(QUIT_KEEPING_TERMINALS);
+    });
 }
 
 /**
@@ -559,15 +646,22 @@ function buildAppMenu(): void {
               { role: "unhide" as const },
               { type: "separator" as const },
               { label: "Restart Loxel", click: () => quitApp(RESTART) },
-              // A plain quit, like every quit nothing planned (the Dock, logout): see QuitPlans.
+              // Names no plan, like the Dock's Quit: it follows "When quitting Loxel" (see
+              // `before-quit`).
               { role: "quit" as const },
               // Electron's menus have no NSMenuItem alternate (macOS's ⌥ "Quit and Keep Windows"),
-              // so this is an item of its own, on the same key with ⌥.
-              {
-                label: "Quit and Keep Terminals",
-                accelerator: "Alt+Cmd+Q",
-                click: () => quitApp(QUIT_KEEPING_TERMINALS),
-              },
+              // so this is an item of its own, on the same key with ⌥: the quit Quit Loxel is not.
+              whenQuitting === "keep"
+                ? {
+                    label: "Quit and End Terminals",
+                    accelerator: "Alt+Cmd+Q",
+                    click: () => quitApp(QUIT),
+                  }
+                : {
+                    label: "Quit and Keep Terminals",
+                    accelerator: "Alt+Cmd+Q",
+                    click: () => quitApp(QUIT_KEEPING_TERMINALS),
+                  },
             ],
           },
         ]
@@ -781,9 +875,18 @@ ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {
   app.dock?.setBadge(count > 0 ? String(count) : "");
 });
 
-// The command palette's Quit and Keep Terminals and Restart Loxel, the same as the app menu's.
+// The command palette's quits and Restart Loxel, the same as the app menu's.
 ipcMain.on(APP_QUIT_KEEPING_TERMINALS, () => quitApp(QUIT_KEEPING_TERMINALS));
+ipcMain.on(APP_QUIT_ENDING_TERMINALS, () => quitApp(QUIT));
 ipcMain.on(APP_RESTART, () => quitApp(RESTART));
+
+// The menu offers on ⌥⌘Q the quit that Quit Loxel is not, so it changes with the setting.
+ipcMain.on(SET_WHEN_QUITTING, (_event, value: unknown) => {
+  const parsed = WhenQuittingSchema.safeParse(value);
+  if (!parsed.success || parsed.data === whenQuitting) return;
+  whenQuitting = parsed.data;
+  buildAppMenu();
+});
 
 // macOS: support native window tabbing (View > Merge All Windows / "+" tab button)
 app.on("new-window-for-tab", () => {
@@ -951,7 +1054,7 @@ if (IS_DEMO)
 // A hidden demo is a background app: no Dock icon, no menu bar, never activated.
 if (IS_DEMO_HIDDEN) app.setActivationPolicy("accessory");
 const isPrimaryInstance = !app.isPackaged || app.requestSingleInstanceLock();
-if (!isPrimaryInstance) app.quit();
+if (!isPrimaryInstance) quitApp(QUIT);
 
 /**
  * Tell the user that Loxel could not start or open its window. A hidden demo has no one to read a
@@ -986,6 +1089,10 @@ installDefaultBrowser();
 
 app.whenReady().then(async () => {
   if (!isPrimaryInstance) return;
+  // Emitted before macOS asks the app to quit for a logout, shutdown or restart.
+  powerMonitor.on("shutdown", () => {
+    poweringOffAt = Date.now();
+  });
   try {
     if (await offerMoveToApplications()) return;
     // Every server spawn reads the key synchronously, so load it before the first one.
@@ -1011,7 +1118,7 @@ app.whenReady().then(async () => {
     installBrowserPermissions(browserSession);
 
     buildAppMenu();
-    await applyPersistedTheme(SERVER_URL);
+    applyLaunchSettings(await readLaunchSettings(SERVER_URL));
     await createWindow();
     const opensAtLaunch = launchOpens;
     launchOpens = null;
@@ -1026,13 +1133,15 @@ app.whenReady().then(async () => {
   } catch (err) {
     showStartupError(err);
     stopServer("end");
-    app.quit();
+    quitApp(QUIT);
   }
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    app.quit();
+    // No window is left to ask in: the setting decides, as at logout.
+    const plan = unplannedQuit(whenQuitting, false);
+    if (plan !== ASK) quitApp(plan);
   }
 });
 
@@ -1040,8 +1149,15 @@ app.on("window-all-closed", () => {
 const QUIT_PROMOTE_WAIT_MS = 2000;
 let promotesSettledForQuit = false;
 
-app.on("before-quit", () => {
-  quitPlans.begin();
+app.on("before-quit", (event) => {
+  if (quitPlans.begin(unplannedQuitPlan()) !== ASK) {
+    // Decided another way (Quit and Keep Terminals while asked): the question is moot.
+    quitQuestion?.abort();
+    quitQuestion = null;
+    return;
+  }
+  event.preventDefault();
+  askThenQuit();
 });
 
 // The server lives as long as the app. Windows are closed by now, and each sent its layout promote

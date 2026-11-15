@@ -4,10 +4,7 @@
  */
 import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { RestartsTerminals, UpdateState } from "@/api/update-model";
-
-function terminals(count: number): string {
-  return count === 1 ? "1 terminal" : `${count} terminals`;
-}
+import { type BusyTerminal, busyTerminals, terminalCount } from "@/lib/busy-terminals";
 
 /** Whether the update `status` is about restarts the terminals; false when there is none. */
 export function restartsTerminalsOf(status: UpdateState | undefined): RestartsTerminals {
@@ -24,20 +21,12 @@ export function restartsTerminalsOf(status: UpdateState | undefined): RestartsTe
 /** The warning for an update, or null when it restarts no terminal. */
 export function terminalRestartWarning(
   restartsTerminals: RestartsTerminals,
-  terminalCount: number,
+  count: number,
 ): string | null {
-  if (restartsTerminals === false || terminalCount === 0) return null;
+  if (restartsTerminals === false || count === 0) return null;
   return restartsTerminals === true
-    ? `This update restarts ${terminals(terminalCount)}`
-    : `This update may restart ${terminals(terminalCount)}`;
-}
-
-/** A terminal with a program running, as the confirmation lists it. */
-export interface BusyTerminal {
-  id: string;
-  program: string;
-  /** The worktree's folder name. */
-  worktree: string;
+    ? `This update restarts ${terminalCount(count)}`
+    : `This update may restart ${terminalCount(count)}`;
 }
 
 export interface TerminalRestartConfirmation {
@@ -57,18 +46,6 @@ export function terminalRestartConfirmation(
   running: readonly RunningTerminal[],
 ): TerminalRestartConfirmation | null {
   if (restartsTerminals === false || running.length === 0) return null;
-  const busy = running.flatMap((terminal) =>
-    typeof terminal.program === "string"
-      ? [
-          {
-            id: terminal.id,
-            program: terminal.program,
-            // A Home terminal's has none.
-            worktree: terminal.worktreePath === null ? "Home" : folderName(terminal.worktreePath),
-          },
-        ]
-      : [],
-  );
   const them = running.length === 1 ? "it" : `all ${running.length}`;
   return {
     title: terminalRestartWarning(restartsTerminals, running.length) ?? "",
@@ -76,10 +53,6 @@ export function terminalRestartConfirmation(
       restartsTerminals === true
         ? `Version ${version} cannot take over the terminals running now, so installing it ends ${them}.`
         : `Version ${version} does not say whether it can take over the terminals running now. If it cannot, installing it ends ${them}.`,
-    busy,
+    busy: busyTerminals(running),
   };
-}
-
-function folderName(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? path;
 }

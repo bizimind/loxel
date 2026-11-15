@@ -35,6 +35,12 @@ const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission
 const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
 const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN = "browser-notification:permission-withdrawn";
 const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
+const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
+const SET_WHEN_QUITTING = "quit:set-when-quitting";
+const QUIT_QUESTION = "quit:question";
+const QUIT_QUESTION_WITHDRAWN = "quit:question-withdrawn";
+const QUIT_QUESTION_SHOWN = "quit:question-shown";
+const QUIT_ANSWER = "quit:answer";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -145,4 +151,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   respondToNotificationPermission: (response) =>
     ipcRenderer.send(BROWSER_NOTIFICATION_PERMISSION_RESPOND, response),
   clickBrowserNotification: (ref) => ipcRenderer.send(BROWSER_NOTIFICATION_CLICK, ref),
+  quitEndingTerminals: () => ipcRenderer.send(APP_QUIT_ENDING_TERMINALS),
+  setWhenQuitting: (setting) => ipcRenderer.send(SET_WHEN_QUITTING, setting),
+  onQuitQuestion: (callback) => {
+    const handler = (_event, question) => callback(question);
+    ipcRenderer.on(QUIT_QUESTION, handler);
+    return () => ipcRenderer.removeListener(QUIT_QUESTION, handler);
+  },
+  onQuitQuestionWithdrawn: (callback) => {
+    const handler = (_event, id) => callback(id);
+    ipcRenderer.on(QUIT_QUESTION_WITHDRAWN, handler);
+    return () => ipcRenderer.removeListener(QUIT_QUESTION_WITHDRAWN, handler);
+  },
+  quitQuestionShown: (id) => ipcRenderer.send(QUIT_QUESTION_SHOWN, id),
+  answerQuitQuestion: (reply) => ipcRenderer.send(QUIT_ANSWER, reply),
 });

@@ -10,6 +10,7 @@ import {
   parseNotificationSites,
 } from "@/electron/browser-notification-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { isRecord } from "@/lib/is-record";
 import {
   allThemes,
   BUILTIN_THEMES,
@@ -20,6 +21,7 @@ import {
   type ThemeBase,
   type ThemeSettings,
 } from "@/lib/loxel-theme";
+import { DEFAULT_WHEN_QUITTING, parseWhenQuitting, type WhenQuitting } from "@/lib/quit-terminals";
 import type { ParsedTheme } from "@/lib/theme-file";
 import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
@@ -36,14 +38,23 @@ export type SidebarZone = "left" | "bottom" | "right";
 
 /**
  * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
- * (hand-edited, or from a newer version) falls back to the default, dark, the color themes are
- * parsed (`parseThemeSettings`), since their colors are written into a stylesheet, and the browser's
- * per-site decisions keep only valid entries, since the Electron main process enforces them.
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The browser's
+ * per-site decisions keep only valid entries, since the Electron main process enforces them. The
+ * terminal's
+ * "When quitting Loxel" falls back to its default when it is missing (a row from before it) or
+ * unknown, as main does with the value it is sent.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
   if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
   if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
+  if (isRecord(valid.terminal)) {
+    valid.terminal = {
+      ...valid.terminal,
+      whenQuitting: parseWhenQuitting(valid.terminal.whenQuitting),
+    };
+  }
   if ("browser" in valid) valid.browser = parseBrowserSettings(valid.browser);
   // Only fields already in the slice were replaced, each with a valid value of its type.
   return valid as T;
@@ -56,6 +67,8 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
+  /** What Quit Loxel does to the terminals ("When quitting Loxel"). */
+  whenQuitting: WhenQuitting;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -735,6 +748,7 @@ export const useSettingsStore = create<SettingsState>()(
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
+        whenQuitting: DEFAULT_WHEN_QUITTING,
       },
       themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
