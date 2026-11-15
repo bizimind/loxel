@@ -26,7 +26,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
 
       - name: Delete preview deployments
         env:
