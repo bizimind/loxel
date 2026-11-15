@@ -121,6 +121,10 @@ import {
   unplannedQuit,
 } from "./quit-plan";
 import { askBeforeQuitting, bringQuitQuestionToFront } from "./quit-question";
+import {
+  installServiceWorkerNotifications,
+  trackWebviewFocus,
+} from "./service-worker-notifications";
 import { readLaunchSettings } from "./settings-row";
 import {
   type BrowserPanelFrame,
@@ -765,6 +769,7 @@ app.on("web-contents-created", (_, contents) => {
   forwardWebviewKeystrokes(contents);
   trackWebviewDialogs(contents);
   trackWebviewNotifications(contents);
+  trackWebviewFocus(contents);
 
   if (contents.getType() === "webview") {
     // New tabs and windows a browser panel's page opens become browser tabs next to it, and its
@@ -1116,6 +1121,7 @@ app.whenReady().then(async () => {
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
     installBrowserPermissions(browserSession);
+    installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();
     applyLaunchSettings(await readLaunchSettings(SERVER_URL));

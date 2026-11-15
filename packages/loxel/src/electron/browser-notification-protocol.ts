@@ -1,7 +1,9 @@
 /**
  * Messages that carry a browser panel page's web notifications (`new Notification()`,
  * `Notification.requestPermission()`) from the webview's preload, through the main process, to the
- * window renderer that shows them in Loxel's notification center (see `browser-notifications.ts`).
+ * window renderer that shows them in Loxel's notification center (see `browser-notifications.ts`),
+ * and the ones a service worker registration shows, from the page or the worker's own preload
+ * (see `service-worker-notifications.ts`).
  */
 import { z } from "zod";
 
@@ -71,3 +73,43 @@ export const notificationPermissionWithdrawnSchema = z.object({
   id: z.number().int(),
   webContentsId: z.number().int(),
 });
+
+/**
+ * Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.showNotification()`.
+ * `scope` is the registration's, sent by pages only: a worker's own scope is known to main.
+ */
+export const registrationNotificationSchema = z.object({
+  scope: z.string().optional(),
+  title: z.string(),
+  body: z.string(),
+  tag: z.string(),
+  timestamp: z.number(),
+  /** The `data` option, structured-cloned; handed back to the worker on clicks. */
+  data: z.unknown(),
+});
+
+/** Main → preload: why `showNotification()` was refused, or `shown` (also when dropped quietly). */
+export type RegistrationShowResult = "shown" | "denied" | "data-too-large";
+
+/** Preload → main: `getNotifications()` (invoke), or `close()` on one of them (by main's ref). */
+export const registrationNotificationQuerySchema = z.object({
+  scope: z.string().optional(),
+  tag: z.string().optional(),
+});
+export const registrationNotificationCloseSchema = z.object({
+  scope: z.string().optional(),
+  ref: z.string(),
+});
+
+/**
+ * Main → preload: a live notification of a registration, for `getNotifications()` and the
+ * worker's `notificationclick`; `ref` is main's id for it, which `close()` sends back.
+ */
+export interface RegistrationNotificationInfo {
+  ref: string;
+  title: string;
+  body: string;
+  tag: string;
+  timestamp: number;
+  data: unknown;
+}

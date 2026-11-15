@@ -99,6 +99,21 @@ export const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN =
   "browser-notification:permission-withdrawn";
 /** Renderer → main: the user clicked a page's notification in the notification center. */
 export const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
+/**
+ * Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.showNotification()`.
+ * See `service-worker-notifications.ts`.
+ */
+export const REGISTRATION_NOTIFICATION_SHOW = "registration-notification:show";
+/** Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.getNotifications()`. */
+export const REGISTRATION_NOTIFICATION_LIST = "registration-notification:list";
+/** Webview or service worker preload → main: `close()` on a registration's notification. */
+export const REGISTRATION_NOTIFICATION_CLOSE = "registration-notification:close";
+/** Main → service worker preload: dispatch `notificationclick` for a notification the user clicked. */
+export const REGISTRATION_NOTIFICATION_CLICK = "registration-notification:click";
+/** Service worker preload → main: the `notificationclick` handler's `waitUntil` promises settled. */
+export const REGISTRATION_NOTIFICATION_CLICK_DONE = "registration-notification:click-done";
+/** Service worker preload → main (invoke): `clients.openWindow()`, allowed just after a click. */
+export const REGISTRATION_NOTIFICATION_OPEN_WINDOW = "registration-notification:open-window";
 /** Renderer → main: Quit and End Terminals, from the command palette. */
 export const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
 /**

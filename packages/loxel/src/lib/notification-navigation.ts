@@ -31,28 +31,32 @@ export function navigateToNotification(notification: ServerNotification): void {
 
   const wtStore = useWorktreeStore.getState();
 
-  // Going to another worktree or Home rebuilds the layout and reloads its browser panels, so a
-  // page's notification has no page left to click; activating the panel is all that is left.
+  // Like clicking a browser's notification: the page's `click` handler, or its service worker's
+  // `notificationclick`, runs (to open the chat or build it was about). Main ignores refs with
+  // nothing left to click: going to another worktree or Home rebuilds the layout and reloads its
+  // browser panels, so only the site's service worker outlives the switch.
+  const activate = () => {
+    activatePanelById(panelId);
+    if (source.kind === "browser") {
+      window.electronAPI?.clickBrowserNotification({ ref: source.ref });
+    }
+  };
+
   if (worktreePath === null && wtStore.activeWorktreePath !== null) {
     // A Home panel's: go Home first, then activate the panel after layout settles
     wtStore.showHome();
-    requestAnimationFrame(() => activatePanelById(panelId));
+    requestAnimationFrame(activate);
   } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
     // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)
       .then(() => {
-        requestAnimationFrame(() => activatePanelById(panelId));
+        requestAnimationFrame(activate);
       })
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);
       });
   } else {
-    activatePanelById(panelId);
-    // Like clicking a browser's notification: the page's `click` handler runs (to open the chat
-    // or build it was about). Main ignores refs whose page is gone.
-    if (source.kind === "browser") {
-      window.electronAPI?.clickBrowserNotification({ ref: source.ref });
-    }
+    activate();
   }
 }
