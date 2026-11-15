@@ -104,6 +104,14 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ---
 
+## Terminal
+
+| Action                              | Shortcut                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| Terminal: Toggle Bidirectional Text | unbound — command palette ([right-to-left text](/docs/terminals#right-to-left-text)) |
+
+---
+
 ## Languages
 
 | Action                         | Shortcut                                |

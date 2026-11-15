@@ -68,6 +68,14 @@ Your shell's startup runs after that, so it can still change what you get. A `JA
 
 ---
 
+## Right-to-left text
+
+By default, Hebrew, Arabic and other right-to-left text shows in the order programs write it, so right-to-left words appear reversed, as in many terminals. To read it in its natural order, turn on **Bidirectional Text** in **Settings > Terminal**, or run **Terminal: Toggle Bidirectional Text** from the command palette (`Cmd+Shift+P`). It is off by default.
+
+With it on, each line shows right-to-left words in reading order, mirrors brackets inside them, and keeps numbers and left-to-right words as they are. In a table drawn with box-drawing lines, each cell is ordered on its own, so cells never trade places. What you copy, search and paste is the text exactly as the program wrote it. Leave the setting off for programs that reorder right-to-left text themselves, such as Emacs.
+
+---
+
 ## Theme
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.

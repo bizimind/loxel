@@ -9,6 +9,7 @@ export function TerminalSection() {
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const notificationSequences = useSettingsStore((s) => s.terminal.notificationSequences);
   const activatePythonEnv = useSettingsStore((s) => s.terminal.activatePythonEnv);
+  const bidiText = useSettingsStore((s) => s.terminal.bidiText);
   const updateTerminal = useSettingsStore((s) => s.updateTerminal);
 
   // Local string state allows free typing; commit to store on blur.
@@ -104,6 +105,21 @@ export function TerminalSection() {
         <p className="text-muted-foreground text-[10px]">
           Start new terminals with the worktree&apos;s Python virtual environment active, the one
           the Python language server uses. Open terminals keep their environment.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="text-muted-foreground text-xs">Bidirectional Text</label>
+          <Switch
+            checked={bidiText}
+            onCheckedChange={(checked) => updateTerminal({ bidiText: checked })}
+            className="ml-auto"
+          />
+        </div>
+        <p className="text-muted-foreground text-[10px]">
+          Show right-to-left text, such as Hebrew and Arabic, in reading order. Copied text is
+          unchanged. Turn off for programs that already reorder it themselves, such as Emacs.
         </p>
       </div>
     </div>

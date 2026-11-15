@@ -27,6 +27,8 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
+  /** Draw right-to-left text (Hebrew, Arabic, ...) in display order. */
+  bidiText: boolean;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -626,6 +628,7 @@ export const useSettingsStore = create<SettingsState>()(
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
+        bidiText: false,
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       schemas: [],
@@ -861,7 +864,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoRevealInExplorer: state.autoRevealInExplorer,
         autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 14,
+      version: 15,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -995,6 +998,17 @@ export const useSettingsStore = create<SettingsState>()(
               : undefined;
           if (editor && !editor.inlayHints) {
             editor.inlayHints = DEFAULT_EDITOR_SETTINGS.inlayHints;
+          }
+        }
+
+        if (version <= 14) {
+          // v14 → v15: add the bidirectional text setting to terminal settings
+          const terminal =
+            typeof state.terminal === "object" && state.terminal !== null
+              ? (state.terminal as Record<string, unknown>)
+              : undefined;
+          if (terminal && typeof terminal.bidiText !== "boolean") {
+            terminal.bidiText = false;
           }
         }
 

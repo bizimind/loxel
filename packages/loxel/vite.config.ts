@@ -33,11 +33,52 @@ const XTERM_WEBGL_PIXEL_GRID_PATCHES = [
   },
 ];
 
-function xtermWebglPixelGrid(): Plugin {
+/**
+ * Add `WebglAddon.setRowTransform` (typed in src/components/terminal/webgl-renderer.ts), which the
+ * terminal uses to draw bidirectional text. For each row `_updateModel` draws, the transform names
+ * the logical cell to draw in each visual column (`$bx`) and the mirrored characters. Selection and
+ * decorations resolve against the logical column, the cursor is drawn where its logical cell lands
+ * (`$bc`), and character joining is skipped on transformed rows. Same exactly-once rule as above.
+ */
+const XTERM_WEBGL_ROW_TRANSFORM_PATCHES = [
+  {
+    find: "let s=this._core,o=this._workCell,r,a,l,u,c,d,h=0,f=!0,I,L,M,q,S,W,E,y,w;",
+    replace:
+      "let s=this._core,o=this._workCell,r,a,l,u,c,d,h=0,f=!0,I,L,M,q,S,W,E,y,w,$bd,$bx,$bc=1/0;",
+  },
+  {
+    find: "c=this._characterJoinerService.getJoinedCharacters(l),y=0;",
+    replace:
+      "c=this._characterJoinerService.getJoinedCharacters(l),$bd=this._rowTransform?.(l),$bd&&(c=[]),y=0;",
+  },
+  { find: "u.loadCell(y,o)", replace: "$bx=$bd?$bd.visualToLogical[y]:y,u.loadCell($bx,o)" },
+  {
+    find: "if(q=o.getChars(),S=o.getCode(),E=(a*s.cols+y)*Ce,this._cellColorResolver.resolve(o,y,l,",
+    replace:
+      "if(q=o.getChars(),S=o.getCode(),$bd?.mirrored.has($bx)&&(q=$bd.mirrored.get($bx),S=q.codePointAt(0)),E=(a*s.cols+y)*Ce,this._cellColorResolver.resolve(o,$bx,l,",
+  },
+  {
+    find: "(y===ce&&(this._model.cursor={x:ce,",
+    replace: "($bx===ce&&(this._model.cursor={x:$bc=y,",
+  },
+  { find: "we=ce+o.getWidth()-1),y>=ce&&y<=we&&", replace: "we=y+o.getWidth()-1),y>=$bc&&y<=we&&" },
+  {
+    find: "this._renderer=this._register(new ui(t,l,u,c,s,d,o,f,this._preserveDrawingBuffer)),",
+    replace:
+      "this._renderer=this._register(new ui(t,l,u,c,s,d,o,f,this._preserveDrawingBuffer)),this._renderer._rowTransform=(e=>this._rowTransform?.(e)),",
+  },
+  {
+    find: "clearTextureAtlas(){this._renderer?.clearTextureAtlas()}",
+    replace:
+      "clearTextureAtlas(){this._renderer?.clearTextureAtlas()}setRowTransform(e){this._rowTransform=e}",
+  },
+];
+
+function xtermWebglPatches(): Plugin {
   let isBuild = false;
   let patched = false;
   return {
-    name: "xterm-webgl-pixel-grid",
+    name: "xterm-webgl-patches",
     enforce: "pre",
     configResolved(config) {
       isBuild = config.command === "build";
@@ -45,14 +86,17 @@ function xtermWebglPixelGrid(): Plugin {
     buildEnd(error) {
       // Dev serves modules on demand; in a build the addon must have gone through the transform.
       if (!isBuild || error || patched) return;
-      this.error(`xterm-webgl-pixel-grid: ${XTERM_WEBGL_MODULE} was never transformed`);
+      this.error(`xterm-webgl-patches: ${XTERM_WEBGL_MODULE} was never transformed`);
     },
     transform(code, id) {
       if (!id.includes(XTERM_WEBGL_MODULE)) return null;
       let source = code;
-      for (const { find, replace } of XTERM_WEBGL_PIXEL_GRID_PATCHES) {
+      for (const { find, replace } of [
+        ...XTERM_WEBGL_PIXEL_GRID_PATCHES,
+        ...XTERM_WEBGL_ROW_TRANSFORM_PATCHES,
+      ]) {
         if (source.split(find).length !== 2) {
-          throw new Error(`xterm-webgl-pixel-grid: expected one match in ${id} for: ${find}`);
+          throw new Error(`xterm-webgl-patches: expected one match in ${id} for: ${find}`);
         }
         source = source.replace(find, () => replace);
       }
@@ -69,7 +113,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      xtermWebglPixelGrid(),
+      xtermWebglPatches(),
       ...(isElectron
         ? electron([
             {

@@ -422,6 +422,10 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
       if (attachedRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
     });
+    webglRenderer.setBidiText(useSettingsStore.getState().terminal.bidiText);
+    const unsubBidiText = useSettingsStore.subscribe((s) =>
+      webglRenderer.setBidiText(s.terminal.bidiText),
+    );
     const visibility = panelApi.onDidVisibilityChange(({ isVisible }) => {
       if (isVisible) webglRenderer.attach();
       else webglRenderer.detach();
@@ -518,6 +522,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       unsubOutput();
       unsubscribe();
       unsubReconnect();
+      unsubBidiText();
       visibility.dispose();
       webglRenderer.detach();
       terminal.dispose();
