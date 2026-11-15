@@ -999,6 +999,8 @@ const terminalManager = new TerminalManager(terminalHosts, {
   },
 });
 const notificationStore = new NotificationStore();
+/** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
+const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
 const formatService = new FormatService();
 const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
@@ -1195,24 +1197,19 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     }
 
     case "browser_notification_show": {
+      // Main already checked and capped what the page sent; this guards the socket itself.
+      if (msg.source.kind !== "browser") break;
       for (const id of notificationStore.dismissReplacedBy(msg.source)) {
         broadcastAll({ type: "notification_dismissed", id });
       }
-      const notification = notificationStore.add({
+      const { added, evicted } = notificationStore.addBrowser({
         source: msg.source,
-        title: msg.title,
-        body: msg.body,
+        title: msg.title.slice(0, MAX_BROWSER_NOTIFICATION_TEXT),
+        body: msg.body?.slice(0, MAX_BROWSER_NOTIFICATION_TEXT),
         urgency: "normal",
       });
-      broadcastAll({ type: "notification_added", data: notification });
-      break;
-    }
-
-    case "browser_notification_close": {
-      const closed = notificationStore.dismissWhere(
-        (s) => s.kind === "browser" && s.ref === msg.ref,
-      );
-      for (const id of closed) broadcastAll({ type: "notification_dismissed", id });
+      for (const id of evicted) broadcastAll({ type: "notification_dismissed", id });
+      broadcastAll({ type: "notification_added", data: added });
       break;
     }
 

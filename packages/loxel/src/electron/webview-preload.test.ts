@@ -234,4 +234,31 @@ describe("webview preload notifications", () => {
     const Notification = notificationPage("granted");
     expect(() => new (Notification as unknown as new () => unknown)()).toThrow(TypeError);
   });
+
+  test("routes a service worker registration's showNotification through main", async () => {
+    class ServiceWorkerRegistration {
+      readonly scope = "/";
+    }
+    Object.assign(globalThis, { ServiceWorkerRegistration });
+    try {
+      notificationPage("granted");
+      const registration = new ServiceWorkerRegistration() as unknown as {
+        showNotification: (title: string, options?: object) => Promise<void>;
+        getNotifications: () => Promise<unknown[]>;
+      };
+      await registration.showNotification("Deployed", { body: "v2 is live", tag: "deploy" });
+      expect(send).toHaveBeenCalledWith(BROWSER_NOTIFICATION_SHOW, {
+        pageId: expect.any(Number),
+        title: "Deployed",
+        body: "v2 is live",
+        tag: "deploy",
+      });
+      expect(await registration.getNotifications()).toEqual([]);
+
+      sendSync.mockImplementation(() => "denied");
+      expect(registration.showNotification("Nope")).rejects.toThrow(TypeError);
+    } finally {
+      Reflect.deleteProperty(globalThis, "ServiceWorkerRegistration");
+    }
+  });
 });

@@ -90,8 +90,6 @@ export const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
 export const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
 /** Main → renderer: show a page's notification in the notification center. */
 export const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
-/** Main → renderer: a page closed one of its notifications. */
-export const BROWSER_NOTIFICATION_CLOSED = "browser-notification:closed";
 /** Main → renderer: ask whether a site may show notifications, in the panel hosting the page. */
 export const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission-request";
 /** Renderer → main: the user answered a permission request. */

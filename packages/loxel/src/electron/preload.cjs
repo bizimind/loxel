@@ -31,7 +31,6 @@ const APP_RESTART = "app:restart";
 const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
 const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
 const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
-const BROWSER_NOTIFICATION_CLOSED = "browser-notification:closed";
 const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission-request";
 const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
 const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN = "browser-notification:permission-withdrawn";
@@ -127,7 +126,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onBrowserNotifications: (handlers) => {
     const subscriptions = [
       [BROWSER_NOTIFICATION_OPENED, (_event, notification) => handlers.onOpened(notification)],
-      [BROWSER_NOTIFICATION_CLOSED, (_event, closed) => handlers.onClosed(closed)],
       [
         BROWSER_NOTIFICATION_PERMISSION_REQUEST,
         (_event, request) => handlers.onPermissionRequest(request),

@@ -71,7 +71,9 @@ contextBridge.executeInMainWorld({
     // never closes its notifications must not grow this forever.
     const MAX_TRACKED = 100;
     const live = new Map();
-    let nextId = 1;
+    // A random start per document: main keys notifications by frame, and a frame's next document
+    // must not reuse the ids of the one before.
+    let nextId = Math.floor(Math.random() * 2 ** 30) + 1;
     const text = (value) => (value === undefined ? "" : `${value}`);
     /** Fires an event main delivered on a live notification; `click` is the only one it sends. */
     let deliver;
@@ -191,6 +193,34 @@ contextBridge.executeInMainWorld({
     }
     bridge.onEvent((id, type) => deliver(id, type));
     window.Notification = Notification;
+
+    // A page showing a notification through its service worker's registration gets it in the
+    // notification center too (clicking it goes to the panel; the worker gets no
+    // notificationclick). Calls made inside the worker itself don't pass here.
+    // Declared apart from its assignment, so it converts its arguments like the DOM does whatever
+    // the typings say they are.
+    function showNotification(title, options = {}) {
+      if (bridge.permission() !== "granted") {
+        return Promise.reject(
+          new TypeError("No notification permission has been granted for this origin."),
+        );
+      }
+      const opts = options ?? {};
+      bridge.show({
+        pageId: nextId++,
+        title: `${title}`,
+        body: text(opts.body),
+        tag: text(opts.tag),
+      });
+      return Promise.resolve();
+    }
+    const registration = globalThis.ServiceWorkerRegistration?.prototype;
+    if (registration) {
+      registration.showNotification = showNotification;
+      registration.getNotifications = function getNotifications() {
+        return Promise.resolve([]);
+      };
+    }
 
     // navigator.permissions.query() would ask Chromium, which denies notifications to every
     // page; report the permission the page's Notification has.

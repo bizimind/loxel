@@ -85,14 +85,13 @@ interface Window {
     /** Quit, leaving the terminals running, and open the app again. */
     restartApp: () => void;
     /**
-     * Browser panel pages' web notifications: one was shown (payload: `BrowserNotification`) or
-     * closed by its page (`{ ref }`), a site asks to show them (`NotificationPermissionRequest`),
-     * or such a request was withdrawn (`{ id, webContentsId }`). Subscribing tells main this
+     * Browser panel pages' web notifications: one was shown (payload: `BrowserNotification`), a
+     * site asks to show them (`NotificationPermissionRequest`), or such a request was withdrawn
+     * (`{ id, webContentsId }`). Subscribing tells main this
      * document handles them.
      */
     onBrowserNotifications: (handlers: {
       onOpened: (notification: unknown) => void;
-      onClosed: (closed: unknown) => void;
       onPermissionRequest: (request: unknown) => void;
       onPermissionWithdrawn: (withdrawn: unknown) => void;
     }) => () => void;

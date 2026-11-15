@@ -12,7 +12,6 @@ import {
   type BrowserNotification,
   type NotificationPermissionRequest,
   type NotificationSiteDecision,
-  browserNotificationRefSchema,
   browserNotificationSchema,
   notificationPermissionRequestSchema,
   notificationPermissionWithdrawnSchema,
@@ -61,12 +60,6 @@ function handleOpened(value: unknown): void {
   else hold(notification.webContentsId, { kind: "opened", notification });
 }
 
-function handleClosed(value: unknown): void {
-  const parsed = browserNotificationRefSchema.safeParse(value);
-  if (!parsed.success) return warnMalformed(parsed.error);
-  wsClient.send({ type: "browser_notification_close", ref: parsed.data.ref });
-}
-
 function handleRequest(value: unknown): void {
   const parsed = notificationPermissionRequestSchema.safeParse(value);
   if (!parsed.success) return warnMalformed(parsed.error);
@@ -109,7 +102,6 @@ function listen(): void {
   listening = true;
   window.electronAPI.onBrowserNotifications({
     onOpened: handleOpened,
-    onClosed: handleClosed,
     onPermissionRequest: handleRequest,
     onPermissionWithdrawn: handleWithdrawn,
   });
@@ -128,11 +120,16 @@ function subscribe(webContentsId: number, listener: PanelListener): () => void {
   };
 }
 
-/** Add a page's notification to the notification center, from the browser panel `panelId`. */
-function showInNotificationCenter(notification: BrowserNotification, panelId: string): void {
+/**
+ * Add a page's notification to the notification center, from the browser panel `panelId` in the
+ * layout of `worktreePath` (null: Home's).
+ */
+function showInNotificationCenter(
+  notification: BrowserNotification,
+  panelId: string,
+  worktreePath: string | null,
+): void {
   const { ref, origin, title, body, tag } = notification;
-  // Browser panels live in the active worktree's layout, or in Home's (null).
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   wsClient.send({
     type: "browser_notification_show",
     source: { kind: "browser", panelId, origin, ref, worktreePath, ...(tag && { tag }) },
@@ -157,18 +154,21 @@ export function useBrowserNotifications(
   answer: (answer: NotificationPermissionAnswer) => void;
 } {
   const [queue, setQueue] = useState<NotificationPermissionRequest[]>([]);
+  // The worktree whose layout the panel mounted in, or Home's (null). Read once: during a switch
+  // the active worktree is already the next one while this panel's layout is still up.
+  const [worktreePath] = useState(() => useWorktreeStore.getState().activeWorktreePath);
 
   useEffect(() => {
     listen();
     if (webContentsId === null) return;
     return subscribe(webContentsId, {
-      opened: (notification) => showInNotificationCenter(notification, panelId),
+      opened: (notification) => showInNotificationCenter(notification, panelId, worktreePath),
       // A new guest (the webview was re-created) drops the old guest's requests.
       request: (request) =>
         setQueue((prev) => [...prev.filter((r) => r.webContentsId === webContentsId), request]),
       withdraw: (id) => setQueue((prev) => prev.filter((request) => request.id !== id)),
     });
-  }, [webContentsId, panelId]);
+  }, [webContentsId, panelId, worktreePath]);
 
   const request = useMemo(
     () => queue.find((r) => r.webContentsId === webContentsId) ?? null,

@@ -12,7 +12,6 @@ import {
 import {
   BROWSER_NOTIFICATION_CLICK,
   BROWSER_NOTIFICATION_CLOSE,
-  BROWSER_NOTIFICATION_CLOSED,
   BROWSER_NOTIFICATION_EVENT,
   BROWSER_NOTIFICATION_LISTEN,
   BROWSER_NOTIFICATION_OPENED,
@@ -82,6 +81,7 @@ function fakeHost({ listening = true } = {}) {
   const host = {
     ...fakeEmitter(),
     id: nextContentsId++,
+    getType: () => "window",
     isDestroyed: () => false,
     send: (channel: string, payload: unknown) => sent.push({ channel, payload }),
   } as unknown as WebContents;
@@ -97,7 +97,6 @@ function fakeHost({ listening = true } = {}) {
       ),
     withdrawn: () => of(BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN),
     opened: () => of(BROWSER_NOTIFICATION_OPENED).map((p) => browserNotificationSchema.parse(p)),
-    closed: () => of(BROWSER_NOTIFICATION_CLOSED),
   };
 }
 
@@ -109,6 +108,7 @@ function fakeGuest(host: WebContents, origin = "http://localhost:5173") {
     ...emitter,
     id: nextContentsId++,
     getType: () => "webview",
+    isDestroyed: () => false,
     hostWebContents: host,
     mainFrame,
   } as unknown as WebContents;
@@ -141,8 +141,10 @@ const show = (guest: WebContents, pageId: number, senderFrame?: WebFrameMain) =>
     senderFrame,
   );
 
+/** Loxel's window sending the settings' decisions. */
+const windowSender = { sender: { getType: () => "window" } } as unknown as IpcMainEvent;
 const setSites = (sites: NotificationSites) =>
-  handler(BROWSER_NOTIFICATION_SET_SITES)({} as IpcMainEvent, sites);
+  handler(BROWSER_NOTIFICATION_SET_SITES)(windowSender, sites);
 
 function respond(host: WebContents, id: number, decision: string) {
   handler(BROWSER_NOTIFICATION_PERMISSION_RESPOND)({ sender: host } as unknown as IpcMainEvent, {
@@ -150,6 +152,12 @@ function respond(host: WebContents, id: number, decision: string) {
     decision,
   });
 }
+
+/** Let the handlers' pending microtasks (their awaits) run, without waiting on time. */
+const microtasksDone = () =>
+  new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 
 /** Settle a promise's state without waiting on time: pending if it hasn't resolved by now. */
 async function state<T>(promise: Promise<T>): Promise<T | "pending"> {
@@ -189,6 +197,20 @@ describe("permission", () => {
     expect(permission(guest)).toBe("denied");
   });
 
+  test("is denied to plain http away from this machine", () => {
+    setSites({ "http://example.com": "allow", "http://127.0.0.1:3000": "allow" });
+    expect(permission(fakeGuest(host.host, "http://example.com").guest)).toBe("denied");
+    expect(permission(fakeGuest(host.host, "http://127.0.0.1:3000").guest)).toBe("granted");
+  });
+
+  test("ignores decisions sent by anything but Loxel's windows", () => {
+    const { guest } = fakeGuest(host.host);
+    handler(BROWSER_NOTIFICATION_SET_SITES)({ sender: guest } as unknown as IpcMainEvent, {
+      "http://localhost:5173": "allow",
+    });
+    expect(permission(guest)).toBe("default");
+  });
+
   test("is denied to cross-origin frames, non-web pages and windows that don't listen", () => {
     setSites({ "http://localhost:5173": "allow", null: "allow" });
     const { guest } = fakeGuest(host.host);
@@ -204,7 +226,7 @@ describe("requestPermission", () => {
   test("asks the hosting window and resolves with the user's answer", async () => {
     const { guest } = fakeGuest(host.host);
     const request = requestPermission(guest);
-    await Promise.resolve();
+    await microtasksDone();
     const [shown] = host.requests();
     expect(shown).toEqual({
       id: shown!.id,
@@ -226,7 +248,7 @@ describe("requestPermission", () => {
       requestPermission(second),
     ];
     const otherRequest = requestPermission(other);
-    await Promise.resolve();
+    await microtasksDone();
     // One prompt per page, however often it asks.
     expect(host.requests().map((r) => r.webContentsId)).toEqual([first.id, second.id, other.id]);
 
@@ -239,19 +261,26 @@ describe("requestPermission", () => {
     expect(await state(otherRequest)).toBe("pending");
   });
 
-  test("dismissing decides nothing", async () => {
-    const { guest } = fakeGuest(host.host);
+  test("dismissing decides nothing, and the page can't ask again until it navigates", async () => {
+    const { guest, emit } = fakeGuest(host.host);
     const request = requestPermission(guest);
-    await Promise.resolve();
+    await microtasksDone();
     respond(host.host, host.requests()[0]!.id, "dismiss");
     expect(await request).toBe("default");
     expect(permission(guest)).toBe("default");
+
+    expect(await requestPermission(guest)).toBe("default");
+    expect(host.requests()).toHaveLength(1);
+    emit("did-navigate");
+    void requestPermission(guest);
+    await microtasksDone();
+    expect(host.requests()).toHaveLength(2);
   });
 
   test("only the window that was asked can answer", async () => {
     const { guest } = fakeGuest(host.host);
     const request = requestPermission(guest);
-    await Promise.resolve();
+    await microtasksDone();
     respond(fakeHost().host, host.requests()[0]!.id, "allow");
     respond(guest, host.requests()[0]!.id, "allow");
     expect(await state(request)).toBe("pending");
@@ -260,7 +289,7 @@ describe("requestPermission", () => {
   test("a decision saved elsewhere (another window, settings) settles open requests", async () => {
     const { guest } = fakeGuest(host.host);
     const request = requestPermission(guest);
-    await Promise.resolve();
+    await microtasksDone();
     setSites({ "http://localhost:5173": "allow" });
     expect(await request).toBe("granted");
     expect(host.withdrawn()).toHaveLength(1);
@@ -270,7 +299,7 @@ describe("requestPermission", () => {
     const navigating = fakeGuest(host.host);
     const destroyed = fakeGuest(host.host);
     const requests = [requestPermission(navigating.guest), requestPermission(destroyed.guest)];
-    await Promise.resolve();
+    await microtasksDone();
     navigating.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false });
     destroyed.emit("destroyed");
     expect(await Promise.all(requests)).toEqual(["default", "default"]);
@@ -308,14 +337,18 @@ describe("notifications", () => {
   test("are dropped without permission, from cross-origin frames, and past the rate limit", () => {
     const blocked = fakeGuest(host.host, "https://example.com").guest;
     show(blocked, 1);
-    const { guest } = fakeGuest(host.host);
+    const { guest, emit } = fakeGuest(host.host);
     show(guest, 1, frame("https://ads.example"));
     expect(host.opened()).toEqual([]);
     for (let i = 0; i < 15; i++) show(guest, i);
     expect(host.opened()).toHaveLength(10);
+    // Reloading doesn't reset the limit.
+    emit("did-navigate");
+    show(guest, 99);
+    expect(host.opened()).toHaveLength(10);
   });
 
-  test("close() reaches the window; clicks reach the page from its window only", () => {
+  test("clicks reach the page from its window only, until the page closes the notification", () => {
     const { guest, mainFrame } = fakeGuest(host.host);
     show(guest, 7);
     const { ref } = host.opened()[0]!;
@@ -328,8 +361,8 @@ describe("notifications", () => {
     expect(mainFrame.sent).toEqual([[BROWSER_NOTIFICATION_EVENT, 7, "click"]]);
 
     call(BROWSER_NOTIFICATION_CLOSE, guest, 7);
-    expect(host.closed()).toEqual([{ ref }]);
-    // Closed: nothing left to click.
+    // It stays in the notification center (nothing goes to the window), but has nothing to click.
+    expect(host.opened()).toHaveLength(1);
     handler(BROWSER_NOTIFICATION_CLICK)({ sender: host.host } as unknown as IpcMainEvent, { ref });
     expect(mainFrame.sent).toHaveLength(1);
   });

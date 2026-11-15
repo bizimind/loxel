@@ -48,10 +48,7 @@ export const browserNotificationSchema = z.object({
 });
 export type BrowserNotification = z.infer<typeof browserNotificationSchema>;
 
-/**
- * A notification by main's ref. Main → window renderer: the page closed it. Window renderer →
- * main: the user clicked it in the notification center.
- */
+/** Window renderer → main: the user clicked a page's notification (by main's ref). */
 export const browserNotificationRefSchema = z.object({ ref: z.string() });
 
 /** Main → window renderer: ask the user whether `origin` may show notifications. */

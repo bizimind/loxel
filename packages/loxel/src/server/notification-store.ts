@@ -15,6 +15,11 @@ import {
 } from "@/api/notification-model";
 
 const MAX_NOTIFICATIONS = 200;
+/**
+ * Browser pages' share of the list: a busy or misbehaving site evicts its own kind's oldest
+ * notifications, never the terminals' that tell the user an agent is waiting.
+ */
+const MAX_BROWSER_NOTIFICATIONS = 50;
 
 export class NotificationStore {
   private notifications: ServerNotification[] = [];
@@ -30,6 +35,21 @@ export class NotificationStore {
       this.notifications.length = MAX_NOTIFICATIONS;
     }
     return notification;
+  }
+
+  /**
+   * Add a browser page's notification, evicting the oldest browser ones past their share. Returns
+   * it and the ids evicted.
+   */
+  addBrowser(input: Omit<ServerNotification, "id" | "timestamp">): {
+    added: ServerNotification;
+    evicted: string[];
+  } {
+    const added = this.add(input);
+    const browser = this.notifications.filter((n) => n.source.kind === "browser");
+    const excess = new Set(browser.slice(MAX_BROWSER_NOTIFICATIONS).map((n) => n.id));
+    if (excess.size > 0) this.notifications = this.notifications.filter((n) => !excess.has(n.id));
+    return { added, evicted: [...excess] };
   }
 
   dismiss(id: string): boolean {
@@ -56,12 +76,17 @@ export class NotificationStore {
 
   /**
    * Remove what a new browser notification replaces: like browsers, its origin's earlier
-   * notifications with the same tag. Returns their ids.
+   * notifications with the same tag, in the same worktree (or Home): the same dev server port in
+   * two worktrees is two apps. Returns their ids.
    */
   dismissReplacedBy(source: BrowserNotificationSource): string[] {
     if (!source.tag) return [];
     return this.dismissWhere(
-      (s) => s.kind === "browser" && s.origin === source.origin && s.tag === source.tag,
+      (s) =>
+        s.kind === "browser" &&
+        s.origin === source.origin &&
+        s.tag === source.tag &&
+        s.worktreePath === source.worktreePath,
     );
   }
 

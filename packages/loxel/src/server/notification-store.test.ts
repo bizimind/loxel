@@ -53,7 +53,33 @@ describe("NotificationStore", () => {
     store.add({ source: terminal, urgency: "normal" });
     store.add({ source: browser("a"), urgency: "normal" });
     store.add({ source: { kind: "terminal_host" }, urgency: "normal" });
-    expect(store.dismissByWorktree("/wt")).toEqual(["t1", "browser-1"]);
+    expect(store.dismissByWorktree("/wt").toSorted()).toEqual(["browser-1", "t1"]);
     expect(store.getAll().map((n) => n.source.kind)).toEqual(["terminal_host"]);
+  });
+
+  test("tag replacement stays within one worktree", () => {
+    const store = new NotificationStore();
+    const inWorktree = (ref: string, worktreePath: string | null) => ({
+      ...browser(ref),
+      worktreePath,
+      tag: "build",
+    });
+    const a = store.add({ source: inWorktree("a", "/wt"), urgency: "normal" });
+    store.add({ source: inWorktree("b", "/other"), urgency: "normal" });
+    store.add({ source: inWorktree("c", null), urgency: "normal" });
+    expect(store.dismissReplacedBy(inWorktree("d", "/wt"))).toEqual([a.id]);
+    expect(store.getAll()).toHaveLength(2);
+  });
+
+  test("browser notifications evict their own kind past their share, never terminals'", () => {
+    const store = new NotificationStore();
+    const agent = store.add({ source: terminal, urgency: "normal" });
+    const evicted: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      evicted.push(...store.addBrowser({ source: browser(`r${i}`), urgency: "normal" }).evicted);
+    }
+    expect(evicted).toHaveLength(10);
+    expect(store.getAll().filter((n) => n.source.kind === "browser")).toHaveLength(50);
+    expect(store.getAll()).toContainEqual(agent);
   });
 });
