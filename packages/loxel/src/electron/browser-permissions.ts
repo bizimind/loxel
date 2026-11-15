@@ -48,14 +48,15 @@ const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
 
 /**
  * Whether a browser panel page gets `permission`. One decision answers both the check and the
- * request, so what a page reads (`Notification.permission`) matches what asking gets it. Each
+ * request, so what a page reads (`navigator.permissions.query()`) matches what asking gets it. Each
  * permission decided otherwise than by the allowlist has its own branch here.
  */
 export function browserPermissionGranted(
   permission: BrowserPermission,
   asker: PermissionAsker,
 ): boolean {
-  // Not offered yet: no page can show notifications.
+  // Chromium's notifications would bypass Loxel's: pages get Loxel's own Notification, which
+  // asks the user per site and shows in the notification center (browser-notifications.ts).
   if (permission === "notifications") return false;
   // Links to other apps (`mailto:`, `zoommtg:`, `vscode:`), which open in those apps today.
   // Browsers ask first; until Loxel can, the page itself may open them, but frames embedded in it,
@@ -66,8 +67,8 @@ export function browserPermissionGranted(
 
 /**
  * Decide browser panel permissions in `browserSession`. Both handlers are needed: requests answer
- * `requestPermission()`-style calls, and checks are what `Notification.permission`,
- * `navigator.permissions.query()` and many APIs read before (or instead of) asking.
+ * `requestPermission()`-style calls, and checks are what `navigator.permissions.query()` and many
+ * APIs read before (or instead of) asking.
  */
 export function installBrowserPermissions(
   browserSession: Pick<Session, "setPermissionCheckHandler" | "setPermissionRequestHandler">,
