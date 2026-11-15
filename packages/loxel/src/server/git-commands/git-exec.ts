@@ -86,20 +86,21 @@ export async function execGit({
   return { exitCode, stdout, stderr: withNote, spawnBlockMs, wallMs };
 }
 
+/** How long a timed-out group gets to exit on SIGTERM before it is sent SIGKILL. */
+const KILL_GRACE_MS = 2000;
+
 /**
- * SIGTERM the process group led by `pid` after `ms`. The whole group rather than git alone: a
- * helper git started (ssh, a credential helper, a proxy command) that outlived it would keep its
- * output pipes open, and reading them would wait for that helper however long it hangs.
+ * SIGTERM the process group led by `pid` after `ms`, and SIGKILL it if it is still there
+ * `KILL_GRACE_MS` later. The whole group rather than git alone: a helper git started (ssh, a
+ * credential helper, a proxy command) that outlived it would keep its output pipes open, and
+ * reading them would wait for that helper however long it hangs.
  */
 function killGroupAfter(pid: number, ms: number): { readonly fired: boolean; cancel(): void } {
   let fired = false;
-  const timer = setTimeout(() => {
+  let timer = setTimeout(() => {
     fired = true;
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // The group is already gone.
-    }
+    signalGroup(pid, "SIGTERM");
+    timer = setTimeout(() => signalGroup(pid, "SIGKILL"), KILL_GRACE_MS);
   }, ms);
   return {
     get fired() {
@@ -107,4 +108,12 @@ function killGroupAfter(pid: number, ms: number): { readonly fired: boolean; can
     },
     cancel: () => clearTimeout(timer),
   };
+}
+
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group is already gone.
+  }
 }

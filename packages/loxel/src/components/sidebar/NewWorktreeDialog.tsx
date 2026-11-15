@@ -19,9 +19,10 @@ function normalizeName(value: string): string {
  * follows the title until it is edited directly. With `parent`, the worktree is nested under it,
  * and starts from the remote default like any other unless "Start from <parent>" stacks it on the
  * parent's commit: a choice made each time, never remembered. A line under the fields says where
- * the worktree starts, with how far a parent is behind. A branch that already exists is resolved here too. The dialog closes as soon as the create has
- * started: the sidebar shows the worktree as pending while it is created (the repo's init hook can
- * take a while), and a failure from then on comes as a toast.
+ * the worktree starts, with how far a parent is behind. A branch that already exists is resolved
+ * here too. The dialog closes as soon as the create has started: the sidebar shows the worktree
+ * as pending while it is created (the repo's init hook can take a while), and a failure from then
+ * on comes as a toast.
  */
 export function NewWorktreeDialog({
   projectPath,
@@ -58,6 +59,7 @@ export function NewWorktreeDialog({
   const parentPath = parent?.path;
   useEffect(() => {
     let cancelled = false;
+    setBasePlan(null);
     api
       .planWorktreeBase(projectPath, parentPath)
       .then((plan) => !cancelled && setBasePlan(plan))
@@ -200,7 +202,8 @@ export function NewWorktreeDialog({
                   Start from {worktreeLabel(parent)}
                 </label>
               )}
-              {basePlan && (
+              {/* Checking out an existing branch starts from that branch, not from this base. */}
+              {basePlan && !conflict && (
                 <span className="text-muted-foreground text-[10px] not-dark:text-[11px] not-dark:leading-snug">
                   {worktreeBaseHint(
                     basePlan,

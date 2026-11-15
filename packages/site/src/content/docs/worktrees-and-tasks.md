@@ -114,7 +114,7 @@ Worktrees can be nested under the worktree they belong to, such as the worktrees
 
 With nesting on, the worktree menu has:
 
-- **New child worktree**: opens the New worktree dialog for a worktree nested under this one. Like any new worktree it starts from the latest default branch; check **Start from <parent>** to stack it on the parent's current commit instead. The dialog shows which commit it starts from, and how many commits the parent is behind the default branch.
+- **New child worktree**: opens the New worktree dialog for a worktree nested under this one. Like any new worktree it starts from the latest default branch; check **Start from**, followed by the parent's name, to stack it on the parent's current commit instead. The dialog shows where it starts and, for a stacked worktree, how many commits the parent is behind the default branch.
 - **Edit title**: changes the title the sidebar shows for the worktree (its name until you give it one). Setting it back to the worktree name removes the title. The worktree's directory and branch keep their names.
 - **Move to top level**: un-nests a nested worktree.
 

@@ -43,15 +43,19 @@ export function fetchRemoteDefault(
 async function runFetch(repoPath: string, timeoutMs: number): Promise<void> {
   try {
     const ref = await resolveRemoteDefault(repoPath);
-    if (!ref) return;
+    // An origin/HEAD pointed at another remote's ref is not origin's branch to fetch.
+    if (!ref?.startsWith("origin/")) return;
     const branch = ref.slice("origin/".length);
     // Only the default branch, into its remote-tracking ref whatever the configured refspec says,
-    // leaving FETCH_HEAD to the user's own fetches.
+    // leaving FETCH_HEAD to the user's own fetches, and without submodules (which may live on
+    // other hosts) or the auto-maintenance a fetch ends with.
     const result = await runGit(
       [
         "fetch",
         "--quiet",
         "--no-write-fetch-head",
+        "--no-recurse-submodules",
+        "--no-auto-maintenance",
         "origin",
         `+refs/heads/${branch}:refs/remotes/${ref}`,
       ],
@@ -73,7 +77,8 @@ async function runFetch(repoPath: string, timeoutMs: number): Promise<void> {
 
 /**
  * The user's shell environment, so credential helpers and ssh-agent work as in their terminal,
- * with git's own prompts off: nobody is there to answer them.
+ * with git's and Git Credential Manager's prompts off: nobody is waiting to answer them, and a
+ * sign-in window would be closed by the timeout.
  */
 function fetchEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -81,6 +86,7 @@ function fetchEnv(): Record<string, string> {
     if (value !== undefined) env[key] = value;
   }
   env.GIT_TERMINAL_PROMPT = "0";
+  env.GCM_INTERACTIVE = "never";
   return env;
 }
 
