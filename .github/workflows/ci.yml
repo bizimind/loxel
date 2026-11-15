@@ -70,9 +70,10 @@ jobs:
             echo "Changed files:"
             echo "$CHANGED_FILES"
 
-            # Root package.json, lockfile, Bun runtime pin or this workflow affects all checks
-            if echo "$CHANGED_FILES" | grep -qE "^(package\.json|pnpm-lock\.yaml|\.bun-version|\.github/workflows/ci\.yml)$"; then
-              echo "Root package.json, lockfile, .bun-version or ci.yml changed - running all packages"
+            # Root package.json, lockfile, pnpm workspace settings (overrides, the release-age policy),
+            # Bun runtime pin or this workflow affects all checks
+            if echo "$CHANGED_FILES" | grep -qE "^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.bun-version|\.github/workflows/ci\.yml)$"; then
+              echo "Root package.json, lockfile, pnpm-workspace.yaml, .bun-version or ci.yml changed - running all packages"
               RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
             fi
 
@@ -188,7 +189,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
           cache: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -214,7 +215,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
           cache: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -240,7 +241,7 @@ jobs:
           node-version: 24
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
           cache: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -268,7 +269,7 @@ jobs:
           node-version: 24
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
           cache: true
       - uses: oven-sh/setup-bun@v2
         with:
