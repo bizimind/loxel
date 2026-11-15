@@ -74,6 +74,13 @@ describe("computeInlineChanges", () => {
     expect(updated.map((r) => slice(newLine, r))).toEqual([added]);
   });
 
+  it("measures the rewrite cutoff before joining, so a join never drops highlights", () => {
+    // Joined, the edit covers 5 of 6 characters, past the cutoff; Monaco's own ranges are not.
+    const { old, new: updated } = computeInlineChanges(["0.0.10"], ["1.10.0"]);
+    expect(old.map((r) => slice("0.0.10", r))).toEqual(["0.0.1"]);
+    expect(updated.map((r) => slice("1.10.0", r))).toEqual(["1.10."]);
+  });
+
   it("does not split a surrogate pair when trimming a joined edit", () => {
     const oldLine = "s = '😀a😁' + rest";
     const newLine = "s = '😁😀a' + rest";

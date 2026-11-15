@@ -221,18 +221,27 @@ export function computeInlineChanges(
   });
   if (result.hitTimeout) return EMPTY;
 
-  const old: InlineRange[] = [];
-  const updated: InlineRange[] = [];
-  for (const change of result.changes) {
-    for (const inner of joinShiftedEdits(change.innerChanges ?? [], oldLines, newLines)) {
-      if (!isEmptyRange(inner.originalRange)) old.push({ ...inner.originalRange });
-      if (!isEmptyRange(inner.modifiedRange)) updated.push({ ...inner.modifiedRange });
-    }
-  }
-
-  const ratio = Math.max(changedRatio(old, oldLines), changedRatio(updated, newLines));
+  const monacoChanges = result.changes.flatMap((change) => change.innerChanges ?? []);
+  // Gate on Monaco's own ranges: a joined edit absorbs the unchanged run between its two
+  // halves, and that presentation choice must not tip a block into having no highlights.
+  const monaco = splitSides(monacoChanges);
+  const ratio = Math.max(changedRatio(monaco.old, oldLines), changedRatio(monaco.new, newLines));
   if (ratio > MAX_CHANGED_RATIO) return EMPTY;
 
+  return splitSides(
+    result.changes.flatMap((change) =>
+      joinShiftedEdits(change.innerChanges ?? [], oldLines, newLines),
+    ),
+  );
+}
+
+function splitSides(changes: InnerRangeMapping[]): InlineChanges {
+  const old: InlineRange[] = [];
+  const updated: InlineRange[] = [];
+  for (const inner of changes) {
+    if (!isEmptyRange(inner.originalRange)) old.push({ ...inner.originalRange });
+    if (!isEmptyRange(inner.modifiedRange)) updated.push({ ...inner.modifiedRange });
+  }
   return { old, new: updated };
 }
 
