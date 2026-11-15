@@ -86,6 +86,7 @@ import {
   scheduleAutomaticUpdateCheck,
   terminalsForUpdateInstall,
 } from "./app-updater";
+import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installDefaultBrowser } from "./default-browser";
 import {
@@ -106,12 +107,7 @@ import {
 } from "./javascript-dialogs";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
-import {
-  applyPersistedTheme,
-  followNativeTheme,
-  installNativeTheme,
-  windowBackgroundColor,
-} from "./native-theme";
+import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
 import {
   ASK,
   QUIT,
@@ -368,8 +364,7 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
 
-  followNativeTheme(win);
-  appWindows.add(win);
+  registerAppWindow(win);
 
   if (IS_DEMO_HIDDEN) {
     win.setIgnoreMouseEvents(true);
@@ -379,7 +374,6 @@ async function createWindow(): Promise<BrowserWindow> {
   // When the BrowserWindow is gone, ask the server to promote this window's
   // session-scoped layout to canonical so the next solo window restores it.
   win.on("closed", () => {
-    appWindows.delete(win);
     promoteLayoutForWindow(windowId);
   });
 
@@ -502,14 +496,11 @@ function applyLaunchSettings(raw: string | null | undefined): void {
   buildAppMenu();
 }
 
-/** Loxel's own windows, which can ask before a quit; not browser panel popups. */
-const appWindows = new Set<BrowserWindow>();
-
-/** The window to ask in: the focused one of Loxel's, or else any of them. */
+/** The window to ask in before a quit: the focused one of Loxel's own, or else any of them. */
 function windowToAskIn(): BrowserWindow | undefined {
   const focused = BrowserWindow.getFocusedWindow();
-  if (focused && appWindows.has(focused)) return focused;
-  return appWindows.values().next().value;
+  if (focused && isAppWindow(focused)) return focused;
+  return appWindowList()[0];
 }
 
 /** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */

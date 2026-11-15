@@ -4,10 +4,11 @@
  * renderer reports each change of the setting (`SET_THEME_SOURCE`); before any window exists,
  * main reads the persisted setting so the first window already opens in it.
  */
-import { type BrowserWindow, ipcMain, nativeTheme } from "electron";
+import { ipcMain, nativeTheme } from "electron";
 
 import { asThemePreference } from "../lib/theme-preference";
 import { persistedTheme } from "../server/persisted-settings";
+import { appWindowList } from "./app-windows";
 import { SET_THEME_SOURCE } from "./ipc-channels";
 
 /** The renderer's `--background` in each theme (`src/index.css`); keep the two in step. */
@@ -18,15 +19,6 @@ export function windowBackgroundColor(): string {
   return nativeTheme.shouldUseDarkColors ? WINDOW_BACKGROUND.dark : WINDOW_BACKGROUND.light;
 }
 
-/** Loxel's own windows, whose background follows the theme (not browser panel popups). */
-const appWindows = new Set<BrowserWindow>();
-
-/** Keep `win`'s background in the theme as it changes, for as long as the window lives. */
-export function followNativeTheme(win: BrowserWindow): void {
-  appWindows.add(win);
-  win.on("closed", () => appWindows.delete(win));
-}
-
 /** Apply each theme setting a window's renderer reports, and repaint window backgrounds. */
 export function installNativeTheme(): void {
   ipcMain.on(SET_THEME_SOURCE, (_event, theme: unknown) => {
@@ -34,7 +26,8 @@ export function installNativeTheme(): void {
     if (source) nativeTheme.themeSource = source;
   });
   nativeTheme.on("updated", () => {
-    for (const win of appWindows) win.setBackgroundColor(windowBackgroundColor());
+    // Loxel's own windows: a browser panel popup paints its page's background.
+    for (const win of appWindowList()) win.setBackgroundColor(windowBackgroundColor());
   });
 }
 
