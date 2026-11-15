@@ -4,7 +4,6 @@
     { "path": "./packages/cc-git-editor" },
     { "path": "./packages/cli-common" },
     { "path": "./packages/excalidraw" },
-    { "path": "./packages/logger" },
     { "path": "./packages/loxel" },
     { "path": "./packages/monaco-lsp-client" },
     { "path": "./packages/whisper-cpp" },

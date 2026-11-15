@@ -9,11 +9,10 @@ This monorepo (pnpm + Bun) holds the app in [packages/loxel](packages/loxel), it
 | Package                                         | Description                                                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | [cc-git-editor](packages/cc-git-editor)         | Agent-friendly git commands that intercept `git rebase -i` and `git add -p` for non-blocking execution         |
-| [cli-common](packages/cli-common)               | Shared CLI utilities: output modes, formatters, logging, self-update                                           |
+| [cli-common](packages/cli-common)               | Shared CLI utilities: output modes, formatters, self-update                                                    |
 | [code-analysis](packages/code-analysis)         | Code analysis CLI with live treemap and import-graph visualizations                                            |
 | [excalidraw](packages/excalidraw)               | CLI for agents to create, edit, query, and render Excalidraw diagrams                                          |
 | [localdb-sdk](packages/localdb-sdk)             | SQLite-backed structured database SDK with typed columns, views, and formulas                                  |
-| [logger](packages/logger)                       | Structured Axiom logging with error serialization and sensitive-data redaction                                 |
 | [loxel](packages/loxel)                         | The workspace: Electron desktop app plus Bun server for running parallel, task-scoped AI coding work           |
 | [monaco-lsp-client](packages/monaco-lsp-client) | Monaco editor LSP client (fork of `@vscode/monaco-lsp-client`)                                                 |
 | [sandbox](packages/sandbox)                     | Provider-agnostic container SDK for Apple Containers, Podman, and Docker, plus a reference agent sandbox image |

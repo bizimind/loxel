@@ -4,7 +4,7 @@ This file provides guidance to coding agents working in this repository (`CLAUDE
 
 ## Project Overview
 
-loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools and libraries that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for logging and CLI output.
+loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools and libraries that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for CLI output, self-update, and local databases.
 
 ## Environment Setup
 
@@ -76,9 +76,7 @@ Each package README is the authoritative doc for that package; this list only or
 
 #### Libraries
 
-- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
-
-- **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
 
 - **localdb-sdk**: SQLite-backed (`bun:sqlite`) structured database SDK with typed columns, views, and formulas; powers loxel's local databases. See `packages/localdb-sdk/README.md`.
 

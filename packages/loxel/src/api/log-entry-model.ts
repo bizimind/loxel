@@ -65,10 +65,7 @@ export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-/**
- * Logger interface shared between server and frontend loggers.
- * Structurally compatible with AppLogger from the `logger` package.
- */
+/** Logger interface shared between server and frontend loggers. */
 export interface ChildLogger {
   debug(msg: string, ctx?: Record<string, unknown>): void;
   info(msg: string, ctx?: Record<string, unknown>): void;
@@ -78,6 +75,19 @@ export interface ChildLogger {
   flush(): Promise<void>;
   /** Create a sub-child with additional default context. */
   with(defaultCtx: Record<string, unknown>): ChildLogger;
+}
+
+/** A logger that drops everything, for code that takes a `ChildLogger` but has nowhere to log. */
+export function createNoopLogger(): ChildLogger {
+  const noop = () => {};
+  return {
+    debug: noop,
+    info: noop,
+    warn: noop,
+    error: noop,
+    flush: async () => {},
+    with: () => createNoopLogger(),
+  };
 }
 
 function serializeErrorValue(err: unknown): Record<string, unknown> {

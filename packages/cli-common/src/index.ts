@@ -76,18 +76,3 @@ export {
   type VersionOptions,
   type VersionResult,
 } from "./commands/index.ts";
-
-// Logging utilities
-export {
-  createCliLogger,
-  logCliError,
-  parseCliContext,
-  resolveLoggingConfig,
-  type BuildType,
-  type CliContext,
-  type CliLoggingConfig,
-  type ResolvedLoggingConfig,
-} from "./logging.ts";
-
-// Re-export logger types for convenience
-export type { AppLogger, LogSource } from "@bizimind/logger";

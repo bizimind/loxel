@@ -61,9 +61,6 @@ importers:
 
   packages/cli-common:
     dependencies:
-      '@bizimind/logger':
-        specifier: workspace:*
-        version: link:../logger
       commander:
         specifier: ^15.1.0
         version: 15.1.0
@@ -153,19 +150,6 @@ importers:
         specifier: ^24.19.2
         version: 24.19.2
 
-  packages/logger:
-    dependencies:
-      '@axiomhq/js':
-        specifier: ^2.0.0
-        version: 2.0.0
-      '@axiomhq/logging':
-        specifier: ^0.4.1
-        version: 0.4.1(@axiomhq/js@2.0.0)
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.4
-        version: 1.4.4
-
   packages/loxel:
     dependencies:
       '@base-ui/react':
@@ -174,9 +158,6 @@ importers:
       '@bizimind/localdb-sdk':
         specifier: workspace:*
         version: link:../localdb-sdk
-      '@bizimind/logger':
-        specifier: workspace:*
-        version: link:../logger
       '@bizimind/monaco-lsp-client':
         specifier: workspace:*
         version: link:../monaco-lsp-client
@@ -684,19 +665,6 @@ packages:
 
   '@astrojs/yaml2ts@0.2.4':
     resolution: {integrity: sha512-8oddpOae35pJsXPQXhTkM0ypfKPskVsh2bCxRtbf7e+/Epw2nReakFYpLKjZMEr75CsoF203PMnCocpfz0s69A==}
-
-  '@axiomhq/js@2.0.0':
-    resolution: {integrity: sha512-mhDH0KLFkDko9ytoltgmch2gOiwE6kY6VWhCmTux9lzL9hmjTej68JeQKwq9GGqOY7xwDsya88bNiTnp/zc8+Q==}
-    engines: {node: '>=20'}
-
-  '@axiomhq/logging@0.4.1':
-    resolution: {integrity: sha512-lrl63DiVLXwf2Zj2XeuGhbzhngcNyhqrrdkxs1pG9g5qLxs1BxHdRBbIVhp0/1dQbLpd8CT3FvQA1RS9usbTgw==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@axiomhq/js': ^1.0.0
-    peerDependenciesMeta:
-      '@axiomhq/js':
-        optional: true
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -4235,9 +4203,6 @@ packages:
       picomatch:
         optional: true
 
-  fetch-retry@6.0.0:
-    resolution: {integrity: sha512-BUFj1aMubgib37I3v4q78fYo63Po7t4HUPTpQ6/QE6yK6cIQrP+W43FYToeTEyg5m2Y7eFUtijUuAv/PDlWuag==}
-
   fflate@0.4.9:
     resolution: {integrity: sha512-zdxgIEddhfsyCaWpJ2SdXEP8ZMrKJ6+5jl4OupODcywU0IhRk6gdXuVGcPICyfx2H97hVK7xmJtRLPjkxAX8Vw==}
 
@@ -6676,14 +6641,6 @@ snapshots:
   '@astrojs/yaml2ts@0.2.4':
     dependencies:
       yaml: 2.9.1
-
-  '@axiomhq/js@2.0.0':
-    dependencies:
-      fetch-retry: 6.0.0
-
-  '@axiomhq/logging@0.4.1(@axiomhq/js@2.0.0)':
-    optionalDependencies:
-      '@axiomhq/js': 2.0.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -10553,8 +10510,6 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
-
-  fetch-retry@6.0.0: {}
 
   fflate@0.4.9: {}
 

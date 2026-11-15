@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./output": "./src/output.ts",
-    "./logging": "./src/logging.ts",
     "./update": "./src/update/index.ts",
     "./commands": "./src/commands/index.ts"
   },
@@ -18,7 +17,6 @@
     "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
-    "@bizimind/logger": "workspace:*",
     "commander": "^15.1.0",
     "zod": "^4.6.7"
   },
