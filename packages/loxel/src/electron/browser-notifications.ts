@@ -1,0 +1,317 @@
+/**
+ * Web notifications for browser panel pages, shown in Loxel's notification center instead of by
+ * the OS.
+ *
+ * Chromium's own notification permission stays denied for the browser session, so pages never
+ * reach native notifications. The webview preload (`webview-preload.cjs`) gives pages a
+ * `Notification` of Loxel's instead: reading its permission, requesting it and showing a
+ * notification are IPC calls to main, which decides by the page's origin as main sees it, never
+ * as the page claims it.
+ *
+ * Decisions per site live in Loxel's settings; window renderers send them here on load and on
+ * every change, because `Notification.permission` is synchronous and main must answer it at
+ * once. A site without a decision asks: main forwards the request to the window hosting the page,
+ * whose browser panel shows Allow / Block, and the answer resolves every page of that site that
+ * is waiting.
+ *
+ * Only top-level `http(s)` pages and same-origin frames in them get notifications; cross-origin
+ * frames are denied, as in browsers.
+ */
+import {
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type WebContents,
+  type WebFrameMain,
+  ipcMain,
+} from "electron";
+
+import {
+  type BrowserNotification,
+  type NotificationPermissionRequest,
+  type NotificationPermissionState,
+  type NotificationSites,
+  browserNotificationRefSchema,
+  notificationPermissionResponseSchema,
+  pageNotificationSchema,
+  parseNotificationSites,
+} from "./browser-notification-protocol";
+import {
+  BROWSER_NOTIFICATION_CLICK,
+  BROWSER_NOTIFICATION_CLOSE,
+  BROWSER_NOTIFICATION_CLOSED,
+  BROWSER_NOTIFICATION_EVENT,
+  BROWSER_NOTIFICATION_LISTEN,
+  BROWSER_NOTIFICATION_OPENED,
+  BROWSER_NOTIFICATION_PERMISSION,
+  BROWSER_NOTIFICATION_PERMISSION_REQUEST,
+  BROWSER_NOTIFICATION_PERMISSION_RESPOND,
+  BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN,
+  BROWSER_NOTIFICATION_REQUEST_PERMISSION,
+  BROWSER_NOTIFICATION_SET_SITES,
+  BROWSER_NOTIFICATION_SHOW,
+} from "./ipc-channels";
+import { createListeningRenderers } from "./listening-renderers";
+
+/** Longer texts are cut: the notification center shows two lines of body. */
+const MAX_TITLE = 500;
+const MAX_BODY = 2_000;
+const MAX_TAG = 200;
+/** A page showing more than this many notifications in the window gets the rest dropped. */
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 10_000;
+
+let sites: NotificationSites = {};
+/** Whether a renderer has sent the settings' decisions yet; requests wait for them. */
+let sitesLoaded = false;
+let onSitesLoaded: (() => void)[] = [];
+
+const listeningHosts = createListeningRenderers();
+
+interface PendingRequest {
+  guestId: number;
+  host: WebContents;
+  origin: string;
+  /** Every `requestPermission()` the page made while this request was open. */
+  resolvers: ((state: NotificationPermissionState) => void)[];
+}
+const pendingRequests = new Map<number, PendingRequest>();
+let nextRequestId = 1;
+
+interface PageNotification {
+  guestId: number;
+  /** The window the notification went to: the only one whose clicks reach the page. */
+  host: WebContents;
+  frame: WebFrameMain;
+  pageId: number;
+}
+/** The pages' live notifications by main's ref, for clicks and `close()`. */
+const pageNotifications = new Map<string, PageNotification>();
+let nextRef = 1;
+/** When each guest showed its recent notifications, for the rate limit. */
+const recentShows = new Map<number, number[]>();
+
+function cap(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function isWebOrigin(origin: string): boolean {
+  try {
+    const { protocol, host } = new URL(origin);
+    return (protocol === "http:" || protocol === "https:") && host !== "";
+  } catch {
+    return false;
+  }
+}
+
+/** The site deciding for the calling frame, or null when the frame gets no notifications. */
+function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
+  const guest = event.sender;
+  const frame = event.senderFrame;
+  if (guest.getType() !== "webview" || !frame || frame.detached) return null;
+  const top = guest.mainFrame.origin;
+  // Cross-origin frames get no notifications, like in browsers: the user decides for the page.
+  if (frame.origin !== top || !isWebOrigin(top)) return null;
+  return top;
+}
+
+/** The window showing the guest's panel, when it shows notifications. */
+function listeningHost(guest: WebContents): WebContents | null {
+  const host = guest.hostWebContents;
+  if (!host || host.isDestroyed() || !listeningHosts.has(host.id)) return null;
+  return host;
+}
+
+function permissionFor(site: string): NotificationPermissionState {
+  const decision = sites[site];
+  if (decision === "allow") return "granted";
+  if (decision === "block") return "denied";
+  return "default";
+}
+
+function pagePermission(event: IpcMainEvent | IpcMainInvokeEvent): NotificationPermissionState {
+  const site = siteOf(event);
+  if (!site || !listeningHost(event.sender)) return "denied";
+  return permissionFor(site);
+}
+
+function withdraw(id: number, pending: PendingRequest, state: NotificationPermissionState): void {
+  pendingRequests.delete(id);
+  for (const resolve of pending.resolvers) resolve(state);
+  if (pending.host.isDestroyed()) return;
+  pending.host.send(BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN, {
+    id,
+    webContentsId: pending.guestId,
+  });
+}
+
+/** Resolve the requests of sites that now have a decision, and take down their prompts. */
+function settleDecidedRequests(): void {
+  for (const [id, pending] of pendingRequests) {
+    const state = permissionFor(pending.origin);
+    if (state !== "default") withdraw(id, pending, state);
+  }
+}
+
+function waitForSites(): Promise<void> {
+  if (sitesLoaded) return Promise.resolve();
+  return new Promise((resolve) => {
+    onSitesLoaded.push(resolve);
+  });
+}
+
+async function requestPermission(event: IpcMainInvokeEvent): Promise<NotificationPermissionState> {
+  await waitForSites();
+  const site = siteOf(event);
+  const host = listeningHost(event.sender);
+  if (!site || !host) return "denied";
+  const state = permissionFor(site);
+  if (state !== "default") return state;
+
+  const guestId = event.sender.id;
+  return new Promise((resolve) => {
+    // A page asking again while its prompt is up waits for the same answer.
+    for (const pending of pendingRequests.values()) {
+      if (pending.guestId === guestId && pending.origin === site) {
+        pending.resolvers.push(resolve);
+        return;
+      }
+    }
+    const id = nextRequestId++;
+    pendingRequests.set(id, { guestId, host, origin: site, resolvers: [resolve] });
+    const request: NotificationPermissionRequest = { id, webContentsId: guestId, origin: site };
+    host.send(BROWSER_NOTIFICATION_PERMISSION_REQUEST, request);
+  });
+}
+
+function respondToRequest(event: IpcMainEvent, value: unknown): void {
+  const parsed = notificationPermissionResponseSchema.safeParse(value);
+  if (!parsed.success) return;
+  const { id, decision } = parsed.data;
+  const pending = pendingRequests.get(id);
+  if (!pending || pending.host !== event.sender) return;
+  if (decision === "dismiss") {
+    withdraw(id, pending, "default");
+    return;
+  }
+  // The renderer also saves the decision in settings, which sends it back here; applying it now
+  // answers the page without waiting for that round trip.
+  sites = { ...sites, [pending.origin]: decision };
+  settleDecidedRequests();
+}
+
+function setSites(value: unknown): void {
+  sites = parseNotificationSites(value);
+  if (!sitesLoaded) {
+    sitesLoaded = true;
+    for (const resolve of onSitesLoaded) resolve();
+    onSitesLoaded = [];
+  }
+  settleDecidedRequests();
+}
+
+function withinRateLimit(guestId: number): boolean {
+  const now = Date.now();
+  const recent = (recentShows.get(guestId) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT) return false;
+  recent.push(now);
+  recentShows.set(guestId, recent);
+  return true;
+}
+
+function refOf(guestId: number, frame: WebFrameMain, pageId: number): string | undefined {
+  for (const [ref, n] of pageNotifications) {
+    // Compared by id: Electron may hand out a new WebFrameMain object for the same frame.
+    const sameFrame =
+      n.frame.processId === frame.processId && n.frame.routingId === frame.routingId;
+    if (n.guestId === guestId && sameFrame && n.pageId === pageId) return ref;
+  }
+  return undefined;
+}
+
+function showNotification(event: IpcMainEvent, value: unknown): void {
+  const parsed = pageNotificationSchema.safeParse(value);
+  const frame = event.senderFrame;
+  if (!parsed.success || !frame || pagePermission(event) !== "granted") return;
+  const guest = event.sender;
+  const host = listeningHost(guest);
+  if (!host || !withinRateLimit(guest.id)) return;
+
+  const { pageId, title, body, tag } = parsed.data;
+  const ref = `${guest.id}-${nextRef++}`;
+  pageNotifications.set(ref, { guestId: guest.id, host, frame, pageId });
+  const notification: BrowserNotification = {
+    ref,
+    webContentsId: guest.id,
+    origin: guest.mainFrame.origin,
+    title: cap(title, MAX_TITLE),
+    body: cap(body, MAX_BODY),
+    tag: cap(tag, MAX_TAG),
+  };
+  host.send(BROWSER_NOTIFICATION_OPENED, notification);
+}
+
+function closeNotification(event: IpcMainEvent, pageId: unknown): void {
+  const frame = event.senderFrame;
+  if (typeof pageId !== "number" || !frame) return;
+  const ref = refOf(event.sender.id, frame, pageId);
+  const notification = ref === undefined ? undefined : pageNotifications.get(ref);
+  if (!ref || !notification) return;
+  pageNotifications.delete(ref);
+  const { host } = notification;
+  if (!host.isDestroyed()) host.send(BROWSER_NOTIFICATION_CLOSED, { ref });
+}
+
+function clickNotification(event: IpcMainEvent, value: unknown): void {
+  const parsed = browserNotificationRefSchema.safeParse(value);
+  if (!parsed.success) return;
+  const notification = pageNotifications.get(parsed.data.ref);
+  if (!notification || notification.host !== event.sender || notification.frame.detached) return;
+  notification.frame.send(BROWSER_NOTIFICATION_EVENT, notification.pageId, "click");
+}
+
+/** Withdraw the guest's open prompts: its page is going away. */
+function withdrawRequests(guestId: number): void {
+  for (const [id, pending] of pendingRequests) {
+    if (pending.guestId === guestId) withdraw(id, pending, "default");
+  }
+}
+
+/** Forget the notification objects of the guest's page: clicks have nothing left to reach. */
+function forgetNotifications(guestId: number): void {
+  for (const [ref, n] of pageNotifications) {
+    if (n.guestId === guestId) pageNotifications.delete(ref);
+  }
+  recentShows.delete(guestId);
+}
+
+export function installBrowserNotifications(): void {
+  ipcMain.on(BROWSER_NOTIFICATION_PERMISSION, (event) => {
+    event.returnValue = sitesLoaded ? pagePermission(event) : "default";
+  });
+  ipcMain.handle(BROWSER_NOTIFICATION_REQUEST_PERMISSION, requestPermission);
+  ipcMain.on(BROWSER_NOTIFICATION_SHOW, showNotification);
+  ipcMain.on(BROWSER_NOTIFICATION_CLOSE, closeNotification);
+  ipcMain.on(BROWSER_NOTIFICATION_LISTEN, (event) => listeningHosts.add(event.sender));
+  ipcMain.on(BROWSER_NOTIFICATION_SET_SITES, (_event, value: unknown) => setSites(value));
+  ipcMain.on(BROWSER_NOTIFICATION_PERMISSION_RESPOND, respondToRequest);
+  ipcMain.on(BROWSER_NOTIFICATION_CLICK, clickNotification);
+}
+
+/** Track a webview's page lifecycle for its notifications (from `web-contents-created`). */
+export function trackWebviewNotifications(contents: WebContents): void {
+  if (contents.getType() !== "webview") return;
+  const guestId = contents.id;
+  // The page being left gets no answer to its prompts, as with dialogs.
+  contents.on("did-start-navigation", ({ isMainFrame, isSameDocument }) => {
+    if (isMainFrame && !isSameDocument) withdrawRequests(guestId);
+  });
+  // A new document's notification objects are its own; the old page's notifications stay in the
+  // notification center, and clicking one only goes to the panel.
+  contents.on("did-navigate", () => forgetNotifications(guestId));
+  const gone = () => {
+    withdrawRequests(guestId);
+    forgetNotifications(guestId);
+  };
+  contents.on("render-process-gone", gone);
+  contents.once("destroyed", gone);
+}

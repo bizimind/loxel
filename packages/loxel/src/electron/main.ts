@@ -79,6 +79,7 @@ import {
   scheduleAutomaticUpdateCheck,
   terminalsForUpdateInstall,
 } from "./app-updater";
+import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
@@ -669,6 +670,7 @@ app.on("web-contents-created", (_, contents) => {
   });
   forwardWebviewKeystrokes(contents);
   trackWebviewDialogs(contents);
+  trackWebviewNotifications(contents);
 
   if (contents.getType() === "webview") {
     // New tabs and windows a browser panel's page opens become browser tabs next to it, and its
@@ -766,6 +768,7 @@ installWebviewKeystrokeForwarding();
 installWebviewCopyImage();
 installJavaScriptDialogs();
 installNativeTheme();
+installBrowserNotifications();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {

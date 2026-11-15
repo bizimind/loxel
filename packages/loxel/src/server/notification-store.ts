@@ -1,13 +1,18 @@
 /**
  * Server-side in-memory notification store.
  *
- * Generic notification model — not tied to terminals. Future notification sources
- * (CI, etc.) can use the same system by adding new source kinds.
+ * Generic notification model: terminals, browser panel pages and the server itself are its
+ * sources, told apart by `source.kind`.
  *
  * Ephemeral: state is lost on server restart (matches current notification behavior).
  * All connected clients are kept in sync via WS broadcasts from the caller.
  */
-import type { ServerNotification } from "@/api/notification-model";
+import {
+  type BrowserNotificationSource,
+  type NotificationSource,
+  type ServerNotification,
+  isPanelSource,
+} from "@/api/notification-model";
 
 const MAX_NOTIFICATIONS = 200;
 
@@ -35,18 +40,36 @@ export class NotificationStore {
   }
 
   dismissByPanel(panelId: string): boolean {
-    const before = this.notifications.length;
-    this.notifications = this.notifications.filter(
-      (n) => !(n.source.kind === "terminal" && n.source.panelId === panelId),
-    );
-    return this.notifications.length !== before;
+    return this.dismissWhere((s) => isPanelSource(s) && s.panelId === panelId).length > 0;
   }
 
-  /** Dismiss what a worktree's terminals raised. Returns the panels that had notifications. */
+  /** Remove the notifications whose source matches, returning their ids. */
+  dismissWhere(matches: (source: NotificationSource) => boolean): string[] {
+    const removed: string[] = [];
+    this.notifications = this.notifications.filter((n) => {
+      if (!matches(n.source)) return true;
+      removed.push(n.id);
+      return false;
+    });
+    return removed;
+  }
+
+  /**
+   * Remove what a new browser notification replaces: like browsers, its origin's earlier
+   * notifications with the same tag. Returns their ids.
+   */
+  dismissReplacedBy(source: BrowserNotificationSource): string[] {
+    if (!source.tag) return [];
+    return this.dismissWhere(
+      (s) => s.kind === "browser" && s.origin === source.origin && s.tag === source.tag,
+    );
+  }
+
+  /** Dismiss what a worktree's panels raised. Returns the panels that had notifications. */
   dismissByWorktree(worktreePath: string): string[] {
     const panelIds = new Set<string>();
     this.notifications = this.notifications.filter((n) => {
-      if (n.source.kind !== "terminal" || n.source.worktreePath !== worktreePath) return true;
+      if (!isPanelSource(n.source) || n.source.worktreePath !== worktreePath) return true;
       panelIds.add(n.source.panelId);
       return false;
     });

@@ -4,7 +4,7 @@
  * Shared by the "Go to Recent Notification" keybinding and
  * click-to-navigate in the notification center overlay.
  */
-import type { ServerNotification } from "@/api/notification-model";
+import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -25,14 +25,16 @@ function activatePanelById(panelId: string, retries = 1): void {
 export function navigateToNotification(notification: ServerNotification): void {
   const { source } = notification;
 
-  // Only sources with a panelId can be navigated to
-  if (source.kind !== "terminal") return;
+  // Only sources with a panel can be navigated to
+  if (!isPanelSource(source)) return;
   const { panelId, worktreePath } = source;
 
   const wtStore = useWorktreeStore.getState();
 
+  // Going to another worktree or Home rebuilds the layout and reloads its browser panels, so a
+  // page's notification has no page left to click; activating the panel is all that is left.
   if (worktreePath === null && wtStore.activeWorktreePath !== null) {
-    // A Home terminal's: go Home first, then activate the panel after layout settles
+    // A Home panel's: go Home first, then activate the panel after layout settles
     wtStore.showHome();
     requestAnimationFrame(() => activatePanelById(panelId));
   } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
@@ -47,5 +49,10 @@ export function navigateToNotification(notification: ServerNotification): void {
       });
   } else {
     activatePanelById(panelId);
+    // Like clicking a browser's notification: the page's `click` handler runs (to open the chat
+    // or build it was about). Main ignores refs whose page is gone.
+    if (source.kind === "browser") {
+      window.electronAPI?.clickBrowserNotification({ ref: source.ref });
+    }
   }
 }

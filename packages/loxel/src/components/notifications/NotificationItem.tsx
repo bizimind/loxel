@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 
-import type { ServerNotification } from "@/api/notification-model";
+import type { NotificationSource, ServerNotification } from "@/api/notification-model";
+import { hostOf } from "@/components/browser/BrowserBookmarks";
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { cn } from "@/lib/utils";
@@ -14,13 +15,33 @@ const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
   critical: "bg-red-500",
 };
 
-function sourceLabel(notification: ServerNotification): string {
-  const { source } = notification;
-  if (source.kind === "terminal_host") return "Loxel";
-  // A Home terminal's notification names no worktree.
-  if (source.worktreePath === null) return "Home";
-  return source.worktreePath.split("/").pop() || "terminal";
+/** A worktree's name, or "Home" for a Home panel's notification (no worktree). */
+function placeName(worktreePath: string | null): string {
+  if (worktreePath === null) return "Home";
+  return worktreePath.split("/").pop() || worktreePath;
 }
+
+/** Where the notification came from: the worktree or Home, and the site for a browser page. */
+function sourceLabel({ source }: ServerNotification): string {
+  switch (source.kind) {
+    case "terminal_host":
+      return "Loxel";
+    case "terminal":
+      return placeName(source.worktreePath);
+    case "browser":
+      return `${hostOf(source.origin)} · ${placeName(source.worktreePath)}`;
+    default: {
+      const unknown: never = source;
+      return String(unknown);
+    }
+  }
+}
+
+const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
+  terminal: "Terminal notification",
+  browser: "Browser notification",
+  terminal_host: "Terminal host notification",
+};
 
 export function NotificationItem({
   notification,
@@ -29,9 +50,7 @@ export function NotificationItem({
   notification: ServerNotification;
   onNavigate?: () => void;
 }) {
-  const title =
-    notification.title ??
-    `${notification.source.kind[0]!.toUpperCase()}${notification.source.kind.slice(1)} notification`;
+  const title = notification.title || DEFAULT_TITLES[notification.source.kind];
 
   return (
     <div

@@ -2,7 +2,7 @@ import type { OpenTerminalRequest } from "@/open-request";
 
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
-import type { ServerNotification } from "./notification-model";
+import type { BrowserNotificationSource, ServerNotification } from "./notification-model";
 import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { SchemaConsentState } from "./schema-consent-model";
@@ -168,7 +168,16 @@ export type WsClientMessage =
   // Notifications
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }
-  | { type: "notifications_clear" };
+  | { type: "notifications_clear" }
+  /** A browser panel's page showed a notification (it replaces its origin's one with the tag). */
+  | {
+      type: "browser_notification_show";
+      source: BrowserNotificationSource;
+      title: string;
+      body?: string;
+    }
+  /** A browser panel's page called `close()` on a notification it showed. */
+  | { type: "browser_notification_close"; ref: string };
 
 // Close codes of a language-server socket, which tell the client whether to reconnect (see
 // `lsp-connection.ts`).

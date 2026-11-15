@@ -36,6 +36,7 @@ import {
   javaScriptDialogResponseSchema,
   pageDialogCallSchema,
 } from "./javascript-dialog-protocol";
+import { createListeningRenderers } from "./listening-renderers";
 
 /** Longer messages are cut: rendering megabytes of page text would stall the whole window. */
 const MAX_DIALOG_TEXT = 10_000;
@@ -61,7 +62,7 @@ interface PageDialogState {
 const pendingDialogs = new Map<number, PendingDialog>();
 const pageStates = new Map<number, PageDialogState>();
 /** Window renderers whose current document has subscribed to page dialogs. */
-const listeningHosts = new Set<number>();
+const listeningHosts = createListeningRenderers();
 let nextDialogId = 1;
 
 /** What the page's dialog function returns when the dialog isn't shown or is dismissed. */
@@ -178,28 +179,10 @@ function respondToDialog(event: IpcMainEvent, value: unknown): void {
   dismissDialogs(dialog.guestId);
 }
 
-/** A window renderer subscribed to dialogs; valid until its document is replaced. */
-function listen(event: IpcMainEvent): void {
-  const host = event.sender;
-  if (listeningHosts.has(host.id)) return;
-  listeningHosts.add(host.id);
-  // On commit, not on start: the window cancels navigations it starts (external links are
-  // opened in the system browser from will-navigate), and those keep the document. A new
-  // document subscribes again. did-navigate fires only for main-frame cross-document commits.
-  // A reload keeps the webContents, so both listeners go with the subscription.
-  const forget = () => {
-    listeningHosts.delete(host.id);
-    host.off("did-navigate", forget);
-    host.off("destroyed", forget);
-  };
-  host.on("did-navigate", forget);
-  host.once("destroyed", forget);
-}
-
 export function installJavaScriptDialogs(): void {
   ipcMain.on(JAVASCRIPT_DIALOG_RUN, runDialog);
   ipcMain.on(JAVASCRIPT_DIALOG_RESPOND, respondToDialog);
-  ipcMain.on(JAVASCRIPT_DIALOG_LISTEN, listen);
+  ipcMain.on(JAVASCRIPT_DIALOG_LISTEN, (event) => listeningHosts.add(event.sender));
 }
 
 /** Load the dialog preload into a webview (from `will-attach-webview`, after its own is stripped). */

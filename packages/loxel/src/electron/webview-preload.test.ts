@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { JAVASCRIPT_DIALOG_RUN } from "./ipc-channels";
+import {
+  BROWSER_NOTIFICATION_CLOSE,
+  BROWSER_NOTIFICATION_EVENT,
+  BROWSER_NOTIFICATION_PERMISSION,
+  BROWSER_NOTIFICATION_REQUEST_PERMISSION,
+  BROWSER_NOTIFICATION_SHOW,
+  JAVASCRIPT_DIALOG_RUN,
+} from "./ipc-channels";
 
 interface DialogCall {
   type: string;
@@ -14,15 +21,32 @@ interface PageDialogs {
 }
 type InstallDialogs = (runDialog: (call: DialogCall) => unknown) => void;
 
-let script: { func: InstallDialogs; args: [(call: DialogCall) => unknown] } | undefined;
-const sendSync = mock((_channel: string, _call: DialogCall): unknown => null);
+interface MainWorldScript {
+  func: (...args: never[]) => void;
+  args: unknown[];
+}
+const scripts: MainWorldScript[] = [];
+const sendSync = mock((_channel: string, _call?: unknown): unknown => null);
+const send = mock((_channel: string, _payload: unknown) => {});
+const invoke = mock((_channel: string): Promise<unknown> => Promise.resolve("granted"));
+const ipcListeners = new Map<string, (event: unknown, ...args: unknown[]) => void>();
 void mock.module("electron", () => ({
-  contextBridge: { executeInMainWorld: (s: NonNullable<typeof script>) => (script = s) },
-  ipcRenderer: { sendSync },
+  contextBridge: { executeInMainWorld: (s: MainWorldScript) => scripts.push(s) },
+  ipcRenderer: {
+    sendSync,
+    send,
+    invoke,
+    on: (channel: string, listener: (event: unknown, ...args: unknown[]) => void) =>
+      ipcListeners.set(channel, listener),
+  },
 }));
 await import("./webview-preload.cjs");
-if (!script) throw new Error("the preload installed nothing in the main world");
-const { func: installDialogs, args } = script;
+const [dialogScript, notificationScript] = scripts;
+if (!dialogScript || !notificationScript) {
+  throw new Error("the preload did not install its main-world scripts");
+}
+const installDialogs = dialogScript.func as unknown as InstallDialogs;
+const args = dialogScript.args as [(call: DialogCall) => unknown];
 
 /** Run the main-world function against a stub page; returns its dialogs and page events. */
 function stubPage(answer: (call: DialogCall) => unknown) {
@@ -38,7 +62,10 @@ function stubPage(answer: (call: DialogCall) => unknown) {
   return { page, runDialog, fire };
 }
 
-beforeEach(() => sendSync.mockClear());
+beforeEach(() => {
+  sendSync.mockReset();
+  send.mockClear();
+});
 
 describe("webview preload", () => {
   test("asks main synchronously on the dialog channel", () => {
@@ -104,5 +131,107 @@ describe("webview preload", () => {
     fire("pageshow"); // back from the back/forward cache
     expect(page.confirm("Back?")).toBe(true);
     expect(runDialog).toHaveBeenCalledTimes(2);
+  });
+});
+
+interface PageNotification extends EventTarget {
+  title: string;
+  body: string;
+  tag: string;
+  data: unknown;
+  onclick: ((event: Event) => void) | null;
+  close: () => void;
+}
+interface NotificationClass {
+  new (title: unknown, options?: Record<string, unknown>): PageNotification;
+  readonly permission: string;
+  requestPermission: (callback?: (permission: string) => void) => Promise<string>;
+}
+
+/** Run the notification script against a stub page; returns the page's Notification. */
+function notificationPage(permission: string) {
+  const page = {} as { Notification: NotificationClass };
+  Object.assign(globalThis, { window: page });
+  sendSync.mockImplementation(() => permission);
+  const install = notificationScript!.func as unknown as (bridge: unknown) => void;
+  install(notificationScript!.args[0]);
+  return page.Notification;
+}
+
+/** Resolves on the next event of `type` the notification fires. */
+const nextEvent = (target: EventTarget, type: string) =>
+  new Promise<Event>((resolve) => {
+    target.addEventListener(type, resolve, { once: true });
+  });
+
+describe("webview preload notifications", () => {
+  test("reads the permission from main on every access", () => {
+    const Notification = notificationPage("default");
+    expect(Notification.permission).toBe("default");
+    sendSync.mockImplementation(() => "granted");
+    expect(Notification.permission).toBe("granted");
+    expect(sendSync).toHaveBeenLastCalledWith(BROWSER_NOTIFICATION_PERMISSION);
+  });
+
+  test("shows a granted page's notification through main and fires show", async () => {
+    const Notification = notificationPage("granted");
+    const notification = new Notification("Build", { body: "done", tag: "ci", data: { id: 1 } });
+    expect([notification.title, notification.body, notification.tag]).toEqual([
+      "Build",
+      "done",
+      "ci",
+    ]);
+    expect(notification.data).toEqual({ id: 1 });
+    expect(send).toHaveBeenCalledWith(BROWSER_NOTIFICATION_SHOW, {
+      pageId: expect.any(Number),
+      title: "Build",
+      body: "done",
+      tag: "ci",
+    });
+    await nextEvent(notification, "show");
+  });
+
+  test("without permission, shows nothing and fires error", async () => {
+    const Notification = notificationPage("denied");
+    const notification = new Notification("Nope");
+    expect(send).not.toHaveBeenCalled();
+    await nextEvent(notification, "error");
+  });
+
+  test("delivers main's click to the notification and its onclick", async () => {
+    const Notification = notificationPage("granted");
+    const notification = new Notification("Build");
+    const [, { pageId }] = send.mock.calls[0] as [string, { pageId: number }];
+    const onclick = mock((_event: Event) => {});
+    notification.onclick = onclick;
+    const clicked = nextEvent(notification, "click");
+    ipcListeners.get(BROWSER_NOTIFICATION_EVENT)!({}, pageId, "click");
+    expect((await clicked).type).toBe("click");
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+
+  test("close() tells main once and fires close", async () => {
+    const Notification = notificationPage("granted");
+    const notification = new Notification("Build");
+    const [, { pageId }] = send.mock.calls[0] as [string, { pageId: number }];
+    notification.close();
+    notification.close();
+    expect(send.mock.calls.filter(([channel]) => channel === BROWSER_NOTIFICATION_CLOSE)).toEqual([
+      [BROWSER_NOTIFICATION_CLOSE, pageId],
+    ]);
+    await nextEvent(notification, "close");
+  });
+
+  test("requestPermission asks main and also calls the legacy callback", async () => {
+    const Notification = notificationPage("default");
+    const callback = mock((_permission: string) => {});
+    expect(await Notification.requestPermission(callback)).toBe("granted");
+    expect(invoke).toHaveBeenCalledWith(BROWSER_NOTIFICATION_REQUEST_PERMISSION);
+    expect(callback).toHaveBeenCalledWith("granted");
+  });
+
+  test("requires a title, like the DOM's constructor", () => {
+    const Notification = notificationPage("granted");
+    expect(() => new (Notification as unknown as new () => unknown)()).toThrow(TypeError);
   });
 });

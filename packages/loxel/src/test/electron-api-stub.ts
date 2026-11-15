@@ -28,6 +28,10 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     setAsDefaultBrowser: async () => ({ isDefault: false, canSet: false }),
     quitKeepingTerminals: () => {},
     restartApp: () => {},
+    onBrowserNotifications: () => () => {},
+    setNotificationSites: () => {},
+    respondToNotificationPermission: () => {},
+    clickBrowserNotification: () => {},
     ...overrides,
   };
 }

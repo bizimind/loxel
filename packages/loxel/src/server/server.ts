@@ -1194,6 +1194,28 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       break;
     }
 
+    case "browser_notification_show": {
+      for (const id of notificationStore.dismissReplacedBy(msg.source)) {
+        broadcastAll({ type: "notification_dismissed", id });
+      }
+      const notification = notificationStore.add({
+        source: msg.source,
+        title: msg.title,
+        body: msg.body,
+        urgency: "normal",
+      });
+      broadcastAll({ type: "notification_added", data: notification });
+      break;
+    }
+
+    case "browser_notification_close": {
+      const closed = notificationStore.dismissWhere(
+        (s) => s.kind === "browser" && s.ref === msg.ref,
+      );
+      for (const id of closed) broadcastAll({ type: "notification_dismissed", id });
+      break;
+    }
+
     default: {
       const _exhaustive: never = msg;
       throw new Error(`Unknown WS client message type: ${String(_exhaustive)}`);

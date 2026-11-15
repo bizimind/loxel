@@ -4,6 +4,11 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
+import {
+  type NotificationSiteDecision,
+  type NotificationSites,
+  parseNotificationSites,
+} from "@/electron/browser-notification-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
 import {
   allThemes,
@@ -31,13 +36,15 @@ export type SidebarZone = "left" | "bottom" | "right";
 
 /**
  * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
- * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
- * parsed (`parseThemeSettings`), since their colors are written into a stylesheet.
+ * (hand-edited, or from a newer version) falls back to the default, dark, the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet, and the browser's
+ * per-site decisions keep only valid entries, since the Electron main process enforces them.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
   if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
   if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
+  if ("browser" in valid) valid.browser = parseBrowserSettings(valid.browser);
   // Only fields already in the slice were replaced, each with a valid value of its type.
   return valid as T;
 }
@@ -52,6 +59,22 @@ export interface TerminalSettings {
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
+
+export interface BrowserSettings {
+  /**
+   * Whether each site (by origin) may show notifications from browser panels; sites not listed
+   * ask. The Electron main process enforces these (see browser-notifications.ts).
+   */
+  notificationSites: NotificationSites;
+}
+
+function parseBrowserSettings(value: unknown): BrowserSettings {
+  const sites =
+    typeof value === "object" && value !== null && "notificationSites" in value
+      ? value.notificationSites
+      : undefined;
+  return { notificationSites: parseNotificationSites(sites) };
+}
 
 // ---------------------------------------------------------------------------
 // Editor / Indentation
@@ -523,6 +546,7 @@ type SettingsSection =
   | "keybindings"
   | "layout"
   | "terminal"
+  | "browser"
   | "editor"
   | "schemas"
   | "fileAssociations"
@@ -546,6 +570,7 @@ export interface SettingsState {
   autoRevealInExplorer: boolean;
   /** Check for updates when the server starts. The server reads this from the persisted settings. */
   autoCheckForUpdates: boolean;
+  browser: BrowserSettings;
 
   // Transient UI state (not persisted)
   isOpen: boolean;
@@ -619,6 +644,10 @@ export interface SettingsState {
   // Updates
   setAutoCheckForUpdates: (enabled: boolean) => void;
 
+  // Browser actions
+  /** Allow or block notifications from a site, or forget its decision (`null`) so it asks again. */
+  setNotificationSite: (origin: string, decision: NotificationSiteDecision | null) => void;
+
   // Wt config actions
 
   // UI actions
@@ -689,6 +718,7 @@ export function persistedSettings(state: SettingsState) {
     fileAssociations: state.fileAssociations,
     autoRevealInExplorer: state.autoRevealInExplorer,
     autoCheckForUpdates: state.autoCheckForUpdates,
+    browser: state.browser,
   };
 }
 
@@ -713,6 +743,7 @@ export const useSettingsStore = create<SettingsState>()(
       fileAssociations: [],
       autoRevealInExplorer: false,
       autoCheckForUpdates: true,
+      browser: { notificationSites: {} },
 
       isOpen: false,
       activeSection: "general",
@@ -999,6 +1030,15 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoCheckForUpdates: (enabled) => set({ autoCheckForUpdates: enabled }),
 
+      // -- Browser --
+
+      setNotificationSite: (origin, decision) =>
+        set((s) => {
+          const { [origin]: _previous, ...others } = s.browser.notificationSites;
+          const notificationSites = decision ? { ...others, [origin]: decision } : others;
+          return { browser: { ...s.browser, notificationSites } };
+        }),
+
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -1014,7 +1054,7 @@ export const useSettingsStore = create<SettingsState>()(
           ? withValidSettings(persisted)
           : {}),
       }),
-      version: 17,
+      version: 18,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -1170,6 +1210,13 @@ export const useSettingsStore = create<SettingsState>()(
               : undefined;
           if (formatting) {
             formatting.markdownOutput = parseMarkdownOutputSettings(formatting.markdownOutput);
+          }
+        }
+
+        if (version <= 17) {
+          // v17 → v18: add browser settings (per-site notification decisions)
+          if (typeof state.browser !== "object" || state.browser === null) {
+            state.browser = { notificationSites: {} };
           }
         }
 

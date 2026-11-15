@@ -28,6 +28,14 @@ const DEFAULT_BROWSER_GET = "default-browser:get";
 const DEFAULT_BROWSER_SET = "default-browser:set";
 const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 const APP_RESTART = "app:restart";
+const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
+const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
+const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
+const BROWSER_NOTIFICATION_CLOSED = "browser-notification:closed";
+const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission-request";
+const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
+const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN = "browser-notification:permission-withdrawn";
+const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -116,4 +124,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setAsDefaultBrowser: () => ipcRenderer.invoke(DEFAULT_BROWSER_SET),
   quitKeepingTerminals: () => ipcRenderer.send(APP_QUIT_KEEPING_TERMINALS),
   restartApp: () => ipcRenderer.send(APP_RESTART),
+  onBrowserNotifications: (handlers) => {
+    const subscriptions = [
+      [BROWSER_NOTIFICATION_OPENED, (_event, notification) => handlers.onOpened(notification)],
+      [BROWSER_NOTIFICATION_CLOSED, (_event, closed) => handlers.onClosed(closed)],
+      [
+        BROWSER_NOTIFICATION_PERMISSION_REQUEST,
+        (_event, request) => handlers.onPermissionRequest(request),
+      ],
+      [
+        BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN,
+        (_event, withdrawn) => handlers.onPermissionWithdrawn(withdrawn),
+      ],
+    ];
+    for (const [channel, handler] of subscriptions) ipcRenderer.on(channel, handler);
+    ipcRenderer.send(BROWSER_NOTIFICATION_LISTEN);
+    return () => {
+      for (const [channel, handler] of subscriptions) ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  setNotificationSites: (sites) => ipcRenderer.send(BROWSER_NOTIFICATION_SET_SITES, sites),
+  respondToNotificationPermission: (response) =>
+    ipcRenderer.send(BROWSER_NOTIFICATION_PERMISSION_RESPOND, response),
+  clickBrowserNotification: (ref) => ipcRenderer.send(BROWSER_NOTIFICATION_CLICK, ref),
 });
