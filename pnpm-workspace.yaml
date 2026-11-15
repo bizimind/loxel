@@ -1,13 +1,16 @@
 packages:
   - "packages/*"
 
-# Delay newly published versions to reduce supply-chain risk. pnpm 12 also checks every entry of an
-# existing lockfile against this window, so `pnpm install --frozen-lockfile` in CI rejects a lockfile
-# that carries a too-new version, transitive ones included. That check needs pnpm 12: the root
-# package.json's `engines.pnpm` makes older pnpm refuse to run, and makes Dependabot update the
-# lockfile with pnpm 12, which drops any bump that would add a version inside the window. CI's
-# `pnpm/action-setup` steps install pnpm 12 for the same reason.
+# Delay newly published versions to reduce supply-chain risk. The pnpm this repo requires also checks
+# every entry of an existing lockfile against this window, so `pnpm install --frozen-lockfile` in CI
+# rejects a lockfile that carries a too-new version, transitive ones included; pnpm 10 skipped that
+# check. The root package.json's `engines.pnpm` makes older pnpm refuse to run, and makes Dependabot
+# update the lockfile with pnpm 12, which drops a version-update bump that would add a version inside
+# the window (a security update may still add one, and CI then rejects it). CI's `pnpm/action-setup`
+# steps install pnpm 12 for the same reason.
 minimumReleaseAge: 10080
+# A version whose registry metadata has no publish time fails the check instead of passing it.
+minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeExclude:
   # Loxel ships a patched build of this Electron release (packages/loxel/electron/); 45.3.0 carries
   # Chromium security fixes and was published 2026-11-10. Drop once it is a week old.
