@@ -5,6 +5,7 @@
  * click-to-navigate in the notification center overlay.
  */
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
+import { whenBrowserPageAttached } from "@/store/browser-pages";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -29,30 +30,32 @@ export function navigateToNotification(notification: ServerNotification): void {
   if (!isPanelSource(source)) return;
   const { panelId, worktreePath } = source;
 
-  const wtStore = useWorktreeStore.getState();
+  const activate = () => {
+    if (source.kind !== "browser") return activatePanelById(panelId);
+    // Like clicking a browser's notification: the page's `click` handler runs (to open the chat or
+    // build it was about). A page in another worktree or Home kept running there, and gets the
+    // click once its layout is mounted, so what it opens lands next to it.
+    // Main ignores refs whose page is gone (it was closed, unloaded or reloaded).
+    whenBrowserPageAttached(panelId, ({ api }) => {
+      api.setActive();
+      window.electronAPI?.clickBrowserNotification({ ref: source.ref });
+    });
+  };
 
-  // Going to another worktree or Home rebuilds the layout and reloads its browser panels, so a
-  // page's notification has no page left to click; activating the panel is all that is left.
+  const wtStore = useWorktreeStore.getState();
   if (worktreePath === null && wtStore.activeWorktreePath !== null) {
     // A Home panel's: go Home first, then activate the panel after layout settles
     wtStore.showHome();
-    requestAnimationFrame(() => activatePanelById(panelId));
+    requestAnimationFrame(activate);
   } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
     // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)
-      .then(() => {
-        requestAnimationFrame(() => activatePanelById(panelId));
-      })
+      .then(() => requestAnimationFrame(activate))
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);
       });
   } else {
-    activatePanelById(panelId);
-    // Like clicking a browser's notification: the page's `click` handler runs (to open the chat
-    // or build it was about). Main ignores refs whose page is gone.
-    if (source.kind === "browser") {
-      window.electronAPI?.clickBrowserNotification({ ref: source.ref });
-    }
+    activate();
   }
 }

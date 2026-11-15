@@ -23,6 +23,7 @@ import {
 } from "@/lib/worktree-hierarchy";
 import { queryClient } from "@/query-client";
 
+import { closeLayoutBrowserPages } from "./browser-pages";
 import { useFileSearchStore } from "./file-search";
 import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
@@ -660,6 +661,7 @@ export function isListedWorktree(path: string): boolean {
  */
 function releaseWorktree(path: string): void {
   purgeWorktreeStores(path);
+  closeLayoutBrowserPages(path);
   purgeWorktreeCache(path);
   useFileSearchStore.getState().purgeWorktree(path);
   queryClient.removeQueries({

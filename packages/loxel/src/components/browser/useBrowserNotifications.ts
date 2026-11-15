@@ -18,7 +18,6 @@ import {
 } from "@/electron/browser-notification-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { useSettingsStore } from "@/store/settings-store";
-import { useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("ui");
 
@@ -142,21 +141,20 @@ export type NotificationPermissionAnswer = NotificationSiteDecision | "dismiss";
 
 /**
  * The web notifications of the webview with this guest webContents id (null until it is ready),
- * shown in the notification center as coming from the browser panel `panelId`. `request` is the
+ * shown in the notification center as coming from the browser panel `panelId` in the layout of
+ * `worktreePath` (null: Home's), whether or not that layout is shown. `request` is the
  * oldest open permission request, for the panel's prompt, and `answer` replies to it: Allow and
  * Block are saved for the site, Dismiss decides nothing.
  */
 export function useBrowserNotifications(
   webContentsId: number | null,
   panelId: string,
+  worktreePath: string | null,
 ): {
   request: NotificationPermissionRequest | null;
   answer: (answer: NotificationPermissionAnswer) => void;
 } {
   const [queue, setQueue] = useState<NotificationPermissionRequest[]>([]);
-  // The worktree whose layout the panel mounted in, or Home's (null). Read once: during a switch
-  // the active worktree is already the next one while this panel's layout is still up.
-  const [worktreePath] = useState(() => useWorktreeStore.getState().activeWorktreePath);
 
   useEffect(() => {
     listen();

@@ -19,7 +19,7 @@ import {
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
@@ -33,6 +33,7 @@ import {
   useBrowserBookmarksStore,
   useIsBookmarked,
 } from "@/store/browser-bookmarks";
+import { setBrowserPageUrl } from "@/store/browser-pages";
 import { isHttpUrl } from "@/url-utils";
 
 import {
@@ -70,10 +71,23 @@ export interface BrowserPanelParams {
 
 interface BrowserPanelProps {
   url: string;
-  panelApi: DockviewPanelApi;
+  /** The browser panel's dockview id. */
+  panelId: string;
+  /**
+   * The browser panel while its layout is shown. Null while the page runs in the background (see
+   * `store/browser-pages.ts`): the page keeps its own state, and its panel catches up when shown.
+   */
+  panelApi: DockviewPanelApi | null;
+  /** The worktree whose layout the panel is in, or null for Home's. */
+  worktreePath: string | null;
 }
 
-export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
+export function BrowserPanel({
+  url: initialUrl,
+  panelId,
+  panelApi,
+  worktreePath,
+}: BrowserPanelProps) {
   const webviewRef = useRef<WebviewTag | null>(null);
   const readyRef = useRef(false);
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
@@ -98,6 +112,21 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [pageUrl, setPageUrl] = useState("");
   const isBookmarked = useIsBookmarked(pageUrl);
 
+  // The panel for the page's events, which outlive any one panel API (the layout is rebuilt on
+  // every worktree switch).
+  const panelApiRef = useRef(panelApi);
+  // In the commit that detaches the page, before its events can reach the old layout's panel.
+  useLayoutEffect(() => {
+    panelApiRef.current = panelApi;
+  }, [panelApi]);
+  useEffect(() => {
+    // Shown again after running in the background: give the panel the page's tab and params.
+    const page = pageRef.current;
+    if (!panelApi || !page.url) return;
+    panelApi.updateParameters({ url: page.url, faviconUrl: page.faviconUrl });
+    if (page.title) panelApi.setTitle(page.title);
+  }, [panelApi]);
+
   // The page's alert() / confirm() / prompt(), shown over the page one at a time.
   // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
   const {
@@ -110,7 +139,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   // The page's web notifications go to the notification center; a site asking to show them gets
   // a bar under the toolbar.
   const { request: notificationRequest, answer: answerNotificationRequest } =
-    useBrowserNotifications(webContentsId, panelApi.id);
+    useBrowserNotifications(webContentsId, panelId, worktreePath);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -140,13 +169,6 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     },
   });
 
-  // Layouts saved before browser panels used the "always" renderer restore with the default
-  // renderer; upgrade them so hidden tabs stay attached (see createBrowser).
-  useEffect(() => {
-    if (panelApi.renderer === "always") return;
-    panelApi.setRenderer("always");
-  }, [panelApi]);
-
   // Hand keyboard focus to the page when the panel is activated (e.g. directional focus), or to
   // the address bar while the panel shows no page yet, so a new blank tab is ready for a URL.
   // Skip when focus is already inside the panel so clicking the URL bar keeps its focus.
@@ -163,11 +185,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       // panels), and its hidden elements can't take focus until then. The webview can.
       if (document.activeElement === target) return;
       requestAnimationFrame(() => {
-        if (isActivatedPanel(panelApi) && !rootRef.current?.contains(document.activeElement)) {
+        const api = panelApiRef.current;
+        if (api && isActivatedPanel(api) && !rootRef.current?.contains(document.activeElement)) {
           target.focus();
         }
       });
-    }, [panelApi]),
+    }, []),
   );
 
   // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
@@ -176,9 +199,11 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       window.electronAPI?.onOpenInNewBrowserTab((webContentsId, url, background) => {
         const webview = webviewRef.current;
         if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
-        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: !background });
+        // Tabs open next to the panel, in the layout shown; not from a page in the background.
+        if (!panelApiRef.current) return;
+        openBrowserTab(url, { sourcePanelId: panelId, activate: !background });
       }),
-    [panelApi],
+    [panelId],
   );
 
   // Attach webview event listeners
@@ -229,27 +254,28 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       setCurrentUrl(url);
       setInputUrl(url);
       setPageUrl(url);
+      setBrowserPageUrl(panelId, url);
       if (event.type === "did-navigate") {
         pageRef.current = { url, title: "" };
-        panelApi.updateParameters({ url, faviconUrl: undefined });
+        panelApiRef.current?.updateParameters({ url, faviconUrl: undefined });
       } else {
         // The same document, which keeps its title and favicon (Chromium reports them per document).
         pageRef.current = { ...pageRef.current, url };
-        panelApi.updateParameters({ url });
+        panelApiRef.current?.updateParameters({ url });
       }
       updateNavState();
     };
 
     const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
       pageRef.current = { ...pageRef.current, title: event.title };
-      panelApi.setTitle(event.title);
+      panelApiRef.current?.setTitle(event.title);
     };
 
     const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
       const favicon = event.favicons[0];
       if (favicon) {
         pageRef.current = { ...pageRef.current, faviconUrl: favicon };
-        panelApi.updateParameters({ faviconUrl: favicon });
+        panelApiRef.current?.updateParameters({ faviconUrl: favicon });
       }
     };
 
@@ -311,7 +337,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
-  }, [panelApi]);
+  }, [panelId]);
 
   const navigate = useCallback(
     (url: string) => {
@@ -388,13 +414,13 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const openBookmark = useCallback<OpenBookmark>(
     (url, inNewTab) => {
       if (inNewTab) {
-        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: inNewTab.activate });
+        openBrowserTab(url, { sourcePanelId: panelId, activate: inNewTab.activate });
         return;
       }
       navigate(url);
       webviewRef.current?.focus();
     },
-    [navigate, panelApi],
+    [navigate, panelId],
   );
 
   // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
@@ -527,7 +553,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       {contextMenu && (
         <BrowserContextMenu
           menu={contextMenu}
-          panelId={panelApi.id}
+          panelId={panelId}
           onOpenChange={(open) => setContextMenu((menu) => menu && { ...menu, open })}
         />
       )}

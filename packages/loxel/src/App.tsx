@@ -3,6 +3,7 @@ import type { DockviewApi } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useEffect, useRef } from "react";
 
+import { BrowserPagePool } from "./components/browser/BrowserPagePool";
 import { CommandPaletteModal } from "./components/command-palette/CommandPaletteModal";
 import { HomeCenter } from "./components/dockview/CenterHost";
 import { LAYOUT_VERSION, createDefaultLayout } from "./components/dockview/default-layout";
@@ -116,6 +117,8 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* After the layouts, so its pages stack over their slots there. */}
+      <BrowserPagePool />
       <AddProjectWizard />
       <SettingsModal />
       <SearchModal />
