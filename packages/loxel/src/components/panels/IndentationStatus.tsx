@@ -23,7 +23,7 @@ export function IndentationStatus() {
         className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
       >
         {label}
-        <span className="text-muted-foreground/70">({source})</span>
+        <span className="text-muted-foreground/85 dark:text-muted-foreground/70">({source})</span>
       </button>
       <span title="Line endings">{entry.eol}</span>
     </>

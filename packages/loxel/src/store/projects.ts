@@ -80,6 +80,8 @@ interface ProjectState {
   projects: EnrichedProject[];
   /** The server user's home directory (null until projects are first fetched). */
   homeDir: string | null;
+  /** Where Home's drafts are kept (`ProjectsResponse.homeDraftsDir`). */
+  homeDraftsDir: string | null;
   sidebarExpanded: boolean;
   /** Width of the sidebar when expanded (the collapsed width is fixed). */
   sidebarWidth: number;
@@ -92,8 +94,11 @@ interface ProjectState {
    */
   autoExpandedProjectIds: string[];
 
+  /** Whether the first project list fetch has settled, so an empty `projects` means none. */
+  projectsFetched: boolean;
   fetchProjects: () => Promise<void>;
-  addProject: (path: string, name?: string) => Promise<void>;
+  /** Refresh the list after the server added `project`, and switch to it. */
+  showAddedProject: (project: Project) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   updateProject: (id: string, updates: { name?: string }) => Promise<void>;
@@ -109,29 +114,35 @@ export const useProjectStore = create<ProjectState>()(
     (set, get) => ({
       projects: [],
       homeDir: null,
+      homeDraftsDir: null,
       sidebarExpanded: false,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
       autoExpandedProjectIds: [],
+      projectsFetched: false,
 
       fetchProjects: async () => {
         try {
           const data = await api.getProjects();
-          set({ projects: data.projects, homeDir: data.homeDir });
+          set({
+            projects: data.projects,
+            homeDir: data.homeDir,
+            homeDraftsDir: data.homeDraftsDir,
+          });
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
           useWorktreeStore.getState().applyEnrichedProjects(data.projects);
         } finally {
           // Settle even on failure, so waiting opens report "no project" instead of hanging
           projectsLoaded.resolve();
+          if (!get().projectsFetched) set({ projectsFetched: true });
         }
       },
 
-      addProject: async (path, name) => {
-        const project = await api.addProject(path, name);
+      showAddedProject: async (project) => {
         // Fetch updated project list so deriveProject() works
         await get().fetchProjects();
-        // Server initializes the project during addProject (starts watcher).
+        // The server initialized the project when it added it (started its watcher).
         // Switch to the new project's worktree (or project root for non-bare).
         const { useWorktreeStore } = await import("./worktrees");
         const added = get().projects.find((candidate) => candidate.id === project.id);

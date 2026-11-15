@@ -64,6 +64,11 @@ export function isActionEnabledHere(actionId: ActionId): boolean {
   return getActionDef(actionId)?.isEnabled?.() ?? true;
 }
 
+/** The action a binding's actions run where focus is now, if any. Tree actions are widget-local. */
+export function enabledActionOf(actions: readonly ActionId[]): ActionId | undefined {
+  return actions.find((id) => !id.startsWith("tree.") && isActionEnabledHere(id));
+}
+
 /**
  * Resolve one keystroke against the active bindings, advancing chord state.
  * Tree actions are widget-local (handled by the focused tree), and actions disabled where focus
@@ -76,10 +81,10 @@ export function resolveKeystroke(combo: KeyCombo): KeystrokeResult {
   const pending = usePendingChordStore.getState().steps;
 
   if (pending.length === 0) {
-    const actionId = lookup.get(combo);
-    if (actionId?.startsWith("tree.")) return { kind: "unbound" };
-    if (actionId) {
-      return isActionEnabledHere(actionId) ? { kind: "action", actionId } : { kind: "unbound" };
+    const actions = lookup.get(combo);
+    if (actions) {
+      const actionId = enabledActionOf(actions);
+      return actionId ? { kind: "action", actionId } : { kind: "unbound" };
     }
     if (chordPrefixes.has(combo)) {
       setSteps([combo]);
@@ -93,10 +98,11 @@ export function resolveKeystroke(combo: KeyCombo): KeystrokeResult {
   );
   for (const step of candidates) {
     const sequence = toKeyBinding([...pending, step]);
-    const actionId = lookup.get(sequence);
-    if (actionId) {
+    const actions = lookup.get(sequence);
+    if (actions) {
       setSteps([]);
-      return isActionEnabledHere(actionId) ? { kind: "action", actionId } : { kind: "cancelled" };
+      const actionId = enabledActionOf(actions);
+      return actionId ? { kind: "action", actionId } : { kind: "cancelled" };
     }
     if (chordPrefixes.has(sequence)) {
       setSteps([...pending, step]);

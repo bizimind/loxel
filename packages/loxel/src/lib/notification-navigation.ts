@@ -5,7 +5,6 @@
  * click-to-navigate in the notification center overlay.
  */
 import type { ServerNotification } from "@/api/notification-model";
-import { activatePanel } from "@/store/layout-actions";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -14,7 +13,7 @@ function activatePanelById(panelId: string, retries = 1): void {
   const api = getCenterApi();
   const panel = api?.panels.find((p) => p.id === panelId);
   if (api && panel) {
-    activatePanel(api, panel);
+    panel.api.setActive();
     return;
   }
   // Panel may not be mounted yet after worktree switch — retry after layout settles
@@ -32,7 +31,11 @@ export function navigateToNotification(notification: ServerNotification): void {
 
   const wtStore = useWorktreeStore.getState();
 
-  if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
+  if (worktreePath === null && wtStore.activeWorktreePath !== null) {
+    // A Home terminal's: go Home first, then activate the panel after layout settles
+    wtStore.showHome();
+    requestAnimationFrame(() => activatePanelById(panelId));
+  } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
     // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)

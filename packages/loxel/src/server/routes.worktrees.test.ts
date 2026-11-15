@@ -56,7 +56,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
-      sendToWorktreeWindows: () => {},
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: (cwd) => (cwd === repo ? project : undefined),
       findProjectForPath: () => undefined,
@@ -73,14 +73,18 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts: {} as never,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 

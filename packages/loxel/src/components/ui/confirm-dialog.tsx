@@ -35,7 +35,7 @@ export function ConfirmDialog({
     <DialogShell open={open} onCancel={onCancel} className="w-80">
       <div className="px-4 pt-4 pb-2">
         <h3 className="text-foreground text-sm font-medium">{title}</h3>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</p>
+        <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>
       </div>
       <div className="flex items-center justify-end gap-2 px-4 py-3">
         <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onCancel}>

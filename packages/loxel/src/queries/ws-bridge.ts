@@ -2,10 +2,13 @@ import { useEffect } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { HOME_KEY } from "@/api/home-model";
+import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder, openTerminal } from "@/lib/open-path";
+import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
@@ -14,6 +17,7 @@ import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -42,7 +46,7 @@ function invalidateEditorConfigBelow(dir: string): void {
  */
 export function refreshOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   nonces: string[],
 ): void {
@@ -97,7 +101,7 @@ export function refreshOpenFile(
  */
 async function fetchIntoOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   path: string,
   nonces: string[],
@@ -129,7 +133,7 @@ async function fetchIntoOpenFile(
  */
 export async function checkOpenFileExists(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
 ): Promise<void> {
   const initial = useEditorStateStore.getState().files.get(editorKey);
@@ -180,13 +184,6 @@ export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
 
-    // On reconnect, invalidate update status so React Query refetches from the (new) server.
-    // This clears the stale "installing" state when the version didn't change (failed update
-    // fallback) — if the version DID change, the WsClient reloads the page instead.
-    const unsubReconnect = wsClient.onReconnect(() => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.updateStatus() });
-    });
-
     const getLogsIsActive = (): boolean => {
       const { activeLeftPanel, activeBottomPanel, activeRightPanel } =
         getCurrentWorktreeToolsBar().getState();
@@ -196,6 +193,18 @@ export function useWsBridge(): void {
     };
 
     const unsubscribe = wsClient.subscribe((message: WsMessage) => {
+      if (isToolchainChangedMessage(message)) {
+        const toolchain = toolchainStatuses.find((t) => t.changedMessage === message.type);
+        if (!toolchain) return;
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.toolchainStatus(
+            toolchain.id,
+            deriveProjectPath(message.wtPath),
+            message.wtPath,
+          ),
+        });
+        return;
+      }
       switch (message.type) {
         // --- Worktree-scoped events (carry wtPath) ---
 
@@ -242,15 +251,17 @@ export function useWsBridge(): void {
             invalidateEditorConfigBelow(changedPath.slice(0, -EDITORCONFIG_SUFFIX.length + 1));
           }
 
+          // Home's drafts belong to no worktree, like the editors that show them.
+          const editorWtPath = message.wtPath === HOME_KEY ? undefined : message.wtPath;
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
             if (entry.filePath === changedPath) {
-              refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
+              refreshOpenFile(projectPath, editorWtPath, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
               // file reports itself), so just re-check that, and re-read the `.editorconfig`s
               // that may have come or gone with it.
-              void checkOpenFileExists(projectPath, message.wtPath, editorKey);
+              void checkOpenFileExists(projectPath, editorWtPath, editorKey);
               queryClient.invalidateQueries({
                 queryKey: queryKeys.editorConfigPrefix(entry.filePath),
               });
@@ -318,12 +329,6 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "python_env_changed":
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.pythonEnv(deriveProjectPath(message.wtPath), message.wtPath),
-          });
-          break;
-
         case "external_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(
@@ -334,10 +339,7 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath, {
-            placement: message.data.placement,
-            focus: message.data.focus,
-          });
+          void openFile(message.data);
           break;
 
         case "open_folder":
@@ -349,7 +351,7 @@ export function useWsBridge(): void {
           break;
 
         case "open_url":
-          dispatchLoxelEvent("loxel-create-browser", message.data);
+          void openUrl(message.wtPath, message.data);
           break;
 
         // --- Project-scoped events (carry projectPath) ---
@@ -424,11 +426,11 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "update_status_changed":
-          queryClient.setQueryData(queryKeys.updateStatus(), message.data);
-          break;
-
         // --- Notification events (global) ---
+
+        case "schema_consent_changed":
+          useSchemaConsentStore.setState(message.data);
+          break;
 
         case "notifications_sync":
           usePanelNotificationStore.getState().syncAll(message.data);
@@ -446,19 +448,25 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().clearFromServer();
           break;
 
+        case "repo_trust_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          // What a toolchain reports can depend on trust, such as a shim's version.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
+          break;
+
         case "store_updated":
           if (message.nonce && consumeNonce(message.nonce)) break;
           applyStoreUpdate(message.key, message.state);
           break;
 
+        case "terminals_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
+          break;
+
         case "terminal_exit":
+        case "terminal_notice":
         case "terminal_state":
         case "error":
-        case "agent_event":
-        case "agent_exit":
-        case "agent_sessions":
-        case "agent_replay_done":
-        case "agent_error":
           break;
 
         default: {
@@ -471,7 +479,6 @@ export function useWsBridge(): void {
     });
 
     return () => {
-      unsubReconnect();
       unsubscribe();
       wsClient.disconnect();
     };

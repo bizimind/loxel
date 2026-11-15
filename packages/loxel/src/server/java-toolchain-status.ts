@@ -1,0 +1,141 @@
+import {
+  type JavaEnvCandidatesResponse,
+  type JavaEnvResponse,
+  javaToolchain,
+} from "@/api/java-env-model";
+
+import {
+  getJavaEnvResolution,
+  type JavaEnvUpdate,
+  listJavaRuntimes,
+  normalizeJavaOverride,
+  refreshAllJavaEnvs,
+  refreshJavaEnv,
+  resolveJavaEnv,
+  subscribeJavaEnv,
+} from "./java-env";
+import { canRunJdtls, jdtlsHostCrossed } from "./java-lsp-manager";
+import {
+  getJavaOverride,
+  javaOverrideStoreKey,
+  onJavaOverrideChange,
+  setJavaOverride,
+} from "./java-override-store";
+import {
+  getJavaProjectIssue,
+  onJavaProjectIssueChange,
+  reloadJavaProjects,
+} from "./java-project-import";
+import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
+import { error, json } from "./response-helpers";
+import type { ToolchainStatusModule } from "./toolchain-status-module";
+
+async function javaEnvResponse(wtPath: string): Promise<JavaEnvResponse> {
+  const { env, ignoredJavaHome } = await getJavaEnvResolution(wtPath);
+  return {
+    env,
+    overridePath: getJavaOverride(wtPath),
+    ignoredJavaHome,
+    projectIssue: getJavaProjectIssue(wtPath),
+  };
+}
+
+// GET /api/java-env?wt= — The JDK Loxel uses for a worktree
+async function handleJavaEnv(wtPath: string): Promise<Response> {
+  return json(await javaEnvResponse(wtPath));
+}
+
+// GET /api/java-env/candidates?wt= — JDKs the user can choose for a worktree
+async function handleJavaEnvCandidates(wtPath: string): Promise<Response> {
+  const [candidates, automatic] = await Promise.all([
+    listJavaRuntimes(wtPath),
+    resolveJavaEnv(wtPath, { overridePath: null }),
+  ]);
+  const response: JavaEnvCandidatesResponse = {
+    candidates,
+    automatic: automatic.env,
+    overridePath: getJavaOverride(wtPath),
+  };
+  return json(response);
+}
+
+// POST /api/java-env/override — Choose a worktree's JDK, or (null) return to detection
+async function handleJavaOverride(
+  wtPath: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const { javaHome } = body;
+  if (javaHome !== null && typeof javaHome !== "string") {
+    return error("javaHome must be a string or null", 400);
+  }
+  let chosen: string | null = null;
+  if (javaHome !== null) {
+    try {
+      chosen = await normalizeJavaOverride(wtPath, javaHome);
+    } catch (err) {
+      return error(err instanceof Error ? err.message : "Invalid JDK", 400);
+    }
+  }
+  setJavaOverride(wtPath, chosen);
+  return json(await javaEnvResponse(wtPath));
+}
+
+// POST /api/java-env/reload-projects — Load a worktree's projects again
+async function handleJavaReloadProjects(wtPath: string): Promise<Response> {
+  reloadJavaProjects(wtPath);
+  return json({ ok: true });
+}
+
+/**
+ * Like {@link subscribeJavaEnv}, and also reports a change when a JDK that can run the language
+ * server appears or goes, though the worktree's own JDK stays: a client whose server could not start
+ * for lack of one tries again on that message. So does a change in what holds its projects back.
+ */
+function subscribeJavaStatus(
+  wtPath: string,
+  listener: (update: Pick<JavaEnvUpdate, "changed">) => void,
+): () => void {
+  let couldRun: boolean | null = null;
+  const check = async (): Promise<boolean> => {
+    const canRun = canRunJdtls(await listJavaRuntimes(wtPath), {
+      wtPath,
+      repoTrusted: isRepoTrusted(wtPath),
+    });
+    const crossed = jdtlsHostCrossed(couldRun, canRun);
+    couldRun = canRun;
+    return crossed;
+  };
+  const stopIssues = onJavaProjectIssueChange((changedPath) => {
+    if (changedPath === wtPath) listener({ changed: true });
+  });
+  const stopEnv = subscribeJavaEnv(wtPath, (update) => {
+    void check().then((crossed) => listener({ ...update, changed: update.changed || crossed }));
+  });
+  // Trust can decide whether a JDK inside the repository may run the server.
+  const stopTrust = onRepoTrustChange(() => {
+    void check().then((crossed) => {
+      if (crossed) listener({ changed: true });
+    });
+  });
+  return () => {
+    stopIssues();
+    stopEnv();
+    stopTrust();
+  };
+}
+
+export const javaToolchainStatus: ToolchainStatusModule = {
+  toolchain: javaToolchain,
+  subscribe: subscribeJavaStatus,
+  refresh: refreshJavaEnv,
+  refreshAll: refreshAllJavaEnvs,
+  onOverrideChange: onJavaOverrideChange,
+  overrideStoreKey: javaOverrideStoreKey,
+  routes: {
+    GET: { "/api/java-env": handleJavaEnv, "/api/java-env/candidates": handleJavaEnvCandidates },
+    POST: {
+      "/api/java-env/override": handleJavaOverride,
+      "/api/java-env/reload-projects": handleJavaReloadProjects,
+    },
+  },
+};

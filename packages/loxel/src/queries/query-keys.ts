@@ -38,10 +38,18 @@ export const queryKeys = {
     ["detachedFiles", projectPath, wtPath] as const,
   externalFiles: (projectPath: string | null, wtPath: string | null) =>
     ["externalFiles", projectPath, wtPath] as const,
-  pythonEnv: (projectPath: string | null, wtPath: string | null) =>
-    ["pythonEnv", projectPath, wtPath] as const,
-  /** Prefix key for every worktree's Python interpreter. */
-  pythonEnvAll: () => ["pythonEnv"] as const,
+  toolchainStatus: (toolchainId: string, projectPath: string | null, wtPath: string | null) =>
+    ["toolchainStatus", projectPath, wtPath, toolchainId] as const,
+  /** Prefix key for every worktree's status of every language toolchain. */
+  toolchainStatusAll: () => ["toolchainStatus"] as const,
+  repoTrust: (projectPath: string | null, wtPath: string | null) =>
+    ["repoTrust", projectPath, wtPath] as const,
+  /** Every repository's answer, for Settings > Security; under {@link repoTrustAll}. */
+  repoTrustList: () => ["repoTrust", "list"] as const,
+  /** Prefix key for every worktree's repository trust, and the list of every repository's. */
+  repoTrustAll: () => ["repoTrust"] as const,
+  /** `GET /api/terminals`; invalidated by `terminals_changed`. */
+  runningTerminals: () => ["runningTerminals"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

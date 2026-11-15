@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { DockviewApi, DockviewComponent } from "dockview-react";
 
@@ -21,8 +21,13 @@ let diskContent: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
 let failWrites = false;
 const actualClient = await import("@/api/client");
+const createdDrafts: string[] = [];
 mock.module("@/api/client", () => ({
   ...actualClient,
+  createDetachedFile: async (options: { wt: string; prefix: string; ext: string }) => {
+    createdDrafts.push(options.wt);
+    return { name: "Note 1.md", path: `/drafts/${options.wt}/Note 1.md` };
+  },
   getFileContentByPath: async (path: string) => {
     const content = diskContent[path];
     if (content === undefined) throw new actualClient.ApiError("File not found", 404, "ENOENT");
@@ -37,16 +42,22 @@ mock.module("@/api/client", () => ({
 
 const {
   createBrowser,
+  createEditor,
   createTerminal,
   duplicateComparison,
+  duplicatePatchDiff,
   handleFileDeleted,
   handleFileMoved,
   openBrowserTab,
   openCompareFiles,
   openFileBacked,
+  openPatchDiff,
+  patchDiffTitle,
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
+const { useWorktreeStore } = await import("@/store/worktrees");
+const { useProjectStore } = await import("@/store/projects");
 
 /** A center dockview with two groups: `left` (a.ts, b.ts) and `right` (c.ts). */
 function setup() {
@@ -79,7 +90,11 @@ function tabIds(api: DockviewApi, groupIndex: number) {
   return api.groups[groupIndex]!.panels.map((p) => p.id);
 }
 
+// Most panels belong to a worktree, so the tests run in one; Home's test leaves it.
+beforeEach(() => useWorktreeStore.setState({ activeWorktreePath: "/repo" }));
+
 afterEach(() => {
+  useWorktreeStore.setState({ activeWorktreePath: null });
   setCenterApi(null);
   document.body.innerHTML = "";
   useEditorStateStore.setState({ files: new Map() });
@@ -324,6 +339,42 @@ describe("handleFileMoved", () => {
 describe("placement", () => {
   const ids = (panels: { id: string }[]) => panels.map((p) => p.id);
 
+  test("only panels that need no worktree open in Home", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    const { api } = setup();
+
+    openCompareFiles("/repo/a.ts", "/repo/b.ts");
+    openFileBacked("codeEditor", "/repo/d.ts");
+    createBrowser("https://example.com");
+
+    expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
+    expect(api.getPanel("codeeditor-/repo/d.ts")).toBeUndefined();
+    expect(api.panels.some((p) => p.id.startsWith("browser-"))).toBe(true);
+  });
+
+  test("a Home plan is one of Home's drafts, belonging to no worktree", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    const { api } = setup();
+
+    await createEditor();
+
+    expect(createdDrafts.at(-1)).toBe("home");
+    expect(api.getPanel("editor-/drafts/home/Note 1.md")?.params).toEqual({
+      filePath: "/drafts/home/Note 1.md",
+    });
+  });
+
+  test("a Home terminal starts in the home directory and belongs to no worktree", () => {
+    useWorktreeStore.setState({ activeWorktreePath: null });
+    useProjectStore.setState({ homeDir: "/Users/me" });
+    const { api } = setup();
+
+    createTerminal({ terminalId: "t" });
+
+    expect(api.getPanel("terminal-t")?.params).toEqual({ terminalId: "t", cwd: "/Users/me" });
+    useProjectStore.setState({ homeDir: null });
+  });
+
   test("a new panel opens as a tab in the active tab's group by default", () => {
     const { api, a } = setup();
     a.api.setActive();
@@ -495,6 +546,58 @@ describe("placement", () => {
     expect(api.activePanel?.id).toBe(a.id);
   });
 
+  test("a batch's first panel is placed as asked and the rest join its group", () => {
+    const { api } = setup();
+    const placement = { split: "right" as const, batch: "b1" };
+
+    createBrowser("https://example.com/1", { placement });
+    openFileBacked("codeEditor", "/repo/new.ts", { placement });
+    createBrowser("https://example.com/2", { placement });
+
+    expect(api.groups).toHaveLength(3);
+    const last = api.groups[2]!.panels;
+    expect(last).toHaveLength(3);
+    expect(last[1]!.id).toBe("codeeditor-/repo/new.ts");
+  });
+
+  test("without focus a batch keeps the active tab and still shares one group", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    const placement = { split: "right" as const, batch: "b2" };
+
+    createBrowser("https://example.com/1", { placement, focus: false });
+    createBrowser("https://example.com/2", { placement, focus: false });
+
+    expect(api.activePanel?.id).toBe(a.id);
+    expect(api.groups).toHaveLength(3);
+    expect(api.groups.map((g) => g.panels.length).toSorted((x, y) => x - y)).toEqual([1, 2, 2]);
+  });
+
+  test("an open file in a batch moves to the batch's group", () => {
+    const { api, c } = setup();
+    const placement = { split: "down" as const, batch: "b3" };
+
+    createBrowser("https://example.com", { placement });
+    openFileBacked("codeEditor", "/repo/a.ts", { placement });
+
+    const moved = api.getPanel("codeeditor-/repo/a.ts")!;
+    const browser = api.panels.find((p) => p.id.startsWith("browser-"))!;
+    expect(moved.group).toBe(browser.group);
+    expect(moved.group).not.toBe(c.group);
+  });
+
+  test("another batch, or another layout, starts its own group", () => {
+    const { api } = setup();
+
+    createBrowser("https://example.com/1", { placement: { split: "right", batch: "b4" } });
+    createBrowser("https://example.com/2", { placement: { split: "right", batch: "b5" } });
+    expect(api.groups).toHaveLength(4);
+
+    const other = setup();
+    createBrowser("https://example.com/3", { placement: { split: "right", batch: "b5" } });
+    expect(other.api.groups).toHaveLength(3);
+  });
+
   test("without focus a browser tab added behind the active tab leaves its content shown", () => {
     const { api, a } = setup();
     a.api.setActive();
@@ -614,5 +717,60 @@ describe("compare panels", () => {
     a.api.setActive();
     duplicateComparison({ split: "right" });
     expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
+  });
+});
+
+describe("patch diff panels", () => {
+  const PATCH = "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const patchPanels = (api: DockviewApi) => api.panels.filter((p) => p.id.startsWith("patchdiff-"));
+
+  test("open a patch in its own panel, and focus it when the same block opens again", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+
+    const [panel] = patchPanels(api);
+    expect(panel?.view.contentComponent).toBe("patchDiff");
+    expect(panel?.title).toBe("app.ts patch");
+    expect(panel?.params).toEqual({ patch: PATCH, sourcePath: "docs/notes.md" });
+    expect(api.activePanel).toBe(panel);
+    // Opened as a tab next to the markdown editor it came from.
+    expect(panel?.group).toBe(a.group);
+
+    a.api.setActive();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+    expect(patchPanels(api)).toHaveLength(1);
+    expect(api.activePanel).toBe(panel);
+
+    // Edited text is another patch: a panel of its own, the first keeps what it opened with.
+    openPatchDiff({ patch: `${PATCH}+c\n`, sourcePath: "docs/notes.md" });
+    expect(patchPanels(api)).toHaveLength(2);
+    expect(panel?.params?.patch).toBe(PATCH);
+  });
+
+  test("a split duplicates the patch panel it starts from", () => {
+    const { api } = setup();
+    openPatchDiff({ patch: PATCH, sourcePath: "docs/notes.md" });
+    duplicatePatchDiff({ split: "right" });
+
+    const panels = patchPanels(api);
+    expect(panels).toHaveLength(2);
+    expect(panels[1]!.params).toEqual(panels[0]!.params);
+    expect(panels[1]!.group).not.toBe(panels[0]!.group);
+  });
+
+  test("a split from a panel that is not a patch opens nothing", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    duplicatePatchDiff({ split: "right" });
+    expect(patchPanels(api)).toHaveLength(0);
+  });
+
+  test("the title names the patch's one file, or else the markdown file it came from", () => {
+    const sourcePath = "docs/notes.md";
+    expect(patchDiffTitle({ patch: PATCH, sourcePath })).toBe("app.ts patch");
+    const twoFiles = `${PATCH}--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-x\n+y\n`;
+    expect(patchDiffTitle({ patch: twoFiles, sourcePath })).toBe("notes.md patch");
+    expect(patchDiffTitle({ patch: "-old\n+new\n", sourcePath })).toBe("notes.md patch");
   });
 });

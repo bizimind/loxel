@@ -1,6 +1,6 @@
 # cli-common
 
-Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, Axiom logging setup, and the self-update system for compiled binaries. Used by [wt](../wt), [excalidraw](../excalidraw), [coding-agent](../coding-agent), and [code-analysis](../code-analysis).
+Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, Axiom logging setup, and the self-update system for compiled binaries. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis).
 
 Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
 

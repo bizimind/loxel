@@ -31,7 +31,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 12
           cache: true
       - uses: oven-sh/setup-bun@v2
         with:

@@ -3,9 +3,13 @@ import { describe, expect, mock, test } from "bun:test";
 import * as monaco from "monaco-editor";
 
 import { createEditorOpener } from "./editor-opener";
+import { registerVirtualDocumentScheme } from "./virtual-documents";
 
-const sourceAt = (uri: string) =>
-  ({ getModel: () => ({ uri: monaco.Uri.parse(uri) }) }) as unknown as monaco.editor.ICodeEditor;
+const sourceAt = (uri: string, peek: object | null = null) =>
+  ({
+    getModel: () => ({ uri: monaco.Uri.parse(uri) }),
+    getContribution: (id: string) => (id === "editor.contrib.referencesController" ? peek : null),
+  }) as unknown as monaco.editor.ICodeEditor;
 
 function open(resource: string, source = sourceAt("loxel://HEAD/repo/main.ts")) {
   const openFile = mock();
@@ -18,6 +22,29 @@ function open(resource: string, source = sourceAt("loxel://HEAD/repo/main.ts")) 
 }
 
 describe("createEditorOpener", () => {
+  test("opens a connected server's read-only document in its own tab, canonically encoded", () => {
+    const scheme = registerVirtualDocumentScheme({ scheme: "opener-doc" }, "java");
+    const openFile = mock();
+    const openVirtual = mock();
+    const opener = createEditorOpener(openFile, openVirtual);
+    const resource = monaco.Uri.parse("opener-doc://contents/a/List.java?=p/x%28List.class");
+    const source = sourceAt("file:///repo/main.java");
+
+    // No connection: Monaco's to handle, like any other unknown scheme.
+    expect(opener.openCodeEditor(source, resource, new monaco.Position(1, 1))).toBe(false);
+
+    const end = scheme.connected({ request: async () => null });
+    expect(opener.openCodeEditor(source, resource, new monaco.Range(3, 5, 3, 9))).toBe(true);
+    expect(openVirtual.mock.calls).toEqual([[resource.toString(), { line: 3, column: 5 }]]);
+    expect(openFile).not.toHaveBeenCalled();
+
+    // A definition inside the document itself is revealed in place.
+    expect(
+      opener.openCodeEditor(sourceAt(resource.toString()), resource, new monaco.Position(2, 1)),
+    ).toBe(false);
+    end();
+  });
+
   test("opens file: and loxel://HEAD targets at the selection's start, decoded", () => {
     expect(open("file:///usr/lib/python3.12/os.py")).toEqual({
       handled: true,
@@ -39,6 +66,17 @@ describe("createEditorOpener", () => {
       ["/repo/b.py", { line: 7, column: 2 }],
       ["/repo/c.py", { line: 1, column: 1 }],
     ]);
+  });
+
+  test("closes the source's peek widget when its pick opens in another tab", () => {
+    const closeWidget = mock();
+    const source = sourceAt("file:///repo/main.py", { closeWidget });
+
+    expect(open("file:///repo/b.py", source).handled).toBe(true);
+    expect(closeWidget.mock.calls).toEqual([[false]]);
+    // A pick in the source's own file is revealed in the peek by Monaco.
+    expect(open("file:///repo/main.py", source).handled).toBe(false);
+    expect(closeWidget).toHaveBeenCalledTimes(1);
   });
 
   test("leaves a target in the source's own model to Monaco", () => {

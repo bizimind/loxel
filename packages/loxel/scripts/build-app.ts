@@ -8,11 +8,18 @@
  * present it is embedded; otherwise the app is signed with the unprovisioned
  * entitlements so it still launches, with passkeys disabled. The release
  * workflow passes --config.mac.provisioningProfile explicitly instead.
+ *
+ * Releases ship a patched Electron (docs/PATCHED_ELECTRON.md). When `fetch-electron.ts` or
+ * `build-electron.ts` has put the zip for the target architecture in build/electron-dist, and its
+ * marker names the current build ID, it is packaged; with no zip the app gets stock Electron from
+ * node_modules, without the patches, and a zip from another build stops the build.
  */
 import fs from "node:fs";
 import path from "node:path";
 
 import { $ } from "bun";
+
+import { DIST_DIR, buildIdMarker, currentBuild, distZipName, parseArch } from "./electron-dist";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const profile = path.join(packageRoot, "build", "embedded.provisionprofile");
@@ -26,6 +33,27 @@ if (args.some((arg) => arg.startsWith("--config.mac.provisioningProfile"))) {
 } else {
   console.log("[build-app] no build/embedded.provisionprofile; passkeys will be disabled");
   args.push("--config.mac.entitlements=assets/entitlements.mac.unprovisioned.plist");
+}
+
+const arch = parseArch(
+  args.includes("--x64") ? "x64" : args.includes("--arm64") ? "arm64" : process.arch,
+);
+const build = currentBuild();
+const patchedZip = path.join(DIST_DIR, distZipName(build.version, arch));
+const marker = buildIdMarker(patchedZip);
+const patchedBuildId = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").trim() : undefined;
+if (args.some((arg) => arg.startsWith("--config.electronDist"))) {
+  console.log("[build-app] using the Electron given on the command line");
+} else if (fs.existsSync(patchedZip) && patchedBuildId === build.id) {
+  console.log(`[build-app] packaging patched Electron ${build.id} (${patchedZip})`);
+  args.push(`--config.electronDist=${DIST_DIR}`);
+} else if (fs.existsSync(patchedZip)) {
+  throw new Error(
+    `${patchedZip} is from build ${patchedBuildId ?? "unknown"}, not ${build.id}: ` +
+      "fetch or build the current one (docs/PATCHED_ELECTRON.md), or delete it to package stock Electron",
+  );
+} else {
+  console.log("[build-app] no patched Electron in build/electron-dist; packaging stock Electron");
 }
 
 await $`pnpm exec electron-builder ${args}`.cwd(packageRoot);

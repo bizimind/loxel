@@ -6,26 +6,20 @@ import {
   GlobeIcon,
   NotepadTextIcon,
   PenLineIcon,
-  SparklesIcon,
   TerminalSquareIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
-import {
-  createAgent,
-  createBrowser,
-  createDrawing,
-  createEditor,
-  createTerminal,
-} from "@/lib/panel-creators";
+import { createBrowser, createDrawing, createEditor, createTerminal } from "@/lib/panel-creators";
+import { toolchainStatusItems } from "@/lib/toolchain-status-items";
 import { useStatusQuery } from "@/queries/use-repo-queries";
 import { toKeyBinding } from "@/store/keybindings/key-combo";
 import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
 import { LanguageServerStatus } from "./LanguageServerStatus";
-import { PythonInterpreterStatus } from "./PythonInterpreterStatus";
+import { RepoTrustStatus } from "./RepoTrustStatus";
 
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
 function PendingChordIndicator() {
@@ -91,12 +85,19 @@ export function StatusBar() {
               </Badge>
             )}
             {status.unstaged.length > 0 && (
-              <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+              <Badge
+                variant="secondary"
+                // Light tints the counts with the file trees' git status colors
+                className="bg-vcs-modified/10 text-vcs-modified dark:bg-secondary dark:text-secondary-foreground h-4 px-1.5 text-[10px] not-dark:font-semibold"
+              >
                 {status.unstaged.length} modified
               </Badge>
             )}
             {status.untracked.length > 0 && (
-              <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+              <Badge
+                variant="outline"
+                className="bg-vcs-untracked/10 text-vcs-untracked dark:text-foreground dark:border-border h-4 border-transparent px-1.5 text-[10px] not-dark:font-semibold dark:bg-transparent"
+              >
                 {status.untracked.length} untracked
               </Badge>
             )}
@@ -111,9 +112,13 @@ export function StatusBar() {
 
       <IndentationStatus />
 
-      <PythonInterpreterStatus />
+      {toolchainStatusItems.map(({ toolchain, StatusItem }) => (
+        <StatusItem key={toolchain.id} />
+      ))}
 
       <LanguageServerStatus />
+
+      <RepoTrustStatus />
 
       <PendingChordIndicator />
 
@@ -124,15 +129,6 @@ export function StatusBar() {
           Loading...
         </div>
       )}
-
-      {/* New agent button */}
-      <button
-        onClick={() => createAgent()}
-        title="New Agent"
-        className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
-      >
-        <SparklesIcon className="size-3.5" />
-      </button>
 
       {/* New editor button */}
       <button

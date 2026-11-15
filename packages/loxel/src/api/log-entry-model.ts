@@ -1,11 +1,16 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-/** All known log categories. */
+/** A language server's name: its route (`/ws/<name>`) and log category. */
+export type LspName = `${string}-lsp`;
+
+/**
+ * The fixed log categories, in the order the logs panel lists them. A language server added since
+ * needs no entry: any `LspName` is a category, and the panel lists the ones its clients connect to.
+ */
 export const LOG_CATEGORIES = [
   "server",
   "git",
   "terminal",
-  "agent",
   "files",
   "watcher",
   "detached",
@@ -15,6 +20,7 @@ export const LOG_CATEGORIES = [
   "terraform-lsp",
   "python-lsp",
   "ruff-lsp",
+  "mypy-lsp",
   "astro-lsp",
   "xml-lsp",
   "toml-lsp",
@@ -30,7 +36,11 @@ export const LOG_CATEGORIES = [
   "perf",
 ] as const;
 
-export type LogCategory = (typeof LOG_CATEGORIES)[number];
+export type LogCategory = (typeof LOG_CATEGORIES)[number] | LspName;
+
+export function isLogCategory(value: string): value is LogCategory {
+  return (LOG_CATEGORIES as readonly string[]).includes(value) || /^[a-z0-9-]+-lsp$/.test(value);
+}
 
 export interface LogEntry {
   /** Monotonic counter, unique per server lifetime. */
@@ -68,4 +78,28 @@ export interface ChildLogger {
   flush(): Promise<void>;
   /** Create a sub-child with additional default context. */
   with(defaultCtx: Record<string, unknown>): ChildLogger;
+}
+
+function serializeErrorValue(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    const result: Record<string, unknown> = { message: err.message, stack: err.stack };
+    if (err.cause) {
+      result.cause = serializeErrorValue(err.cause);
+    }
+    return result;
+  }
+  return { message: String(err) };
+}
+
+/** A log context ready for JSON: an `error` that is an `Error` becomes its message, stack and causes. */
+export function serializeLogContext(ctx: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(ctx)) {
+    if (key === "error" && value instanceof Error) {
+      result[key] = serializeErrorValue(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }

@@ -16,7 +16,7 @@ export function ModalErrorBoundary({ name, onClose, children }: ModalErrorBounda
     <ErrorBoundary
       fallbackRender={({ error, resetErrorBoundary }) => (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
-          <div className="bg-popover border-border flex w-80 flex-col items-center gap-3 rounded-lg border p-8 shadow-2xl">
+          <div className="bg-popover border-border flex w-80 flex-col items-center gap-3 rounded-lg border p-8 shadow-(--shadow-dialog)">
             <p className="text-foreground text-sm font-medium">{name} encountered an error</p>
             <p className="text-muted-foreground max-w-xs text-center text-xs text-balance">
               {error instanceof Error ? error.message : String(error)}

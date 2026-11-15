@@ -7,16 +7,11 @@ export type LogLevel = "error" | "warn" | "info" | "debug";
  * Log source identifiers for different packages/services.
  */
 export type LogSource =
-  | "ccm"
-  | "ccm-daemon"
-  | "ccm-mobile"
-  | "coding-agent"
   | "channel-worker"
   | "convex"
   | "channel"
   | "remote-terminal"
   | "remote-claude"
-  | "remote-coding-agent"
   | "wt";
 
 /**

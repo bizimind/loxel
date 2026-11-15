@@ -1,36 +1,79 @@
 /**
- * Terminal sessions keyed by the terminal ID. Spawns the shell on first attach (or up front for
- * `loxel terminal`), tracks orphaned sessions, and owns the shell environment. See
- * docs/TERMINALS.md.
+ * Terminal sessions keyed by the terminal ID, and the policy around them: the shell and its
+ * environment, spawning on first attach (or up front for `loxel terminal`), the client each session
+ * streams to, orphans, worktree lifecycle and which notification sequences count. The sessions
+ * themselves run in a {@link TerminalHost}, reached only through its interface. See
+ * docs/TERMINALS.md and docs/TERMINAL_HOST.md.
  */
-import type { PythonEnv } from "@/api/python-env-model";
-import type { NotificationSequence } from "@/api/ws-protocol";
+import { z } from "zod";
+
+import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
+import type { TerminalState } from "@/api/terminal-stream";
+import type { NotificationSequence, TerminalEnd, TerminalNotice } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
+import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
+import type {
+  ForegroundProcesses,
+  OscNotificationCode,
+  TerminalHost,
+  TerminalHostEvent,
+  TerminalOutputEvent,
+  TerminalSessionEnd,
+  TerminalSessionInfo,
+} from "@/terminal-host";
 
 import { logger } from "./logger";
 import { buildShellSpawnEnv } from "./shell-env";
-import { activatePythonEnv } from "./terminal-python-env";
-import type { TerminalSink } from "./terminal-session";
-import { TerminalSession } from "./terminal-session";
+import {
+  commitToolchainEnvChange,
+  type TerminalEnvChange,
+  type TerminalToolchainSettings,
+  type ToolchainEnvContributor,
+} from "./toolchain-env-contributor";
 
 const log = logger.child("terminal");
 const textEncoder = new TextEncoder();
 
-/** How long a new shell waits for its Python environment before starting without it. */
-const PYTHON_ENV_TIMEOUT_MS = 3000;
+/** How long a new shell waits for its toolchains' environments before starting without them. */
+const TOOLCHAIN_ENV_TIMEOUT_MS = 3000;
 
-export interface TerminalSpawnOptions {
+export type TerminalOutput = Omit<TerminalOutputEvent, "type" | "id">;
+
+/** Where a session delivers messages for its attached client. */
+export interface TerminalSink {
+  sendState(state: TerminalState): void;
+  /** Output from the host, with the renderer frame to forward as is. */
+  sendOutput(output: TerminalOutput): void;
+  sendExit(end: TerminalEnd): void;
+  sendNotice(notice: TerminalNotice): void;
+}
+
+/** What the server keeps in a session's host meta, read back from the host after a restart. */
+const TerminalMetaSchema = z.object({
+  /**
+   * The worktree the panel belongs to, or null for a Home terminal; follows the worktree when it
+   * is moved.
+   */
+  worktreePath: z.string().nullable(),
+  /** The directory the shell started in. */
+  cwd: z.string(),
+  /** The window that created the terminal, if any. */
+  windowId: z.string().optional(),
+});
+export type TerminalMeta = z.infer<typeof TerminalMetaSchema>;
+
+export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   cols: number;
   rows: number;
   /** Applied only when the session is spawned. */
   cwd: string;
-  /** The panel's worktree when the shell starts elsewhere; applied only when spawned. */
+  /** The panel's worktree, absent for a Home terminal; applied only when spawned. */
   worktreePath?: string;
+  /** The window creating the terminal; applied only when spawned. */
+  windowId?: string;
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
-  /** Activate the worktree's Python environment; defaults to true. Applied only when spawned. */
-  activatePythonEnv?: boolean;
   scrollbackLines?: number;
   /**
    * Typed into the shell as if the user had entered it. Applied only by the call that spawns the
@@ -48,12 +91,27 @@ export interface TerminalAttachOptions extends TerminalSpawnOptions {
 
 export interface TerminalManagerHooks {
   isSequenceEnabled: (sequence: NotificationSequence) => boolean;
-  onNotification: (session: TerminalSession, payload: OscPayload) => void;
-  /** Called after the session has been removed. */
-  onExit: (session: TerminalSession, exitCode: number) => void;
-  /** The Python environment to activate in a new shell for this worktree; null for none. */
-  pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null>;
+  onNotification: (id: string, meta: TerminalMeta, payload: OscPayload) => void;
+  /**
+   * Called after a session that ended on its own (its program exited, or its host was lost) has
+   * been removed.
+   */
+  onExit: (id: string, end: TerminalEnd) => void;
+  /** What contributes to a new shell's environment, applied in this order. */
+  toolchainEnvs: readonly ToolchainEnvContributor[];
+  /** A session was added (spawned or adopted) or removed, for whoever lists them. */
+  onSessionsChanged?: () => void;
 }
+
+/** The setting that enables each notification sequence, and how its payload is read. */
+const OSC_NOTIFICATIONS: Record<
+  OscNotificationCode,
+  { sequence: NotificationSequence; parse: (data: string) => OscPayload | null }
+> = {
+  9: { sequence: "osc9", parse: parseOsc9 },
+  777: { sequence: "osc777", parse: parseOsc777 },
+  99: { sequence: "osc99", parse: parseOsc99 },
+};
 
 /** Build terminal-specific env: login shell PATH + TERM fallback. */
 function buildTerminalEnv(): Record<string, string | undefined> {
@@ -62,13 +120,40 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
   // as an agent's, or their own `loxel` commands would open without focus.
   for (const name of CODING_AGENT_ENV_VARS) delete env[name];
+  // Nor carry the Loxel terminal it was started from: each shell gets its own from the spawn's
+  // overrides, and a Home terminal must have no worktree, so its `loxel` opens pages in its window.
+  delete env.LOXEL_WORKTREE;
+  delete env.LOXEL_WINDOW_ID;
   return env;
+}
+
+/** What `contributor` adds to a new shell in this worktree; null when it fails or runs out of time. */
+async function resolveToolchainEnv(
+  contributor: ToolchainEnvContributor,
+  worktreePath: string,
+  timedOut: Promise<"timeout">,
+): Promise<TerminalEnvChange | null> {
+  try {
+    const change = await Promise.race([contributor.resolveForTerminal(worktreePath), timedOut]);
+    if (change !== "timeout") return change;
+    log.warn(`${contributor.name} environment took too long; starting the terminal without it`, {
+      worktreePath,
+    });
+  } catch (err) {
+    log.warn(`Could not activate the ${contributor.name} environment in a terminal`, {
+      worktreePath,
+      error: err,
+    });
+  }
+  return null;
 }
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
 interface PendingStart {
+  /** Null for a Home terminal, which belongs to no worktree. */
+  worktreePath: string | null;
   /** Resolves to null when the terminal was destroyed meanwhile. */
-  session: Promise<TerminalSession | null>;
+  session: Promise<ManagedSession | null>;
   /** The client to bind once spawned; cleared by a detach. */
   sink: TerminalSink | null;
   /** The latest size an attach or resize asked for. */
@@ -77,34 +162,144 @@ interface PendingStart {
   input: Uint8Array[];
 }
 
+/** A session running in the host, or being spawned there, as the manager sees it. */
+interface ManagedSession {
+  meta: TerminalMeta;
+  /** Chosen here for each spawn, so events from an earlier spawn under the ID can be told apart. */
+  epoch: string;
+  /** Settles when the host has answered the spawn; rejects if it failed. */
+  ready: Promise<void>;
+  /**
+   * The client the session belongs to, set as soon as it attaches, even before the host has
+   * answered; null while detached, which makes the session an orphan.
+   */
+  sink: TerminalSink | null;
+  /** The attachment of the sink's attach, 0 until it is sent; only its states reach the sink. */
+  attachment: number;
+  /** True once the sink has received its state: output from then on is its own. */
+  live: boolean;
+  /**
+   * Set once its program ended while no server was connected, and the host kept it: the next
+   * attach shows what its client missed, then its exit. It no longer counts as running, nor as an
+   * orphan to end, so a panel that mounts later still gets what it missed.
+   */
+  ended: TerminalSessionEnd | null;
+}
+
+/** What `get()` reports about a session. */
+export interface TerminalSessionView {
+  meta: TerminalMeta;
+  attached: boolean;
+}
+
 export class TerminalManager {
-  private sessions = new Map<string, TerminalSession>();
+  private sessions = new Map<string, ManagedSession>();
   private starting = new Map<string, PendingStart>();
+  /** Source of attachment numbers, unique across every session of this manager. */
+  private lastAttachment = 0;
 
-  constructor(private readonly hooks: TerminalManagerHooks) {}
+  constructor(
+    private readonly host: TerminalHost,
+    private readonly hooks: TerminalManagerHooks,
+  ) {
+    host.onEvent((event) => this.onHostEvent(event));
+  }
 
-  get(id: string): TerminalSession | undefined {
-    return this.sessions.get(id);
+  /**
+   * Take over sessions that are already running in the host, found there after a server restart.
+   * They have no client until one attaches; one whose meta this server cannot read is ended.
+   */
+  adopt(sessions: readonly TerminalSessionInfo[]): void {
+    for (const info of sessions) {
+      const meta = TerminalMetaSchema.safeParse(info.meta);
+      if (!meta.success) {
+        log.warn(`Ending terminal ${info.id.slice(0, 8)}, whose meta this server cannot read`, {
+          error: meta.error,
+        });
+        this.host.destroy(info.id);
+        continue;
+      }
+      this.sessions.set(info.id, {
+        meta: meta.data,
+        epoch: info.epoch,
+        ready: Promise.resolve(),
+        sink: null,
+        attachment: 0,
+        live: false,
+        ended: info.ended ?? null,
+      });
+    }
+    this.hooks.onSessionsChanged?.();
+  }
+
+  /** Every session running in the host, or being spawned there, with its meta. */
+  running(): { id: string; meta: TerminalMeta }[] {
+    return [...this.sessions]
+      .filter(([, session]) => !session.ended)
+      .map(([id, session]) => ({ id, meta: session.meta }));
+  }
+
+  /** The foreground program of each session whose host can tell; see `TerminalHost`. */
+  foregroundProcesses(): Promise<ForegroundProcesses> {
+    return this.host.foregroundProcesses();
+  }
+
+  get(id: string): TerminalSessionView | undefined {
+    const session = this.sessions.get(id);
+    return session && { meta: session.meta, attached: session.sink !== null };
   }
 
   /** Attach a client to the session, spawning the shell first if the session does not exist. */
   async attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {
+    const { sinceEpoch, sinceOffset } = options;
+    const since =
+      sinceEpoch !== undefined && sinceOffset !== undefined
+        ? { epoch: sinceEpoch, offset: sinceOffset }
+        : undefined;
+    const scrollbackLines = options.scrollbackLines ?? DEFAULT_SCROLLBACK_LINES;
     const running = this.sessions.get(id);
-    const since = { epoch: options.sinceEpoch, offset: options.sinceOffset };
     if (running) {
-      running.resize(options.cols, options.rows);
-      running.setScrollbackLines(options.scrollbackLines);
-      return running.attach(sink, since);
+      this.claim(running, sink);
+      this.host.resize(id, options.cols, options.rows);
+      this.host.setScrollback(id, scrollbackLines);
+      // The host may still be answering the spawn; this attach then fails if the spawn does.
+      await running.ready;
+      return this.bind(id, running, sink, since);
     }
 
     const pending = this.start(id, options);
     pending.sink = sink;
     pending.size = { cols: options.cols, rows: options.rows };
     const session = await pending.session;
-    // Destroyed, detached, or taken over by a later attach while the environment was resolved.
-    if (!session || pending.sink !== sink) return;
-    session.setScrollbackLines(options.scrollbackLines);
-    return session.attach(sink, since);
+    if (!session) return;
+    this.host.setScrollback(id, scrollbackLines);
+    return this.bind(id, session, sink, since);
+  }
+
+  /**
+   * Make `sink` the session's client at once, so a detach or a later attach that arrives before
+   * the host is asked takes effect; nothing reaches it until its own attach's state.
+   */
+  private claim(session: ManagedSession, sink: TerminalSink): void {
+    session.sink = sink;
+    session.attachment = 0;
+    session.live = false;
+  }
+
+  /**
+   * Ask the host to attach `sink`, unless it was detached, the session ended, or a later attach
+   * took the session over since it claimed it.
+   */
+  private bind(
+    id: string,
+    session: ManagedSession,
+    sink: TerminalSink,
+    since: { epoch: string; offset: number } | undefined,
+  ): Promise<void> {
+    if (this.sessions.get(id) !== session || session.sink !== sink) return Promise.resolve();
+    const attachment = ++this.lastAttachment;
+    session.attachment = attachment;
+    return this.host.attach({ id, attachment, since });
   }
 
   /**
@@ -127,11 +322,9 @@ export class TerminalManager {
       session: this.buildEnv(options).then((env) => {
         if (this.starting.get(id) !== pending) return null;
         this.starting.delete(id);
-        const session = this.spawn(id, options, env);
-        if (pending.size) session.resize(pending.size.cols, pending.size.rows);
-        for (const data of pending.input) session.write(data);
-        return session;
+        return this.spawn(id, options, pending, env);
       }),
+      worktreePath: options.worktreePath ?? null,
       sink: null,
       size: null,
       input: [],
@@ -145,73 +338,179 @@ export class TerminalManager {
   ): Promise<Record<string, string | undefined>> {
     const env = buildTerminalEnv();
     if (options.envOverrides) Object.assign(env, options.envOverrides);
-    if (options.activatePythonEnv === false) return env;
+    // A Home terminal's toolchains are those of the directory it starts in.
     const worktreePath = options.worktreePath ?? options.cwd;
+    const contributors = this.hooks.toolchainEnvs.filter(
+      (contributor) => contributor.enabledInTerminal?.(options) ?? true,
+    );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), PYTHON_ENV_TIMEOUT_MS);
+      timer = setTimeout(() => resolve("timeout"), TOOLCHAIN_ENV_TIMEOUT_MS);
     });
-    try {
-      const pythonEnv = await Promise.race([this.hooks.pythonEnvFor(worktreePath), timedOut]);
-      if (pythonEnv === "timeout") {
-        log.warn("Python environment took too long; starting the terminal without it", {
+    // Resolved side by side, so a slow toolchain costs the others no time, and applied in list
+    // order, since several can change the same variable.
+    const changes = await Promise.all(
+      contributors.map((contributor) => resolveToolchainEnv(contributor, worktreePath, timedOut)),
+    );
+    clearTimeout(timer);
+    for (const [index, change] of changes.entries()) {
+      if (!change) continue;
+      try {
+        const changed = { ...env };
+        await change(changed, terminalShell());
+        commitToolchainEnvChange(env, changed);
+      } catch (err) {
+        log.warn(`Could not activate the ${contributors[index]?.name} environment in a terminal`, {
           worktreePath,
+          error: err,
         });
-      } else if (pythonEnv) {
-        await activatePythonEnv(env, pythonEnv, terminalShell(), worktreePath);
       }
-    } catch (err) {
-      log.warn("Could not activate the Python environment in a terminal", {
-        worktreePath,
-        error: err,
-      });
-    } finally {
-      clearTimeout(timer);
     }
     return env;
   }
 
-  private spawn(
+  /**
+   * Start the shell in the host. The session is registered, with the client waiting for it, in the
+   * same step as the host is asked, so input, resizes, attaches, detaches and a destroy that arrive meanwhile
+   * go to the host after the spawn, in order. Resolves to null if the session ended meanwhile.
+   */
+  private async spawn(
     id: string,
     options: TerminalSpawnOptions,
+    pending: PendingStart,
     env: Record<string, string | undefined>,
-  ): TerminalSession {
+  ): Promise<ManagedSession | null> {
     const shell = terminalShell();
-    const { cols, rows, cwd, worktreePath, command } = options;
+    const { cwd, windowId, command } = options;
+    const { cols, rows } = pending.size ?? options;
     log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);
 
-    const session = new TerminalSession({
-      id,
-      cols,
-      rows,
-      cwd,
-      worktreePath,
-      scrollbackLines: options.scrollbackLines,
-      env,
-      command: [shell, "-il"],
-      isSequenceEnabled: this.hooks.isSequenceEnabled,
-      onNotification: this.hooks.onNotification,
-      onExit: (exited, exitCode) => {
-        // A session destroyed on purpose exits a little later; by then its ID may already belong
-        // to a fresh spawn (a respawn after destroy), which must not be dropped in its place.
-        if (this.sessions.get(id) !== exited) return;
-        this.sessions.delete(id);
-        exited.destroy();
-        this.hooks.onExit(exited, exitCode);
-      },
-    });
-    this.sessions.set(id, session);
+    const meta: TerminalMeta = { worktreePath: pending.worktreePath, cwd };
+    if (windowId !== undefined) meta.windowId = windowId;
+    const epoch = crypto.randomUUID();
 
     // Typed ahead: the PTY queues the bytes until the shell reads its first line, so the command
     // shows up at the prompt and in shell history exactly as if the user had entered it.
-    if (command !== undefined) session.write(textEncoder.encode(`${command}\n`));
-    return session;
+    const typed = command === undefined ? [] : [textEncoder.encode(`${command}\n`)];
+    const spawned = this.host.spawn({
+      id,
+      epoch,
+      argv: [shell, "-il"],
+      cwd,
+      env: definedEnv(env),
+      cols,
+      rows,
+      scrollbackLines: options.scrollbackLines ?? DEFAULT_SCROLLBACK_LINES,
+      meta,
+      input: new Uint8Array(Bun.concatArrayBuffers([...typed, ...pending.input])),
+    });
+    const session: ManagedSession = {
+      meta,
+      epoch,
+      ready: spawned.then(() => {}),
+      sink: pending.sink,
+      attachment: 0,
+      live: false,
+      ended: null,
+    };
+    this.sessions.set(id, session);
+    this.hooks.onSessionsChanged?.();
+    try {
+      await session.ready;
+    } catch (err) {
+      if (this.sessions.get(id) === session) {
+        this.sessions.delete(id);
+        this.hooks.onSessionsChanged?.();
+      }
+      throw err;
+    }
+    return this.sessions.get(id) === session ? session : null;
+  }
+
+  private onHostEvent(event: TerminalHostEvent): void {
+    switch (event.type) {
+      case "state": {
+        const session = this.sessions.get(event.state.id);
+        // A state for an attach since superseded, or for a client that detached.
+        if (!session?.sink || session.attachment !== event.attachment) return;
+        session.live = true;
+        session.sink.sendState(event.state);
+        return;
+      }
+      case "output": {
+        const session = this.sessions.get(event.id);
+        if (!session?.sink || !session.live) return;
+        session.sink.sendOutput(event);
+        return;
+      }
+      case "exit": {
+        const outputLost = this.sessions.get(event.id)?.ended?.outputKept === false;
+        this.onEnded(event.id, event.epoch, {
+          reason: "exited",
+          exitCode: event.exitCode,
+          outputLost,
+        });
+        return;
+      }
+      case "ended": {
+        const session = this.sessions.get(event.id);
+        if (!session || session.epoch !== event.epoch) return;
+        const known = session.ended;
+        if (known?.exitCode === event.exitCode && known.outputKept === event.outputKept) return;
+        // Listed again on every restored connection; the host may have let its output go since.
+        session.ended = { exitCode: event.exitCode, outputKept: event.outputKept };
+        log.info(`Terminal ${event.id.slice(0, 8)} ended with code ${event.exitCode} meanwhile`);
+        this.hooks.onSessionsChanged?.();
+        return;
+      }
+      case "lost":
+        this.onEnded(
+          event.id,
+          event.epoch,
+          event.reason === "host_lost"
+            ? { reason: "host_lost" }
+            : { reason: "exited", exitCode: null, outputLost: true },
+        );
+        return;
+      case "osc": {
+        const session = this.sessions.get(event.id);
+        if (!session || session.epoch !== event.epoch) return;
+        const { sequence, parse } = OSC_NOTIFICATIONS[event.code];
+        if (!this.hooks.isSequenceEnabled(sequence)) return;
+        const payload = parse(event.data);
+        if (payload) this.hooks.onNotification(event.id, session.meta, payload);
+        return;
+      }
+      case "unresponsive": {
+        const session = this.sessions.get(event.id);
+        if (session?.epoch !== event.epoch) return;
+        session.sink?.sendNotice({ notice: "host_unresponsive" });
+        return;
+      }
+      default: {
+        const unknownEvent: never = event;
+        throw new Error(`Unknown terminal host event: ${JSON.stringify(unknownEvent)}`);
+      }
+    }
+  }
+
+  private onEnded(id: string, epoch: string, end: TerminalEnd): void {
+    const session = this.sessions.get(id);
+    if (!session || session.epoch !== epoch) return;
+    this.sessions.delete(id);
+    session.sink?.sendExit(end);
+    this.hooks.onExit(id, end);
+    this.hooks.onSessionsChanged?.();
   }
 
   detach(id: string): void {
     const pending = this.starting.get(id);
     if (pending) pending.sink = null;
-    this.sessions.get(id)?.detach();
+    const session = this.sessions.get(id);
+    if (!session?.sink) return;
+    session.sink = null;
+    session.live = false;
+    this.host.detach(id);
   }
 
   detachAll(ids: Iterable<string>): void {
@@ -219,15 +518,13 @@ export class TerminalManager {
   }
 
   write(id: string, data: Uint8Array): void {
-    const session = this.sessions.get(id);
-    if (session) session.write(data);
+    if (this.sessions.has(id)) this.host.write(id, data);
     else this.starting.get(id)?.input.push(data);
   }
 
   resize(id: string, cols: number, rows: number): void {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.resize(cols, rows);
+    if (this.sessions.has(id)) {
+      this.host.resize(id, cols, rows);
       return;
     }
     const pending = this.starting.get(id);
@@ -235,29 +532,67 @@ export class TerminalManager {
   }
 
   ack(id: string, syncOffset: number, bytes: number): void {
-    this.sessions.get(id)?.ack(syncOffset, bytes);
+    if (this.sessions.has(id)) this.host.ack(id, syncOffset, bytes);
   }
 
   destroy(id: string): void {
     this.starting.delete(id);
-    const session = this.sessions.get(id);
-    if (!session) return;
-    this.sessions.delete(id);
-    session.destroy();
+    if (!this.sessions.delete(id)) return;
+    this.host.destroy(id);
+    this.hooks.onSessionsChanged?.();
   }
 
-  /** True if any session has no attached client. */
+  /**
+   * End every session of a removed worktree, `delayMs` from now, calling `onEnded` with each one
+   * that was still running. Only the sessions there now: a worktree created at the same path
+   * meanwhile keeps its own. A shell still waiting for its environment never starts.
+   */
+  endWorktreeSessions(worktreePath: string, delayMs: number, onEnded: (id: string) => void): void {
+    for (const [id, pending] of this.starting) {
+      if (pending.worktreePath !== worktreePath) continue;
+      this.destroy(id);
+      onEnded(id);
+    }
+    const sessions = [...this.sessions].filter(([, s]) => s.meta.worktreePath === worktreePath);
+    const end = () => {
+      for (const [id, session] of sessions) {
+        // Exited or closed meanwhile, or already ended by the other removal path.
+        if (this.sessions.get(id) !== session) continue;
+        this.destroy(id);
+        onEnded(id);
+      }
+    };
+    if (delayMs === 0) end();
+    else if (sessions.length > 0) setTimeout(end, delayMs).unref();
+  }
+
+  /** A moved worktree keeps its sessions, so removing it later still ends them. */
+  retargetWorktree(from: string, to: string): void {
+    for (const pending of this.starting.values()) {
+      if (pending.worktreePath === from) pending.worktreePath = to;
+    }
+    for (const [id, session] of this.sessions) {
+      if (session.meta.worktreePath !== from) continue;
+      session.meta = { ...session.meta, worktreePath: to };
+      this.host.setMeta(id, session.meta);
+    }
+  }
+
+  /** True if any running session has no attached client. */
   hasOrphanSessions(): boolean {
     for (const session of this.sessions.values()) {
-      if (!session.attached) return true;
+      if (!session.sink && !session.ended) return true;
     }
     return false;
   }
 
-  /** Destroy every session without an attached client. Returns the number destroyed. */
+  /**
+   * Destroy every running session without an attached client. Ended ones are kept for their
+   * panels to show what they missed. Returns the number destroyed.
+   */
   destroyOrphans(): number {
-    const orphans = [...this.sessions.values()].filter((s) => !s.attached);
-    for (const session of orphans) this.destroy(session.id);
+    const orphans = [...this.sessions].filter(([, s]) => !s.sink && !s.ended).map(([id]) => id);
+    for (const id of orphans) this.destroy(id);
     return orphans.length;
   }
 
@@ -269,4 +604,13 @@ export class TerminalManager {
 
 function terminalShell(): string {
   return process.env.SHELL || "/bin/bash";
+}
+
+/** The environment as the host takes it: unset variables are left out. */
+function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const defined: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) defined[name] = value;
+  }
+  return defined;
 }

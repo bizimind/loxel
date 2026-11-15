@@ -10,6 +10,7 @@
 import type { LogLevel } from "@/api/log-entry-model";
 import { reconcile } from "@/lib/reconcile";
 
+import { parseBookmarks, useBrowserBookmarksStore } from "./browser-bookmarks";
 import { TEMPLATES } from "./keybindings/keybinding-schema";
 import {
   deriveKeybindingState,
@@ -18,7 +19,7 @@ import {
 } from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
-import { useSettingsStore } from "./settings-store";
+import { persistedSettings, useSettingsStore, withValidSettings } from "./settings-store";
 import { useUIStore } from "./ui";
 import { mergePersistedProjectStates, persistedProjectStates, useWorktreeStore } from "./worktrees";
 
@@ -41,19 +42,8 @@ interface SyncTarget {
 
 const syncTargets: Record<string, SyncTarget> = {
   settings: {
-    getState: () => {
-      const s = useSettingsStore.getState();
-      return {
-        models: s.models,
-        codingAgent: s.codingAgent,
-        layout: s.layout,
-        terminal: s.terminal,
-        editor: s.editor,
-        schemas: s.schemas,
-        fileAssociations: s.fileAssociations,
-      };
-    },
-    setState: (partial) => useSettingsStore.setState(partial),
+    getState: () => persistedSettings(useSettingsStore.getState()),
+    setState: (partial) => useSettingsStore.setState(withValidSettings(partial)),
   },
 
   keybindings: {
@@ -78,7 +68,6 @@ const syncTargets: Record<string, SyncTarget> = {
     getState: () => {
       const s = useUIStore.getState();
       return {
-        darkMode: s.darkMode,
         diffViewMode: s.diffViewMode,
         showAllBranches: s.showAllBranches,
         diffFileTreeExpanded: s.diffFileTreeExpanded,
@@ -89,7 +78,9 @@ const syncTargets: Record<string, SyncTarget> = {
       };
     },
     setState: (partial) => useUIStore.setState(partial),
-    deserialize: (raw) => ({
+    // `darkMode` is resolved per window from the theme setting; a renderer from before it was,
+    // which still syncs it, must not flip this window's editors and terminals.
+    deserialize: ({ darkMode: _darkMode, ...raw }) => ({
       ...raw,
       favoriteBranches: new Set((raw.favoriteBranches as string[]) ?? []),
       logExcludedLevels: new Set((raw.logExcludedLevels as LogLevel[]) ?? []),
@@ -130,6 +121,12 @@ const syncTargets: Record<string, SyncTarget> = {
       };
     },
     setState: (partial) => useProjectStore.setState(partial),
+  },
+
+  "browser-bookmarks": {
+    getState: () => ({ bookmarks: useBrowserBookmarksStore.getState().bookmarks }),
+    setState: (partial) => useBrowserBookmarksStore.setState(partial),
+    deserialize: (raw) => ({ bookmarks: parseBookmarks(raw) }),
   },
 };
 

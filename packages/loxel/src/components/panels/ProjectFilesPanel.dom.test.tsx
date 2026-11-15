@@ -123,7 +123,6 @@ const { buildReverseLookup } = await import("@/store/keybindings/keybinding-reso
 const { TEMPLATES } = await import("@/store/keybindings/keybinding-schema");
 const { useKeybindingStore } = await import("@/store/keybindings/keybinding-store");
 const { useSettingsStore } = await import("@/store/settings-store");
-const { setActiveWorktreeKey } = await import("@/store/worktree-store");
 const { getCurrentWorktreeUI } = await import("@/store/worktree-ui");
 const { useWorktreeStore } = await import("@/store/worktrees");
 const { ProjectFilesPanel } = await import("./ProjectFilesPanel");
@@ -223,7 +222,6 @@ describe("ProjectFilesPanel", () => {
     );
 
     useWorktreeStore.setState({ activeWorktreePath: "/repo" });
-    setActiveWorktreeKey("/repo");
     getCurrentWorktreeUI().setState({
       selectedProjectFile: null,
       expandedProjectFolders: new Set(),

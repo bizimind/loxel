@@ -2,13 +2,23 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
-import {
-  DEFAULT_SCROLLBACK_LINES,
-  type AgentSessionOptions,
-  DEFAULT_NOTIFICATION_SEQUENCES,
-  type NotificationSequences,
-} from "@/api/ws-protocol";
+import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
+import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { isRecord } from "@/lib/is-record";
+import {
+  allThemes,
+  BUILTIN_THEMES,
+  DEFAULT_THEME_SETTINGS,
+  isBuiltinTheme,
+  type LoxelTheme,
+  parseThemeSettings,
+  type ThemeBase,
+  type ThemeSettings,
+} from "@/lib/loxel-theme";
+import { DEFAULT_WHEN_QUITTING, parseWhenQuitting, type WhenQuitting } from "@/lib/quit-terminals";
+import type { ParsedTheme } from "@/lib/theme-file";
+import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
@@ -21,48 +31,25 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
-export interface ApiKeyError {
-  err: string;
-}
-
-export function isApiKeyError(apiKey: string | ApiKeyError): apiKey is ApiKeyError {
-  return typeof apiKey === "object" && apiKey !== null && "err" in apiKey;
-}
-
-export interface ModelEntry {
-  id: string;
-  label: string;
-  provider: "openrouter";
-  modelId: string;
-  apiKey: string | ApiKeyError;
-}
-
-export type AgentFunction =
-  | "planner"
-  | "executor"
-  | "fallback"
-  | "judge"
-  | "websearch"
-  | "websearchFallback";
-
-export const AGENT_FUNCTIONS: { key: AgentFunction; label: string }[] = [
-  { key: "planner", label: "Planner" },
-  { key: "executor", label: "Executor" },
-  { key: "fallback", label: "Fallback" },
-  { key: "judge", label: "Judge" },
-  { key: "websearch", label: "WebSearch" },
-  { key: "websearchFallback", label: "WS Fallback" },
-];
-
-export interface CodingAgentSettings {
-  /** ID of the model used for all functions by default. */
-  baseModelId: string;
-  /** Per-function overrides. Values are ModelEntry IDs. Absent = use base model. */
-  functionOverrides: Partial<Record<AgentFunction, string>>;
-  /** Default session mode for new agent sessions. */
-  defaultMode?: "execute" | "plan";
-  /** Default tool profile for new agent sessions. */
-  defaultProfile?: "execute" | "plan" | "minimal";
+/**
+ * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The terminal's
+ * "When quitting Loxel" falls back to its default when it is missing (a row from before it) or
+ * unknown, as main does with the value it is sent.
+ */
+export function withValidSettings<T extends object>(slice: T): T {
+  const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
+  if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
+  if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
+  if (isRecord(valid.terminal)) {
+    valid.terminal = {
+      ...valid.terminal,
+      whenQuitting: parseWhenQuitting(valid.terminal.whenQuitting),
+    };
+  }
+  // Only fields already in the slice were replaced, each with a valid value of its type.
+  return valid as T;
 }
 
 export interface TerminalSettings {
@@ -72,6 +59,8 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
+  /** What Quit Loxel does to the terminals ("When quitting Loxel"). */
+  whenQuitting: WhenQuitting;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -97,28 +86,62 @@ export interface IndentationOverride {
 // Formatting
 // ---------------------------------------------------------------------------
 
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
-import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import type { FontKind, FontSettings } from "@/lib/font-settings";
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
+import type {
+  FormatterOverride,
+  FormattingSettings,
+  MarkdownOutputSettings,
+} from "@/lib/formatting-model";
+import { DEFAULT_FORMATTING_SETTINGS, parseMarkdownOutputSettings } from "@/lib/formatting-model";
+
+/** When an editor shows inlay hints; the values of Monaco's `inlayHints.enabled`. */
+export type InlayHintsMode = "on" | "off" | "onUnlessPressed" | "offUnlessPressed";
 
 export interface EditorSettings {
   indentation: IndentationDefaults;
+  inlayHints: InlayHintsMode;
   overrides: IndentationOverride[];
   formatting: FormattingSettings;
 }
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentation: { tabSize: 2, insertSpaces: true },
+  // On, as in VS Code, and what every language server that emits hints has shown until now.
+  inlayHints: "on",
   overrides: [],
   formatting: structuredClone(DEFAULT_FORMATTING_SETTINGS),
 };
 
+export interface BuiltinIndentation extends IndentationDefaults {
+  /** The language's syntax requires this style, so it outranks detection from the content. */
+  required?: boolean;
+}
+
 /**
- * Built-in indentation for languages whose formatter-enforced convention differs from the
- * global default, keyed by resolved (highlighter) language ID.
+ * Built-in indentation for languages whose convention, set by their formatter or official style
+ * guide (for the C family, their main IDEs), differs from the global default, keyed by resolved
+ * (highlighter) language ID. Languages whose common formatters disagree (Java, Swift, shell) are
+ * left to the default.
  */
-export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, IndentationDefaults> = new Map([
+export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
+  // The C family has no single style; 4 is the default of VS Code, CLion and Xcode.
+  ["c", { tabSize: 4, insertSpaces: true }],
+  ["cpp", { tabSize: 4, insertSpaces: true }],
+  ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
+  ["go.work", { tabSize: 4, insertSpaces: false }], // go work use
+  ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
+  ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
+  // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
+  // space-indented continuation lines can outnumber the recipes. 4 is only the tab's display width.
+  ["make", { tabSize: 4, insertSpaces: false, required: true }],
+  ["objective-c", { tabSize: 4, insertSpaces: true }],
+  ["objective-cpp", { tabSize: 4, insertSpaces: true }],
+  ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["razor", { tabSize: 4, insertSpaces: true }], // ASP.NET Core and Blazor templates
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
 
@@ -166,7 +189,8 @@ export interface IndentationResolution {
  *    too, so it outranks Loxel's settings, as it does in VS Code and JetBrains IDEs.
  * 3. The user's per-extension override, which applies to every project.
  * 4. Detection from the file's content, so editing an existing file keeps its style.
- * 5. The built-in default for the file's resolved language.
+ * 5. The built-in default for the file's resolved language. One its syntax requires (make's tabs)
+ *    comes before detection instead.
  * 6. The global default, which sets every property.
  */
 export function resolveIndentation(
@@ -176,12 +200,16 @@ export function resolveIndentation(
 ): IndentationResolution {
   const override = findIndentationOverride(editor.overrides, filePath) ?? null;
   const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
+  const detectedLayer: [IndentationSource, IndentationLayer] = ["detected", detected];
+  const languageLayer: [IndentationSource, IndentationLayer] = [
+    "language",
+    builtin ? defaultsLayer(builtin) : {},
+  ];
   const layers: [IndentationSource, IndentationLayer][] = [
     ["file", fileChoice],
     ["editorconfig", editorConfigLayer(editorConfig)],
     ["override", override ? defaultsLayer(override) : {}],
-    ["detected", detected],
-    ["language", builtin ? defaultsLayer(builtin) : {}],
+    ...(builtin?.required ? [languageLayer, detectedLayer] : [detectedLayer, languageLayer]),
     ["default", defaultsLayer(editor.indentation)],
   ];
   const [insertSpaces, insertSpacesSource] = resolveProperty(layers, "insertSpaces");
@@ -306,6 +334,14 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
 
+  // Cargo's older config name; `config` alone says nothing about the format.
+  fa("**/.cargo/config", "toml"),
+
+  // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
+  // also hold files like module.modulemap, and anything with an extension resolves on its own.
+  fa("**/c++/v1/**/!(*.*)", "cpp"),
+  fa("**/include/c++/**/!(*.*)", "cpp"),
+
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),
 
@@ -383,6 +419,50 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     enabled: true,
   },
   {
+    id: builtinId("**/jsconfig.json"),
+    glob: "**/jsconfig.json",
+    url: "https://json.schemastore.org/jsconfig.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{.babelrc,.babelrc.json,babel.config.json}"),
+    glob: "**/{.babelrc,.babelrc.json,babel.config.json}",
+    url: "https://json.schemastore.org/babelrc.json",
+    enabled: true,
+  },
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can ask for (Monaco's
+  // JSON worker gets schemas inline and would report the reference as a problem on every file).
+  {
+    id: builtinId("**/.eslintrc.{yml,yaml}"),
+    glob: "**/.eslintrc.{yml,yaml}",
+    url: "https://json.schemastore.org/eslintrc.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/lerna.json"),
+    glob: "**/lerna.json",
+    url: "https://json.schemastore.org/lerna.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.lintstagedrc{,.json,.yml,.yaml}"),
+    glob: "**/.lintstagedrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/lintstagedrc.schema.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/pnpm-workspace.yaml"),
+    glob: "**/pnpm-workspace.yaml",
+    url: "https://json.schemastore.org/pnpm-workspace.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.prettierrc{,.json,.yml,.yaml}"),
+    glob: "**/.prettierrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/prettierrc.json",
+    enabled: true,
+  },
+  {
     id: builtinId(".github/workflows/*.{yml,yaml}"),
     glob: ".github/workflows/*.{yml,yaml}",
     url: "https://json.schemastore.org/github-workflow",
@@ -410,6 +490,12 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     id: builtinId("**/.cargo/config.toml"),
     glob: "**/.cargo/config.toml",
     url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/rust-toolchain.toml"),
+    glob: "**/rust-toolchain.toml",
+    url: "https://json.schemastore.org/rust-toolchain.json",
     enabled: true,
   },
   {
@@ -445,46 +531,57 @@ export const selectEffectiveSchemas = createBuiltinMergeSelector(
 
 type SettingsSection =
   | "general"
-  | "codingAgent"
-  | "models"
+  | "appearance"
   | "keybindings"
   | "layout"
   | "terminal"
   | "editor"
   | "schemas"
   | "fileAssociations"
+  | "security"
   | "worktrees";
 
 export interface SettingsState {
-  models: ModelEntry[];
-  codingAgent: CodingAgentSettings;
+  /** Color theme. Dark by default. */
+  theme: ThemePreference;
+  /** The color theme each mode uses, and the user's own themes. */
+  themes: ThemeSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
+  fonts: FontSettings;
   /** User-added schemas + builtin overrides (disabled builtins). */
   schemas: SchemaMapping[];
   /** User file association overrides (language per glob). */
   fileAssociations: FileAssociation[];
   /** Auto-reveal active editor file in project explorer on tab switch. */
   autoRevealInExplorer: boolean;
+  /** Check for updates when the server starts. The server reads this from the persisted settings. */
+  autoCheckForUpdates: boolean;
 
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
 
-  // Model actions
-  addModel: (model: Omit<ModelEntry, "id">) => void;
-  updateModel: (id: string, updates: Partial<Omit<ModelEntry, "id">>) => void;
-  removeModel: (id: string) => void;
-
-  // Coding agent actions
-  setBaseModelId: (modelId: string) => void;
-  setFunctionOverride: (fn: AgentFunction, modelId: string | null) => void;
-  setDefaultMode: (mode: CodingAgentSettings["defaultMode"]) => void;
-  setDefaultProfile: (profile: CodingAgentSettings["defaultProfile"]) => void;
+  setTheme: (theme: ThemePreference) => void;
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
+
+  // Color theme actions
+  /** Use a theme for the mode of its base. */
+  setModeTheme: (base: ThemeBase, themeId: string) => void;
+  /**
+   * Add a theme from a file and use it for its mode. One with the name and base of a custom theme
+   * replaces it and keeps its id; one named like a built-in gets " (imported)". Returns its id.
+   */
+  importTheme: (theme: ParsedTheme) => string;
+  /** Copy a theme as a new custom one and use it for its mode. Returns its id. */
+  duplicateTheme: (themeId: string) => string | null;
+  /** Change a custom theme's name or colors; built-ins do not change. */
+  updateTheme: (themeId: string, patch: Partial<Omit<LoxelTheme, "id" | "base">>) => void;
+  /** Remove a custom theme; a mode using it goes back to its built-in. */
+  removeTheme: (themeId: string) => void;
 
   // Layout actions
   updateLayout: (partial: Partial<LayoutSettings>) => void;
@@ -493,15 +590,22 @@ export interface SettingsState {
 
   // Editor actions
   updateEditorIndentation: (partial: Partial<IndentationDefaults>) => void;
+  setEditorInlayHints: (mode: InlayHintsMode) => void;
   addEditorOverride: (extension: string, tabSize: number, insertSpaces: boolean) => void;
   updateEditorOverride: (id: string, updates: Partial<Omit<IndentationOverride, "id">>) => void;
   removeEditorOverride: (id: string) => void;
 
   // Formatting actions
-  updateFormatting: (partial: Partial<Omit<FormattingSettings, "overrides">>) => void;
+  updateFormatting: (
+    partial: Partial<Omit<FormattingSettings, "overrides" | "markdownOutput">>,
+  ) => void;
+  updateMarkdownOutput: (partial: Partial<MarkdownOutputSettings>) => void;
   addFormatterOverride: (extensions: string, command: string, args: string) => void;
   updateFormatterOverride: (id: string, updates: Partial<Omit<FormatterOverride, "id">>) => void;
   removeFormatterOverride: (id: string) => void;
+
+  // Font actions
+  updateFont: <K extends FontKind>(kind: K, partial: Partial<FontSettings[K]>) => void;
 
   // Schema actions
   addSchema: (glob: string, url: string) => void;
@@ -523,6 +627,9 @@ export interface SettingsState {
 
   // Auto-reveal
   setAutoRevealInExplorer: (enabled: boolean) => void;
+
+  // Updates
+  setAutoCheckForUpdates: (enabled: boolean) => void;
 
   // Wt config actions
 
@@ -548,80 +655,142 @@ const DEFAULT_LAYOUT: LayoutSettings = {
   zonePanelOrder: buildDefaultZonePanelOrder(),
 };
 
+/**
+ * Takes a removed panel out of persisted layout settings: its zone opens with the zone's first
+ * remaining panel instead, or closed when none remain.
+ */
+function stripPanelFromLayout(layout: unknown, panelId: string): void {
+  if (typeof layout !== "object" || layout === null) return;
+  const { zonePanelOrder, zoneDefaults } = layout as Record<string, unknown>;
+  const order =
+    typeof zonePanelOrder === "object" && zonePanelOrder !== null
+      ? (zonePanelOrder as Record<string, unknown>)
+      : {};
+  const remaining = (zone: string): unknown[] => {
+    const panels = order[zone];
+    return Array.isArray(panels) ? panels.filter((id) => id !== panelId) : [];
+  };
+  for (const zone of Object.keys(order)) {
+    if (Array.isArray(order[zone])) order[zone] = remaining(zone);
+  }
+  if (typeof zoneDefaults !== "object" || zoneDefaults === null) return;
+  const defaults = zoneDefaults as Record<string, unknown>;
+  for (const [zone, value] of Object.entries(defaults)) {
+    if (typeof value !== "object" || value === null) continue;
+    const zoneDefault = value as Record<string, unknown>;
+    if (zoneDefault.activePanel !== panelId) continue;
+    const [first] = remaining(zone);
+    defaults[zone] = first === undefined ? false : { ...zoneDefault, activePanel: first };
+  }
+}
+
+function newThemeId(): string {
+  return `custom:${crypto.randomUUID()}`;
+}
+
+/** The persisted slice of the settings store; cross-window sync applies the same slice. */
+export function persistedSettings(state: SettingsState) {
+  return {
+    theme: state.theme,
+    themes: state.themes,
+    layout: state.layout,
+    terminal: state.terminal,
+    editor: state.editor,
+    fonts: state.fonts,
+    schemas: state.schemas,
+    fileAssociations: state.fileAssociations,
+    autoRevealInExplorer: state.autoRevealInExplorer,
+    autoCheckForUpdates: state.autoCheckForUpdates,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
-      models: [],
-      codingAgent: { baseModelId: "", functionOverrides: {} },
+    (set, get) => ({
+      theme: "dark",
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
+        whenQuitting: DEFAULT_WHEN_QUITTING,
       },
+      themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
+      fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
+      autoCheckForUpdates: true,
 
       isOpen: false,
       activeSection: "general",
 
-      // -- Model CRUD --
-
-      addModel: (model) =>
-        set((s) => ({ models: [...s.models, { ...model, id: crypto.randomUUID() }] })),
-
-      updateModel: (id, updates) =>
-        set((s) => ({ models: s.models.map((m) => (m.id === id ? { ...m, ...updates } : m)) })),
-
-      removeModel: (id) =>
-        set((s) => {
-          const models = s.models.filter((m) => m.id !== id);
-          const codingAgent = { ...s.codingAgent };
-
-          // Clear dangling references
-          if (codingAgent.baseModelId === id) {
-            codingAgent.baseModelId = "";
-          }
-          const overrides = { ...codingAgent.functionOverrides };
-          for (const [fn, modelId] of Object.entries(overrides)) {
-            if (modelId === id) delete overrides[fn as AgentFunction];
-          }
-          codingAgent.functionOverrides = overrides;
-
-          return { models, codingAgent };
-        }),
-
-      // -- Coding agent --
-
-      setBaseModelId: (modelId) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, baseModelId: modelId } })),
-
-      setFunctionOverride: (fn, modelId) =>
-        set((s) => {
-          const overrides = { ...s.codingAgent.functionOverrides };
-          if (modelId) {
-            overrides[fn] = modelId;
-          } else {
-            delete overrides[fn];
-          }
-          return { codingAgent: { ...s.codingAgent, functionOverrides: overrides } };
-        }),
-
-      setDefaultMode: (mode) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultMode: mode } })),
-
-      setDefaultProfile: (profile) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultProfile: profile } })),
+      setTheme: (theme) => set({ theme }),
 
       // -- Terminal --
 
       updateTerminal: (partial) => set((s) => ({ terminal: { ...s.terminal, ...partial } })),
+
+      // -- Color themes --
+
+      setModeTheme: (base, themeId) => set((s) => ({ themes: { ...s.themes, [base]: themeId } })),
+
+      importTheme: (parsed) => {
+        const { custom } = get().themes;
+        const name = BUILTIN_THEMES.some((b) => b.name === parsed.name)
+          ? `${parsed.name} (imported)`
+          : parsed.name;
+        const previous = custom.find((t) => t.name === name && t.base === parsed.base);
+        const theme: LoxelTheme = { ...parsed, name, id: previous?.id ?? newThemeId() };
+        set((s) => ({
+          themes: {
+            ...s.themes,
+            [theme.base]: theme.id,
+            custom: previous
+              ? s.themes.custom.map((t) => (t.id === theme.id ? theme : t))
+              : [...s.themes.custom, theme],
+          },
+        }));
+        return theme.id;
+      },
+
+      duplicateTheme: (themeId) => {
+        const { themes } = get();
+        const source = allThemes(themes).find((t) => t.id === themeId);
+        if (!source) return null;
+        const names = new Set(allThemes(themes).map((t) => t.name));
+        let name = `${source.name} copy`;
+        for (let n = 2; names.has(name); n++) name = `${source.name} copy ${n}`;
+        const theme: LoxelTheme = { ...structuredClone(source), id: newThemeId(), name };
+        set((s) => ({
+          themes: { ...s.themes, [theme.base]: theme.id, custom: [...s.themes.custom, theme] },
+        }));
+        return theme.id;
+      },
+
+      updateTheme: (themeId, patch) =>
+        set((s) => {
+          if (isBuiltinTheme(themeId)) return {};
+          const custom = s.themes.custom.map((t) => (t.id === themeId ? { ...t, ...patch } : t));
+          return { themes: { ...s.themes, custom } };
+        }),
+
+      removeTheme: (themeId) =>
+        set((s) => {
+          const { light, dark, custom } = s.themes;
+          return {
+            themes: {
+              light: light === themeId ? DEFAULT_THEME_SETTINGS.light : light,
+              dark: dark === themeId ? DEFAULT_THEME_SETTINGS.dark : dark,
+              custom: custom.filter((t) => t.id !== themeId),
+            },
+          };
+        }),
 
       // -- Layout --
 
@@ -674,6 +843,8 @@ export const useSettingsStore = create<SettingsState>()(
           editor: { ...s.editor, indentation: { ...s.editor.indentation, ...partial } },
         })),
 
+      setEditorInlayHints: (mode) => set((s) => ({ editor: { ...s.editor, inlayHints: mode } })),
+
       addEditorOverride: (extension, tabSize, insertSpaces) =>
         set((s) => {
           const normalized = extension.toLowerCase().replace(/^\./, "");
@@ -713,6 +884,17 @@ export const useSettingsStore = create<SettingsState>()(
           editor: { ...s.editor, formatting: { ...s.editor.formatting, ...partial } },
         })),
 
+      updateMarkdownOutput: (partial) =>
+        set((s) => ({
+          editor: {
+            ...s.editor,
+            formatting: {
+              ...s.editor.formatting,
+              markdownOutput: { ...s.editor.formatting.markdownOutput, ...partial },
+            },
+          },
+        })),
+
       addFormatterOverride: (extensions, command, args) =>
         set((s) => ({
           editor: {
@@ -750,6 +932,11 @@ export const useSettingsStore = create<SettingsState>()(
             },
           },
         })),
+
+      // -- Fonts --
+
+      updateFont: (kind, partial) =>
+        set((s) => ({ fonts: { ...s.fonts, [kind]: { ...s.fonts[kind], ...partial } } })),
 
       // -- Schemas --
 
@@ -821,6 +1008,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoRevealInExplorer: (enabled) => set({ autoRevealInExplorer: enabled }),
 
+      // -- Updates --
+
+      setAutoCheckForUpdates: (enabled) => set({ autoCheckForUpdates: enabled }),
+
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -829,17 +1020,14 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
-      partialize: (state) => ({
-        models: state.models,
-        codingAgent: state.codingAgent,
-        layout: state.layout,
-        terminal: state.terminal,
-        editor: state.editor,
-        schemas: state.schemas,
-        fileAssociations: state.fileAssociations,
-        autoRevealInExplorer: state.autoRevealInExplorer,
+      partialize: persistedSettings,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(typeof persisted === "object" && persisted !== null
+          ? withValidSettings(persisted)
+          : {}),
       }),
-      version: 11,
+      version: 17,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -864,64 +1052,6 @@ export const useSettingsStore = create<SettingsState>()(
             layout.zonePanelOrder = order;
             delete layout.panelDefaultZones;
           }
-        }
-
-        if (version <= 1) {
-          // v1 → v2: flat CodingAgentSettings → models library + baseModelId + overrides
-          const oldAgent =
-            typeof state.codingAgent === "object" && state.codingAgent !== null
-              ? (state.codingAgent as Record<string, string>)
-              : undefined;
-          const models: ModelEntry[] = [];
-
-          const apiKey = oldAgent?.openrouterApiKey ?? "";
-          if (apiKey) {
-            let baseModelId: string;
-            const modelFields = [
-              oldAgent?.plannerModel,
-              oldAgent?.executorModel,
-              oldAgent?.fallbackModel,
-              oldAgent?.judgeModel,
-              oldAgent?.websearchModel,
-              oldAgent?.websearchFallbackModel,
-            ].filter((v): v is string => Boolean(v));
-            const uniqueModelIds = [...new Set(modelFields)];
-
-            for (const modelId of uniqueModelIds) {
-              models.push({
-                id: crypto.randomUUID(),
-                label: modelId,
-                provider: "openrouter",
-                modelId,
-                apiKey,
-              });
-            }
-
-            const baseModelModelId = oldAgent?.plannerModel || uniqueModelIds[0] || "";
-            const baseEntry = models.find((m) => m.modelId === baseModelModelId);
-            baseModelId = baseEntry?.id ?? "";
-
-            const functionOverrides: Partial<Record<AgentFunction, string>> = {};
-            const fnMapping: [AgentFunction, string][] = [
-              ["planner", oldAgent?.plannerModel || ""],
-              ["executor", oldAgent?.executorModel || ""],
-              ["fallback", oldAgent?.fallbackModel || ""],
-              ["judge", oldAgent?.judgeModel || ""],
-              ["websearch", oldAgent?.websearchModel || ""],
-              ["websearchFallback", oldAgent?.websearchFallbackModel || ""],
-            ];
-            for (const [fn, mId] of fnMapping) {
-              if (mId && mId !== baseModelModelId) {
-                const entry = models.find((m) => m.modelId === mId);
-                if (entry) functionOverrides[fn] = entry.id;
-              }
-            }
-
-            state.codingAgent = { baseModelId, functionOverrides };
-          } else {
-            state.codingAgent = { baseModelId: "", functionOverrides: {} };
-          }
-          state.models = models;
         }
 
         if (version <= 2) {
@@ -1008,6 +1138,54 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version <= 11) {
+          // v11 → v12: add automatic update check setting
+          if (typeof state.autoCheckForUpdates !== "boolean") {
+            state.autoCheckForUpdates = true;
+          }
+        }
+
+        if (version <= 12) {
+          // v12 → v13: the built-in coding agent was removed. Its settings, and the steps that
+          // used to shape them, are gone for rows of every older version.
+          delete state.models;
+          delete state.codingAgent;
+          stripPanelFromLayout(state.layout, "forkTree");
+        }
+
+        if (version <= 13) {
+          // v13 → v14: add the inlay hints setting to editor
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
+              : undefined;
+          if (editor && !editor.inlayHints) {
+            editor.inlayHints = DEFAULT_EDITOR_SETTINGS.inlayHints;
+          }
+        }
+
+        if (version <= 15) {
+          // v15 → v16: add font settings
+          if (typeof state.fonts !== "object" || state.fonts === null) {
+            state.fonts = structuredClone(DEFAULT_FONT_SETTINGS);
+          }
+        }
+
+        if (version <= 16) {
+          // v16 → v17: add markdown output markers to formatting settings
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
+              : undefined;
+          const formatting =
+            editor && typeof editor.formatting === "object" && editor.formatting !== null
+              ? (editor.formatting as Record<string, unknown>)
+              : undefined;
+          if (formatting) {
+            formatting.markdownOutput = parseMarkdownOutputSettings(formatting.markdownOutput);
+          }
+        }
+
         // zustand migrations receive unknown and must return the store type.
         // Structural guards above ensure each field is valid before narrowing.
         return state as unknown as SettingsState;
@@ -1019,42 +1197,6 @@ export const useSettingsStore = create<SettingsState>()(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Map AgentFunction keys to ModelRouterOptions property names (casing differs for webSearch). */
-const ROUTER_KEY_MAP: Record<AgentFunction, string> = {
-  planner: "planner",
-  executor: "executor",
-  fallback: "fallback",
-  judge: "judge",
-  websearch: "webSearch",
-  websearchFallback: "webSearchFallback",
-};
-
-/** Resolve model library + agent config into typed SDK session options. */
-export function buildSessionOptions(
-  settings: CodingAgentSettings,
-  models: ModelEntry[],
-): AgentSessionOptions | Record<string, never> {
-  const lookup = new Map(models.map((m) => [m.id, m]));
-  const baseEntry = lookup.get(settings.baseModelId);
-  if (!baseEntry || isApiKeyError(baseEntry.apiKey)) return {};
-
-  const base = { modelId: baseEntry.modelId, apiKey: baseEntry.apiKey };
-  const modelConfig: Record<string, { modelId: string; apiKey: string }> = { base };
-
-  for (const [fn, routerKey] of Object.entries(ROUTER_KEY_MAP)) {
-    const overrideId = settings.functionOverrides[fn as AgentFunction];
-    const entry = overrideId ? lookup.get(overrideId) : undefined;
-    if (entry && !isApiKeyError(entry.apiKey)) {
-      modelConfig[routerKey] = { modelId: entry.modelId, apiKey: entry.apiKey };
-    }
-  }
-
-  const result: AgentSessionOptions = { models: modelConfig };
-  if (settings.defaultMode) result.mode = settings.defaultMode;
-  if (settings.defaultProfile) result.profile = settings.defaultProfile;
-  return result;
-}
 
 /** Resolved layout config for use by createDefaultLayout. */
 export interface EffectiveLayoutConfig {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { StatusInfo } from "@/api/git-models";
+import { CaptureLog, retryUntil } from "@/test/git-sync-harness";
 
 import { ProjectFilesService } from "./project-files-service";
 
@@ -26,26 +27,26 @@ async function seedRepo(): Promise<string> {
 describe("ProjectFilesService status notifications", () => {
   test("a working-tree edit reports a status change", async () => {
     const repo = await seedRepo();
-    let fired = false;
-    let resolveFired: () => void = () => {};
-    const firedOnce = new Promise<"notified">((resolve) => {
-      resolveFired = () => {
-        fired = true;
-        resolve("notified");
-      };
-    });
-    const service = new ProjectFilesService(repo, () => {}, undefined, resolveFired);
+    const reported = new CaptureLog<StatusInfo>();
+    const service = new ProjectFilesService(
+      repo,
+      () => {},
+      undefined,
+      (status) => reported.add(status),
+    );
     cleanups.push(() => service.stop());
     await service.start();
     // start() builds the maps but is not an edit; nothing should have fired yet.
-    expect(fired).toBe(false);
-    await Bun.sleep(300);
+    expect(reported.entries).toEqual([]);
 
-    await Bun.write(path.join(repo, "a.txt"), "changed\n");
-
-    const timeout = Bun.sleep(8000).then(() => "timeout" as const);
-    expect(await Promise.race([firedOnce, timeout])).toBe("notified");
-  }, 20000);
+    // Repeated because a native watch misses what happens before it arms.
+    await retryUntil(
+      (attempt) => Bun.write(path.join(repo, "a.txt"), `changed ${attempt}\n`).then(() => {}),
+      (timeoutMs) => reported.seenWithin(() => true, 0, timeoutMs),
+      "a status change",
+    );
+    expect(reported.entries[0]!.unstaged.map((file) => file.path)).toEqual(["a.txt"]);
+  }, 40000);
 
   test("a git-dir driven refresh reports the fresh status exactly once", async () => {
     const repo = await seedRepo();
@@ -59,15 +60,14 @@ describe("ProjectFilesService status notifications", () => {
       },
     );
     cleanups.push(() => service.stop());
-    // Written before start() so the working-tree watcher has nothing to report.
+    // Not started: no working-tree watcher to report the file, only the refresh below.
     await Bun.write(path.join(repo, "new.txt"), "n\n");
-    await service.start();
-    await Bun.sleep(300);
 
     await service.refreshGitStatus();
 
-    // The callback publishes the snapshot; it must not feed another refresh.
-    await Bun.sleep(200);
+    // The callback publishes the snapshot; it must not feed another refresh, or this would wait
+    // for a drain that never ends.
+    await service.pauseWatching();
     expect(reported).toHaveLength(1);
     expect(reported[0]!.untracked).toEqual(["new.txt"]);
     expect(service.getStatusSnapshot()).toBe(reported[0]!);
@@ -108,9 +108,7 @@ describe("ProjectFilesService refresh coalescing", () => {
     const queued = service.notifyChanges(["b.txt"]);
     service.stop();
 
-    const timeout = Bun.sleep(5000).then(() => "timeout" as const);
-    const settled = Promise.all([first, queued]).then(() => "settled" as const);
-    expect(await Promise.race([settled, timeout])).toBe("settled");
+    await Promise.all([first, queued]);
   }, 20000);
 });
 
@@ -204,24 +202,34 @@ describe("ProjectFilesService changed paths", () => {
     await Bun.write(path.join(repo, ".gitignore"), ".venv/\n");
     await Bun.write(path.join(repo, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
     const reported = new Set<string>();
-    const mainReported = Promise.withResolvers<void>();
-    const ignoredReported = Promise.withResolvers<void>();
+    const events = new CaptureLog<string>();
     const service = new ProjectFilesService(repo, () => {}, undefined, undefined, {
       onPathsChanged: (paths) => {
-        for (const p of paths) reported.add(p);
-        if (reported.has(path.join(repo, "main.py"))) mainReported.resolve();
+        for (const p of paths) {
+          reported.add(p);
+          events.add(p);
+        }
       },
-      onIgnoredPathChanged: (relPath) => {
-        if (relPath === ".venv/lib.py") ignoredReported.resolve();
-      },
+      onIgnoredPathChanged: (relPath) => events.add(`ignored ${relPath}`),
     });
     cleanups.push(() => service.stop());
     await service.start();
 
-    await Bun.write(path.join(repo, ".venv", "lib.py"), "x = 1\n");
-    await Bun.write(path.join(repo, "main.py"), "y = 1\n");
-
-    await Promise.all([mainReported.promise, ignoredReported.promise]);
+    // Repeated because a native watch misses what happens before it arms.
+    const wanted = [path.join(repo, "main.py"), "ignored .venv/lib.py"];
+    await retryUntil(
+      async (attempt) => {
+        await Bun.write(path.join(repo, ".venv", "lib.py"), `x = ${attempt}\n`);
+        await Bun.write(path.join(repo, "main.py"), `y = ${attempt}\n`);
+      },
+      async (timeoutMs) => {
+        const seen = await Promise.all(
+          wanted.map((path) => events.seenWithin((event) => event === path, 0, timeoutMs)),
+        );
+        return seen.every(Boolean);
+      },
+      "changed paths",
+    );
     expect([...reported].filter((p) => p.includes(".venv"))).toEqual([]);
-  }, 20000);
+  }, 40000);
 });

@@ -12,7 +12,7 @@ export interface ConfirmationOptions {
 }
 
 interface PendingConfirmation extends ConfirmationOptions {
-  resolve: (confirmed: boolean) => void;
+  resolve: (answer: boolean | null) => void;
 }
 
 const usePendingConfirmation = create<{ pending: PendingConfirmation | null }>(() => ({
@@ -24,9 +24,17 @@ const usePendingConfirmation = create<{ pending: PendingConfirmation | null }>((
  * no place to render a dialog. Resolves `true` on confirm, `false` on cancel or Esc. Only one
  * confirmation is shown at a time; a newer request cancels the one still pending.
  */
-export function requestConfirmation(options: ConfirmationOptions): Promise<boolean> {
+export async function requestConfirmation(options: ConfirmationOptions): Promise<boolean> {
+  return (await requestAnswer(options)) === true;
+}
+
+/**
+ * {@link requestConfirmation} for a caller that records a "no": resolves `null`, not `false`, when
+ * a newer request replaced this one before the user answered it.
+ */
+export function requestAnswer(options: ConfirmationOptions): Promise<boolean | null> {
   return new Promise((resolve) => {
-    usePendingConfirmation.getState().pending?.resolve(false);
+    usePendingConfirmation.getState().pending?.resolve(null);
     usePendingConfirmation.setState({ pending: { ...options, resolve } });
   });
 }

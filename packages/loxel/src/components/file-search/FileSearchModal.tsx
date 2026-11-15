@@ -166,12 +166,16 @@ export function FileSearchModal() {
             <FileTypeIcon filename={filename} className="size-4 shrink-0" />
             {searchQuery ? (
               <span className="truncate">
-                <HighlightedLabel text={match.path} indices={match.indices} />
+                <HighlightedLabel
+                  text={match.path}
+                  indices={match.indices}
+                  emphasizeFrom={dir.length}
+                />
               </span>
             ) : (
               <span className="truncate">
                 <span className="text-muted-foreground">{dir}</span>
-                <span className="text-foreground">{filename}</span>
+                <span className="text-foreground not-dark:font-medium">{filename}</span>
               </span>
             )}
           </div>

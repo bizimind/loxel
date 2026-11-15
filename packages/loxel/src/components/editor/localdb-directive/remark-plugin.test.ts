@@ -244,8 +244,22 @@ describe("remarkLocalDbDirective", () => {
       type: "html",
       value: "::::localdb\ntable: t\n\n# not escaped\n:::\n::::",
     });
-    expect(processor.stringify(tree)).toBe(
-      "- x\n  ::::localdb\n  table: t\n\n  # not escaped\n  :::\n  ::::\n",
-    );
+    const markdown = processor.stringify(tree);
+    // mdast-util-to-markdown separates a paragraph from raw HTML with a blank line, even in a
+    // tight list. Our verbatim directive uses that HTML handler; its body and fences stay intact.
+    expect(markdown).toBe("- x\n\n  ::::localdb\n  table: t\n\n  # not escaped\n  :::\n  ::::\n");
+    const reparsed = parse(markdown);
+    expect(reparsed.children).toHaveLength(1);
+    const list = reparsed.children[0];
+    if (list?.type !== "list") throw new Error("expected a list");
+    expect(list.children).toHaveLength(1);
+    expect(list.children[0]?.children[0]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "text", value: "x" }],
+    });
+    expect(list.children[0]?.children[1]).toMatchObject({
+      type: "localdb-block",
+      raw: "table: t\n\n# not escaped\n:::",
+    });
   });
 });

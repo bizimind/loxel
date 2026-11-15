@@ -8,16 +8,21 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
-import type { TerminalState } from "@/api/ws-protocol";
+import type { TerminalState } from "@/api/terminal-stream";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { toHexColor } from "@/lib/css-color";
+import { BUNDLED_FONT_FAMILY, type ResolvedFont, resolveFont } from "@/lib/font-settings";
 import { frontendLog } from "@/lib/frontend-logger";
+import { resolveTheme, xtermColorOptions } from "@/lib/loxel-theme";
+import { readThemeTokens } from "@/lib/theme-stylesheet";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
 import { useSettingsStore } from "@/store/settings-store";
@@ -30,56 +35,38 @@ import {
   createFilePathLinkProvider,
 } from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
+import { terminalEndMessage, terminalNoticeMessage } from "./terminal-end-message";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
 
-/** Read a CSS variable from :root. */
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-/** Build xterm.js theme from CSS variables defined in index.css. */
-function getTerminalTheme() {
-  const bg = cssVar("--editor-surface");
-  return {
-    background: bg,
-    foreground: cssVar("--term-foreground"),
-    cursor: cssVar("--term-cursor"),
-    cursorAccent: bg,
-    selectionBackground: cssVar("--term-selection"),
-    black: cssVar("--term-black"),
-    red: cssVar("--term-red"),
-    green: cssVar("--term-green"),
-    yellow: cssVar("--term-yellow"),
-    blue: cssVar("--term-blue"),
-    magenta: cssVar("--term-magenta"),
-    cyan: cssVar("--term-cyan"),
-    white: cssVar("--term-white"),
-    brightBlack: cssVar("--term-bright-black"),
-    brightRed: cssVar("--term-bright-red"),
-    brightGreen: cssVar("--term-bright-green"),
-    brightYellow: cssVar("--term-bright-yellow"),
-    brightBlue: cssVar("--term-bright-blue"),
-    brightMagenta: cssVar("--term-bright-magenta"),
-    brightCyan: cssVar("--term-bright-cyan"),
-    brightWhite: cssVar("--term-bright-white"),
-  };
+/**
+ * A theme color in a form xterm.js parses: it reads hex and comma-separated `rgb()`/`rgba()` on
+ * its own, and other forms only through a canvas, which drops their alpha.
+ */
+function xtermColor(color: string): string {
+  return /^#[\da-f]{3,8}$|^rgba?\(\s*[\d.]+\s*,/i.test(color) ? color : toHexColor(color);
 }
 
 const RESIZE_DEBOUNCE_MS = 100;
 
-const TERMINAL_FONT = {
-  family: "JetBrains Mono NL",
-  size: 13,
-  weight: "400",
-  weightBold: "500",
-} as const;
+/** The bundled font's weights; a font the user picks gets the regular and bold it ships with. */
+const BUNDLED_FONT_WEIGHTS = { fontWeight: "400", fontWeightBold: "500" } as const;
+const PICKED_FONT_WEIGHTS = { fontWeight: "normal", fontWeightBold: "bold" } as const;
+
+function terminalFontOptions(font: ResolvedFont) {
+  return {
+    fontFamily: font.stack,
+    fontSize: font.size,
+    ...(font.family === null ? BUNDLED_FONT_WEIGHTS : PICKED_FONT_WEIGHTS),
+  };
+}
 
 const TERMINAL_FONT_TIMEOUT_MS = 2000;
 
 /**
- * Resolve once the terminal's font faces are loaded, failed, or timed out. xterm measures the cell
+ * Resolve once the bundled terminal font's faces are loaded, failed, or timed out. They back a font
+ * the user picks too, which is installed and needs no loading. xterm measures the cell
  * grid and the WebGL renderer rasterizes glyphs on open, and neither re-checks when a web font
  * swaps in, so opening earlier would bake the fallback font into the grid and the glyph atlas.
  */
@@ -88,7 +75,7 @@ function loadTerminalFont(): Promise<unknown> {
   // for this family (its local() fallback face for U+23FA in index.css breaks matching) and
   // resolves without loading anything.
   const faces = [...document.fonts].filter(
-    (face) => face.family.replaceAll('"', "") === TERMINAL_FONT.family,
+    (face) => face.family.replaceAll('"', "") === BUNDLED_FONT_FAMILY.terminal,
   );
   const loaded = Promise.allSettled(faces.map((face) => face.load()));
   const timeout = new Promise((resolve) => {
@@ -113,6 +100,14 @@ function openUrl(event: MouseEvent, url: string) {
 }
 
 const termLog = frontendLog.child("terminal");
+
+/**
+ * Whether the panel is on screen. A panel can be its group's active tab, and so count as visible,
+ * while its group is hidden behind a maximized one.
+ */
+function isOnScreen(panelApi: DockviewPanelApi): boolean {
+  return panelApi.isVisible && panelApi.group.api.isVisible;
+}
 
 /** Fit the terminal to its container and sync changed dimensions to the PTY. */
 function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon) {
@@ -258,7 +253,20 @@ interface TerminalProps {
 export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
+  // A built-in or stored theme object, so the reference only changes when the colors do.
+  const colorTheme = useSettingsStore((s) => resolveTheme(s.themes, darkMode));
+  const colors = useMemo(() => {
+    const surface = readThemeTokens(colorTheme, ["editor-surface"])["editor-surface"] ?? "";
+    const { theme, minimumContrastRatio } = xtermColorOptions(colorTheme, toHexColor(surface));
+    const xtermTheme = Object.fromEntries(
+      Object.entries(theme).map(([key, color]) => [key, xtermColor(color)]),
+    ) as typeof theme;
+    return { theme: xtermTheme, minimumContrastRatio };
+  }, [colorTheme]);
+  const colorsRef = useRef(colors);
+  colorsRef.current = colors;
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
+  const font = useSettingsStore(useShallow((s) => resolveFont(s.fonts, "terminal")));
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
 
@@ -289,9 +297,12 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     },
   });
 
+  // A Home terminal has no worktree: its shell starts in `cwd` (the home directory).
   const spawnTarget: TerminalPaths | null = panelWorktreePath
     ? { cwd: cwd ?? panelWorktreePath, worktreePath: panelWorktreePath }
-    : null;
+    : cwd
+      ? { cwd }
+      : null;
   const spawnTargetRef = useRef(spawnTarget);
   spawnTargetRef.current = spawnTarget;
   const fileIndexRef = useRef<FileIndex | null>(null);
@@ -306,10 +317,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
 
     const terminal = new XTerm({
       cursorBlink: true,
-      fontFamily: `"${TERMINAL_FONT.family}", monospace`,
-      fontSize: TERMINAL_FONT.size,
-      fontWeight: TERMINAL_FONT.weight,
-      fontWeightBold: TERMINAL_FONT.weightBold,
+      ...terminalFontOptions(resolveFont(useSettingsStore.getState().fonts, "terminal")),
       letterSpacing: 0,
       lineHeight: 1.1,
       linkHandler: { activate: (event, text) => openUrl(event, text) },
@@ -318,7 +326,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       allowProposedApi: true,
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
-      theme: getTerminalTheme(),
+      ...colorsRef.current,
     });
 
     const fitAddon = new FitAddon();
@@ -420,11 +428,18 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // WebGL only while visible: hidden tabs don't count against Chromium's context cap. Switching
     // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
-      if (attachedRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
+      if (attachedRef.current && isOnScreen(panelApi)) {
+        fitAndSendResize(terminalId, terminal, fitAddon);
+      }
     });
-    const visibility = panelApi.onDidVisibilityChange(({ isVisible }) => {
-      if (isVisible) webglRenderer.attach();
-      else webglRenderer.detach();
+    // Deferred to act on where the state settles: saving a layout while a group is maximized shows
+    // and re-hides the other groups synchronously, which must not cost a WebGL context each time.
+    const visibility = panelApi.onDidVisibilityChange(() => {
+      queueMicrotask(() => {
+        if (disposed) return;
+        if (isOnScreen(panelApi)) webglRenderer.attach();
+        else webglRenderer.detach();
+      });
     });
 
     const output = new OutputStream(terminalId, terminal);
@@ -488,10 +503,16 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         }
         return;
       }
+      if (msg.type === "terminal_notice" && msg.id === terminalId) {
+        terminal.write(`\r\n\x1b[90m[${terminalNoticeMessage(msg)}]\x1b[0m\r\n`);
+        termLog.warn("Terminal notice", { terminalId, notice: msg.notice });
+        return;
+      }
       if (msg.type === "terminal_exit" && msg.id === terminalId) {
         exitedRef.current = true;
-        terminal.write(`\r\n\x1b[90m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
-        termLog.info("Terminal exited", { terminalId, exitCode: msg.exitCode });
+        terminal.write(`\r\n\x1b[90m[${terminalEndMessage(msg)}]\x1b[0m\r\n`);
+        const exitCode = msg.reason === "exited" ? msg.exitCode : null;
+        termLog.info("Terminal exited", { terminalId, reason: msg.reason, exitCode });
       }
     });
 
@@ -561,6 +582,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       resizeTimerRef.current = setTimeout(() => {
         if (!fitAddonRef.current || !xtermRef.current) return;
+        // A group hidden behind a maximized one has no size to fit, and the program running here
+        // must keep its dimensions. Showing the group resizes the container, which refits.
+        if (!isOnScreen(panelApi)) return;
         fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
@@ -585,18 +609,15 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       observer.disconnect();
       dprQuery?.removeEventListener("change", onDevicePixelRatioChange);
     };
-  }, [terminalId]);
+  }, [terminalId, panelApi]);
 
-  // Update terminal theme when dark mode changes
+  // Switch colors when the theme changes: another one picked or edited, or the mode switched.
   useEffect(() => {
-    if (!xtermRef.current) return;
-    const id = requestAnimationFrame(() => {
-      if (xtermRef.current) {
-        xtermRef.current.options.theme = getTerminalTheme();
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, [darkMode]);
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    terminal.options.theme = colors.theme;
+    terminal.options.minimumContrastRatio = colors.minimumContrastRatio;
+  }, [colors]);
 
   // Update scrollback buffer when setting changes
   useEffect(() => {
@@ -609,6 +630,16 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     return () => cancelAnimationFrame(id);
   }, [scrollbackLines]);
 
+  // Apply font changes. xterm re-measures its cells and the WebGL renderer redraws its glyphs; the
+  // cell size changes, so refit. A terminal off screen refits when it is shown.
+  useEffect(() => {
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    Object.assign(terminal.options, terminalFontOptions(font));
+    if (!fitAddonRef.current || !attachedRef.current || !isOnScreen(panelApi)) return;
+    fitAndSendResize(terminalId, terminal, fitAddonRef.current);
+  }, [font, terminalId, panelApi]);
+
   // Focus terminal on click
   const handleClick = useCallback(() => {
     xtermRef.current?.focus();
@@ -619,7 +650,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       <div
         ref={containerRef}
         className="h-full w-full overflow-hidden p-2"
-        style={{ backgroundColor: "var(--editor-surface)" }}
+        style={{ backgroundColor: colors.theme.background }}
         onMouseDown={handleClick}
       />
       {findBarProps && <FindBar label="Find in terminal" {...findBarProps} />}

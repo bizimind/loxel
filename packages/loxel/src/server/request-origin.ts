@@ -15,8 +15,11 @@
 export interface RequestOriginPolicy {
   /** Port the server listens on; `Host` and same-origin `Origin` values must carry it. */
   port: number;
-  /** Also accept the Vite dev-server origin, which proxies the renderer in `pnpm run dev:app`. */
-  allowDevOrigins: boolean;
+  /**
+   * Port of the Vite dev server whose origin is also accepted (it serves the renderer and proxies
+   * to this server in dev mode), or null to accept only the server's own origin.
+   */
+  viteDevPort: number | null;
 }
 
 export interface RequestRejection {
@@ -29,8 +32,6 @@ export interface RequestRejection {
 
 // The server binds 127.0.0.1, but a client may still address it by any loopback name.
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"] as const;
-/** Must match `server.port` in vite.config.ts, which uses `strictPort` so it never drifts. */
-const VITE_DEV_PORT = 5173;
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function loopbackOrigins(port: number): string[] {
@@ -52,7 +53,7 @@ function isLoopbackHost(host: string | null, port: number): boolean {
 function isAllowedOrigin(origin: string | null, policy: RequestOriginPolicy): boolean {
   if (origin === null) return true;
   const allowed = loopbackOrigins(policy.port);
-  if (policy.allowDevOrigins) allowed.push(...loopbackOrigins(VITE_DEV_PORT));
+  if (policy.viteDevPort !== null) allowed.push(...loopbackOrigins(policy.viteDevPort));
   return allowed.includes(origin.toLowerCase());
 }
 

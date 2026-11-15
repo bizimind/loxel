@@ -23,7 +23,7 @@ describe("GET /api/editorconfig", () => {
     const resources = {} as WorktreeResources;
     const resolveFilePath = (path: string): ResolvedFilePath | null => {
       if (path.startsWith(join(root, "drafts") + "/")) {
-        return { type: "detached", wtPath: wt, resources, name: "Draft.py" };
+        return { type: "detached", wtPath: wt, service: {} as never, name: "Draft.py" };
       }
       if (!path.startsWith(wt + "/")) return null;
       const tree = { root: wt } as Extract<ResolvedFilePath, { type: "tree" }>["tree"];

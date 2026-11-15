@@ -1,9 +1,10 @@
-import { join } from "node:path";
+import { dirname } from "node:path";
 
 import type { ICruiseResult } from "dependency-cruiser";
 import { cruise } from "dependency-cruiser";
 
 import type { AnalysisPlugin, AnalysisRecord, NetworkGraphConfig } from "../plugin.ts";
+import { findProjectConfig, SOURCE_GLOBS } from "../project.ts";
 
 const plugin: AnalysisPlugin = {
   meta: {
@@ -18,22 +19,28 @@ const plugin: AnalysisPlugin = {
         default: "3",
       },
     ],
-    watchGlobs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "tsconfig*.json"],
+    watchGlobs: [...SOURCE_GLOBS, "tsconfig*.json", "jsconfig*.json"],
   },
 
   async generate(workDir, args): Promise<AnalysisRecord[]> {
-    const roots = args.scope ? [join(workDir, args.scope)] : [workDir];
+    // dependency-cruiser only honors `paths` aliases when given a config explicitly, and
+    // throws when the given file does not exist.
+    const config = findProjectConfig(workDir);
 
-    // dependency-cruiser only honors tsconfig `paths` aliases when given a tsconfig
-    // explicitly, and throws when the given file does not exist.
-    const tsconfigPath = join(workDir, "tsconfig.json");
-    const hasTsconfig = await Bun.file(tsconfigPath).exists();
-
-    const result = await cruise(roots, {
-      doNotFollow: { path: "node_modules" },
-      exclude: { path: ["node_modules", "\\.git", "dist"] },
-      ...(hasTsconfig ? { tsConfig: { fileName: tsconfigPath } } : {}),
-    });
+    const result = await cruise(
+      [args.scope ?? "."],
+      {
+        baseDir: workDir,
+        doNotFollow: { path: "node_modules" },
+        exclude: { path: "(^|/)(node_modules|\\.git|dist)(/|$)" },
+        ...(config ? { tsConfig: { fileName: config } } : {}),
+      },
+      {},
+      // Without a baseUrl here, dependency-cruiser resolves aliases from the process cwd
+      // instead of from the config. It only checks that one is set; the plugin it passes the
+      // config to works out the real one.
+      config ? { tsConfig: { options: { baseUrl: dirname(config) } } } : {},
+    );
 
     const cruiseResult = result.output as ICruiseResult;
     const records: AnalysisRecord[] = [];

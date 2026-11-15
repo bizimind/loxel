@@ -25,7 +25,7 @@ export class TextMateScopeInspector implements monacoEditor.IContentWidget {
       border: "1px solid var(--border)",
       background: "oklch(from var(--popover) l c h / 0.95)",
       backdropFilter: "blur(4px)",
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace",
+      fontFamily: "var(--loxel-font-code)",
       fontSize: "12px",
       lineHeight: "1.5",
       color: "var(--foreground)",

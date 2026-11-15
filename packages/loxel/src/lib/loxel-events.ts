@@ -5,26 +5,27 @@
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
 import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
-import type { CreateTerminalOptions } from "@/lib/panel-creators";
+import type { CreateTerminalOptions, PatchDiffParams } from "@/lib/panel-creators";
 
 /** A file to open in its panel; `placement` moves an already open tab there too. */
 type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
-  "loxel-create-agent": { placement?: PanelPlacement };
   "loxel-create-terminal": CreateTerminalOptions;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
   "loxel-create-browser": { url?: string } & PanelOpenOptions;
   "loxel-create-code-editor": { ext?: string; placement?: PanelPlacement };
   "loxel-create-editor-with-content": { content: string; title: string };
-  "loxel-open-agent-devtools": { sessionId: string };
   "loxel-open-code-editor": OpenFileDetail & { line?: number; column?: number };
   "loxel-open-markdown-editor": OpenFileDetail & { line?: number; column?: number };
+  "loxel-open-virtual-document": { uri: string; line?: number; column?: number };
   "loxel-open-drawing-editor": OpenFileDetail;
   "loxel-open-media-viewer": OpenFileDetail;
   "loxel-open-diff": undefined;
+  /** Splitting a patch's diff panel sends no patch: the panel it starts from is duplicated. */
+  "loxel-open-patch-diff": PatchDiffParams | { placement?: PanelPlacement };
   /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
   "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;

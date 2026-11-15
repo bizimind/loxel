@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { PlacedThread } from "@/api/review-model";
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 
 import { buildCommentDecorations } from "../comments/comment-decorations";
@@ -89,6 +91,8 @@ export function EditorPanel({
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
   const isEditable = onContentChange !== undefined;
+  useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
 
   // Mount editor once
   useEffect(() => {
@@ -109,12 +113,12 @@ export function EditorPanel({
       theme: getMonacoThemeName(darkMode),
       readOnly: !isEditable,
       domReadOnly: !isEditable,
+      inlayHints: inlayHintsOption(),
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",
       lineHeight: 22,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+      ...codeFontOptions(),
       automaticLayout: true,
       contextmenu: false,
       scrollbar: { vertical: "hidden", horizontal: "hidden", handleMouseWheel: false },
@@ -126,7 +130,7 @@ export function EditorPanel({
       folding: false,
       fixedOverflowWidgets: true,
       stickyScroll: { enabled: false },
-      lineDecorationsWidth: 0,
+      lineDecorationsWidth: codeInset(darkMode),
       lineNumbersMinChars: 0,
       padding: { top: 0, bottom: 22 * 8 },
     });
@@ -201,6 +205,7 @@ export function EditorPanel({
   // Update theme
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
+    editorRef.current?.updateOptions({ lineDecorationsWidth: codeInset(darkMode) });
   }, [darkMode]);
 
   // Update decorations
@@ -323,5 +328,14 @@ export function EditorPanel({
     });
   }, [viewZones]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return <div ref={containerRef} data-diff-side={side} className="h-full w-full" />;
+}
+
+/**
+ * Gap between a side's border and its code. On the light theme's white surface code that starts
+ * right at the border reads as cramped; the dark theme keeps its flush layout. The change-line
+ * decorations paint this margin too, so tinted rows stay full width.
+ */
+function codeInset(darkMode: boolean): number {
+  return darkMode ? 0 : 6;
 }

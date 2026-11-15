@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createNoopLogger } from "@bizimind/logger";
+
 import type { WsMessage } from "@/api/ws-protocol";
+import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
 import type { ActiveWindow, RouteContext } from "./routes";
@@ -40,7 +43,7 @@ describe("POST /api/open terminals and placement", () => {
         sent.push({ windowId, msg });
         return true;
       },
-      sendToWorktreeWindows: () => {},
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -50,16 +53,20 @@ describe("POST /api/open terminals and placement", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => window,
+      homeDrafts: {} as never,
       startTerminal: async (target) => {
         started.push(target);
       },
+      listTerminals: async () => ({ terminals: [] }),
     };
   });
 
@@ -142,15 +149,17 @@ describe("POST /api/open terminals and placement", () => {
     expect(started).toEqual([]);
   });
 
-  test("waits like for a window while the window shows no worktree and cwd is in none", async () => {
+  test("opens in Home while the window shows no worktree and cwd is in none", async () => {
     window = { windowId: "w1", worktreePath: null };
 
     const res = await open({ terminal: { cwd: root, command: "ls" } });
 
-    // 503, which the CLI retries: a launching window shows its worktree in a moment.
-    expect(res.status).toBe(503);
-    expect(sent).toEqual([]);
-    expect(started).toEqual([]);
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.msg).toMatchObject({ type: "open_terminal", data: { worktreePath: null } });
+    // Started with no worktree, so its shell gets no LOXEL_WORKTREE.
+    expect(started).toHaveLength(1);
+    expect(started[0]).not.toHaveProperty("worktreePath");
   });
 
   test("reports a shell that fails to start", async () => {
@@ -170,11 +179,11 @@ describe("POST /api/open terminals and placement", () => {
   test("runs the command for a worktree created a moment ago, with no panel attached", async () => {
     const originalShell = process.env.SHELL;
     process.env.SHELL = "/bin/sh";
-    const manager = new TerminalManager({
+    const manager = new TerminalManager(new InProcessTerminalHost({ log: createNoopLogger() }), {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
-      pythonEnvFor: async () => null,
+      toolchainEnvs: [],
     });
     try {
       // The `wt` layout: a bare repository with its worktrees under `.worktrees`.
@@ -278,18 +287,25 @@ describe("POST /api/open terminals and placement", () => {
     expect(sent).toEqual([]);
   });
 
-  test("sends a URL to the worktree's windows, with the placement only for the one in use", async () => {
+  /** Make `root` a registered project, its own only worktree. */
+  function registerRootAsProject(): void {
+    git(root, "init", "-q");
+    ctx.findProjectForPath = () => ({ cwd: root, isBare: false }) as never;
+  }
+
+  test("sends a URL to the worktree's windows, with placement and focus only for the one in use", async () => {
     const calls: Array<{ windowId: string | null; msg: WsMessage; primary: WsMessage }> = [];
-    ctx.sendToWorktreeWindows = (_wtPath, windowId, msg, primary) =>
+    ctx.sendToWorktreeWindows = (_wtPath, windowId, msg, primary) => {
       calls.push({ windowId, msg, primary });
-    ctx.findProjectForPath = () => ({}) as never;
+      return true;
+    };
+    registerRootAsProject();
 
     const res = await open({
       url: "https://example.com",
       wtPath: root,
       windowId: "w1",
       placement: { replace: true },
-      focus: false,
     });
 
     expect(res.status).toBe(200);
@@ -300,10 +316,104 @@ describe("POST /api/open terminals and placement", () => {
         primary: {
           type: "open_url",
           wtPath: root,
-          data: { url: "https://example.com", placement: { replace: true }, focus: false },
+          data: { url: "https://example.com", placement: { replace: true } },
         },
       },
     ]);
+    expect(sent).toEqual([]);
+  });
+
+  test("a URL for a worktree no window shows goes to the window in use", async () => {
+    registerRootAsProject();
+
+    const res = await open({ url: "https://example.com", wtPath: root, windowId: "w1" });
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual([
+      {
+        windowId: "w1",
+        msg: { type: "open_url", wtPath: root, data: { url: "https://example.com" } },
+      },
+    ]);
+  });
+
+  test("a URL waits like a file while no window is connected", async () => {
+    registerRootAsProject();
+    window = null;
+
+    expect((await open({ url: "https://example.com", wtPath: root })).status).toBe(503);
+  });
+
+  test("rejects a URL for a path in no project's worktree", async () => {
+    expect((await open({ url: "https://example.com", wtPath: root })).status).toBe(404);
+  });
+
+  test("a URL naming no worktree goes to the window in use, for what it shows", async () => {
+    expect((await open({ url: "https://example.com" })).status).toBe(200);
+    expect(sent).toEqual([
+      {
+        windowId: null,
+        msg: { type: "open_url", wtPath: null, data: { url: "https://example.com" } },
+      },
+    ]);
+
+    window = null;
+    expect((await open({ url: "https://example.com" })).status).toBe(503);
+  });
+
+  test("--worktree pins a file and a terminal, and any path in the worktree names it", async () => {
+    registerRootAsProject();
+    await mkdir(join(root, "sub"));
+
+    await open({ filePath: join(root, "file.txt"), pinWtPath: join(root, "sub") });
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), worktreePath: root },
+    });
+
+    sent = [];
+    await open({ terminal: { cwd: tmpdir() }, pinWtPath: root });
+    expect(sentTerminal().worktreePath).toBe(root);
+  });
+
+  test("rejects --worktree naming no project's worktree", async () => {
+    const res = await open({ filePath: join(root, "file.txt"), pinWtPath: root });
+
+    expect(res.status).toBe(404);
+    expect(sent).toEqual([]);
+  });
+
+  test("commandWtPath opens a file in the worktree when it is one, and is dropped when not", async () => {
+    await open({ filePath: join(root, "file.txt"), commandWtPath: root });
+    registerRootAsProject();
+    await open({ filePath: join(root, "file.txt"), commandWtPath: root });
+
+    expect(sent.map((s) => s.msg)).toEqual([
+      { type: "open_file", data: { filePath: join(root, "file.txt") } },
+      { type: "open_file", data: { filePath: join(root, "file.txt"), worktreePath: root } },
+    ]);
+  });
+
+  test("a placement batch travels with the placement", async () => {
+    await open({ filePath: join(root, "file.txt"), placement: { split: "up", batch: "b" } });
+
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), placement: { split: "up", batch: "b" } },
+    });
+    const bad = await open({ filePath: root, placement: { batch: 1 } });
+    expect(bad.status).toBe(400);
+  });
+
+  test("warns that a folder ignores --worktree", async () => {
+    registerRootAsProject();
+
+    const res = await open({ filePath: root, pinWtPath: root });
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning: "--worktree does not apply to a folder; it opens in the file tree",
+    });
   });
 
   test("forwards a terminal's focus only when it is off", async () => {

@@ -1,3 +1,5 @@
+import type { ToolchainStatusDescriptor } from "./toolchain-status-model";
+
 /** Where a worktree's Python interpreter was found, listed in resolution order. */
 export type PythonEnvSource =
   | "override"
@@ -45,3 +47,10 @@ export interface PythonOverrideRequest {
   worktreePath: string;
   pythonPath: string | null;
 }
+
+export const pythonToolchain = {
+  id: "python",
+  languageIds: ["python"],
+  changedMessage: "python_env_changed",
+  selectAction: { id: "python.selectInterpreter", label: "Python: Select Interpreter" },
+} as const satisfies ToolchainStatusDescriptor;

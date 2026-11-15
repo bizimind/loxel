@@ -1,13 +1,13 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  BotIcon,
-  BrainCircuitIcon,
   CodeIcon,
   FileJson2Icon,
   FileTypeIcon,
   KeyboardIcon,
+  PaletteIcon,
   PanelsLeftBottomIcon,
   SettingsIcon,
+  ShieldIcon,
   TerminalSquareIcon,
   XIcon,
 } from "lucide-react";
@@ -20,14 +20,14 @@ import { syncSchemas } from "@/lib/schema-sync";
 import type { SettingsState } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 
-import { CodingAgentSection } from "./CodingAgentSection";
+import { AppearanceSection } from "./AppearanceSection";
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
 import { GeneralSection } from "./GeneralSection";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { LayoutSection } from "./LayoutSection";
-import { ModelsSection } from "./ModelsSection";
 import { SchemasSection } from "./SchemasSection";
+import { SecuritySection } from "./SecuritySection";
 import { TerminalSection } from "./TerminalSection";
 
 interface SectionDef {
@@ -38,15 +38,21 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: "general", label: "General", icon: SettingsIcon },
-  { key: "models", label: "Models", icon: BrainCircuitIcon },
-  { key: "codingAgent", label: "Coding Agent", icon: BotIcon },
+  { key: "appearance", label: "Appearance", icon: PaletteIcon },
   { key: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
   { key: "editor", label: "Editor", icon: CodeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
+  { key: "security", label: "Security", icon: ShieldIcon },
 ];
+
+/**
+ * A section below the first, with a divider above it. Light scrolls a section 1px past its
+ * divider, so a section scrolled to the top does not show its divider right under the header's.
+ */
+const SECTION_CLASS = "border-border mt-8 border-t pt-8 not-dark:-scroll-mt-px";
 
 export function SettingsModal() {
   const isOpen = useSettingsStore((s) => s.isOpen);
@@ -54,11 +60,12 @@ export function SettingsModal() {
   const closeSettings = useSettingsStore((s) => s.closeSettings);
 
   // Live state for dirty tracking
-  const models = useSettingsStore((s) => s.models);
-  const codingAgent = useSettingsStore((s) => s.codingAgent);
+  const theme = useSettingsStore((s) => s.theme);
+  const themes = useSettingsStore((s) => s.themes);
   const layout = useSettingsStore((s) => s.layout);
   const terminal = useSettingsStore((s) => s.terminal);
   const editor = useSettingsStore((s) => s.editor);
+  const fonts = useSettingsStore((s) => s.fonts);
   const schemas = useSettingsStore((s) => s.schemas);
   const fileAssociations = useSettingsStore((s) => s.fileAssociations);
 
@@ -67,14 +74,15 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (isOpen) {
-      const { models, codingAgent, layout, terminal, editor, schemas, fileAssociations } =
+      const { theme, themes, layout, terminal, editor, fonts, schemas, fileAssociations } =
         useSettingsStore.getState();
       snapshotRef.current = JSON.stringify({
-        models,
-        codingAgent,
+        theme,
+        themes,
         layout,
         terminal,
         editor,
+        fonts,
         schemas,
         fileAssociations,
       });
@@ -87,16 +95,17 @@ export function SettingsModal() {
     if (!snapshotRef.current) return false;
     return (
       JSON.stringify({
-        models,
-        codingAgent,
+        theme,
+        themes,
         layout,
         terminal,
         editor,
+        fonts,
         schemas,
         fileAssociations,
       }) !== snapshotRef.current
     );
-  }, [models, codingAgent, layout, terminal, editor, schemas, fileAssociations]);
+  }, [theme, themes, layout, terminal, editor, fonts, schemas, fileAssociations]);
 
   const saveDisabled = !isSettingsDirty;
 
@@ -111,15 +120,16 @@ export function SettingsModal() {
     // Restore settings snapshot
     if (snapshotRef.current) {
       const parsed: unknown = JSON.parse(snapshotRef.current);
-      if (typeof parsed === "object" && parsed !== null && "models" in parsed) {
+      if (typeof parsed === "object" && parsed !== null && "layout" in parsed) {
         useSettingsStore.setState(
           parsed as Pick<
             SettingsState,
-            | "models"
-            | "codingAgent"
+            | "theme"
+            | "themes"
             | "layout"
             | "terminal"
             | "editor"
+            | "fonts"
             | "schemas"
             | "fileAssociations"
           >,
@@ -133,7 +143,9 @@ export function SettingsModal() {
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleCancel();
+      // Escape in a dialog opened from Settings (such as the trust question) closes only it.
+      const inDialog = e.target instanceof Element && e.target.closest("dialog[open]") !== null;
+      if (e.key === "Escape" && !inDialog) handleCancel();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -161,10 +173,10 @@ export function SettingsModal() {
   return createPortal(
     <ModalErrorBoundary name="Settings" onClose={handleCancel}>
       <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20 dark:bg-black/50"
         onClick={handleBackdropClick}
       >
-        <div className="bg-popover border-border flex max-h-[85vh] w-full max-w-[min(calc(100%-2rem),960px)] flex-col overflow-hidden rounded-lg border shadow-2xl">
+        <div className="bg-popover border-border flex max-h-[85vh] w-full max-w-[min(calc(100%-2rem),960px)] flex-col overflow-hidden rounded-lg border shadow-(--shadow-dialog)">
           {/* Full-width header */}
           <div className="border-border flex shrink-0 items-center justify-between border-b px-5 py-2">
             <span className="text-foreground text-sm font-semibold">Settings</span>
@@ -179,7 +191,7 @@ export function SettingsModal() {
           {/* Body: left nav + right content */}
           <div className="flex min-h-0 flex-1">
             {/* Left nav — CSS scrollspy via scroll-target-group */}
-            <nav className="settings-scrollspy border-border flex w-[180px] shrink-0 flex-col gap-0.5 border-r p-3">
+            <nav className="settings-scrollspy border-border not-dark:bg-card flex w-[180px] shrink-0 flex-col gap-0.5 border-r p-3">
               {SECTIONS.map((section) => (
                 <a
                   key={section.key}
@@ -198,36 +210,36 @@ export function SettingsModal() {
                 <GeneralSection />
               </div>
 
-              <div id="settings-models" className="border-border mt-8 border-t pt-8">
-                <ModelsSection />
+              <div id="settings-appearance" className={SECTION_CLASS}>
+                <AppearanceSection />
               </div>
 
-              <div id="settings-codingAgent" className="border-border mt-8 border-t pt-8">
-                <CodingAgentSection />
-              </div>
-
-              <div id="settings-keybindings" className="border-border mt-8 border-t pt-8">
+              <div id="settings-keybindings" className={SECTION_CLASS}>
                 <KeybindingsSection />
               </div>
 
-              <div id="settings-layout" className="border-border mt-8 border-t pt-8">
+              <div id="settings-layout" className={SECTION_CLASS}>
                 <LayoutSection />
               </div>
 
-              <div id="settings-terminal" className="border-border mt-8 border-t pt-8">
+              <div id="settings-terminal" className={SECTION_CLASS}>
                 <TerminalSection />
               </div>
 
-              <div id="settings-editor" className="border-border mt-8 border-t pt-8">
+              <div id="settings-editor" className={SECTION_CLASS}>
                 <EditorSection />
               </div>
 
-              <div id="settings-schemas" className="border-border mt-8 border-t pt-8">
+              <div id="settings-schemas" className={SECTION_CLASS}>
                 <SchemasSection />
               </div>
 
-              <div id="settings-fileAssociations" className="border-border mt-8 border-t pt-8">
+              <div id="settings-fileAssociations" className={SECTION_CLASS}>
                 <FileAssociationsSection />
+              </div>
+
+              <div id="settings-security" className={SECTION_CLASS}>
+                <SecuritySection />
               </div>
             </div>
           </div>

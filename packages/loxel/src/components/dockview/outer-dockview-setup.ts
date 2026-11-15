@@ -185,6 +185,11 @@ export function onOuterLayoutChange(api: DockviewApi): void {
   if (changed) scoped.setState({ sidebarSizes: sizes });
 }
 
+/** A swap that `performOuterClear` began ended without a restore (going Home mid-switch). */
+export function onOuterSwapAbandoned(): void {
+  setOuterSwapping(false);
+}
+
 /** Custom clear that preserves drawing caches during layout swap. */
 export function performOuterClear(api: DockviewApi): void {
   setOuterSwapping(true);

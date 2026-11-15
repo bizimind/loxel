@@ -1,4 +1,5 @@
 import type { FormattingSettings } from "@/lib/formatting-model";
+import type { OpenRequest, OpenResult } from "@/open-request";
 
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
@@ -16,6 +17,7 @@ import type { LogEntry } from "./log-entry-model";
 import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
 import type {
+  AddProjectRequest,
   BrowseEntry,
   CloneProjectRequest,
   ConvertProjectRequest,
@@ -23,15 +25,11 @@ import type {
   DetectPathResult,
   InitProjectRequest,
   Project,
+  ProjectSetupResult,
   ProjectsResponse,
   ProjectWorktreesResponse,
   ScanSuggestionsResult,
 } from "./project-model";
-import type {
-  PythonEnvCandidatesResponse,
-  PythonEnvResponse,
-  PythonOverrideRequest,
-} from "./python-env-model";
 import type {
   Comment,
   CommentThread,
@@ -41,19 +39,21 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
-import type { UpdateState } from "./update-model";
+import type { RunningTerminal } from "./running-terminals-model";
+import { RunningTerminalsSchema } from "./running-terminals-model";
+import type { SchemaConsentDecision } from "./schema-consent-model";
+import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./terminal-stream";
 import type {
   NestedRemoval,
   WorktreeRemovePlan,
   WorktreeRemoveResult,
 } from "./worktree-removal-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
-import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
 const API_BASE = "/api";
 
 /** Append wt or project scope param to a URL path. */
-function withScope(path: string, scope: { wt?: string; project?: string }): string {
+export function withScope(path: string, scope: { wt?: string; project?: string }): string {
   const url = new URL(`http://x${path}`);
   if (scope.wt) url.searchParams.set("wt", scope.wt);
   if (scope.project) url.searchParams.set("project", scope.project);
@@ -80,7 +80,7 @@ export function isFileMissingError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
 }
 
-async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -102,8 +102,14 @@ export async function getStore(key: string): Promise<string | null> {
   return value;
 }
 
-export async function putStore(key: string, value: string, nonce?: string): Promise<void> {
+export async function putStore(
+  key: string,
+  value: string,
+  nonce?: string,
+  options?: Pick<RequestInit, "keepalive">,
+): Promise<void> {
   await fetchJson(`/stores/${encodeURIComponent(key)}`, {
+    ...options,
     method: "PUT",
     body: JSON.stringify({ value, nonce }),
   });
@@ -235,6 +241,21 @@ export async function getFileContentByPath(
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`, { signal });
 }
 
+/**
+ * A file's content for a look only, such as a peek widget's: unlike `getFileContentByPath` it
+ * neither tracks the file for renames nor adds a file outside every tree to the worktree's Others.
+ */
+export async function getFilePreviewContent(
+  absolutePath: string,
+  worktreePath?: string | null,
+): Promise<{ content: string }> {
+  const params = new URLSearchParams();
+  params.set("path", absolutePath);
+  if (worktreePath) params.set("wt", worktreePath);
+  params.set("preview", "1");
+  return fetchJson<{ content: string }>(`/file-content?${params.toString()}`);
+}
+
 /** The `.editorconfig` properties that apply to a file (empty when none do). */
 export async function getEditorConfig(
   absolutePath: string,
@@ -295,30 +316,6 @@ export async function getDetectedFormatters(worktreePath: string): Promise<Detec
   return result.formatters;
 }
 
-// --- Python interpreter ---
-
-export async function getPythonEnv(worktreePath: string): Promise<PythonEnvResponse> {
-  return fetchJson<PythonEnvResponse>(withScope("/python-env", { wt: worktreePath }));
-}
-
-export async function getPythonEnvCandidates(
-  worktreePath: string,
-): Promise<PythonEnvCandidatesResponse> {
-  return fetchJson<PythonEnvCandidatesResponse>(
-    withScope("/python-env/candidates", { wt: worktreePath }),
-  );
-}
-
-/** Choose the worktree's interpreter, or return it to automatic detection with null. */
-export async function setPythonOverride(
-  request: PythonOverrideRequest,
-): Promise<PythonEnvResponse> {
-  return fetchJson<PythonEnvResponse>("/python-env/override", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
-}
-
 // --- Full-text search ---
 
 export async function search(
@@ -371,6 +368,14 @@ export async function getDetachedFiles(wt: string) {
 /** The worktree's Others section: open folders (`isDir`), then individually opened files. */
 export async function getExternalFiles(wt: string) {
   return fetchJson<DirEntry[]>(withScope("/external-files", { wt }));
+}
+
+/**
+ * Send an open request (`POST /api/open`), the one the `loxel` CLI sends: for the quickstart's
+ * command field, a terminal the server starts with its command typed in.
+ */
+export async function postOpenRequest(request: OpenRequest) {
+  return fetchJson<OpenResult>("/open", { method: "POST", body: JSON.stringify(request) });
 }
 
 /** Open a folder in the worktree's Others section. Returns the root it is shown under. */
@@ -564,8 +569,8 @@ export async function getProjects() {
   return fetchJson<ProjectsResponse>("/projects");
 }
 
-export async function addProject(path: string, name?: string) {
-  return fetchJson<Project>("/projects", { method: "POST", body: JSON.stringify({ path, name }) });
+export async function addProject(req: AddProjectRequest) {
+  return fetchJson<ProjectSetupResult>("/projects", { method: "POST", body: JSON.stringify(req) });
 }
 
 export async function removeProject(id: string) {
@@ -603,36 +608,53 @@ export async function scanSuggestions(path: string) {
 }
 
 export async function createProject(req: CreateProjectRequest) {
-  return fetchJson<Project>("/projects/create", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/create", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function cloneProject(req: CloneProjectRequest) {
-  return fetchJson<Project>("/projects/clone", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/clone", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function initProject(req: InitProjectRequest) {
-  return fetchJson<Project>("/projects/init", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/init", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function convertProject(req: ConvertProjectRequest) {
-  return fetchJson<Project>("/projects/convert", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/convert", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 // --- Schema API ---
 
-export interface SchemaSyncResult {
-  json: Array<{ glob: string; url: string; schema: unknown }>;
-  yaml: { synced: boolean };
-  toml: { synced: boolean };
+export async function syncSchemas(schemas: Array<{ glob: string; url: string }>): Promise<void> {
+  await fetchJson("/schemas/sync", { method: "POST", body: JSON.stringify({ schemas }) });
 }
 
-export async function syncSchemas(
-  schemas: Array<{ glob: string; url: string }>,
-): Promise<SchemaSyncResult> {
-  return fetchJson<SchemaSyncResult>("/schemas/sync", {
-    method: "POST",
-    body: JSON.stringify({ schemas }),
-  });
+export async function ensureSchemas(urls: readonly string[]): Promise<void> {
+  await fetchJson("/schemas/ensure", { method: "POST", body: JSON.stringify({ urls }) });
+}
+
+/** Record a decision on a schema URL a project file names; null forgets it. */
+export async function decideSchemaConsent(
+  url: string,
+  decision: SchemaConsentDecision | null,
+): Promise<void> {
+  await fetchJson("/schemas/consent", { method: "POST", body: JSON.stringify({ url, decision }) });
+}
+
+export async function setSchemaNeverFetch(neverFetch: boolean): Promise<void> {
+  await fetchJson("/schemas/never-fetch", { method: "POST", body: JSON.stringify({ neverFetch }) });
 }
 
 export async function resolveSchema(url: string, baseDir?: string): Promise<unknown> {
@@ -683,6 +705,14 @@ export async function createWorktree(
   return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
     method: "POST",
     body: JSON.stringify({ projectPath, name, ...options }),
+  });
+}
+
+/** Run the `init.wt.sh` a worktree's creation held back, once its repository is trusted. */
+export async function runInitHook(projectPath: string, wtPath: string) {
+  return fetchJson<{ hookRan: boolean }>("/worktree/run-init-hook", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath }),
   });
 }
 
@@ -911,7 +941,7 @@ class WsClient {
       this.ws = ws;
 
       if (this.wasConnected) {
-        // Server came back — check if it was updated (version changed → full page reload)
+        // Server came back — check whether a different build is running (full page reload)
         this.checkVersionAndRecover();
       } else {
         // First connection: record server version and flush pending messages
@@ -984,8 +1014,8 @@ class WsClient {
 
   /**
    * On reconnect, compare the server version to the one recorded at first connect.
-   * If the version changed (update installed), reload the page to pick up new renderer
-   * assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
+   * If the version changed (a different build of the server started), reload the page to pick
+   * up its renderer assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
    */
   private async checkVersionAndRecover(): Promise<void> {
     this.pendingMessages = [];
@@ -1070,24 +1100,28 @@ class WsClient {
 
 export const wsClient = new WsClient();
 
-// --- Update API ---
+// --- Version API ---
+
+/**
+ * How long to wait for the server's list of terminals. It bounds its own wait for each terminal
+ * host's foreground programs at a few seconds, so this only gives up on a server that stalls: the
+ * callers then fall back to what they knew without it, as for any failure.
+ */
+const RUNNING_TERMINALS_TIMEOUT_MS = 10_000;
+
+/**
+ * The terminals the server runs; with `programs`, each one's foreground program where its terminal
+ * host can tell, which costs the host a process listing.
+ */
+export async function getRunningTerminals(options: {
+  programs: boolean;
+}): Promise<RunningTerminal[]> {
+  const raw = await fetchJson<unknown>(options.programs ? "/terminals?programs" : "/terminals", {
+    signal: AbortSignal.timeout(RUNNING_TERMINALS_TIMEOUT_MS),
+  });
+  return RunningTerminalsSchema.parse(raw).terminals;
+}
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
   return fetchJson("/version");
-}
-
-export async function getUpdateStatus(): Promise<UpdateState> {
-  return fetchJson("/update/status");
-}
-
-export async function checkForUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/check", { method: "POST" });
-}
-
-export async function downloadUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/download", { method: "POST" });
-}
-
-export async function installUpdate(): Promise<void> {
-  await fetchJson("/update/install", { method: "POST" });
 }

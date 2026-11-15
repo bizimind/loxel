@@ -61,6 +61,69 @@ describe("computeInlineChanges", () => {
     expect(spelling.new.map((r) => slice("let colour = 1", r))).toEqual(["u"]);
   });
 
+  // Monaco alone reports these as an insertion and a deletion around text it matched at a
+  // different offset on each side (`+8.` and `-.1` around a shifted `8.3`).
+  it.each([
+    ['"pkg": "^8.3.1",', '"pkg": "^8.8.3",', "3.1", "8.3"],
+    ['"pkg": "^8.3.10-beta",', '"pkg": "^8.8.30-beta",', "3.1", "8.3"],
+    ["at 1:3:1", "at 1:1:3", "3:1", "1:3"],
+    ["a.b.c", "a.a.b", "b.c", "a.b"],
+  ])("joins edits around a shifted match: %s -> %s", (oldLine, newLine, removed, added) => {
+    const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual([removed]);
+    expect(updated.map((r) => slice(newLine, r))).toEqual([added]);
+  });
+
+  it.each([
+    // Monaco's code-unit diff alone would end both ranges inside the emoji.
+    ["😀😁", "😀😀", "😁", "😀"],
+    // A joined edit whose ends fall inside surrogate pairs.
+    ["v😀.😁.😂", "v😀.😀.😁", "😁.😂", "😀.😁"],
+  ])("keeps surrogate pairs whole: %s -> %s", (oldLine, newLine, removed, added) => {
+    const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual([removed]);
+    expect(updated.map((r) => slice(newLine, r))).toEqual([added]);
+  });
+
+  it("joins shifted edits on every line of a multi-line block", () => {
+    const oldLines = ['"a": "^8.3.1",', '"b": "^8.3.1",'];
+    const newLines = ['"a": "^8.8.3",', '"b": "^8.8.3",'];
+    const { old, new: updated } = computeInlineChanges(oldLines, newLines);
+    expect(old.map((r) => [r.startLineNumber, slice(oldLines[r.startLineNumber - 1]!, r)])).toEqual(
+      [
+        [1, "3.1"],
+        [2, "3.1"],
+      ],
+    );
+    expect(
+      updated.map((r) => [r.startLineNumber, slice(newLines[r.startLineNumber - 1]!, r)]),
+    ).toEqual([
+      [1, "8.3"],
+      [2, "8.3"],
+    ]);
+  });
+
+  it.each([
+    // Whitespace between the edits: a token moved, not a shifted match.
+    ["abc ab", "ab abc", ["c"], ["c"]],
+    // The unchanged run is longer than the edits around it.
+    ["abcdef", "xabcde", ["f"], ["x"]],
+    // Genuine moves and swaps: neither edit repeats the text beside it.
+    ["path: a/b/c", "path: b/c/d", ["a/"], ["/d"]],
+    ["f(g(x), h(y))", "f(h(y), g(x))", [", h(y)"], ["h(y), "]],
+    ["items.map(fn).filter(g)", "items.filter(g).map(fn)", ["map(fn)."], [".map(fn)"]],
+    ["call(foo.bar.baz)", "call(bar.baz.qux)", ["foo."], [".qux"]],
+    ["const ids = [1,2,3];", "const ids = [2,3,4];", ["1,"], [",4"]],
+    // Replacements, not an insertion/deletion pair.
+    ["1.2.3333.4", "1.5.3333.6", ["2", "4"], ["5", "6"]],
+    // A single insertion.
+    ["8.3.1", "8.3.1.0", [], [".0"]],
+  ])("keeps edits Monaco aligned correctly: %s -> %s", (oldLine, newLine, removed, added) => {
+    const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual(removed);
+    expect(updated.map((r) => slice(newLine, r))).toEqual(added);
+  });
+
   it("handles blocks with unequal line counts", () => {
     const oldLines = ["return a;"];
     const newLines = ["const b = a;", "return b;"];

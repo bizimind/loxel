@@ -13,28 +13,17 @@ files:
 extraResources:
   - from: build/loxel-server
     to: loxel-server
-  - from: build/yaml-language-server
-    to: yaml-language-server
-  - from: build/docker-language-server
-    to: docker-language-server
-  - from: build/terraform-ls
-    to: terraform-ls
-  - from: build/ruff
-    to: ruff
-  - from: build/tombi
-    to: tombi
-  - from: build/basedpyright-langserver
-    to: basedpyright-langserver
-  - from: build/astro-ls
-    to: astro-ls
-  - from: build/lemminx/lemminx
-    to: lemminx
-  - from: build/typeshed-fallback
-    to: typeshed-fallback
-  - from: build/typescript-lib
-    to: typescript-lib
+  # Never run from here: the server clones it out of the bundle first (docs/TERMINAL_HOST.md)
+  - from: build/loxel-terminal-host
+    to: loxel-terminal-host
+  # Every language server's files, staged from scripts/language-servers/*.json
+  - from: build/language-servers
+    to: .
   - from: dist-electron/renderer
     to: renderer
+  # electron-updater's cache folder; without it no update can download
+  - from: assets/app-update.yml
+    to: app-update.yml
 
 asar: true
 
@@ -52,7 +41,16 @@ mac:
   # them and folders be dropped on the Dock icon or opened with `open -a Loxel`. Alternate rank:
   # Loxel never becomes a type's default app unless the user picks it with "Change All…".
   # src/electron/main.ts handles the opens.
+  # http and https make Loxel a web browser macOS can offer in Desktop & Dock > Default web browser
+  # (and Settings > General > Default Browser in Loxel). Declaring them never changes the default:
+  # macOS keeps the user's browser until they pick another, so Loxel opens links only once chosen.
+  # Alternate rank, as for the documents above, ranks it below any browser that claims more.
   extendInfo:
+    CFBundleURLTypes:
+      - CFBundleURLName: Web site URL
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        CFBundleURLSchemes: [http, https]
     CFBundleDocumentTypes:
       - CFBundleTypeName: Text Document
         CFBundleTypeRole: Editor
@@ -104,15 +102,13 @@ mac:
         CFBundleTypeRole: Viewer
         LSHandlerRank: Alternate
         LSItemContentTypes: [public.folder]
+  # No arch lists: they would override --x64 or --arm64 and package the other architecture with
+  # this machine's binaries.
+  # The dmg is the download; the zip, with its block map, is what installed apps update from
+  # (src/electron/app-updater.ts).
   target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
-    - target: zip
-      arch:
-        - arm64
-        - x64
+    - dmg
+    - zip
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 dmg:

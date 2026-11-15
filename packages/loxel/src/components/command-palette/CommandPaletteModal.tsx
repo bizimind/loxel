@@ -1,16 +1,18 @@
 import { CheckIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
-import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
+import { KeyBindingDisplay, LIGHT_KEYCAP_CLASS } from "@/components/ui/key-binding-display";
 import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { useActionHandler } from "@/hooks/useActionHandler";
 import { fuzzyMatch } from "@/lib/fuzzy-match";
+import { cn } from "@/lib/utils";
 import {
   type CommandPaletteMode,
   type QuickPickItem,
   useCommandPaletteStore,
 } from "@/store/command-palette";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { ACTIONS, isActionId } from "@/store/keybindings/action-registry";
 import type { KeyBinding } from "@/store/keybindings/key-combo";
 import {
@@ -18,6 +20,7 @@ import {
   type KeybindingState,
   useKeybindingStore,
 } from "@/store/keybindings/keybinding-store";
+import { isActionEnabledHere } from "@/store/keybindings/pending-chord";
 
 /** One row of the list: an action in command mode, an item in pick mode. */
 interface PaletteRow {
@@ -30,12 +33,28 @@ interface PaletteRow {
   bindings: readonly KeyBinding[];
 }
 
-function commandRows(query: string, kbState: KeybindingState): PaletteRow[] {
-  const visible = ACTIONS.filter((a) => !a.hidden);
+/**
+ * The actions that apply where focus was when the palette opened (see `ActionDef.isEnabled`): the
+ * palette takes focus, and gives it back before running the chosen action.
+ */
+function actionsEnabledAtOpen(): ReadonlySet<ActionId> {
+  return new Set(ACTIONS.filter((a) => isActionEnabledHere(a.id)).map((a) => a.id));
+}
+
+const NO_ACTIONS: ReadonlySet<ActionId> = new Set();
+
+function commandRows(
+  query: string,
+  kbState: KeybindingState,
+  enabled: ReadonlySet<ActionId>,
+): PaletteRow[] {
+  const visible = ACTIONS.filter((a) => !a.hidden && enabled.has(a.id));
+  const labelOf = (action: (typeof visible)[number]) => action.contextLabel?.() ?? action.label;
   const toRow = (action: (typeof visible)[number], indices: number[]): PaletteRow => ({
     key: action.id,
-    label: action.label,
+    label: labelOf(action),
     indices,
+    current: action.isCurrent?.(),
     bindings: getBindingsForAction(kbState, action.id),
   });
   const q = query.trim();
@@ -43,7 +62,7 @@ function commandRows(query: string, kbState: KeybindingState): PaletteRow[] {
 
   const results: Array<{ row: PaletteRow; score: number }> = [];
   for (const action of visible) {
-    const match = fuzzyMatch(q, action.label);
+    const match = fuzzyMatch(q, labelOf(action));
     if (match) results.push({ row: toRow(action, match.indices), score: match.score });
   }
   results.sort((a, b) => b.score - a.score);
@@ -118,12 +137,19 @@ export function CommandPaletteModal() {
   );
 
   const kbState = useKeybindingStore();
+  // Taken in the render that opens the palette, before the dialog takes focus.
+  const [enabled, setEnabled] = useState(NO_ACTIONS);
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) setEnabled(actionsEnabledAtOpen());
+  }
 
   const rows = useMemo(() => {
-    if (mode.kind === "commands") return commandRows(query, kbState);
+    if (mode.kind === "commands") return commandRows(query, kbState, enabled);
     if (mode.kind === "pick") return pickRows(query, mode.items ?? []);
     return [];
-  }, [mode, query, kbState]);
+  }, [mode, query, kbState, enabled]);
 
   const choose = useCallback(
     ({ key }: PaletteRow) => {
@@ -179,7 +205,10 @@ export function CommandPaletteModal() {
           {row.bindings.length > 0 && (
             <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
               {row.bindings.map((binding) => (
-                <KeyBindingDisplay key={binding} binding={binding} />
+                // Light shows each binding as a keycap, so neighboring bindings read apart
+                <span key={binding} className={cn("inline-flex items-center", LIGHT_KEYCAP_CLASS)}>
+                  <KeyBindingDisplay binding={binding} />
+                </span>
               ))}
             </span>
           )}

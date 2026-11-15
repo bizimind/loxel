@@ -1,15 +1,18 @@
-import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { access, constants, lstat, realpath, stat } from "node:fs/promises";
+import { readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+import { access, constants, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
 import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
 import { isDirectory } from "@/fs-utils";
 
-import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { getPythonOverride } from "./python-override-store";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
+import { isEnvShippedByRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -50,13 +53,14 @@ const PIPENV = {
 } as const;
 const ENV_TOOLS = [POETRY, PIPENV] as const;
 type EnvTool = (typeof ENV_TOOLS)[number];
+/** Exported for tests. */
+export const ENV_TOOL_REPO_TRUST_RESTRICTION =
+  "Poetry and Pipenv aren't asked where this project's Python environment is.";
 const ENV_TOOL_TIMEOUT_MS = 10_000;
 /** Quiet period after the last filesystem event before re-resolving (installers write in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 
 const IS_WINDOWS = process.platform === "win32";
-/** `runGit` exit code when git could not be started (missing binary, unusable directory). */
-const GIT_SPAWN_FAILED = -1;
 
 type SpawnEnv = Record<string, string | undefined>;
 
@@ -103,10 +107,20 @@ interface WorktreePythonEnv {
   withdrawn: boolean;
   /** The override the latest resolution started with. */
   overridePath: string | null;
+  /** The repository trust the latest resolution started with, which decides what it may run. */
+  trusted: boolean;
   watch: PythonEnvWatch | null;
 }
 
 const worktreeEnvs = new Map<string, WorktreePythonEnv>();
+let unsubscribeRepoTrust: (() => void) | null = null;
+
+/** Re-resolve each worktree whose repository's trust changed since its latest resolution. */
+function followRepoTrust(): void {
+  for (const [wtPath, entry] of worktreeEnvs) {
+    if (entry.resolution && isRepoTrusted(wtPath) !== entry.trusted) startResolution(wtPath, entry);
+  }
+}
 
 /**
  * Keep the worktree's resolution memoized and watched while subscribed, and call `listener` after
@@ -130,9 +144,11 @@ export function subscribePythonEnv(
       pending: false,
       withdrawn: false,
       overridePath: null,
+      trusted: false,
       watch: null,
     };
     worktreeEnvs.set(wtPath, entry);
+    unsubscribeRepoTrust ??= onRepoTrustChange(followRepoTrust);
   }
   const subscribed = entry;
   subscribed.listeners.add(listener);
@@ -141,6 +157,9 @@ export function subscribePythonEnv(
     if (subscribed.listeners.size > 0 || worktreeEnvs.get(wtPath) !== subscribed) return;
     subscribed.watch?.close();
     worktreeEnvs.delete(wtPath);
+    if (worktreeEnvs.size > 0) return;
+    unsubscribeRepoTrust?.();
+    unsubscribeRepoTrust = null;
   };
 }
 
@@ -206,7 +225,7 @@ export function refreshAllPythonEnvs(changedNames?: Iterable<string>): void {
  */
 async function revalidate(wtPath: string, entry: WorktreePythonEnv): Promise<void> {
   if (!entry.resolution || worktreeEnvs.get(wtPath) !== entry) return;
-  if (getPythonOverride(wtPath) !== entry.overridePath) {
+  if (getPythonOverride(wtPath) !== entry.overridePath || isRepoTrusted(wtPath) !== entry.trusted) {
     startResolution(wtPath, entry);
     return;
   }
@@ -231,6 +250,7 @@ function startResolution(wtPath: string, entry: WorktreePythonEnv): Promise<Pyth
   const resolution = detailed.then(({ env: resolved }) => resolved);
   entry.resolution = resolution;
   entry.overridePath = overridePath;
+  entry.trusted = isRepoTrusted(wtPath);
   entry.pending = true;
   void detailed.then(({ env: resolved, projectDirs }) => {
     if (worktreeEnvs.get(wtPath) !== entry || entry.resolution !== resolution) return;
@@ -671,25 +691,33 @@ async function systemPython(wtPath: string, env: SpawnEnv): Promise<PythonEnv | 
 
 /**
  * The environment a project tool (Poetry, Pipenv) keeps for the worktree, asked only when the
- * tool's lock file exists at the root and the tool is on PATH, since it is a process spawn.
+ * tool's lock file exists at the root and the tool is on PATH, since it is a process spawn, and
+ * only in a trusted repository: run in the worktree, the tool reads the project's own settings,
+ * which can name code for it to load.
  */
 async function toolEnv(wtPath: string, env: SpawnEnv, tool: EnvTool): Promise<PythonEnv | null> {
   if (!(await Bun.file(path.join(wtPath, tool.lockFile)).exists())) return null;
   const executable = Bun.which(tool.command, { PATH: env.PATH ?? "" });
   if (!executable) return null;
+  if (!isRepoTrusted(wtPath)) {
+    reportRepoRestriction(wtPath, ENV_TOOL_REPO_TRUST_RESTRICTION);
+    return null;
+  }
 
   // Both report an activated environment as the project's own, so hide the one Loxel was
   // launched with.
   const { VIRTUAL_ENV: _venv, CONDA_PREFIX: _conda, PIPENV_ACTIVE: _pipenv, ...toolEnvVars } = env;
   try {
-    const proc = Bun.spawn([executable, ...tool.args], {
-      cwd: wtPath,
-      env: toolEnvVars,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-      timeout: ENV_TOOL_TIMEOUT_MS,
-    });
+    const proc = measureSpawn("python-env", () =>
+      Bun.spawn([executable, ...tool.args], {
+        cwd: wtPath,
+        env: toolEnvVars,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: ENV_TOOL_TIMEOUT_MS,
+      }),
+    );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     // Exits non-zero when the project has no environment yet.
     const envPath = stdout.trim().split("\n").at(-1)?.trim();
@@ -746,56 +774,11 @@ function pixiEnvDirs(projectDir: string): string[] {
 // ---------------------------------------------------------------------------
 // The trust rule
 
-/**
- * Whether the repository ships any part of the environment at `envPath`: a file git tracks inside
- * it, or the `executable` about to run from it (or what its symlinks resolve to), including in a
- * submodule or nested repository. Real environments are never committed, and whatever runs from
- * one (Loxel and basedpyright running the interpreter, format-on-save running ruff or black) would
- * otherwise run repository code, through the executable itself or files it loads such as a `.pth`
- * hook in `site-packages`. The one trust rule for environments, shared by the resolver, the
- * formatter, terminals and ruff's language server, with one cache (see {@link isTrackedByGit}).
- */
-export async function isEnvShippedByRepo(
-  wtPath: string,
-  envPath: string,
-  executable: string,
-): Promise<boolean> {
-  const targets = [...(await envTargets(wtPath, envPath)), executable];
-  const shipped = await Promise.all(targets.map((target) => isShippedByRepo(wtPath, target)));
-  return shipped.some(Boolean);
-}
-
 /** The trust rule for an environment the resolver returned, as it was checked when found. */
 function isResolvedEnvShipped(wtPath: string, env: PythonEnv): Promise<boolean> {
   return env.envPath
     ? isEnvShippedByRepo(wtPath, env.envPath, env.pythonPath)
     : isInterpreterShippedByRepo(wtPath, env.pythonPath);
-}
-
-/**
- * What of the environment at `envPath` to ask git about: the whole directory, or, when the
- * worktree lies inside it (an environment created at the repository root, `python -m venv .`),
- * only the environment's own entries, since the directory then also holds the repository's files.
- */
-async function envTargets(wtPath: string, envPath: string): Promise<string[]> {
-  const resolveReal = (target: string) => realpath(target).catch(() => target);
-  const [realWtPath, realEnvPath] = await Promise.all([resolveReal(wtPath), resolveReal(envPath)]);
-  if (!isInside(wtPath, envPath) && !isInside(realWtPath, realEnvPath)) return [envPath];
-  const libDir = path.join(envPath, "lib");
-  let libEntries: string[] = [];
-  try {
-    libEntries = readdirSync(libDir);
-  } catch {
-    // No `lib` directory: nothing installed there to check.
-  }
-  return [
-    path.join(envPath, "pyvenv.cfg"),
-    path.join(envPath, "conda-meta"),
-    path.join(envPath, "Lib", "site-packages"),
-    ...libEntries
-      .filter((name) => name.startsWith("python"))
-      .map((name) => path.join(libDir, name, "site-packages")),
-  ].filter((target) => existsSync(target));
 }
 
 /** `isEnvShippedByRepo` for an interpreter given by path: its environment, if it is in one. */
@@ -806,198 +789,32 @@ async function isInterpreterShippedByRepo(wtPath: string, pythonPath: string): P
     : isShippedByRepo(wtPath, pythonPath);
 }
 
-/**
- * Whether `target` (a file or directory, or what its symlinks resolve to) is, or for a directory
- * contains, something git tracks in the worktree, including in a submodule or nested repository.
- * A path that cannot be checked (removed meanwhile, or git failing) counts as tracked, so the
- * caller moves on to its next candidate.
- */
-export async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
-  try {
-    const candidates = new Set([target, await realpath(target)]);
-    const root = path.resolve(wtPath);
-    const tracked = await Promise.all([...candidates].map((file) => isTrackedByGit(root, file)));
-    return tracked.some(Boolean);
-  } catch (err) {
-    log.debug("Could not check whether git tracks a path; treating it as tracked", {
-      target,
-      error: err,
-    });
-    return true;
-  }
-}
-
-/** A repository's top level and its index file, whose changes invalidate cached answers. */
-interface RepoInfo {
-  toplevel: string;
-  indexFile: string;
-}
-
-interface WorktreeRepo extends RepoInfo {
-  realWtPath: string;
-}
-
-/** The worktree's own repository by worktree path, looked up once while its git dir exists. */
-const worktreeRepos = new Map<string, Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED>>();
-
-/** A cached {@link isTrackedByGit} answer, valid while the indexes it read are unchanged. */
-interface TrackedAnswer {
-  tracked: boolean;
-  indexStamps: Array<readonly [file: string, stamp: string]>;
-}
-
-/** Answers by worktree and physical path. */
-const trackedAnswers = new Map<string, TrackedAnswer>();
-/**
- * Questions being asked, by key and the worktree index they started from, so concurrent checks
- * of one path share a git run but a check made after the index changed does not join an older one.
- */
-const trackedQuestions = new Map<string, Promise<boolean>>();
-
-/**
- * Asks the innermost repository containing `filePath`, since a submodule or nested repository
- * tracks its own files and the worktree's index does not list them. For a real directory that is
- * the directory's own repository if it is one (a venv can be a repository itself), and any
- * tracked file inside counts. Git is asked about the physical path (parent directory resolved,
- * the entry itself kept, so a committed symlink still counts) wherever it is: a committed symlink
- * can reach another checkout of the same repository. Inside a git worktree, any answer other than
- * a clear "untracked" counts as tracked (fail closed); outside it, a path in no repository is
- * untracked.
- *
- * Clear answers are cached per physical path until the index file of the worktree's or the
- * innermost repository changes: every commit, checkout, pull, `git add` or submodule update
- * rewrites one of those, so callers ask on every use without spawning git each time.
- */
-async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
-  const worktreeRepo = await worktreeRepoOf(wtPath);
-  if (worktreeRepo === GIT_SPAWN_FAILED) return true;
-  // Not a repository at all, so nothing in it can be committed.
-  if (!worktreeRepo) return false;
-
-  const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
-  const key = `${wtPath}\0${physical}`;
-  const known = trackedAnswers.get(key);
-  if (known && (await stampsMatch(known.indexStamps))) return known.tracked;
-  // Stamped before asking, so a change made while git runs invalidates the answer.
-  const worktreeStamp = await stampIndexes([worktreeRepo.indexFile]);
-  const questionKey = `${key}\0${worktreeStamp[0]![1]}`;
-  let question = trackedQuestions.get(questionKey);
-  if (!question) {
-    question = askGit(worktreeRepo, physical, key, worktreeStamp).finally(() =>
-      trackedQuestions.delete(questionKey),
-    );
-    trackedQuestions.set(questionKey, question);
-  }
-  return question;
-}
-
-async function askGit(
-  worktreeRepo: WorktreeRepo,
-  physical: string,
-  key: string,
-  worktreeStamp: TrackedAnswer["indexStamps"],
-): Promise<boolean> {
-  const lookupDir = (await isRealDirectory(physical)) ? physical : path.dirname(physical);
-  const innermost = await repoAt(lookupDir);
-  if (innermost === GIT_SPAWN_FAILED || !innermost) {
-    const tracked = isInside(physical, worktreeRepo.realWtPath);
-    // Inside the worktree this is git failing (fail closed), not an answer worth keeping.
-    if (!tracked) trackedAnswers.set(key, { tracked, indexStamps: worktreeStamp });
-    return tracked;
-  }
-  const indexStamps = [...worktreeStamp, ...(await stampIndexes([innermost.indexFile]))];
-  const listed = await runGit(innermost.toplevel, ["ls-files", "--error-unmatch", "--", physical]);
-  // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
-  if (listed.exitCode !== 0 && listed.exitCode !== 1) return true;
-  const tracked = listed.exitCode === 0;
-  trackedAnswers.set(key, { tracked, indexStamps });
-  return tracked;
-}
-
-async function worktreeRepoOf(
-  wtPath: string,
-): Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED> {
-  const cached = worktreeRepos.get(wtPath);
-  if (cached) {
-    const repo = await cached;
-    if (repo && repo !== GIT_SPAWN_FAILED && isDirectory(path.dirname(repo.indexFile))) return repo;
-    // A failed or outdated lookup; the first caller to notice replaces it.
-    if (worktreeRepos.get(wtPath) === cached) worktreeRepos.delete(wtPath);
-  }
-  let lookup = worktreeRepos.get(wtPath);
-  if (!lookup) {
-    lookup = lookUpWorktreeRepo(wtPath);
-    worktreeRepos.set(wtPath, lookup);
-  }
-  return lookup;
-}
-
-async function lookUpWorktreeRepo(
-  wtPath: string,
-): Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED> {
-  const realWtPath = await realpath(wtPath).catch(() => null);
-  if (!realWtPath) return GIT_SPAWN_FAILED;
-  const repo = await repoAt(realWtPath);
-  return repo === GIT_SPAWN_FAILED || !repo ? repo : { ...repo, realWtPath };
-}
-
-/** The repository containing `dir`, or null when it is in none. */
-async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_SPAWN_FAILED> {
-  const result = await runGit(dir, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]);
-  if (result.exitCode === GIT_SPAWN_FAILED) return GIT_SPAWN_FAILED;
-  const [toplevel, gitDir] = result.stdout.split("\n");
-  if (result.exitCode !== 0 || !toplevel || !gitDir) return null;
-  return { toplevel, indexFile: path.join(gitDir, "index") };
-}
-
-async function stampIndexes(files: string[]): Promise<Array<readonly [string, string]>> {
-  return Promise.all(files.map(async (file) => [file, await fileStamp(file)] as const));
-}
-
-async function stampsMatch(stamps: TrackedAnswer["indexStamps"]): Promise<boolean> {
-  const current = await Promise.all(stamps.map(([file]) => fileStamp(file)));
-  return current.every((stamp, i) => stamp === stamps[i]![1]);
-}
-
-/** Git replaces the index file on every write, so its identity changes with its content. */
-async function fileStamp(file: string): Promise<string> {
-  try {
-    const info = await stat(file);
-    return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
-  } catch {
-    return "missing";
-  }
-}
-
-/** A directory that is not a symlink (`lstat`), so a committed symlink is asked about as itself. */
-async function isRealDirectory(target: string): Promise<boolean> {
-  try {
-    return (await lstat(target)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
-  try {
-    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
-      env: readOnlyGitEnv(),
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return { exitCode, stdout };
-  } catch {
-    return { exitCode: GIT_SPAWN_FAILED, stdout: "" };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Layout helpers
 
+/**
+ * What of the environment `env` may run in an untrusted repository: the interpreter file
+ * `env.pythonPath` resolves to, when it lies outside both the worktree and the environment, so it
+ * is the Python the environment was created from rather than anything installed into it. It runs
+ * by its real path, which no environment's `pyvenv.cfg` sits next to, so the environment's
+ * packages and their startup hooks stay out of it. Null when it lies inside either.
+ */
+export async function untrustedInterpreter(
+  env: Pick<PythonEnv, "pythonPath" | "envPath">,
+  wtPath: string,
+): Promise<string | null> {
+  const real = await realpath(env.pythonPath).catch(() => null);
+  if (!real) return null;
+  const realOf = (dir: string) => realpath(dir).catch(() => path.resolve(dir));
+  const containers = [wtPath, ...(env.envPath ? [env.envPath] : [])];
+  for (const dir of containers) {
+    if (isInside(real, dir) || isInside(real, await realOf(dir))) return null;
+  }
+  return real;
+}
+
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */
-async function envPrefixOf(pythonPath: string): Promise<string | null> {
+export async function envPrefixOf(pythonPath: string): Promise<string | null> {
   const binDir = path.dirname(pythonPath);
   for (const prefix of [path.dirname(binDir), binDir]) {
     if (await Bun.file(path.join(prefix, "pyvenv.cfg")).exists()) return prefix;
@@ -1017,6 +834,50 @@ function interpreterRelativePaths(): string[] {
 
 function interpreterDirNames(): string[] {
   return IS_WINDOWS ? ["Scripts", "python.exe"] : ["bin"];
+}
+
+/** `.pth` files past this size are not read, as basedpyright does. */
+const MAX_PTH_FILE_BYTES = 64 * 1024;
+
+/**
+ * Where the environment at `envPath` has packages to import from, read as files rather than by
+ * running it: its `site-packages` directories and the existing directories their `.pth` files
+ * list (editable installs). A `.pth` line starting with `import` is code, which is never run.
+ */
+export function environmentImportPaths(envPath: string): string[] {
+  const paths: string[] = [];
+  for (const sitePackages of sitePackagesDirs(envPath)) {
+    paths.push(sitePackages);
+    let names: string[] = [];
+    try {
+      names = readdirSync(sitePackages).filter((name) => name.endsWith(".pth"));
+    } catch {
+      continue;
+    }
+    for (const name of names.toSorted()) {
+      paths.push(...pthDirs(sitePackages, path.join(sitePackages, name)));
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/** The directories a `.pth` file lists, relative ones from `sitePackages`, that exist. */
+function pthDirs(sitePackages: string, pthFile: string): string[] {
+  try {
+    const info = statSync(pthFile);
+    if (!info.isFile() || info.size > MAX_PTH_FILE_BYTES) return [];
+    return (
+      readFileSync(pthFile, "utf8")
+        .split(/\r?\n/)
+        // CPython strips only the end of a line.
+        .map((line) => line.trimEnd())
+        .filter((line) => line && !line.startsWith("#") && !/^import[\s\t]/.test(line))
+        .map((line) => path.resolve(sitePackages, line))
+        .filter(isDirectory)
+    );
+  } catch {
+    return [];
+  }
 }
 
 function sitePackagesDirs(envPath: string): string[] {
@@ -1040,20 +901,4 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
- */
-export function pathOutsideWorktree(PATH: string, wtPath: string): string {
-  const root = path.resolve(wtPath);
-  return PATH.split(path.delimiter)
-    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
-    .join(path.delimiter);
-}
-
-function isInside(child: string, parent: string): boolean {
-  const relative = path.relative(parent, child);
-  return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }

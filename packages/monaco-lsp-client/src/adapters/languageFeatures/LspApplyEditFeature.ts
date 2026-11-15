@@ -14,7 +14,13 @@ export class LspApplyEditFeature extends Disposable {
     this._register(
       this._connection.connection.registerRequestHandler(
         api.client.workspaceApplyEdit,
-        async (params) => ({ ok: await this._connection.edits.apply(params.edit) }),
+        async (params) => {
+          // The summary is for the user; the server's answer has no such field.
+          const { applied, failureReason, failedChange } = await this._connection.edits.apply(
+            params.edit,
+          );
+          return { ok: { applied, failureReason, failedChange } };
+        },
       ),
     );
   }

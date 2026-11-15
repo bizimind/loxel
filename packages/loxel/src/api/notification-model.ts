@@ -1,8 +1,11 @@
 /** Source identifies where a notification came from. Extensible for future sources. */
-export type NotificationSource = { kind: "terminal"; panelId: string; worktreePath: string };
+export type NotificationSource =
+  // A terminal panel's, in its worktree, or in Home when `worktreePath` is null
+  | { kind: "terminal"; panelId: string; worktreePath: string | null }
+  /** The server itself, about the terminal hosts (terminals it had to end at startup). */
+  | { kind: "terminal_host" };
 // Future additions:
 // | { kind: "ci"; pipelineId: string; worktreePath?: string }
-// | { kind: "agent"; agentId: string; worktreePath: string }
 
 export interface ServerNotification {
   id: string;

@@ -1,8 +1,9 @@
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, type StdioOptions, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   Menu,
@@ -10,54 +11,93 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  powerMonitor,
   session,
   shell,
   type WebFrameMain,
   webContents,
 } from "electron";
+import { z } from "zod";
 
-import { loadOrCreateDek } from "./dek";
-import { IS_DEV } from "./env";
-const SERVER_PORT = IS_DEV ? 7434 : 7433;
+import { DEFAULT_SERVER_PORT } from "../app-ports";
+import { demoPort } from "../demo-instance";
+import {
+  DEFAULT_WHEN_QUITTING,
+  type WhenQuitting,
+  WhenQuittingSchema,
+} from "../lib/quit-terminals";
+import { getDek, initDek } from "./dek";
+import {
+  DEMO_INSTANCE,
+  DEMO_WINDOW_SIZE,
+  DEV_RENDERER_URL,
+  IS_DEMO,
+  IS_DEMO_HIDDEN,
+  IS_DEV,
+} from "./env";
+const SERVER_PORT = IS_DEMO
+  ? demoPort(DEMO_INSTANCE)
+  : IS_DEV
+    ? DEFAULT_SERVER_PORT.dev
+    : DEFAULT_SERVER_PORT.production;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
-/** External resources directory — updated versions live here instead of inside the .app bundle. */
-const EXTERNAL_RESOURCES = path.join(os.homedir(), ".local", "share", "loxel", "loxel");
-const UPDATES_DIR = path.join(os.homedir(), ".local", "state", "loxel", "loxel", "updates");
-
+/**
+ * The server this process started, which lives exactly as long as the app. Null while a crashed
+ * server waits to restart, and in dev when an already-running dev server is used.
+ */
 let serverProcess: ChildProcess | null = null;
 
-/** Whether this Electron process spawned the server (and should handle updates). */
-let isServerOwner = false;
+/** The app's channel to `serverProcess` (parent-channel-protocol.ts). */
+let serverChannel: Writable | null = null;
 
-/** Consecutive crash count for owned server restart backoff. */
+/** Set once the app quits, so the server's exit is not taken for a crash. */
+let stoppingServer = false;
+
+/** Consecutive crash count for the restart backoff. */
 let serverCrashCount = 0;
 
-/** Pending delayed restart of the owned server, so only one restart is ever in flight. */
+/** Pending delayed restart of a crashed server, so only one restart is ever in flight. */
 let serverRestartTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** When the current owned server process was spawned. */
+/** When the current server process was spawned. */
 let serverStartedAt = 0;
-
-/** Non-owner poll of the shared server; a single interval for the process lifetime. */
-let serverHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
 
 const SERVER_MAX_CRASH_RESTARTS = 3;
 
-/** An owned server that stayed up this long before crashing gets a fresh retry budget. */
+/** A server that stayed up this long before crashing gets a fresh retry budget. */
 const SERVER_STABLE_UPTIME_MS = 60_000;
 
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
-import { requestOpen } from "../open-request";
-import { isHttpUrl } from "../url-utils";
-import { BROWSER_PARTITION } from "./browser-partition";
+import { type OpenRequest, requestOpen } from "../open-request";
 import {
+  PARENT_CHANNEL_FD,
+  STOPPING_SERVER_WAIT_MS,
+  type ShutdownTerminals,
+  encodeParentMessage,
+} from "../parent-channel-protocol";
+import { persistedWhenQuitting } from "../server/persisted-settings";
+import { isHttpUrl } from "../url-utils";
+import {
+  installAppUpdater,
+  isInstallingUpdate,
+  scheduleAutomaticUpdateCheck,
+  terminalsForUpdateInstall,
+} from "./app-updater";
+import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
+import { BROWSER_PARTITION } from "./browser-partition";
+import { installBrowserPermissions } from "./browser-permissions";
+import { installDefaultBrowser } from "./default-browser";
+import {
+  APP_QUIT_ENDING_TERMINALS,
+  APP_QUIT_KEEPING_TERMINALS,
+  APP_RESTART,
   GET_WINDOW_FULL_SCREEN,
-  OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
+  SET_WHEN_QUITTING,
   WINDOW_FOCUS_CHANGE,
   WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
@@ -66,142 +106,130 @@ import {
   installJavaScriptDialogs,
   trackWebviewDialogs,
 } from "./javascript-dialogs";
+import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
-import { configurePasskeys, installAccountChooser } from "./webauthn";
+import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
+import {
+  ASK,
+  QUIT,
+  QUIT_KEEPING_TERMINALS,
+  type QuitPlan,
+  QuitPlans,
+  RESTART,
+  planAtWillQuit,
+  unplannedQuit,
+} from "./quit-plan";
+import { askBeforeQuitting, bringQuitQuestionToFront } from "./quit-question";
+import { readLaunchSettings } from "./settings-row";
+import {
+  type BrowserPanelFrame,
+  configurePasskeys,
+  installAccountChooser,
+  installHybridQrCode,
+} from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
-import { openWebviewWindowsAsTabs } from "./webview-new-tabs";
+import { handleWebviewWindowOpens } from "./webview-new-tabs";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
   BrowserWindow.getFocusedWindow()?.webContents.send(OPEN_IN_BROWSER_TAB, url);
 }
 
-/** Check if a loxel server is already running on the well-known port. */
-async function isServerRunning(): Promise<boolean> {
+const VersionSchema = z.object({
+  appOwned: z.boolean().optional(),
+  shuttingDown: z.boolean().optional(),
+});
+
+/**
+ * The Loxel server answering on the well-known port, or null when none does. `appOwned`: a desktop
+ * app started it, so it goes away with that app. `shuttingDown`: it is about to exit.
+ */
+async function probeServer(): Promise<{ appOwned: boolean; shuttingDown: boolean } | null> {
   try {
     const res = await fetch(`${SERVER_URL}/api/version`, { signal: AbortSignal.timeout(1000) });
-    return res.ok;
+    if (!res.ok) return null;
+    const parsed = VersionSchema.safeParse(await res.json());
+    return {
+      appOwned: parsed.success && parsed.data.appOwned === true,
+      shuttingDown: parsed.success && parsed.data.shuttingDown === true,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
-function compareVersions(a: string, b: string): number {
-  const partsA = a.split(".").map(Number);
-  const partsB = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const numA = partsA[i] ?? 0;
-    const numB = partsB[i] ?? 0;
-    if (numA !== numB) return numA - numB;
-  }
-  return 0;
+async function isServerRunning(): Promise<boolean> {
+  return (await probeServer()) !== null;
 }
 
-/** Resolve server binary and renderer paths. Prefer external resources only when newer than bundled. */
-function getServerPaths(): { serverBin: string; rendererDir: string } {
-  if (!IS_DEV) {
-    const extServer = path.join(EXTERNAL_RESOURCES, "loxel-server");
-    const extRenderer = path.join(EXTERNAL_RESOURCES, "renderer");
-    const extVersionFile = path.join(EXTERNAL_RESOURCES, "version");
-    if (fs.existsSync(extServer) && fs.existsSync(extRenderer) && fs.existsSync(extVersionFile)) {
-      try {
-        const extVersion = fs.readFileSync(extVersionFile, "utf-8").trim();
-        if (compareVersions(extVersion, app.getVersion()) > 0) {
-          return { serverBin: extServer, rendererDir: extRenderer };
-        }
-        console.log(
-          `[electron] Ignoring external resources (v${extVersion}) — bundled v${app.getVersion()} is newer or equal`,
-        );
-      } catch {
-        console.warn("[electron] Failed to read version file, falling back to bundled resources");
-      }
-    }
-  }
-  return {
-    serverBin: path.join(process.resourcesPath, "loxel-server"),
-    rendererDir: path.join(process.resourcesPath, "renderer"),
-  };
+/** Stdin for the key, stdout, stderr, and the app's channel to the server (`PARENT_CHANNEL_FD`). */
+function serverStdio(): StdioOptions {
+  return ["pipe", "pipe", "pipe", "pipe"];
 }
 
-function startServer(options: { dekBase64: string }): void {
+function startServer(): void {
   serverStartedAt = Date.now();
-  if (IS_DEV) {
-    // In dev, spawn bun running the server source directly
-    serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
-      cwd: path.resolve(import.meta.dirname, "../.."),
-      env: { ...process.env, LOXEL_DEV: "1" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  } else {
-    // In production, spawn the server binary (external or bundled)
-    const { serverBin, rendererDir } = getServerPaths();
-    serverProcess = spawn(serverBin, [], {
-      env: {
-        ...process.env,
-        LOXEL_STATIC_DIR: rendererDir,
-        LOXEL_RESOURCES_DIR: EXTERNAL_RESOURCES,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+  // The server exits on its own if this process dies without stopping it.
+  const env = { ...process.env, LOXEL_PARENT_PID: String(process.pid) };
+  const child = IS_DEV
+    ? // In dev, spawn bun running the server source directly
+      spawn("bun", ["run", "src/server/index.ts"], {
+        cwd: path.resolve(import.meta.dirname, "../.."),
+        env: { ...env, LOXEL_DEV: "1" },
+        stdio: serverStdio(),
+      })
+    : IS_DEMO && !app.isPackaged
+      ? // A demo from the source tree: the server's source, serving the renderer built beside this file
+        spawn("bun", ["run", "src/server/index.ts"], {
+          cwd: path.resolve(import.meta.dirname, "../.."),
+          env: { ...env, LOXEL_STATIC_DIR: path.resolve(import.meta.dirname, "../renderer") },
+          stdio: serverStdio(),
+        })
+      : spawn(path.join(process.resourcesPath, "loxel-server"), [], {
+          env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
+          stdio: serverStdio(),
+        });
+  const { stdin, stdout, stderr } = child;
+  const channel = child.stdio[PARENT_CHANNEL_FD];
+  if (!stdin || !stdout || !stderr || !(channel instanceof Writable)) {
+    child.kill();
+    throw new Error("The server was started without its pipes");
   }
+  serverProcess = child;
+  serverChannel = channel;
+  channel.on("error", () => {});
+  // A binary that cannot be run (missing, not executable) fails here, after the spawn returned.
+  child.on("error", (err) => {
+    console.error("[electron] Could not start the server:", err);
+  });
 
-  serverProcess.stdin!.on("error", () => {});
-  serverProcess.stdin!.write(options.dekBase64 + "\n");
-  serverProcess.stdin!.end();
+  // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
+  const dekBase64 = IS_DEMO ? null : getDek();
+  stdin.on("error", () => {});
+  // Closing stdin without a key tells the server that secret storage is unavailable.
+  if (dekBase64) stdin.write(dekBase64 + "\n");
+  stdin.end();
 
-  serverProcess.stdout?.on("data", (data: Buffer) => {
+  stdout.on("data", (data: Buffer) => {
     process.stdout.write(data);
   });
-  serverProcess.stderr?.on("data", (data: Buffer) => {
+  stderr.on("data", (data: Buffer) => {
     process.stderr.write(data);
   });
-  serverProcess.on("exit", (code) => {
-    console.log(`[electron] Server exited with code ${code}`);
+  child.on("exit", (code, signal) => {
+    console.log(`[electron] Server exited with code ${code}${signal ? ` (${signal})` : ""}`);
+    // Only the current server's exit counts: an earlier one's must not drop its replacement.
+    if (serverProcess !== child) return;
     serverProcess = null;
-
-    // Exit code 42 signals an update is ready to install
-    if (code === 42 && !IS_DEV) {
-      handlePendingUpdateSync();
-      return;
-    }
-
-    if (isServerOwner && code !== 0) void handleOwnedServerFailure();
+    serverChannel = null;
+    if (!stoppingServer) scheduleServerRestart();
   });
 }
 
 /**
- * An owned server exited abnormally. If the port is already served, another instance won
- * the spawn race (EADDRINUSE) and this process simply adopts the winner; otherwise it is a
- * crash and the server is restarted.
- */
-async function handleOwnedServerFailure(): Promise<void> {
-  const servedByOther = await isServerRunning();
-  // killServer() or ensureServer() intervened while we were probing the port.
-  if (!isServerOwner || serverProcess) return;
-
-  if (servedByOther) {
-    console.log("[electron] Server port is held by another instance, dropping ownership");
-    dropServerOwnership();
-    return;
-  }
-  scheduleServerRestart();
-}
-
-/** Stop acting as the server owner and poll for the shared server instead. */
-function dropServerOwnership(): void {
-  isServerOwner = false;
-  serverCrashCount = 0;
-  cancelServerRestart();
-  startServerHealthCheck();
-}
-
-/**
- * Restart a crashed owned server with linear backoff (1s, 2s, 3s). After
- * SERVER_MAX_CRASH_RESTARTS consecutive quick crashes, drop ownership and fall back to
- * polling so another instance's server can be adopted. Only one restart is in flight at a
- * time; ensureServer() cancels it when it spawns the server itself (e.g. on macOS activate),
- * and dropping ownership cancels it too.
+ * Restart a crashed server with linear backoff (1s, 2s, 3s). After SERVER_MAX_CRASH_RESTARTS
+ * consecutive quick crashes, give up and quit: the app cannot work without its server.
  */
 function scheduleServerRestart(): void {
   if (serverRestartTimer) return;
@@ -209,29 +237,32 @@ function scheduleServerRestart(): void {
 
   serverCrashCount++;
   if (serverCrashCount > SERVER_MAX_CRASH_RESTARTS) {
-    console.error(
-      `[electron] Owned server crashed ${SERVER_MAX_CRASH_RESTARTS} times, dropping ownership`,
+    console.error(`[electron] Server crashed ${SERVER_MAX_CRASH_RESTARTS} times, giving up`);
+    dialog.showErrorBox(
+      "Loxel Stopped Working",
+      `Loxel's server crashed ${SERVER_MAX_CRASH_RESTARTS} times in a row. Open Loxel again to restart it.`,
     );
-    dropServerOwnership();
+    quitApp(QUIT);
     return;
   }
 
   const delayMs = serverCrashCount * 1000;
   console.log(
-    `[electron] Owned server crashed (attempt ${serverCrashCount}/${SERVER_MAX_CRASH_RESTARTS}), restarting in ${delayMs}ms...`,
+    `[electron] Server crashed (attempt ${serverCrashCount}/${SERVER_MAX_CRASH_RESTARTS}), restarting in ${delayMs}ms...`,
   );
   serverRestartTimer = setTimeout(() => {
     serverRestartTimer = null;
-    // Ownership was dropped, or ensureServer() already spawned a server meanwhile.
-    if (!isServerOwner || serverProcess) return;
-    startServer({ dekBase64: loadOrCreateDek() });
+    if (stoppingServer || serverProcess) return;
+    startServer();
   }, delayMs);
 }
 
-function cancelServerRestart(): void {
-  if (!serverRestartTimer) return;
+/** Cancel a pending crash restart; true when there was one. */
+function cancelServerRestart(): boolean {
+  if (!serverRestartTimer) return false;
   clearTimeout(serverRestartTimer);
   serverRestartTimer = null;
+  return true;
 }
 
 function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
@@ -256,7 +287,7 @@ function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
   });
 }
 
-const APP_ORIGIN = new URL(process.env.VITE_DEV_SERVER_URL ?? SERVER_URL).origin;
+const APP_ORIGIN = new URL(DEV_RENDERER_URL ?? SERVER_URL).origin;
 
 function isLocal(url: string): boolean {
   try {
@@ -307,8 +338,12 @@ async function createWindow(): Promise<BrowserWindow> {
   const isFirstWindow = BrowserWindow.getAllWindows().length === 0;
 
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    // A demo window has the size of the site's screenshots.
+    // Larger than a laptop's screen is fine: a demo window is captured, not looked at.
+    ...(IS_DEMO
+      ? { ...DEMO_WINDOW_SIZE, enableLargerThanScreen: true }
+      : { width: 1400, height: 900 }),
+    ...(IS_DEMO_HIDDEN ? { show: false, opacity: 0 } : {}),
     title: "Loxel",
     titleBarStyle: "hiddenInset",
     tabbingIdentifier: "loxel",
@@ -316,6 +351,8 @@ async function createWindow(): Promise<BrowserWindow> {
     // A click on a backgrounded window also reaches the renderer, so the clicked panel takes
     // focus on the same click that activates the window.
     acceptFirstMouse: true,
+    // Painted until the renderer applies the theme, so a window does not flash the other one.
+    backgroundColor: windowBackgroundColor(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -327,6 +364,13 @@ async function createWindow(): Promise<BrowserWindow> {
       ],
     },
   });
+
+  registerAppWindow(win);
+
+  if (IS_DEMO_HIDDEN) {
+    win.setIgnoreMouseEvents(true);
+    win.showInactive();
+  }
 
   // When the BrowserWindow is gone, ask the server to promote this window's
   // session-scoped layout to canonical so the next solo window restores it.
@@ -350,7 +394,7 @@ async function createWindow(): Promise<BrowserWindow> {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, false);
   });
 
-  const loadUrl = process.env.VITE_DEV_SERVER_URL ?? SERVER_URL;
+  const loadUrl = DEV_RENDERER_URL ?? SERVER_URL;
   win.loadURL(loadUrl);
 
   // Intercept external link clicks at the document level. Chromium 134+ blocks
@@ -412,194 +456,158 @@ async function createWindow(): Promise<BrowserWindow> {
   return win;
 }
 
-function killServer(): void {
-  cancelServerRestart();
-  if (serverHealthCheckTimer) {
-    clearInterval(serverHealthCheckTimer);
-    serverHealthCheckTimer = null;
-  }
-  isServerOwner = false;
-  if (serverProcess) {
-    try {
-      serverProcess.kill("SIGTERM");
-    } catch {
-      // Already dead
-    }
-    serverProcess = null;
-  }
-}
-
-// --- Update handling ---
-
-interface PendingUpdate {
-  version: string;
-  archivePath: string;
-  targetDir: string;
-  sha256: string;
-}
-
-/** Parse and validate pending.json contents at runtime. */
-function parsePendingUpdate(raw: string): PendingUpdate {
-  const data: unknown = JSON.parse(raw);
-  if (
-    typeof data !== "object" ||
-    data === null ||
-    typeof (data as Record<string, unknown>).version !== "string" ||
-    typeof (data as Record<string, unknown>).archivePath !== "string" ||
-    typeof (data as Record<string, unknown>).targetDir !== "string" ||
-    typeof (data as Record<string, unknown>).sha256 !== "string"
-  ) {
-    throw new Error("Invalid pending.json: missing or invalid fields");
-  }
-  return data as PendingUpdate;
+/**
+ * Stop the server as the app quits, ending or keeping the terminals. It finishes shutting down on
+ * its own after the app exits: the message is in the pipe before the app closes its end. Between
+ * a crash and its restart there is no server, and the terminal hosts would keep the shells only
+ * for their grace period: a server is started to carry the quit to them, which it does as soon as
+ * it has found them.
+ */
+function stopServer(terminals: ShutdownTerminals): void {
+  stoppingServer = true;
+  if (cancelServerRestart()) startServerToStop();
+  const channel = serverChannel;
+  serverProcess = null;
+  serverChannel = null;
+  if (!channel) return;
+  console.log(`[electron] Stopping the server (terminals: ${terminals})`);
+  channel.end(encodeParentMessage({ type: "shutdown", terminals }));
 }
 
 /**
- * Resource directories an update replaces wholesale instead of extracting over, so files dropped
- * by the new version do not linger (stale typeshed stubs would shadow the bundled ones).
- * `tsgo-lib` is the preview-era directory, included so the migration removes it on success while
- * retaining a rollback path if installation fails.
+ * Start a server only to hand it the quit. One that cannot start (its pipes missing here, or its
+ * binary, reported by the child's `error` event) leaves the shells their grace period.
  */
-const UPDATE_RESOURCE_DIRS = ["renderer", "typescript-lib", "typeshed-fallback", "tsgo-lib"];
-
-/** Compute SHA256 hash of a file synchronously. */
-function sha256File(filePath: string): string {
-  const content = fs.readFileSync(filePath);
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
-/**
- * Apply a pending update after the server exits with code 42.
- * All operations are synchronous to avoid race conditions with Electron lifecycle events.
- */
-function handlePendingUpdateSync(): void {
-  const pendingPath = path.join(UPDATES_DIR, "pending.json");
-  const backupDir = path.join(UPDATES_DIR, "backup");
-
+function startServerToStop(): void {
   try {
-    if (!fs.existsSync(pendingPath)) {
-      console.error("[electron] No pending.json found after exit code 42");
-      startServer({ dekBase64: loadOrCreateDek() });
-      return;
-    }
-
-    const pending = parsePendingUpdate(fs.readFileSync(pendingPath, "utf-8"));
-    const { archivePath, targetDir, sha256 } = pending;
-
-    if (!fs.existsSync(archivePath)) {
-      throw new Error(`Archive not found: ${archivePath}`);
-    }
-
-    // Re-verify archive integrity before extraction (closes TOCTOU window)
-    const actualHash = sha256File(archivePath);
-    if (actualHash !== sha256) {
-      throw new Error(`Archive integrity check failed: expected ${sha256}, got ${actualHash}`);
-    }
-
-    console.log(`[electron] Installing update v${pending.version}...`);
-
-    // Backup current resources (if they exist)
-    fs.mkdirSync(backupDir, { recursive: true });
-    for (const file of [
-      "loxel-server",
-      "yaml-language-server",
-      "docker-language-server",
-      "terraform-ls",
-      "version",
-    ]) {
-      const src = path.join(targetDir, file);
-      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(backupDir, file));
-    }
-    for (const dir of UPDATE_RESOURCE_DIRS) {
-      const source = path.join(targetDir, dir);
-      if (!fs.existsSync(source)) continue;
-      fs.cpSync(source, path.join(backupDir, dir), { recursive: true });
-      fs.rmSync(source, { recursive: true });
-    }
-    fs.mkdirSync(targetDir, { recursive: true });
-
-    // Extract archive (use execFileSync to avoid shell injection)
-    execFileSync("tar", ["xzf", archivePath, "-C", targetDir]);
-
-    // Ensure executables
-    for (const bin of [
-      "loxel-server",
-      "yaml-language-server",
-      "docker-language-server",
-      "terraform-ls",
-      "typescript-lib/tsc",
-    ]) {
-      const binPath = path.join(targetDir, bin);
-      if (fs.existsSync(binPath)) fs.chmodSync(binPath, 0o755);
-    }
-
-    // Write version marker so getServerPaths() can compare versions
-    fs.writeFileSync(path.join(targetDir, "version"), pending.version);
-
-    // Clean up pending marker and archive (keep backup until next successful startup)
-    fs.unlinkSync(pendingPath);
-    try {
-      fs.unlinkSync(archivePath);
-    } catch (err) {
-      console.error("[electron] Failed to clean up archive:", err);
-    }
-
-    console.log(`[electron] Update v${pending.version} installed, relaunching...`);
-    app.relaunch();
-    app.exit(0);
+    startServer();
   } catch (err) {
-    console.error("[electron] Update failed:", err);
-
-    // Restore from backup
-    try {
-      if (fs.existsSync(pendingPath)) {
-        const { targetDir } = parsePendingUpdate(fs.readFileSync(pendingPath, "utf-8"));
-        for (const file of [
-          "loxel-server",
-          "yaml-language-server",
-          "docker-language-server",
-          "terraform-ls",
-          "version",
-        ]) {
-          const backup = path.join(backupDir, file);
-          if (fs.existsSync(backup)) fs.copyFileSync(backup, path.join(targetDir, file));
-        }
-        for (const dir of UPDATE_RESOURCE_DIRS) {
-          const backup = path.join(backupDir, dir);
-          if (!fs.existsSync(backup)) continue;
-          const dest = path.join(targetDir, dir);
-          if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-          fs.cpSync(backup, dest, { recursive: true });
-        }
-      }
-    } catch (restoreErr) {
-      console.error("[electron] Failed to restore backup:", restoreErr);
-    }
-
-    // Delete pending.json to prevent boot loop
-    try {
-      fs.unlinkSync(pendingPath);
-    } catch (err) {
-      console.error("[electron] Failed to clean up pending marker:", err);
-    }
-
-    dialog.showErrorBox("Update Failed", `Failed to install update: ${err}`);
-
-    // Restart server with old version
-    startServer({ dekBase64: loadOrCreateDek() });
+    console.error("[electron] Could not start a server to carry the quit to the terminals:", err);
   }
 }
 
-/** Clean up leftover backup from a previously successful update. */
-function cleanupUpdateBackup(): void {
-  const backupDir = path.join(UPDATES_DIR, "backup");
-  if (fs.existsSync(backupDir)) {
-    try {
-      fs.rmSync(backupDir, { recursive: true });
-      console.log("[electron] Cleaned up update backup");
-    } catch (err) {
-      console.error("[electron] Failed to clean up backup:", err);
-    }
+/**
+ * Apply the persisted settings main follows before any window has reported them: the theme the
+ * first window opens in, and "When quitting Loxel". Unread (`undefined`), both keep their defaults.
+ */
+function applyLaunchSettings(raw: string | null | undefined): void {
+  if (raw === undefined) return;
+  applyPersistedTheme(raw);
+  whenQuitting = persistedWhenQuitting(raw);
+  buildAppMenu();
+}
+
+/** The window to ask in before a quit: the focused one of Loxel's own, or else any of them. */
+function windowToAskIn(): BrowserWindow | undefined {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && isAppWindow(focused)) return focused;
+  return appWindowList()[0];
+}
+
+/** The quit under way: Quit, Quit and Keep Terminals or Restart Loxel. */
+const quitPlans = new QuitPlans();
+
+/** Quit the app following `plan`. */
+function quitApp(plan: QuitPlan): void {
+  quitPlans.request(plan);
+  app.quit();
+}
+
+/**
+ * The "When quitting Loxel" setting: what Quit Loxel, the Dock's Quit and logout do to the
+ * terminals. Read from the persisted settings at launch, then as each window's renderer reports it.
+ */
+let whenQuitting: WhenQuitting = DEFAULT_WHEN_QUITTING;
+
+/**
+ * When macOS last said it is logging out, shutting down or restarting, whose quit must not wait on
+ * a question. Another app can still cancel a logout, and no event says so: after a minute, a quit is
+ * the user's again.
+ */
+let poweringOffAt: number | null = null;
+const POWER_OFF_QUIT_WINDOW_MS = 60_000;
+
+function systemPoweringOff(): boolean {
+  return poweringOffAt !== null && Date.now() - poweringOffAt < POWER_OFF_QUIT_WINDOW_MS;
+}
+
+/** The question asked before a quit, while the user (or the terminals' listing) has not answered. */
+let quitQuestion: AbortController | null = null;
+
+/**
+ * What a quit that names no plan does (Quit Loxel, the Dock): the setting's plan, or the question
+ * first. An update install decides the terminals itself, and logout must not be held up. A hidden
+ * demo has no one to answer, and its driver quits it.
+ */
+function unplannedQuitPlan(): QuitPlan | typeof ASK {
+  const canAsk = !systemPoweringOff() && !isInstallingUpdate() && !IS_DEMO_HIDDEN;
+  return unplannedQuit(whenQuitting, canAsk);
+}
+
+/**
+ * Ask before quitting, then quit with the plan the user chose. A second ⌘Q meanwhile brings the
+ * question to the front again rather than asking twice.
+ */
+function askThenQuit(): void {
+  if (quitQuestion) {
+    bringQuitQuestionToFront();
+    return;
+  }
+  const controller = new AbortController();
+  quitQuestion = controller;
+  askBeforeQuitting(SERVER_URL, { window: windowToAskIn, signal: controller.signal })
+    .catch((err: unknown) => {
+      // Nothing was answered: keep the terminals, which the next launch reattaches, rather than
+      // end programs the user was to be asked about.
+      console.error(
+        "[electron] Could not ask before quitting; quitting keeping the terminals",
+        err,
+      );
+      return "keep" as const;
+    })
+    .then((answer) => {
+      if (quitQuestion === controller) quitQuestion = null;
+      if (answer === "end") quitApp(QUIT);
+      else if (answer === "keep") quitApp(QUIT_KEEPING_TERMINALS);
+    });
+}
+
+/**
+ * Squirrel can replace only an app it can write to. One opened straight from the disk image, or
+ * one macOS runs from a read-only copy because it was never moved after downloading, cannot be.
+ */
+function canReplaceAppBundle(): boolean {
+  const bundle = path.resolve(app.getPath("exe"), "../../..");
+  try {
+    fs.accessSync(bundle, fs.constants.W_OK);
+    fs.accessSync(path.dirname(bundle), fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Offer to move an app that could not update itself into /Applications. True when it moved:
+ * Electron then quits this copy and launches the moved one, so startup must stop here.
+ */
+async function offerMoveToApplications(): Promise<boolean> {
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  if (app.isInApplicationsFolder() || canReplaceAppBundle()) return false;
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    message: "Move Loxel to the Applications folder?",
+    detail: "Loxel can install updates only from a folder it can change.",
+    buttons: ["Move to Applications", "Not Now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response !== 0) return false;
+  try {
+    return app.moveToApplicationsFolder();
+  } catch (err) {
+    dialog.showErrorBox("Cannot Move Loxel", String(err));
+    return false;
   }
 }
 
@@ -636,7 +644,23 @@ function buildAppMenu(): void {
               { role: "hideOthers" as const },
               { role: "unhide" as const },
               { type: "separator" as const },
+              { label: "Restart Loxel", click: () => quitApp(RESTART) },
+              // Names no plan, like the Dock's Quit: it follows "When quitting Loxel" (see
+              // `before-quit`).
               { role: "quit" as const },
+              // Electron's menus have no NSMenuItem alternate (macOS's ⌥ "Quit and Keep Windows"),
+              // so this is an item of its own, on the same key with ⌥: the quit Quit Loxel is not.
+              whenQuitting === "keep"
+                ? {
+                    label: "Quit and End Terminals",
+                    accelerator: "Alt+Cmd+Q",
+                    click: () => quitApp(QUIT),
+                  }
+                : {
+                    label: "Quit and Keep Terminals",
+                    accelerator: "Alt+Cmd+Q",
+                    click: () => quitApp(QUIT_KEEPING_TERMINALS),
+                  },
             ],
           },
         ]
@@ -648,7 +672,7 @@ function buildAppMenu(): void {
           label: "New Window",
           accelerator: "CmdOrCtrl+Shift+N",
           click: () => {
-            void createWindow();
+            openNewWindow();
           },
         },
       ],
@@ -668,8 +692,9 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        // Not the forceReload role: its ⇧⌘R is Rename Tab in the renderer, and macOS menus take
-        // their keys before the page (`registerAccelerator: false` is ignored there).
+        // Not the forceReload role: its ⇧⌘R is Rename Tab, or a focused browser panel's hard refresh,
+        // in the renderer, and macOS menus take their keys before the page
+        // (`registerAccelerator: false` is ignored there).
         ...(IS_DEV
           ? [
               { role: "reload" as const },
@@ -700,6 +725,10 @@ function buildAppMenu(): void {
     },
     {
       label: "Window",
+      // The window role makes this the app's Windows menu (NSApp.windowsMenu), where macOS adds
+      // its window tiling items (Fill, Move & Resize) and their fn⌃ shortcuts. Without it the
+      // system shortcuts match no menu item and do nothing.
+      role: "window",
       submenu: [{ role: "minimize" }, ...(isMac ? [{ role: "zoom" as const }] : [])],
     },
   ];
@@ -736,12 +765,14 @@ app.on("web-contents-created", (_, contents) => {
   trackWebviewDialogs(contents);
 
   if (contents.getType() === "webview") {
-    // New tabs and windows a browser panel's page opens become browser tabs next to it.
-    // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
-    openWebviewWindowsAsTabs(contents);
+    // New tabs and windows a browser panel's page opens become browser tabs next to it, and its
+    // popups child windows. Each webview gets its own webContents, so mainWindow's handler
+    // doesn't cover them.
+    handleWebviewWindowOpens(contents);
   } else {
     // Never let other web contents create windows: open their links in the system browser
-    // (or a browser panel tab when Cmd is held). createWindow replaces this for app windows.
+    // (or a browser panel tab when Cmd is held). createWindow replaces this for app windows, and
+    // webview-new-tabs.ts for browser panel popups.
     contents.setWindowOpenHandler(({ url }) => {
       if (!isLocal(url) && isHttpUrl(url)) {
         if (metaKeyHeld) {
@@ -767,45 +798,48 @@ app.on("web-contents-created", (_, contents) => {
 
 // --- App lifecycle ---
 
-/** Ensure the shared server is running, spawning it if needed. */
-async function ensureServer(): Promise<void> {
-  const running = await isServerRunning();
-  if (running) return;
+/** The server start in flight, which every caller joins so the app never spawns two servers. */
+let serverStarting: Promise<void> | null = null;
 
-  // A server we spawned (e.g. a crash restart) is still booting — wait for it instead of
-  // racing it with a second spawn.
-  if (serverProcess) {
-    await waitForServer(SERVER_URL);
-    return;
-  }
-
-  // If a pending update exists (left by a previous server exit code 42 whose owner
-  // Electron already quit), apply it before spawning the new server. This ensures
-  // updates are installed regardless of which Electron process spawns next.
-  if (!IS_DEV) {
-    const pendingPath = path.join(UPDATES_DIR, "pending.json");
-    if (fs.existsSync(pendingPath)) {
-      handlePendingUpdateSync();
-      // handlePendingUpdateSync may relaunch the app — if it didn't,
-      // the update either failed or there was no archive, so continue to spawn.
+/**
+ * Start the app's server and wait until it answers, or join the start already in flight. A server
+ * already answering on the port that an app started is one a previous run left shutting down (in
+ * dev, also the one an Electron that just restarted on a main-process rebuild leaves behind), so
+ * launch waits for it to go. Any other server on the port was not started by an app: in dev, a dev
+ * server started by hand (`pnpm run dev:server`), which the app uses instead; in production, one
+ * from an earlier version or started by hand, which can stay up for minutes, so launch fails.
+ */
+function startAppServer(): Promise<void> {
+  serverStarting ??= (async () => {
+    const running = await probeServer();
+    if (running && !running.appOwned && !running.shuttingDown) {
+      if (IS_DEV) {
+        console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
+        return;
+      }
+      throw new Error(
+        `A Loxel server this app did not start is running on port ${SERVER_PORT}: one from an earlier version, which shuts down within 5 minutes of its last window closing, or one started by hand. Open Loxel again once it has stopped.`,
+      );
     }
+    if (running) await waitForServerToStop();
+    startServer();
+    await waitForServer(SERVER_URL);
+  })().finally(() => {
+    serverStarting = null;
+  });
+  return serverStarting;
+}
+
+async function waitForServerToStop(): Promise<void> {
+  const deadline = Date.now() + STOPPING_SERVER_WAIT_MS;
+  while (await isServerRunning()) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Another Loxel server is running on port ${SERVER_PORT}. Quit it, then open Loxel again.`,
+      );
+    }
+    await sleep(250);
   }
-
-  cancelServerRestart();
-  startServer({ dekBase64: loadOrCreateDek() });
-  isServerOwner = true;
-
-  // Wait for the Bun server to be ready before creating the window.
-  // In dev, vite proxies /api and /ws to this server.
-  await waitForServer(SERVER_URL);
-
-  // If our server process died during waitForServer but the port is up
-  // (another instance won the spawn race), we're not the owner. The exit handler
-  // normally catches this itself, but its port probe may still be in flight.
-  if (!serverProcess) dropServerOwnership();
-
-  // Server started successfully — clean up backup from any previous update
-  if (isServerOwner) cleanupUpdateBackup();
 }
 
 // macOS: "New Window" in dock right-click menu
@@ -815,27 +849,17 @@ if (process.platform === "darwin") {
       {
         label: "New Window",
         click: () => {
-          void createWindow();
+          openNewWindow();
         },
       },
     ]),
   );
 }
 
-// Native folder picker — invoked by renderer when running in Electron
-ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return null;
-  const result = await dialog.showOpenDialog(win, {
-    properties: ["openDirectory"],
-    title: "Select Project Folder",
-  });
-  return result.canceled ? null : (result.filePaths[0] ?? null);
-});
-
 installWebviewKeystrokeForwarding();
 installWebviewCopyImage();
 installJavaScriptDialogs();
+installNativeTheme();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
@@ -848,21 +872,61 @@ ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {
   app.dock?.setBadge(count > 0 ? String(count) : "");
 });
 
+// The command palette's quits and Restart Loxel, the same as the app menu's.
+ipcMain.on(APP_QUIT_KEEPING_TERMINALS, () => quitApp(QUIT_KEEPING_TERMINALS));
+ipcMain.on(APP_QUIT_ENDING_TERMINALS, () => quitApp(QUIT));
+ipcMain.on(APP_RESTART, () => quitApp(RESTART));
+
+// The menu offers on ⌥⌘Q the quit that Quit Loxel is not, so it changes with the setting.
+ipcMain.on(SET_WHEN_QUITTING, (_event, value: unknown) => {
+  const parsed = WhenQuittingSchema.safeParse(value);
+  if (!parsed.success || parsed.data === whenQuitting) return;
+  whenQuitting = parsed.data;
+  buildAppMenu();
+});
+
 // macOS: support native window tabbing (View > Merge All Windows / "+" tab button)
 app.on("new-window-for-tab", () => {
-  void createWindow();
+  openNewWindow();
 });
+
+/**
+ * Wait until the server answers. One restarting after a crash is waited for; in dev, a dev server
+ * started by hand that has since shut down (it does when idle) is replaced by one this app starts.
+ */
+async function serverReady(): Promise<void> {
+  if (serverStarting) {
+    await serverStarting;
+    return;
+  }
+  if (serverProcess || serverRestartTimer || (await isServerRunning())) {
+    await waitForServer(SERVER_URL);
+    return;
+  }
+  await startAppServer();
+}
+
+/**
+ * Open one more window (New Window, a native window tab) once the server answers. Before startup
+ * has opened the first window there is nothing to add to: startup opens it.
+ */
+function openNewWindow(): void {
+  if (launchOpens !== null) return;
+  serverReady()
+    .then(() => createWindow())
+    .catch((err: unknown) => dialog.showErrorBox("Cannot Open a Window", String(err)));
+}
 
 let windowStarting: Promise<void> | null = null;
 
 /**
- * Open a window if none is (macOS keeps running with all windows closed), starting the server
- * first — it shuts down when idle. Concurrent callers share the one window.
+ * Open a window if none is (macOS keeps running with all windows closed), once the server answers:
+ * it may be restarting after a crash. Concurrent callers share the one window.
  */
 function ensureWindow(): Promise<void> {
   if (BrowserWindow.getAllWindows().length > 0) return Promise.resolve();
   windowStarting ??= (async () => {
-    await ensureServer();
+    await serverReady();
     await createWindow();
   })().finally(() => {
     windowStarting = null;
@@ -870,57 +934,57 @@ function ensureWindow(): Promise<void> {
   return windowStarting;
 }
 
-// --- Files and folders opened with Loxel ---
+// --- Files, folders and links opened with Loxel ---
 // macOS hands the app files and folders opened with it (Finder "Open With", drops on the Dock
-// icon, `open -a Loxel <path>`) as open-file events. Those that launch the app arrive before it is
-// ready, so they wait for the startup window. The server sends each to the window in use.
+// icon, `open -a Loxel <path>`) as open-file events, and web links, once Loxel is the default
+// browser, as open-url events. Those that launch the app arrive before it is ready, so they wait
+// for the startup window. The server sends each to the window in use.
 
-/** Paths received before the startup window exists; null once it does. */
-let launchPaths: string[] | null = [];
-/** Opens run one at a time so several files open in the order macOS sent them. */
+/** Something macOS asked Loxel to open, and how to name it (short, and in full) if that fails. */
+interface OsOpen {
+  request: OpenRequest;
+  label: string;
+  target: string;
+}
+
+/** Opens received before the startup window exists; null once it does. */
+let launchOpens: OsOpen[] | null = [];
+/** Opens run one at a time so several open in the order macOS sent them. */
 let openQueue = Promise.resolve();
 
-function openPathFromOS(filePath: string): void {
+function openFromOS({ request, label, target }: OsOpen): void {
   openQueue = openQueue.then(async () => {
     try {
       await ensureWindow();
-      await requestOpen(SERVER_URL, { filePath });
+      await requestOpen(SERVER_URL, request);
     } catch (err) {
-      console.error(`[electron] Failed to open ${filePath}:`, err);
+      console.error(`[electron] Failed to open ${label}:`, err);
       void dialog.showMessageBox({
         type: "error",
-        message: `Cannot open ${path.basename(filePath)}`,
-        detail: `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+        message: `Cannot open ${label}`,
+        detail: `${target}\n\n${err instanceof Error ? err.message : String(err)}`,
       });
     }
   });
 }
 
+function receiveOpenFromOS(open: OsOpen): void {
+  if (launchOpens) launchOpens.push(open);
+  else openFromOS(open);
+}
+
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
-  if (launchPaths) launchPaths.push(filePath);
-  else openPathFromOS(filePath);
+  receiveOpenFromOS({ request: { filePath }, label: path.basename(filePath), target: filePath });
 });
 
-/** When we didn't spawn the server, poll for liveness so we can recover if it dies. */
-function startServerHealthCheck(): void {
-  if (serverHealthCheckTimer) return;
-  serverHealthCheckTimer = setInterval(async () => {
-    if (isServerOwner) return; // owner has the exit handler, no need to poll
-    if (await isServerRunning()) return;
-
-    console.log("[electron] Server unreachable (non-owner), attempting recovery...");
-    try {
-      await ensureServer();
-      // Server is back — reload all windows so they connect to the fresh server
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.reload();
-      }
-    } catch (err) {
-      console.error("[electron] Server recovery failed:", err);
-    }
-  }, 5000);
-}
+// A link opened with Loxel as the browser goes straight to a browser panel at that URL: of the
+// worktree the window in use shows, else of Home. No `wtPath`, so the server picks the window.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  if (!isHttpUrl(url)) return;
+  receiveOpenFromOS({ request: { url }, label: "the link", target: url });
+});
 
 /** The window showing a webview frame, or the best guess once the frame is gone. */
 function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
@@ -931,6 +995,24 @@ function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
     BrowserWindow.getFocusedWindow() ??
     BrowserWindow.getAllWindows()[0]
   );
+}
+
+/** The browser panel showing a frame: its webview and the window renderer hosting it. */
+function browserPanelFrame(frame: WebFrameMain): BrowserPanelFrame | null {
+  const contents = webContents.fromFrame(frame);
+  const host = contents?.hostWebContents;
+  if (!contents || !host) return null;
+  return {
+    webContentsId: contents.id,
+    send: (channel, payload) => {
+      if (!host.isDestroyed()) host.send(channel, payload);
+    },
+    isGone: () => contents.isDestroyed(),
+    onGone: (callback) => {
+      contents.once("destroyed", callback);
+      return () => contents.removeListener("destroyed", callback);
+    },
+  };
 }
 
 /** Ask which passkey to use when a site matches several. */
@@ -953,9 +1035,66 @@ async function promptForAccount(
   return response < labels.length ? response : null;
 }
 
+// One Electron process per installed app: it owns the server, and Squirrel can replace only a bundle
+// no other process runs from. A second launch (`open -n`, or the binary run directly) hands over and
+// exits. Packaged builds only: vite-plugin-electron starts a rebuilt dev Electron before the old
+// one has exited, which a lock would turn into a quit.
+// A dev run keeps its own data directory (Chromium profile and cookies): sharing the installed
+// app's while both run makes their databases lock each other and breaks sites in browser panels.
+if (IS_DEV) app.setPath("userData", `${app.getPath("userData")}-dev`);
+// A demo keeps its data directory apart, so its lock, cookies and settings don't meet the app's.
+if (IS_DEMO)
+  app.setPath(
+    "userData",
+    `${app.getPath("userData")} Demo${DEMO_INSTANCE ? ` ${DEMO_INSTANCE}` : ""}`,
+  );
+// A hidden demo is a background app: no Dock icon, no menu bar, never activated.
+if (IS_DEMO_HIDDEN) app.setActivationPolicy("accessory");
+const isPrimaryInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!isPrimaryInstance) quitApp(QUIT);
+
+/**
+ * Tell the user that Loxel could not start or open its window. A hidden demo has no one to read a
+ * dialog, and a modal one would wait forever for a click its driver can't send: it logs the error
+ * and exits instead, which its driver sees.
+ */
+function showStartupError(err: unknown): void {
+  if (!IS_DEMO_HIDDEN) {
+    dialog.showErrorBox("Startup Error", String(err));
+    return;
+  }
+  console.error("[electron] Startup error:", err);
+  stopServer("end");
+  app.exit(1);
+}
+
+app.on("second-instance", () => {
+  // Startup opens the first window; until it has, there is nothing to show.
+  if (launchOpens !== null) return;
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  if (!win) {
+    ensureWindow().catch(showStartupError);
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  app.focus({ steal: true });
+});
+
+installAppUpdater();
+installDefaultBrowser();
+
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return;
+  // Emitted before macOS asks the app to quit for a logout, shutdown or restart.
+  powerMonitor.on("shutdown", () => {
+    poweringOffAt = Date.now();
+  });
   try {
-    await ensureServer();
+    if (await offerMoveToApplications()) return;
+    // Every server spawn reads the key synchronously, so load it before the first one.
+    if (!IS_DEMO) await initDek();
+    await startAppServer();
 
     // After `ready`: with a prompt reason, configureWebAuthn writes to Chromium's
     // resource bundle, which only exists once the browser process has started.
@@ -967,38 +1106,77 @@ app.whenReady().then(async () => {
       configureWebAuthn: (options) => app.configureWebAuthn(options),
     });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
-    installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
+    const browserSession = session.fromPartition(BROWSER_PARTITION);
+    installAccountChooser(browserSession, promptForAccount);
+    installHybridQrCode(browserSession, browserPanelFrame);
+    // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
+    // them, nor any permission outside their short allowlist.
+    session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
+    installBrowserPermissions(browserSession);
 
     buildAppMenu();
+    applyLaunchSettings(await readLaunchSettings(SERVER_URL));
     await createWindow();
-    const pathsOpenedAtLaunch = launchPaths;
-    launchPaths = null;
-    for (const filePath of pathsOpenedAtLaunch ?? []) openPathFromOS(filePath);
+    const opensAtLaunch = launchOpens;
+    launchOpens = null;
+    for (const open of opensAtLaunch ?? []) openFromOS(open);
     startMainProcessMonitor(SERVER_URL);
-
-    // If we didn't spawn the server, monitor it so we can recover from unexpected death
-    if (!isServerOwner) startServerHealthCheck();
+    if (!IS_DEMO) scheduleAutomaticUpdateCheck(SERVER_URL);
 
     // On macOS, clicking the dock icon after all windows are closed re-activates.
     app.on("activate", () => {
-      ensureWindow().catch((err: unknown) => {
-        dialog.showErrorBox("Startup Error", String(err));
-      });
+      ensureWindow().catch(showStartupError);
     });
   } catch (err) {
-    dialog.showErrorBox("Startup Error", String(err));
-    if (isServerOwner) killServer();
-    app.quit();
+    showStartupError(err);
+    stopServer("end");
+    quitApp(QUIT);
   }
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    app.quit();
+    // No window is left to ask in: the setting decides, as at logout.
+    const plan = unplannedQuit(whenQuitting, false);
+    if (plan !== ASK) quitApp(plan);
   }
 });
 
-app.on("before-quit", () => {
-  // Server self-terminates via idle shutdown when all clients disconnect.
-  // Don't kill it here — other Electron windows may still be connected.
+/** How long quitting waits for the windows' layout promotes to reach the server. */
+const QUIT_PROMOTE_WAIT_MS = 2000;
+let promotesSettledForQuit = false;
+
+app.on("before-quit", (event) => {
+  if (quitPlans.begin(unplannedQuitPlan()) !== ASK) {
+    // Decided another way (Quit and Keep Terminals while asked): the question is moot.
+    quitQuestion?.abort();
+    quitQuestion = null;
+    return;
+  }
+  event.preventDefault();
+  askThenQuit();
+});
+
+// The server lives as long as the app. Windows are closed by now, and each sent its layout promote
+// on close; quitting waits for those before stopping the server, which then finishes the API
+// requests it has received before exiting. Not while Squirrel quits to install an update: a promote
+// that did not land is recovered when the next server starts.
+app.on("will-quit", (event) => {
+  const installing = isInstallingUpdate();
+  if (promotesSettledForQuit || pendingPromotes.size === 0 || installing) {
+    const plan = planAtWillQuit(
+      quitPlans.current(),
+      installing ? terminalsForUpdateInstall() : null,
+    );
+    // Here rather than before `app.quit()`: a relaunch is armed only for a quit that happens.
+    if (plan.relaunch) app.relaunch();
+    stopServer(plan.terminals);
+    return;
+  }
+  event.preventDefault();
+  promotesSettledForQuit = true;
+  const plan = quitPlans.current();
+  void Promise.race([Promise.allSettled(pendingPromotes), sleep(QUIT_PROMOTE_WAIT_MS)]).then(() =>
+    quitApp(plan),
+  );
 });

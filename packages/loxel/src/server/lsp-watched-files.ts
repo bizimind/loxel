@@ -128,8 +128,8 @@ export function splitWatchedFilesRegistration(body: string): WatchedFilesRegistr
 }
 
 /**
- * The file watchers one language server registered through `client/registerCapability`, and the
- * forwarding of matching worktree changes to it as batched `workspace/didChangeWatchedFiles`
+ * The file watchers one language server registered through `client/registerCapability` or its
+ * manager declared, and the forwarding of matching worktree changes to it as batched `workspace/didChangeWatchedFiles`
  * notifications.
  */
 export class WatchedFilesForwarder {
@@ -150,6 +150,11 @@ export class WatchedFilesForwarder {
   private disposed = false;
   /** Paths reported as existing, for file systems that record no birth time. */
   private readonly seen = new Set<string>();
+  /** Watchers the manager declared (see {@link declareWatchers}), whatever the server registers. */
+  private declared: Watcher[] = [];
+  /** The declared watchers that also take events from inside git-ignored directories. */
+  private declaredIgnored: Watcher[] = [];
+  private initialized = false;
 
   constructor(
     /** Absolute worktree path; glob strings that are not absolute are matched relative to it. */
@@ -159,6 +164,32 @@ export class WatchedFilesForwarder {
     private readonly maxWaitMs = MAX_WAIT_MS,
   ) {}
 
+  /**
+   * Add watchers of the manager's own, for servers that register none, all three change kinds.
+   * Globs are relative to the worktree. `ignoredGlobs` also take the events inside git-ignored
+   * directories that {@link wantsIgnoredPath} asks about. They apply from
+   * {@link serverInitialized}; changes before it are held.
+   */
+  declareWatchers(globs: readonly string[], ignoredGlobs: readonly string[]): void {
+    const watcher = (glob: string) => compiled(this.root, glob, WATCH_KIND_ALL);
+    this.declaredIgnored = ignoredGlobs.map(watcher);
+    this.declared = [...globs.map(watcher), ...this.declaredIgnored];
+  }
+
+  /**
+   * The client's `initialized` reached the server, which may not get notifications before that.
+   * Registered watchers cannot come earlier, so only declared ones wait for this.
+   */
+  serverInitialized(): void {
+    this.initialized = true;
+    this.releaseEarly();
+  }
+
+  /** Whether a declared watcher wants this worktree-relative, `/`-separated ignored path. */
+  wantsIgnoredPath(relPath: string): boolean {
+    return this.declaredIgnored.some((watcher) => watcher.glob.match(fold(relPath)));
+  }
+
   /** Record a `workspace/didChangeWatchedFiles` registration's watchers under its id. */
   register(id: string, registerOptions: unknown): void {
     const watchers = isRecord(registerOptions) ? registerOptions.watchers : undefined;
@@ -166,6 +197,11 @@ export class WatchedFilesForwarder {
       id,
       Array.isArray(watchers) ? watchers.flatMap((w) => this.compileWatcher(w) ?? []) : [],
     );
+    this.releaseEarly();
+  }
+
+  /** Queue the changes kept from before the watchers that want them existed. */
+  private releaseEarly(): void {
     const wanted = [...this.early].filter((p) => this.kindsFor(p) !== 0);
     for (const p of wanted) this.early.delete(p);
     this.queue(wanted);
@@ -185,22 +221,17 @@ export class WatchedFilesForwarder {
   }
 
   /**
-   * Queue changed absolute paths. Paths no registered watcher matches are dropped; while no watcher
-   * is registered they are kept for later registrations instead.
+   * Queue changed absolute paths. Paths no watcher matches are dropped; while the server has no
+   * watcher registered they are kept for later registrations instead.
    */
   queue(paths: Iterable<string>): void {
     if (this.disposed) return;
-    if (!this.hasWatchers()) {
-      for (const p of paths) {
-        if (this.early.size >= EARLY_LIMIT) break;
-        this.early.add(p);
-      }
-      return;
-    }
+    const keepEarly = !this.hasWatchers();
     const wasEmpty = this.pending.size === 0;
     for (const p of paths) {
       const kinds = this.kindsFor(p);
       if (kinds !== 0) this.pending.set(p, kinds);
+      else if (keepEarly && this.early.size < EARLY_LIMIT) this.early.add(p);
     }
     if (this.pending.size === 0) return;
     const now = Date.now();
@@ -230,10 +261,11 @@ export class WatchedFilesForwarder {
     this.registrations.clear();
   }
 
-  /** WatchKind bits wanted for this absolute path across every registered watcher; 0 = none. */
+  /** WatchKind bits wanted for this absolute path across every watcher; 0 = none. */
   kindsFor(absPath: string): number {
     let kinds = 0;
-    for (const watchers of this.registrations.values()) {
+    const declared = this.initialized ? this.declared : [];
+    for (const watchers of [declared, ...this.registrations.values()]) {
       for (const watcher of watchers) {
         if ((kinds & watcher.kind) === watcher.kind) continue;
         const subject = matchSubject(watcher, absPath);
@@ -308,7 +340,12 @@ export class WatchedFilesForwarder {
     if (!isRecord(globPattern) || typeof globPattern.pattern !== "string") return null;
     const baseUri = isRecord(globPattern.baseUri) ? globPattern.baseUri.uri : globPattern.baseUri;
     if (typeof baseUri !== "string" || !baseUri.startsWith("file:")) return null;
-    return compiled(fileURLToPath(baseUri), globPattern.pattern, kind);
+    try {
+      return compiled(fileURLToPath(baseUri), globPattern.pattern, kind);
+    } catch {
+      // A `file://host/...` URI has no local path, and this runs inside the stdout read loop.
+      return null;
+    }
   }
 }
 

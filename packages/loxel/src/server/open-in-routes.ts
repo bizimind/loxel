@@ -11,6 +11,7 @@ import type { OpenInApp, OpenInApps } from "@/api/open-in-model";
 
 import type { LaunchServicesClient } from "./launch-services-client";
 import { error, json } from "./response-helpers";
+import { measureSpawn } from "./spawn-metrics";
 
 export interface OpenInRouteContext {
   /** True when `path` is a file or folder Loxel manages (worktree, draft or external file). */
@@ -23,7 +24,9 @@ export interface OpenInRouteContext {
 }
 
 export async function runOpenCommand(args: string[]): Promise<void> {
-  const proc = Bun.spawn(["/usr/bin/open", ...args], { stdout: "ignore", stderr: "pipe" });
+  const proc = measureSpawn("open", () =>
+    Bun.spawn(["/usr/bin/open", ...args], { stdout: "ignore", stderr: "pipe" }),
+  );
   const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   if (exitCode !== 0) throw new Error(stderr.trim() || `open exited with code ${exitCode}`);
 }

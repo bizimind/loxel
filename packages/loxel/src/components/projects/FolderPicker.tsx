@@ -109,7 +109,7 @@ export function FolderPickerContent({ onSelect, allowNonGitFolders }: FolderPick
                 onDoubleClick={() => canSelect && onSelect(dir.path)}
               >
                 {dir.isGitRepo ? (
-                  <GitBranchIcon className="text-primary size-4 shrink-0" />
+                  <GitBranchIcon className="text-link size-4 shrink-0" />
                 ) : (
                   <FolderIcon className="text-muted-foreground size-4 shrink-0" />
                 )}
@@ -125,7 +125,7 @@ export function FolderPickerContent({ onSelect, allowNonGitFolders }: FolderPick
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-primary ml-auto h-6 shrink-0 px-2 text-[10px]"
+                    className="text-link ml-auto h-6 shrink-0 px-2 text-[10px]"
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelect(dir.path);

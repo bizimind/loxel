@@ -1,4 +1,7 @@
 ---
+import { trackClick } from "../lib/analytics";
+import { GITHUB_REPO_URL } from "../lib/site";
+
 const links = [{ href: "/docs/getting-started", label: "Docs" }];
 ---
 
@@ -36,9 +39,10 @@ const links = [{ href: "/docs/getting-started", label: "Docs" }];
     </div>
 
     <a
-      href="https://github.com/bizimind/loxel"
+      href={GITHUB_REPO_URL}
       target="_blank"
       rel="noopener noreferrer"
+      {...trackClick("github_link_clicked", { location: "nav" })}
       class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">

@@ -4,9 +4,11 @@
 
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { THEME_PREFERENCES } from "@/lib/theme-preference";
 
 import type { ActionId, SplitPanelType } from "./action-registry";
-import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES } from "./action-registry";
+import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES, canShareBinding } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
 import { bindingsOverlap, normalizeKeyBinding } from "./key-combo";
 
@@ -48,7 +50,6 @@ const DIRECTION_KEYS: Record<SplitDirection, string> = {
 
 const SPLIT_TYPE_KEYS: Record<SplitPanelType, string> = {
   terminal: "T",
-  agent: "A",
   editor: "M",
   excalidraw: "D",
   browser: "B",
@@ -91,14 +92,20 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick", newTabChord("terminal")],
   "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
   "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
-  "panel.new.agent": ["Cmd+Shift+A", newTabChord("agent")],
   "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
+  "panel.reopenClosed": ["Cmd+Shift+T"],
   // Free in Monaco (its Refactor is ⌃⇧R on macOS); dev builds' Force Reload menu item has no key
-  // (electron/main.ts).
+  // (electron/main.ts). The two share it: browser tabs can't be renamed, so which one runs depends
+  // on whether a browser panel has focus.
   "panel.rename": ["Cmd+Shift+R"],
+  "browser.hardRefresh": ["Cmd+Shift+R"],
+  // Browsers' key; only taken while a browser panel has focus, so Monaco keeps its ⌘D elsewhere.
+  "browser.toggleBookmark": ["Cmd+D"],
+  // Beside ⌃⇧+arrow, which moves between the groups this hides. ⇧⌘↩ is Monaco's Insert Line Above.
+  "panel.toggleMaximize": ["Ctrl+Shift+Enter"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],
@@ -126,7 +133,6 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "toggle.git": ["Ctrl+Shift+G"],
   "toggle.comments": ["Ctrl+Shift+R"],
   "toggle.logs": ["Ctrl+Shift+L"],
-  "toggle.forkTree": ["Ctrl+Shift+K"],
   "sidebar.worktree.toggle": ["Ctrl+Alt+B"],
   // Context-aware: collapses/expands the worktree sidebar or side zone that holds focus
   "sidebar.toggleFocused": ["Ctrl+Shift+Space"],
@@ -171,9 +177,23 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "tree.open": ["Enter"],
   "tree.rename": ["F2", "Shift+F6"],
   "editor.changeIndentation": [],
-  "python.selectInterpreter": [],
+  ...Object.fromEntries(toolchainStatuses.map(({ selectAction }) => [selectAction.id, []])),
+  // Code actions, enabled only in an editor whose language server offers them. Quick Fix and
+  // Organize Imports keep Monaco's keys; Monaco's Refactor key (⌃⇧R) is Toggle Comments here.
+  "codeAction.quickFix": ["Cmd+Period"],
+  "codeAction.fixAll": ["Ctrl+Shift+Period"],
+  "codeAction.organizeImports": ["Alt+Shift+O"],
+  "codeAction.sourceAction": ["Ctrl+Alt+S"],
+  "codeAction.refactor": ["Ctrl+Alt+R"],
   "language.restartServers": [],
+  "worktree.manageRepoTrust": [],
+  "project.add": [],
   "app.settings": ["Cmd+Comma"],
+  // ⌥⌘Q is the app menu's, like ⌘Q: macOS menus take their keys before the page.
+  "app.quitKeepingTerminals": [],
+  "app.quitEndingTerminals": [],
+  "app.restart": [],
+  ...Object.fromEntries(THEME_PREFERENCES.map((theme) => [`theme.${theme}`, []])),
 });
 
 export const TEMPLATES: Record<TemplateName, BindingTemplate> = { loxel: LOXEL_DEFAULT_TEMPLATE };
@@ -211,15 +231,32 @@ export const KEY_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that a binding template has no ambiguous bindings: no binding is used twice and no
- * binding is a chord prefix of another.
+ * Whether two actions can't hold these bindings together: the bindings overlap (equal, or one is a
+ * chord prefix of the other), unless they are equal and the actions may share a key.
+ */
+export function bindingsConflict(
+  actionA: ActionId,
+  bindingA: KeyBinding,
+  actionB: ActionId,
+  bindingB: KeyBinding,
+): boolean {
+  if (!bindingsOverlap(bindingA, bindingB)) return false;
+  return bindingA !== bindingB || !canShareBinding(actionA, actionB);
+}
+
+/**
+ * Validate that a binding template has no ambiguous bindings: no binding is used twice (except by
+ * actions that may share a key) and no binding is a chord prefix of another.
  * Called at module load time for built-in templates and from tests for CI coverage.
  */
 export function validateBindings(template: BindingTemplate): void {
-  const seen: { binding: KeyBinding; actionId: string }[] = [];
-  for (const [actionId, bindings] of Object.entries(template)) {
+  const seen: { binding: KeyBinding; actionId: ActionId }[] = [];
+  for (const [actionId, bindings] of Object.entries(template) as [
+    ActionId,
+    readonly KeyBinding[],
+  ][]) {
     for (const binding of bindings) {
-      const existing = seen.find((s) => bindingsOverlap(s.binding, binding));
+      const existing = seen.find((s) => bindingsConflict(s.actionId, s.binding, actionId, binding));
       if (existing) {
         throw new Error(
           `Keybinding conflict: "${binding}" (${actionId}) overlaps "${existing.binding}" (${existing.actionId})`,

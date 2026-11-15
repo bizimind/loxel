@@ -159,6 +159,58 @@ describe("WatchedFilesForwarder glob matching", () => {
     expect(f.kindsFor(`${ROOT}/conf/sub/x.toml`)).toBe(0);
   });
 
+  test("a relative pattern whose URI has no local path is ignored", () => {
+    const f = forwarder([
+      { globPattern: { baseUri: "file://host/share", pattern: "**" } },
+      { globPattern: "**/*.py" },
+    ]);
+    expect(f.kindsFor(`${ROOT}/a.py`)).toBe(7);
+    expect(f.kindsFor(`${ROOT}/a.txt`)).toBe(0);
+  });
+
+  test("declared watchers match without a registration, ignored globs only for ignored events", () => {
+    const f = new WatchedFilesForwarder(ROOT, () => {}, 20);
+    f.declareWatchers(["**/.eslintrc*"], ["build/compile_commands.json"]);
+    expect(f.kindsFor(`${ROOT}/pkg/.eslintrc.json`)).toBe(0);
+    f.serverInitialized();
+    expect(f.kindsFor(`${ROOT}/pkg/.eslintrc.json`)).toBe(7);
+    expect(f.kindsFor(`${ROOT}/build/compile_commands.json`)).toBe(7);
+    expect(f.kindsFor(`${ROOT}/src/a.c`)).toBe(0);
+    expect(f.wantsIgnoredPath("build/compile_commands.json")).toBe(true);
+    expect(f.wantsIgnoredPath("build/main.o")).toBe(false);
+    expect(f.wantsIgnoredPath("node_modules/x/.eslintrc.json")).toBe(false);
+  });
+
+  test("a change a declared watcher took is not held for a later registration", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "lsp-watched-")));
+    try {
+      const declaredPath = join(root, ".eslintrc");
+      const otherPath = join(root, "a.py");
+      await writeFile(declaredPath, "");
+      await writeFile(otherPath, "");
+      const { promise: first, resolve: sawFirst } = Promise.withResolvers<FileEvent[]>();
+      const { promise: second, resolve: sawSecond } = Promise.withResolvers<FileEvent[]>();
+      let batches = 0;
+      const f = new WatchedFilesForwarder(
+        root,
+        (changes) => (batches++ === 0 ? sawFirst(changes) : sawSecond(changes)),
+        20,
+      );
+      f.declareWatchers([".eslintrc"], []);
+      f.queue([declaredPath, otherPath]);
+      // Held until the server may hear about it.
+      expect(batches).toBe(0);
+      f.serverInitialized();
+      expect((await first).every((c) => c.uri === pathToFileURL(declaredPath).href)).toBe(true);
+
+      f.register("reg", { watchers: [{ globPattern: "**" }] });
+      expect((await second).every((c) => c.uri === pathToFileURL(otherPath).href)).toBe(true);
+      f.dispose();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("kinds combine across watchers and registrations, and unregistering drops them", () => {
     const f = forwarder([{ globPattern: "**/*.py", kind: 1 }]);
     f.register("other", { watchers: [{ globPattern: "**", kind: 4 }] });

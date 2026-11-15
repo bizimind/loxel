@@ -11,6 +11,8 @@ export interface NestedWorktreePlan {
 export interface WorktreeRemovePlan extends RemovePlan {
   /** Every worktree nested below it, at any depth */
   nested: NestedWorktreePlan[];
+  /** The repository has a `clean.wt.sh` that removing will not run, since it is not trusted */
+  cleanHookHeld: boolean;
 }
 
 /**

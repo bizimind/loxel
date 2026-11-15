@@ -1,31 +1,26 @@
-import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
+import { getPythonEnv } from "@/api/python-env-client";
+import { pythonToolchain } from "@/api/python-env-model";
 import {
   pythonEnvSourceDescription,
   pythonInterpreterLabel,
   selectPythonInterpreter,
 } from "@/lib/python-interpreter";
-import { resolveLanguage } from "@/lib/resolve-language";
-import { cn } from "@/lib/utils";
-import { usePythonEnvQuery } from "@/queries/use-repo-queries";
-import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
+import { useActiveToolchainStatus } from "@/queries/use-toolchain-status";
+
+import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
 /**
- * The Python interpreter of the active editor's worktree (the panel's own, which is not always the
- * active worktree), shown while that editor holds a Python file. Clicking it opens the
- * interpreter picker for that worktree.
+ * The Python interpreter of the active editor's worktree, shown while that editor holds a Python
+ * file. Clicking it opens the interpreter picker for that worktree.
  */
 export function PythonInterpreterStatus() {
-  const active = useActiveEditorFile();
-  const associations = useSettingsStore(selectEffectiveFileAssociations);
-  const isPython = active !== null && resolveLanguage(active.filePath, associations) === "python";
-  const wtPath = isPython ? active.worktreePath : null;
-  const { data } = usePythonEnvQuery(wtPath);
+  const active = useActiveToolchainStatus(pythonToolchain, getPythonEnv);
 
-  if (!wtPath || !data) return null;
+  if (!active) return null;
 
-  const { env, overridePath } = data;
+  const { wtPath, status } = active;
+  const { env, overridePath } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
-  const label = env ? pythonInterpreterLabel(env, wtPath) : "Select Python Interpreter";
   const tooltip = [
     env
       ? `${env.pythonPath}\n${pythonEnvSourceDescription(env.source)}`
@@ -38,16 +33,11 @@ export function PythonInterpreterStatus() {
     .join("\n");
 
   return (
-    <button
-      type="button"
-      onClick={() => void selectPythonInterpreter(wtPath)}
-      title={tooltip}
-      className={cn(
-        "hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors",
-        env && !overrideUnusable ? "text-muted-foreground" : "text-warning",
-      )}
-    >
-      {label}
-    </button>
+    <ToolchainStatusButton
+      label={env ? pythonInterpreterLabel(env, wtPath) : "Select Python Interpreter"}
+      tooltip={tooltip}
+      warning={!env || overrideUnusable}
+      onSelect={() => void selectPythonInterpreter(wtPath)}
+    />
   );
 }

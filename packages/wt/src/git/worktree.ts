@@ -260,9 +260,10 @@ export const TRASH_DIR = ".wt-trash";
  * with installed dependencies), and git keeps the worktree registered until it
  * is done. Renaming the checkout into the trash is instant; `git worktree
  * remove --force` then has only the metadata of a missing checkout to delete,
- * and a detached `rm -rf` that outlives the caller deletes the files. The
- * trash is inside the worktrees directory so the rename never crosses a
- * filesystem.
+ * and the caller then deletes the files with `deleteInBackground`, as its last
+ * step: its own working directory may be inside them, and git cannot be started
+ * from a directory that is gone. The trash is inside the worktrees directory so
+ * the rename never crosses a filesystem.
  *
  * Only this removal's own parked checkout is ever deleted: another removal's
  * checkout may still be registered while it sits in the trash, and so is one
@@ -272,21 +273,21 @@ export const TRASH_DIR = ".wt-trash";
  * worktree is clean (or that force is meant). It does not skip a lock: when
  * git refuses, the checkout is moved back and the refusal is thrown.
  *
- * @returns false when the checkout could not be moved (missing, or on another
- *   filesystem); the worktree is untouched, and the caller should use
- *   `removeWorktree`.
+ * @returns where the checkout was parked, or null when it could not be moved
+ *   (missing, or on another filesystem); the worktree is then untouched, and
+ *   the caller should use `removeWorktree`.
  */
 export async function detachWorktree(
   root: string,
   path: string,
   worktreesDirPath: string,
-): Promise<boolean> {
+): Promise<string | null> {
   const parked = join(worktreesDirPath, TRASH_DIR, `${basename(path)}-${randomUUID()}`);
   try {
     await mkdir(dirname(parked), { recursive: true });
     await rename(path, parked);
   } catch {
-    return false;
+    return null;
   }
 
   const result = await runGit(["worktree", "remove", "--force", path], root);
@@ -303,15 +304,14 @@ export async function detachWorktree(
     throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
   }
 
-  deleteInBackground(parked);
-  return true;
+  return parked;
 }
 
 /**
  * Delete `path` in a detached process, so the caller can return (or exit) at
  * once. Best effort: if `rm` cannot start, the files stay in the trash.
  */
-function deleteInBackground(path: string): void {
+export function deleteInBackground(path: string): void {
   const child = spawn("/bin/rm", ["-rf", "--", path], { detached: true, stdio: "ignore" });
   // A spawn failure arrives as an `error` event; unhandled, it would kill the caller.
   child.on("error", () => {});

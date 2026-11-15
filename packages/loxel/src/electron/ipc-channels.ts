@@ -11,7 +11,11 @@ export const WINDOW_FOCUS_CHANGE = "window:focus-change";
 export const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
 /** Renderer → main (sync): whether the sender's window is fullscreen right now. */
 export const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
-export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
+/**
+ * Renderer → main: the Theme setting (`ThemePreference`), applied as `nativeTheme.themeSource` so
+ * native UI and browser panels follow it.
+ */
+export const SET_THEME_SOURCE = "theme:set-source";
 /**
  * Renderer → main: which keystrokes to intercept in its webviews — the first keystrokes of its
  * bindings, or all of them while a chord is in progress.
@@ -35,8 +39,8 @@ export const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
  */
 export const JAVASCRIPT_DIALOG_RUN = "javascript-dialog:run";
 /**
- * Renderer → main: this document shows page dialogs. Pages of a window whose renderer never sent
- * it (one that predates dialogs) get no dialog instead of blocking on one that is never shown.
+ * Renderer → main: this document shows page dialogs. Pages of a window whose current document has
+ * not sent it get no dialog instead of blocking on one that is never shown.
  */
 export const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 /** Main → renderer: show a page's dialog in the browser panel hosting that webview. */
@@ -45,3 +49,43 @@ export const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 export const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
 /** Main → renderer: a dialog was withdrawn because its page navigated or went away. */
 export const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
+/** Renderer → main (invoke): the app update's current `UpdateState`. */
+export const UPDATE_GET_STATUS = "update:get-status";
+/** Renderer → main (invoke): check the release manifest for a newer version. */
+export const UPDATE_CHECK = "update:check";
+/** Renderer → main (invoke): download the available update. */
+export const UPDATE_DOWNLOAD = "update:download";
+/** Renderer → main: quit, install the downloaded update and relaunch. */
+export const UPDATE_INSTALL = "update:install";
+/** Main → renderer: the app update's `UpdateState` changed. */
+export const UPDATE_STATUS_CHANGED = "update:status-changed";
+/** Main → renderer: show a passkey QR code (`PasskeyQrCode`) in one of its browser panels. */
+export const PASSKEY_QR_SHOW = "passkey:qr-show";
+/** Main → renderer: the passkey request of a webview (by webContents ID) ended; hide its QR code. */
+export const PASSKEY_QR_HIDE = "passkey:qr-hide";
+/** Renderer → main (invoke): whether Loxel is the default web browser (`DefaultBrowserStatus`). */
+export const DEFAULT_BROWSER_GET = "default-browser:get";
+/** Renderer → main (invoke): ask macOS to make Loxel the default web browser. */
+export const DEFAULT_BROWSER_SET = "default-browser:set";
+/** Renderer → main: Quit and Keep Terminals, from the command palette. */
+export const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
+/** Renderer → main: Restart Loxel, from the command palette. */
+export const APP_RESTART = "app:restart";
+/** Renderer → main: Quit and End Terminals, from the command palette. */
+export const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
+/**
+ * Renderer → main: the "When quitting Loxel" setting (`WhenQuitting`), which decides what Quit Loxel
+ * does and which quit the app menu offers beside it.
+ */
+export const SET_WHEN_QUITTING = "quit:set-when-quitting";
+/** Main → renderer: ask before quitting (`QuitQuestion`), terminals being busy. */
+export const QUIT_QUESTION = "quit:question";
+/**
+ * Main → renderer: main no longer waits on the question with this ID (it asked natively instead, or
+ * the quit was decided another way); take it down.
+ */
+export const QUIT_QUESTION_WITHDRAWN = "quit:question-withdrawn";
+/** Renderer → main: the question with this ID is on screen. */
+export const QUIT_QUESTION_SHOWN = "quit:question-shown";
+/** Renderer → main: the user answered a question (`QuitReply`). */
+export const QUIT_ANSWER = "quit:answer";

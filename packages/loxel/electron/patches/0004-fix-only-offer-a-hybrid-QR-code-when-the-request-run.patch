@@ -1,0 +1,192 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ori Shalom <ori.100000@gmail.com>
+Date: Tue, 10 Nov 2026 21:44:13 +0200
+Subject: [PATCH 4/4] fix: only offer a hybrid QR code when the request runs
+ hybrid discovery
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ...n_authenticator_request_client_delegate.cc | 49 ++++++++++++++-----
+ ...on_authenticator_request_client_delegate.h | 11 ++++-
+ spec/api-web-authn.spec.ts                    | 33 +++++++++++++
+ 3 files changed, 81 insertions(+), 12 deletions(-)
+
+diff --git a/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc b/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
+index 7839247e7c..80bdeb0230 100644
+--- a/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
++++ b/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
+@@ -89,6 +89,7 @@ std::string CredentialIdFor(
+ }
+ 
+ constexpr std::string_view kCollectPinEventName = "collect-webauthn-pin";
++constexpr std::string_view kHybridRequestEventName = "webauthn-hybrid-request";
+ 
+ std::string_view PinEntryReasonToString(device::pin::PINEntryReason reason) {
+   switch (reason) {
+@@ -344,23 +345,26 @@ void ElectronAuthenticatorRequestClientDelegate::ConfigureDiscoveries(
+   // transport. A restart from StartOver() keeps the QR code the app is
+   // already showing.
+   if (!hybrid_qr_generator_key_) {
+-    std::array<uint8_t, device::cablev2::kQRKeySize> qr_generator_key;
+-    crypto::RandBytes(qr_generator_key);
+-    const std::string qr_code =
+-        device::cablev2::qr::Encode(qr_generator_key, request_type);
+-
+     // The app renders the QR code, so hybrid is only useful when a listener
+     // exists. Without one, leave the transport unconfigured so the remaining
+     // authenticators behave exactly as before.
+-    base::WeakPtr<ElectronAuthenticatorRequestClientDelegate> weak_this =
+-        weak_factory_.GetWeakPtr();
+-    if (!EmitHybridRequestEvent(request_type, qr_code) || !weak_this) {
++    if (!HasSessionListener(kHybridRequestEventName)) {
+       return;
+     }
++    std::array<uint8_t, device::cablev2::kQRKeySize> qr_generator_key;
++    crypto::RandBytes(qr_generator_key);
++    hybrid_qr_code_ =
++        device::cablev2::qr::Encode(qr_generator_key, request_type);
++    hybrid_request_type_ = request_type;
+     hybrid_qr_generator_key_ = qr_generator_key;
+   }
+ 
+-  hybrid_browser_context_ = browser_context;
++  // The event waits for OnTransportAvailabilityEnumerated(): the transports
++  // passed to the request handler are not known here, and an allow list can
++  // exclude hybrid (e.g. every credential lists only "internal"). Offering a
++  // QR code then would leave the phone waiting for a desktop that never
++  // listens.
++  hybrid_pending_browser_context_ = browser_context;
+   fido_discovery_factory->set_cable_data(request_type,
+                                          *hybrid_qr_generator_key_);
+   fido_discovery_factory->set_network_context_factory(
+@@ -396,7 +400,7 @@ bool ElectronAuthenticatorRequestClientDelegate::EmitHybridRequestEvent(
+                                            .ToLocalChecked();
+ 
+   v8::Local<v8::Value> emit_result =
+-      gin_helper::EmitEvent(isolate, session_wrapper, "webauthn-hybrid-request",
++      gin_helper::EmitEvent(isolate, session_wrapper, kHybridRequestEventName,
+                             event_object, details);
+ 
+   // EventEmitter.prototype.emit() returns true iff there was at least one
+@@ -612,6 +616,24 @@ void ElectronAuthenticatorRequestClientDelegate::FidoAuthenticatorAdded(
+ void ElectronAuthenticatorRequestClientDelegate::
+     OnTransportAvailabilityEnumerated(
+         device::FidoRequestHandlerBase::TransportAvailabilityInfo data) {
++  // Offer the QR code once, and only when the request handler actually runs
++  // a hybrid discovery: it is absent when the allow list excludes hybrid or
++  // the factory could not create one. A restart keeps the code already shown.
++  if (hybrid_qr_generator_key_ && !hybrid_browser_context_ &&
++      data.available_transports.contains(
++          device::FidoTransportProtocol::kHybrid)) {
++    base::WeakPtr<ElectronAuthenticatorRequestClientDelegate> weak_this =
++        weak_factory_.GetWeakPtr();
++    const bool shown =
++        EmitHybridRequestEvent(hybrid_request_type_, hybrid_qr_code_);
++    if (!weak_this) {
++      return;
++    }
++    if (shown) {
++      hybrid_browser_context_ = hybrid_pending_browser_context_;
++    }
++  }
++
+   // Hybrid discovery listens for the phone's BLE advertisement, which on
+   // macOS needs the Bluetooth permission. Ask for it now rather than letting
+   // the request sit until the OS prompt happens to appear.
+@@ -772,6 +794,11 @@ bool ElectronAuthenticatorRequestClientDelegate::SupportsPIN() const {
+   // don't listen — e.g. userVerification: 'preferred' requests keep completing
+   // without user verification instead of being routed into a PIN exchange
+   // that nothing can service.
++  return HasSessionListener(kCollectPinEventName);
++}
++
++bool ElectronAuthenticatorRequestClientDelegate::HasSessionListener(
++    std::string_view event_name) const {
+   gin::WeakCell<api::Session>* session = GetSession();
+   if (!session || !session->Get()) {
+     return false;
+@@ -787,7 +814,7 @@ bool ElectronAuthenticatorRequestClientDelegate::SupportsPIN() const {
+ 
+   v8::Local<v8::Value> result =
+       gin_helper::CallMethod(isolate, session_wrapper, "listenerCount",
+-                             std::string(kCollectPinEventName));
++                             std::string(event_name));
+   int listener_count = 0;
+   return !result.IsEmpty() &&
+          gin::ConvertFromV8(isolate, result, &listener_count) &&
+diff --git a/shell/browser/webauthn/electron_authenticator_request_client_delegate.h b/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
+index 78a20c7591..96776d5db6 100644
+--- a/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
++++ b/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
+@@ -126,6 +126,8 @@ class ElectronAuthenticatorRequestClientDelegate
+   void CancelRequest();
+   // Emits 'webauthn-hybrid-request' on the session. Returns true iff at least
+   // one listener received the event.
++  // Whether the session has a listener for |event_name|.
++  bool HasSessionListener(std::string_view event_name) const;
+   bool EmitHybridRequestEvent(device::FidoRequestType request_type,
+                               const std::string& qr_code);
+   void OnBleStatus(device::FidoRequestHandlerBase::BleStatus status);
+@@ -149,10 +151,17 @@ class ElectronAuthenticatorRequestClientDelegate
+       request_ble_permission_callback_;
+ 
+   // Set once an app listener accepted the 'webauthn-hybrid-request' event
+-  // and hybrid (caBLE v2) discovery was configured for this request. The
++  // for a request whose handler runs hybrid (caBLE v2) discovery. The
+   // browser context outlives the request; the frame may not, so the
+   // completion event is delivered through this handle.
+   base::WeakPtr<ElectronBrowserContext> hybrid_browser_context_;
++  // The requesting session's context, kept from ConfigureDiscoveries() until
++  // the event is emitted.
++  base::WeakPtr<ElectronBrowserContext> hybrid_pending_browser_context_;
++  // The QR code for |hybrid_qr_generator_key_| and the request it encodes.
++  std::string hybrid_qr_code_;
++  device::FidoRequestType hybrid_request_type_ =
++      device::FidoRequestType::kGetAssertion;
+   // The key behind the QR code the app was given; reused if the request
+   // restarts so the code stays valid.
+   std::optional<std::array<uint8_t, device::cablev2::kQRKeySize>>
+diff --git a/spec/api-web-authn.spec.ts b/spec/api-web-authn.spec.ts
+index f32bef023a..f44a50aadf 100644
+--- a/spec/api-web-authn.spec.ts
++++ b/spec/api-web-authn.spec.ts
+@@ -866,6 +866,39 @@ ifdescribe(process.platform !== 'win32')("session 'webauthn-hybrid-request' even
+     expect(asserted.id).toBe(created.id);
+   });
+ 
++  it('does not fire when the allow list excludes hybrid', async () => {
++    const created = await makeCredential();
++    expect(created.ok).toBe(true);
++
++    let requests = 0;
++    (w.webContents.session as NodeJS.EventEmitter).on('webauthn-hybrid-request', () => {
++      requests++;
++    });
++
++    // Every allowed credential lists only "internal", so the request never
++    // runs a hybrid discovery and a QR code could not be answered.
++    const result = await w.webContents.executeJavaScript(`
++      (() => {
++        const b64 = ${JSON.stringify(created.id)}.replace(/-/g, '+').replace(/_/g, '/');
++        const id = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
++        return navigator.credentials.get({
++          publicKey: {
++            challenge: new Uint8Array(32),
++            rpId: 'localhost',
++            allowCredentials: [{ type: 'public-key', id, transports: ['internal'] }],
++            userVerification: 'required'
++          }
++        }).then(
++          c => ({ ok: true, id: c.id }),
++          e => ({ ok: false, name: e.name, message: e.message })
++        );
++      })()
++    `);
++    expect(result.ok).toBe(true);
++    expect(result.id).toBe(created.id);
++    expect(requests).toBe(0);
++  });
++
+   it('does not emit a completion event when no listener accepted the request', async () => {
+     let completions = 0;
+     (w.webContents.session as NodeJS.EventEmitter).on('webauthn-hybrid-request-completed', () => {

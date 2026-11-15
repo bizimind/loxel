@@ -220,6 +220,22 @@ describe("threadsToMarkdown", () => {
     expect(result).toContain("```python");
   });
 
+  test.each([
+    ["include/fmt/base.h", "cpp"],
+    ["legacy/solver.C", "cpp"],
+    ["src/lib.c", "c"],
+    ["src/impl.tpp", "cpp"],
+    ["ios/Bridge.mm", "objective-cpp"],
+    ["CMakeLists.txt", "cmake"],
+  ])("fences %s as %s", (filePath, language) => {
+    const result = threadsToMarkdown({
+      reviewNames: [],
+      placedThreadsByFile: new Map([[filePath, [makeThread({ filePath })]]]),
+      lostThreads: [],
+    });
+    expect(result).toContain(`\`\`\`${language}\n`);
+  });
+
   test("multiple review names", () => {
     const thread = makeThread();
     const result = threadsToMarkdown({

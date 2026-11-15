@@ -28,6 +28,7 @@ export {
   addWorktree,
   canonicalWorktreesDir,
   DETACHED,
+  deleteInBackground,
   detachWorktree,
   findWorktree,
   getManagedWorktrees,

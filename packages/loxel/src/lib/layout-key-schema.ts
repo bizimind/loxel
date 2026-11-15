@@ -34,6 +34,19 @@ export function layoutSessionSuffix(sessionKey: string): string | null {
   return rest.slice(colonIdx + 1);
 }
 
+/**
+ * The worktree path a layout row belongs to, or null for any other key. A scope and a window ID
+ * never hold a colon; the path may.
+ */
+export function layoutKeyWorktree(key: string): string | null {
+  let suffix: string | null = null;
+  if (key.startsWith(LAYOUT_CANONICAL_PREFIX)) suffix = key.slice(LAYOUT_CANONICAL_PREFIX.length);
+  else suffix = layoutSessionSuffix(key);
+  if (suffix === null) return null;
+  const colonIdx = suffix.indexOf(":");
+  return colonIdx < 0 ? null : suffix.slice(colonIdx + 1);
+}
+
 export function layoutCanonicalKeyFromSuffix(suffix: string): string {
   return `${LAYOUT_CANONICAL_PREFIX}${suffix}`;
 }

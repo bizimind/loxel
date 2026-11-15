@@ -1,6 +1,7 @@
 import type { LocalDb } from "@bizimind/localdb-sdk";
 import type { ServerWebSocket } from "bun";
 
+import type { LspName } from "@/api/log-entry-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { isWithin } from "@/lib/project-file-helpers";
 
@@ -11,6 +12,7 @@ import type { FileOperationsHistory, FileOperationsService } from "./file-operat
 import type { FileWatcher } from "./file-watcher";
 import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
+import type { RegisteredWorktrees } from "./registered-worktrees";
 import type { ReviewDb } from "./review-db";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
@@ -26,6 +28,8 @@ export interface ProjectState {
   worktreesDir: string;
   /** Cached dirty status of every worktree, pushed as `worktree_status_changed`. */
   worktreeStatuses: WorktreeStatusTracker;
+  /** The worktrees seen registered, to tell a removal from a move on a `worktrees` event. */
+  registeredWorktrees: RegisteredWorktrees;
 }
 
 /**
@@ -92,8 +96,8 @@ export interface WorktreeResources {
   fileOpsHistory: FileOperationsHistory;
   /** Connected clients subscribing to this worktree's events. */
   subscribers: Set<ServerWebSocket<WsData>>;
-  /** Keeps the worktree's Python environment resolution shared and watched (see `python-env.ts`). */
-  unsubscribePythonEnv: () => void;
+  /** Keep the worktree's language toolchains resolved and watched (see `toolchain-statuses.ts`). */
+  unsubscribeToolchainStatuses: Array<() => void>;
 }
 
 /** A worktree's Others section: its open folders, then its open external files. */
@@ -124,7 +128,8 @@ export type ResolvedFilePath =
       /** Relative to the tree root; empty only for an Others folder's root. */
       relativePath: string;
     }
-  | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
+  // A draft: of the worktree `wtPath` names, or of Home (`HOME_KEY`).
+  | { type: "detached"; wtPath: string; service: DetachedFilesService; name: string }
   | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string };
 
 /** Per-client tracking for cleanup on disconnect. */
@@ -140,18 +145,28 @@ export interface ClientState {
   shownWorktree?: string;
 }
 
-/** WS data tag for routing app vs language-server connections. */
-export type WsData =
-  | { type: "app" }
-  | { type: "yaml-lsp" }
-  | WorktreeLspData<"ts-lsp">
-  | WorktreeLspData<"docker-lsp">
-  | WorktreeLspData<"terraform-lsp">
-  | WorktreeLspData<"python-lsp">
-  | WorktreeLspData<"ruff-lsp">
-  | WorktreeLspData<"astro-lsp">
-  | WorktreeLspData<"xml-lsp">
-  | WorktreeLspData<"toml-lsp">;
+/** A language-server manager rooted at a worktree, as `server.ts` drives it. */
+export interface WorktreeLspServer {
+  readonly name: LspName;
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void;
+  destroySession(ws: ServerWebSocket<unknown>): void;
+  handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
+  notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
+  notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
+  /**
+   * The worktree at `wtPath` is gone: delete what the server keeps for it outside the worktree. It
+   * may run more than once for a path, and for one the server never served.
+   */
+  forgetWorktree?(wtPath: string): void;
+  /** May settle once its processes have exited; server shutdown waits for that. */
+  destroy(): void | Promise<void>;
+}
 
-export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
-export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];
+export interface WorktreeLspData {
+  type: LspName;
+  wtPath: string;
+  manager: WorktreeLspServer;
+}
+
+/** WS data tag for routing app vs language-server connections. */
+export type WsData = { type: "app" } | { type: "yaml-lsp" } | WorktreeLspData;

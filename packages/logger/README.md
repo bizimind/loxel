@@ -1,6 +1,6 @@
 # logger
 
-Structured logging wrapper around [Axiom](https://axiom.co) (`@axiomhq/logging`). Every entry is tagged with its source, errors are serialized with their full cause chain, and context is sanitized before it leaves the process. Used by [cli-common](../cli-common), [coding-agent](../coding-agent), and [channel-worker](../channel-worker).
+Structured logging wrapper around [Axiom](https://axiom.co) (`@axiomhq/logging`). Every entry is tagged with its source, errors are serialized with their full cause chain, and context is sanitized before it leaves the process. Used by [cli-common](../cli-common) and [channel-worker](../channel-worker).
 
 Workspace-only; add `"@bizimind/logger": "workspace:*"`. Public API is in [`src/index.ts`](src/index.ts); config and source types are in `src/types.ts`.
 

@@ -5,10 +5,14 @@ import { join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import type { ExternalTypeChecker } from "./python-lsp-manager";
+
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "python-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
-const { PythonLspManager, pythonSettings } = await import("./python-lsp-manager");
+const { PYTHON_REPO_TRUST_RESTRICTION, PythonLspManager, pythonSettings } =
+  await import("./python-lsp-manager");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { setPythonOverride } = await import("./python-override-store");
 const { refreshPythonEnv } = await import("./python-env");
 
@@ -42,6 +46,13 @@ afterEach(async () => {
 interface Diagnostic {
   message: string;
   code?: string;
+  severity?: number;
+}
+
+interface CompletionItem {
+  label: string;
+  insertTextFormat?: number;
+  textEdit?: { newText: string };
 }
 
 /** Stands in for the WebSocket and the Monaco LSP client behind it. */
@@ -50,6 +61,9 @@ class FakeClient {
   readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly responses = new Map<number, (result: unknown) => void>();
   private diagnosticsWaiter: (() => void) | null = null;
+  private nextId = 100;
+  /** Methods of the requests the server sent. */
+  readonly serverRequests: string[] = [];
 
   constructor(private readonly manager: InstanceType<typeof PythonLspManager>) {
     const ws = {
@@ -62,13 +76,19 @@ class FakeClient {
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
 
-  async start(wtPath: string): Promise<void> {
+  /** `pull`: ask for diagnostics (`textDocument/diagnostic`) like Monaco does, instead of having them pushed. */
+  async start(wtPath: string, { pull = false } = {}): Promise<void> {
     this.manager.createSession(this.ws, wtPath);
     const rootUri = `file://${wtPath}`;
+    const textDocument = {
+      publishDiagnostics: {},
+      completion: { completionItem: { snippetSupport: true } },
+      ...(pull ? { diagnostic: { dynamicRegistration: true } } : {}),
+    };
     await this.request(1, "initialize", {
       processId: null,
       rootUri,
-      capabilities: { textDocument: { publishDiagnostics: {} }, workspace: {} },
+      capabilities: { textDocument, workspace: {} },
       workspaceFolders: [{ uri: rootUri, name: "wt" }],
     });
     this.send({ method: "initialized", params: {} });
@@ -105,6 +125,32 @@ class FakeClient {
     }
   }
 
+  /** Pull `uri`'s diagnostics until they satisfy `predicate`; the server answers once analyzed. */
+  async pullDiagnostics(
+    uri: string,
+    predicate: (diagnostics: Diagnostic[]) => boolean,
+  ): Promise<Diagnostic[]> {
+    while (true) {
+      const result = (await this.request(this.nextId++, "textDocument/diagnostic", {
+        textDocument: { uri },
+        previousResultId: "stale",
+      })) as { items?: Diagnostic[] };
+      const items = result.items ?? [];
+      if (predicate(items)) return items;
+    }
+  }
+
+  /** Ask for completions until there are some; the server has none while it is still loading. */
+  async completionItems(uri: string, line: number, character: number): Promise<CompletionItem[]> {
+    while (true) {
+      const result = (await this.request(this.nextId++, "textDocument/completion", {
+        textDocument: { uri },
+        position: { line, character },
+      })) as { items?: CompletionItem[] };
+      if (result.items?.length) return result.items;
+    }
+  }
+
   private request(id: number, method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve) => {
       this.responses.set(id, resolve);
@@ -129,11 +175,20 @@ class FakeClient {
       return;
     }
     if (message.method !== undefined && message.id !== undefined) {
+      this.serverRequests.push(message.method);
+      // Answered like monaco-lsp-client does: basedpyright stops answering pulls after a failed refresh.
+      if (
+        message.method === "client/registerCapability" ||
+        message.method === "workspace/diagnostic/refresh"
+      ) {
+        this.send({ id: message.id, result: null });
+        return;
+      }
       // Server→client requests the client doesn't implement, like monaco-lsp-client.
       this.send({ id: message.id, error: { code: -32601, message: "Unhandled method" } });
       return;
     }
-    if (message.id !== undefined) this.responses.get(message.id)?.(message.result);
+    if (message.id !== undefined) this.responses.get(message.id)?.(message.result ?? {});
   }
 }
 
@@ -170,13 +225,33 @@ const analyzed = (diagnostics: Diagnostic[]) =>
 const hasUnusedCallResult = (diagnostics: Diagnostic[]) =>
   diagnostics.some((d) => d.code === "reportUnusedCallResult");
 
+/** A type checker standing in for mypy, owning every file once `owns` is set. */
+class FakeTypeChecker implements ExternalTypeChecker {
+  owns = false;
+  private readonly listeners = new Set<(wtPath: string) => void>();
+
+  ownsTypeChecking(): boolean {
+    return this.owns;
+  }
+
+  onTypeCheckingChange(listener: (wtPath: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  set(wtPath: string, owns: boolean): void {
+    this.owns = owns;
+    for (const listener of this.listeners) listener(wtPath);
+  }
+}
+
 /** A manager whose resolver found no interpreter, as on a machine without Python outside the repo. */
 class UnresolvedEnvManager extends PythonLspManager {
   protected override async workspaceConfiguration(
     session: Parameters<InstanceType<typeof PythonLspManager>["workspaceConfiguration"]>[0],
     section: string | undefined,
   ): Promise<unknown> {
-    if (section === "python") return pythonSettings(null, session.wtPath);
+    if (section === "python") return pythonSettings(null, session.wtPath, session.repoTrusted);
     return super.workspaceConfiguration(session, section);
   }
 }
@@ -194,6 +269,23 @@ async function analyzeMain(
 }
 
 describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
+  test(
+    "gets method overrides in plain text, so default values reach the editor unexpanded",
+    async () => {
+      const wt = await makeWorktree();
+      manager = new PythonLspManager();
+      const client = new FakeClient(manager);
+      await client.start(wt);
+      await writeFile(join(wt, "base.py"), `class Base:\n    def run(self, x="$HOME"): ...\n`);
+      const text = `from base import Base\nclass Sub(Base):\n    def ru\n`;
+      const uri = client.open(join(wt, "sub.py"), text);
+      const [run] = await client.completionItems(uri, 2, 10);
+      expect(run?.textEdit?.newText).toContain("$HOME");
+      expect(run?.insertTextFormat).not.toBe(2);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   test(
     "resolves imports installed only in the worktree's .venv",
     async () => {
@@ -220,6 +312,30 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
       await chmod(join(bin, "python"), 0o755);
       await analyzeMain(wt, () => new UnresolvedEnvManager());
       expect(await Bun.file(marker).exists()).toBe(false);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "runs the environment's own interpreter only in a trusted repository",
+    async () => {
+      const wt = await makeWorktree();
+      await makeVenvWithPackage(join(wt, ".venv"));
+      const marker = join(root!, "ran");
+      const python = join(wt, ".venv", "bin", "python");
+      await rm(python);
+      await writeFile(python, `#!/bin/sh\ntouch '${marker}'\nexec '${python3}' "$@"\n`);
+      await chmod(python, 0o755);
+
+      // Its packages are read as files.
+      expect(hasMissingImport(await analyzeMain(wt))).toBe(false);
+      expect(await Bun.file(marker).exists()).toBe(false);
+      expect(getRepoTrustStatus(wt).restrictions).toEqual([PYTHON_REPO_TRUST_RESTRICTION]);
+
+      await manager?.destroy();
+      setRepoTrusted(wt, true);
+      await analyzeMain(wt);
+      expect(await Bun.file(marker).exists()).toBe(true);
     },
     TEST_TIMEOUT_MS,
   );
@@ -294,6 +410,35 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
       await writeFile(module, "VALUE = 1\n");
       manager.notifyWatchedFilesChanged(wt, [module]);
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "drops its type errors where another checker type-checks, unless the project configures it",
+    async () => {
+      const wt = await makeWorktree();
+      const file = join(wt, "checked.py");
+      await writeFile(file, `import os\n${SENTINEL}\n\ndef broken(:\n    pass\n`);
+      const checker = new FakeTypeChecker();
+      manager = new PythonLspManager(checker);
+      const client = new FakeClient(manager);
+      await client.start(wt, { pull: true });
+      const uri = client.open(file, await Bun.file(file).text());
+      await client.pullDiagnostics(uri, analyzed);
+
+      checker.set(wt, true);
+      // The client is asked to pull again; its answer never reaches basedpyright.
+      expect(client.serverRequests).toContain("workspace/diagnostic/refresh");
+      const owned = await client.pullDiagnostics(uri, () => true);
+      expect(analyzed(owned)).toBe(false);
+      // Syntax errors (no rule) and hints (unused import) stay.
+      expect(owned.some((d) => d.code === undefined)).toBe(true);
+      expect(owned.some((d) => d.code === "reportUnusedImport" && d.severity === 4)).toBe(true);
+
+      // A project that configures basedpyright wants its type errors next to the other checker's.
+      await writeFile(join(wt, "pyrightconfig.json"), "{}\n");
+      await client.pullDiagnostics(uri, analyzed);
     },
     TEST_TIMEOUT_MS,
   );

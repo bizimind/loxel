@@ -1,0 +1,1 @@
+{ "script": "build-yaml-lsp.ts", "resources": ["yaml-language-server"] }

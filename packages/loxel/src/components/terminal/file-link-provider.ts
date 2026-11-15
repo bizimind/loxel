@@ -142,7 +142,7 @@ function createLink(
       // Bare filenames resolved via the index are worktree-root relative; explicit paths are
       // relative to where the shell started.
       const resolved = resolvedRelative
-        ? resolvePath(resolvedRelative, paths.worktreePath)
+        ? resolvePath(resolvedRelative, paths.worktreePath ?? paths.cwd)
         : resolvePath(filePath, paths.cwd);
       // Folders open in the files panel; everything else in its editor.
       void openPath(resolved, location);
@@ -150,10 +150,10 @@ function createLink(
   };
 }
 
-/** Where a terminal's shell started and which worktree the panel belongs to. */
+/** Where a terminal's shell started and which worktree the panel belongs to (none in Home). */
 export interface TerminalPaths {
   cwd: string;
-  worktreePath: string;
+  worktreePath?: string;
 }
 
 export function createFilePathLinkProvider(

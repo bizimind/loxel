@@ -7,26 +7,21 @@ import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
+import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
+import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
 import type {
-  AgentEventPayload,
   FileMoveSource,
   TerminalSpawnTarget,
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
-import {
-  BIN_HEADER_SIZE,
-  BIN_MSG_INPUT,
-  encodeOutputFrame,
-  parseBinaryHeader,
-} from "@/api/ws-protocol";
+import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
+import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 
-import { AgentManager } from "./agent-manager";
-import { AstroLspManager } from "./astro-lsp-manager";
-import { config, getDetachedDir, hash12 } from "./config";
+import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
-import { DockerLspManager } from "./docker-lsp-manager";
+import { endedHostsNotice } from "./ended-hosts-notice";
 import { ExternalFilesService } from "./external-files-service";
 import {
   ExternalFolderRegistry,
@@ -37,26 +32,24 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
+import { gitExecClient } from "./git-exec-client";
+import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
+import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
-import {
-  getPythonEnv,
-  refreshAllPythonEnvs,
-  refreshPythonEnv,
-  subscribePythonEnv,
-} from "./python-env";
-import { PythonLspManager } from "./python-lsp-manager";
-import { onPythonOverrideChange } from "./python-override-store";
+import { RegisteredWorktrees } from "./registered-worktrees";
+import { onRepoTrustStatusChange } from "./repo-trust";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
-import { handleRequest } from "./routes";
-import { RuffLspManager } from "./ruff-lsp-manager";
+import { handleRequest, versionInfo } from "./routes";
+import { SchemaConsent } from "./schema-consent";
+import { SchemaDownloads } from "./schema-downloads";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
@@ -70,27 +63,129 @@ import type {
   ClientState,
   ProjectState,
   ResolvedFilePath,
+  WorktreeLspData,
   WorktreeResources,
   WsData,
-  WorktreeLspType,
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
-import { recoverOrphanLayoutSessions } from "./store-db";
+import { measureSpawn } from "./spawn-metrics";
+import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
+import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
-import type { TerminalSpawnOptions } from "./terminal-manager";
+import type { TerminalSink, TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
-import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
-import { TerraformLspManager } from "./terraform-lsp-manager";
-import { TomlLspManager } from "./toml-lsp-manager";
-import { TsLspManager } from "./ts-lsp-manager";
+import { toolchainEnvs } from "./toolchain-envs";
+import { toolchainStatusModules } from "./toolchain-statuses";
+import { getCurrentVersion } from "./version";
+import { deleteRowsOfMissingWorktrees, deleteWorktreeRows } from "./worktree-rows";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
-import { XmlLspManager } from "./xml-lsp-manager";
 import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
+
+// --- Exit with the desktop app ---
+// The app stops its server when it quits with a shutdown message on its channel, which says what
+// happens to the terminals. The channel closing without one, or the server being reparented,
+// means the app crashed or was killed. Set up first, so a quit while the server is still starting
+// stops it too.
+
+const PARENT_CHECK_MS = 2000;
+
+/** Set once startup is done, and a shutdown has a server to tear down. */
+let serving = false;
+/** Set by the first stop that arrives during startup; any later one (the channel closing) is moot. */
+let stoppingInStartup = false;
+/**
+ * Resolved once startup has reached the terminal hosts, with how to leave them: a stop during
+ * startup waits for it, so the shells get the fate the app asked for rather than the hosts' grace
+ * period.
+ */
+const terminalHostsReached =
+  Promise.withResolvers<(terminals: ShutdownTerminals) => Promise<void>>();
+/**
+ * How long a stop during startup holds the port while it waits for startup to reach the terminal
+ * hosts and leaves them: well within the time a relaunched app waits for it, so the app never
+ * gives up on it and fails to launch.
+ */
+const STARTUP_STOP_WAIT_MS = STOPPING_SERVER_WAIT_MS - 5000;
+
+/**
+ * Stop the server as the app asks, or once the app is gone. One still starting has nothing else to
+ * tear down: it leaves the terminal hosts as asked, once startup has reached them, and exits. Gone
+ * without a word (`drop`), it exits at once, and the hosts it reached take the closed connections
+ * as a crash, keeping the shells for the grace period.
+ */
+function leaveWithApp(terminals: TerminalsOnShutdown): void {
+  if (stoppingInStartup) return;
+  if (serving) {
+    shutdown(0, terminals);
+    return;
+  }
+  stoppingInStartup = true;
+  log.info(`Stopping before startup finished (terminals: ${terminals})`);
+  const hostsLeft =
+    terminals !== "drop" && holdPortWhileStopping()
+      ? Promise.race([
+          terminalHostsReached.promise.then((leave) => leave(terminals)),
+          Bun.sleep(STARTUP_STOP_WAIT_MS),
+        ])
+      : Promise.resolve();
+  void hostsLeft
+    .catch((err: unknown) => log.error("Could not leave the terminal hosts", { error: err }))
+    .finally(() => {
+      logger.shutdown();
+      process.exit(0);
+    });
+}
+
+/**
+ * Take the port until exit, answering only that this server is shutting down: an app relaunched
+ * meanwhile then waits for it, rather than starting a server that would take the terminal hosts
+ * while this one leaves them. False when another server has the port, and with it the hosts,
+ * which this one must then leave alone.
+ */
+function holdPortWhileStopping(): boolean {
+  try {
+    Bun.serve({
+      port: config.port,
+      hostname: "127.0.0.1",
+      fetch: (req) =>
+        new URL(req.url).pathname === "/api/version"
+          ? Response.json(versionInfo(true))
+          : new Response("Shutting down", { status: 503 }),
+    });
+    return true;
+  } catch (err) {
+    log.warn(`Port ${config.port} is in use; leaving the terminal hosts alone`, { error: err });
+    return false;
+  }
+}
+
+if (config.parentPid !== null) {
+  listenToParent(parentChannelInput(), {
+    shutdown: (terminals) => {
+      log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
+      leaveWithApp(terminals);
+    },
+    closed: () => {
+      log.info("The desktop app that started this server closed its channel, shutting down");
+      // As after a crash: the terminals wait out the hosts' grace period for the app to come back.
+      leaveWithApp("drop");
+    },
+  });
+
+  // A backstop for the channel: the app spawns this process directly, so when the app dies the
+  // server is reparented (to launchd on macOS), which a reused process ID cannot fake.
+  const parentPid = config.parentPid;
+  setInterval(() => {
+    if (process.ppid === parentPid) return;
+    log.info("The desktop app that started this server is gone, shutting down");
+    leaveWithApp("drop");
+  }, PARENT_CHECK_MS).unref();
+}
 
 // --- Multi-project state (no "active" or "focused" concept) ---
 
@@ -111,6 +206,10 @@ export function findProjectForPath(targetPath: string): ProjectState | undefined
  */
 function resolveFilePath(absolutePath: string, preferredWtPath?: string): ResolvedFilePath | null {
   const normalized = resolve(absolutePath);
+  // Home's drafts belong to no worktree, so no worktree's resources can resolve them.
+  if (normalized.startsWith(homeDrafts.dir + "/")) {
+    return { type: "detached", wtPath: HOME_KEY, service: homeDrafts, name: basename(normalized) };
+  }
   // A folder can be open in the Others section of several worktrees; the requester's wins.
   const preferred = preferredWtPath ? wtResources.get(preferredWtPath) : undefined;
   const candidates: Array<[string, WorktreeResources]> =
@@ -119,10 +218,9 @@ function resolveFilePath(absolutePath: string, preferredWtPath?: string): Resolv
       : [...wtResources];
   for (const [wtPath, resources] of candidates) {
     // Check detached files first (more specific path prefix)
-    const detachedDir = resources.detachedFilesService.dir;
-    if (normalized.startsWith(detachedDir + "/")) {
-      const name = basename(normalized);
-      return { type: "detached", wtPath, resources, name };
+    const service = resources.detachedFilesService;
+    if (normalized.startsWith(service.dir + "/")) {
+      return { type: "detached", wtPath, service, name: basename(normalized) };
     }
     // Check project files
     if (normalized.startsWith(wtPath + "/")) {
@@ -164,10 +262,12 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
     );
     for (const wt of orphans) {
       try {
-        Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
-          stdout: "ignore",
-          stderr: "ignore",
-        });
+        measureSpawn("git worktree", () =>
+          Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
+        );
       } catch (err) {
         log.warn(`Failed to remove temp worktree ${wt.path}`, { error: err });
       }
@@ -185,7 +285,7 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
 
 /** Send a message to all subscribers of a specific worktree (with dedup). */
 function broadcastToSubscribers(wtPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const resources = wtResources.get(wtPath);
   if (!resources || resources.subscribers.size === 0) return;
   const data = JSON.stringify(message);
@@ -196,7 +296,7 @@ function broadcastToSubscribers(wtPath: string, message: WsMessage) {
 
 /** Send a message to all subscribers of any worktree under a project. */
 function broadcastToProject(projectPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   const sent = new Set<ServerWebSocket<WsData>>();
   for (const resources of wtResources.values()) {
@@ -212,7 +312,7 @@ function broadcastToProject(projectPath: string, message: WsMessage) {
 
 /** Send a message to ALL connected clients. */
 function broadcastAll(message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   for (const client of clients.keys()) {
     client.send(data);
@@ -225,12 +325,13 @@ function broadcastAll(message: WsMessage) {
  */
 function terminalSpawnTarget(
   msg: TerminalSpawnTarget,
-): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides" | "activatePythonEnv"> {
-  const envOverrides: Record<string, string> = {
-    LOXEL: "1",
-    LOXEL_PORT: String(config.port),
-    LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
-  };
+): Pick<
+  TerminalSpawnOptions,
+  "cwd" | "worktreePath" | "windowId" | "envOverrides" | "activatePythonEnv"
+> {
+  const envOverrides: Record<string, string> = { LOXEL: "1", LOXEL_PORT: String(config.port) };
+  // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
+  if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
 
   // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
@@ -243,6 +344,7 @@ function terminalSpawnTarget(
   return {
     cwd,
     worktreePath: msg.worktreePath,
+    windowId: msg.windowId,
     envOverrides,
     activatePythonEnv: msg.activatePythonEnv,
   };
@@ -284,23 +386,25 @@ function activeWindow(windowId: string | null): ActiveWindow | null {
 }
 
 /**
- * Send `message` to every window subscribed to `wtPath`, except the one the user is working in
- * among them, which gets `primary`: the window `windowId` names, else the most recently focused
- * one, else any of them.
+ * Send `message` to every window showing `wtPath`, except the one the user is working in among
+ * them, which gets `primary`: the window `windowId` names, else the most recently focused one, else
+ * any of them. A window that left the worktree can stay subscribed until its saves finish, and does
+ * not count. Returns false when no window shows it.
  */
 function sendToWorktreeWindows(
   wtPath: string,
   windowId: string | null,
   message: WsMessage,
   primary: WsMessage,
-): void {
-  const subscribers = [...(wtResources.get(wtPath)?.subscribers ?? [])];
-  const named = windowId
-    ? subscribers.find((ws) => clients.get(ws)?.windowId === windowId)
-    : undefined;
-  const focused = subscribers.find((ws) => ws === lastFocusedClient);
-  const inUse = named ?? focused ?? subscribers[0];
-  for (const ws of subscribers) sendTo(ws, ws === inUse ? primary : message);
+): boolean {
+  const showing = [...(wtResources.get(wtPath)?.subscribers ?? [])].filter(
+    (ws) => clients.get(ws)?.shownWorktree === wtPath,
+  );
+  const named = windowId ? showing.find((ws) => clients.get(ws)?.windowId === windowId) : undefined;
+  const focused = showing.find((ws) => ws === lastFocusedClient);
+  const inUse = named ?? focused ?? showing[0];
+  for (const ws of showing) sendTo(ws, ws === inUse ? primary : message);
+  return showing.length > 0;
 }
 
 /** Why a folder cannot be opened in an Others section, given the registered projects. */
@@ -329,7 +433,7 @@ function broadcastOthers(wtPath: string): void {
 function requestStatusRefresh(wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources || suspendedWorktrees.has(wtPath)) return;
-  stress.track("status-event", { wtPath });
+  stress.track("status-event", wtPath);
   void resources.filesService.refreshGitStatus();
 }
 
@@ -411,6 +515,20 @@ const externalFolderRegistry = new ExternalFolderRegistry({
   },
 });
 
+/**
+ * Home's drafts (plans made with no worktree active): always running, since Home belongs to no
+ * worktree subscription, and reported to every window, any of which may show Home.
+ */
+const homeDrafts = new DetachedFilesService(
+  getHomeDraftsDir(),
+  (entries) => {
+    broadcastAll({ type: "detached_files_changed", wtPath: HOME_KEY, data: { entries } });
+  },
+  (path, nonces) => {
+    broadcastAll({ type: "file_content_changed", wtPath: HOME_KEY, data: { path, nonces } });
+  },
+);
+
 function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesService {
   const dir = getDetachedDir(cwd, wtPath);
   return new DetachedFilesService(
@@ -439,7 +557,12 @@ function createFilesService(
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
       onPathsChanged: (paths) => notifyLspWatchedFiles(wtPath, paths),
-      onIgnoredPathChanged: (relPath) => nodeModulesChanges.add(relPath),
+      onIgnoredPathChanged: (relPath) => {
+        nodeModulesChanges.add(relPath);
+        for (const manager of worktreeLspManagers) {
+          manager.notifyIgnoredPathChanged?.(wtPath, relPath);
+        }
+      },
     },
   );
   return service;
@@ -521,10 +644,12 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     externalFilesService,
     externalFoldersService,
     subscribers: new Set([ws]),
-    // The status bar's interpreter follows environments created or removed on disk.
-    unsubscribePythonEnv: subscribePythonEnv(wtPath, ({ changed }) => {
-      if (changed) broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
-    }),
+    // The status bar's toolchains follow what is created or removed on disk.
+    unsubscribeToolchainStatuses: toolchainStatusModules.map(({ toolchain, subscribe }) =>
+      subscribe(wtPath, ({ changed }) => {
+        if (changed) broadcastToSubscribers(wtPath, { type: toolchain.changedMessage, wtPath });
+      }),
+    ),
   };
 
   wtResources.set(wtPath, resources);
@@ -582,29 +707,73 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.detachedFilesService.stop();
   resources.externalFilesService.stop();
   resources.externalFoldersService.stop();
-  resources.unsubscribePythonEnv();
+  for (const unsubscribe of resources.unsubscribeToolchainStatuses) unsubscribe();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
 }
 
-function reconcileRemovedWorktrees(projectPath: string): void {
-  for (const [wtPath, resources] of [...wtResources]) {
-    if (resources.projectPath !== projectPath || existsSync(wtPath)) continue;
+/** Follow a `worktrees` event: what was removed or moved, by whatever did it. */
+async function reconcileWorktrees(project: ProjectState): Promise<void> {
+  const { removed, moved } = await project.registeredWorktrees.refresh();
+  if (projects.get(project.cwd) !== project) return;
 
-    log.info(`Worktree removed outside the app, releasing resources: ${wtPath}`);
-    completeWorktreeRemoval(wtPath);
+  for (const wtPath of removed) {
+    log.info(`Worktree removed, cleaning up: ${wtPath}`);
+    completeWorktreeRemoval(wtPath, config.removedWorktreeTerminalDelayMs);
+  }
+  for (const { from, to } of moved) {
+    log.info(`Worktree moved: ${from} -> ${to}`);
+    terminalManager.retargetWorktree(from, to);
+    releaseWorktreeResources(from);
+  }
+  // Its directory is gone but nothing says it was removed (deleted by hand, say). Nothing is lost by
+  // this: it comes back with the directory. A removal in progress resumes the same services if git
+  // refuses, so those are left alone.
+  for (const [wtPath, resources] of [...wtResources]) {
+    if (resources.projectPath !== project.cwd || existsSync(wtPath)) continue;
+    if (!suspendedWorktrees.has(wtPath)) releaseWorktreeResources(wtPath);
   }
 }
 
-/** Permanently release a removed worktree after its final project broadcast. */
-function completeWorktreeRemoval(wtPath: string): void {
+/** Delete what language servers keep outside a worktree that no longer exists. */
+function forgetWorktreeInLanguageServers(wtPath: string): void {
+  for (const manager of worktreeLspManagers) manager.forgetWorktree?.(wtPath);
+}
+
+/** Stop serving a worktree path that no longer exists. */
+function releaseWorktreeResources(wtPath: string): void {
+  forgetWorktreeInLanguageServers(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
   for (const ws of resources.subscribers) {
     clients.get(ws)?.subscribedWorktrees.delete(wtPath);
   }
   teardownWorktreeResources(wtPath, resources);
+}
+
+/**
+ * Everything a removed worktree leaves behind, whichever way it was removed: in the app, after
+ * `executeRemove` returned, or by `wt` or `git` anywhere else, on the event that follows. Runs only
+ * once the worktree is unregistered, and running it twice is harmless, since an in-app removal also
+ * causes that event. `terminalDelayMs` is for a removal seen from outside the app, which may be
+ * running in one of these terminals with its branch still to delete, or a command chained after it.
+ */
+function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
+  releaseWorktreeResources(wtPath);
+  terminalManager.endWorktreeSessions(wtPath, terminalDelayMs, (id) => {
+    const owner = terminalOwners.get(id);
+    if (owner) clients.get(owner)?.terminals.delete(id);
+    terminalOwners.delete(id);
+    // Anything it raised during the delay; the rest went with the worktree.
+    if (notificationStore.dismissByPanel(id)) {
+      broadcastAll({ type: "notification_panel_dismissed", panelId: id });
+    }
+  });
+  for (const panelId of notificationStore.dismissByWorktree(wtPath)) {
+    broadcastAll({ type: "notification_panel_dismissed", panelId });
+  }
+  deleteWorktreeRows(wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -688,7 +857,9 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
       if (event === "worktrees") {
         broadcastToProject(cwd, worktreesChangedMessage(cwd));
-        reconcileRemovedWorktrees(cwd);
+        await reconcileWorktrees(project).catch((err: unknown) => {
+          log.warn("Could not read the worktree list", { projectPath: cwd, error: err });
+        });
         project.worktreeStatuses.invalidate();
         return;
       }
@@ -722,6 +893,14 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
+  const registeredWorktrees = new RegisteredWorktrees(cwd);
+  await registeredWorktrees.refresh();
+  const registeredPaths = new Set(managed.map((wt) => wt.path));
+  for (const wtPath of deleteRowsOfMissingWorktrees(worktreesDir, registeredPaths)) {
+    log.info(`Worktree removed while its project was not watched, deleted its rows: ${wtPath}`);
+    forgetWorktreeInLanguageServers(wtPath);
+  }
+
   const filteredWorktrees: WorktreeEntry[] = managed
     .filter(isListedWorktree)
     .map((wt) => toWorktreeEntry(wt, null));
@@ -734,6 +913,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     localDb,
     authorName,
     worktreesDir,
+    registeredWorktrees,
     worktreeStatuses: new WorktreeStatusTracker({
       projectPath: cwd,
       liveStatus: (wtPath) => liveWorktreeStatus(cwd, wtPath),
@@ -773,66 +953,94 @@ function teardownProject(cwd: string): void {
   log.info(`Project torn down: ${cwd}`);
 }
 
-// --- Idle auto-shutdown ---
+// --- Idle cleanup and auto-shutdown ---
 
 const IDLE_SHUTDOWN_MS = 30_000;
-/** Grace period for orphaned terminals to be reattached before cleanup + shutdown. */
+/** Grace period for orphaned terminals to be reattached before they are destroyed. */
 const ORPHAN_CLEANUP_MS = 5 * 60_000;
-let idleShutdownTimer: ReturnType<typeof setTimeout> | null = null;
+/** Runs while no app client is connected; a connecting client cancels it. */
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
 
 // --- Stable infrastructure ---
 
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
 const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
-const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
-const terminalManager = new TerminalManager({
+/** The terminal hosts, which run every terminal in processes that outlive this server. */
+const terminalHosts = new TerminalHostPool({
+  stateDir: config.stateDir,
+  serverBuild: getCurrentVersion(),
+  hostBuildId: await currentHostBuildId(),
+  log: logger.child("terminal"),
+  perfLog: logger.child("perf"),
+});
+terminalHosts.onEvent((event) => {
+  if (event.type === "output") stress.track("pty-output");
+});
+const terminalManager = new TerminalManager(terminalHosts, {
   isSequenceEnabled: isNotificationSequenceEnabled,
-  pythonEnvFor: (worktreePath) => getPythonEnv(worktreePath),
-  onNotification: (session, payload) => {
+  toolchainEnvs,
+  onNotification: (id, meta, payload) => {
     const notification = notificationStore.add({
-      source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
+      source: { kind: "terminal", panelId: id, worktreePath: meta.worktreePath },
       title: payload.title,
       body: payload.body,
       urgency: payload.urgency ?? "normal",
     });
     broadcastAll({ type: "notification_added", data: notification });
   },
-  onExit: (session) => {
-    // The session already sent terminal_exit to its attached client.
-    const owner = terminalOwners.get(session.id);
-    if (owner) clients.get(owner)?.terminals.delete(session.id);
-    terminalOwners.delete(session.id);
+  onSessionsChanged: () => broadcastAll({ type: "terminals_changed" }),
+  onExit: (id) => {
+    // The manager already sent terminal_exit to the attached client.
+    const owner = terminalOwners.get(id);
+    if (owner) clients.get(owner)?.terminals.delete(id);
+    terminalOwners.delete(id);
   },
 });
-const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
-const schemaService = new SchemaService();
+const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
 const formatService = new FormatService();
-const yamlLspManager = new YamlLspManager({});
-const tsLspManager = new TsLspManager();
-const dockerLspManager = new DockerLspManager();
-const terraformLspManager = new TerraformLspManager();
-const pythonLspManager = new PythonLspManager();
-// A chosen interpreter reaches everything that shares the worktree's resolution (language
-// servers, terminals, format on save, the status bar) without a restart.
-onPythonOverrideChange(refreshPythonEnv);
-const ruffLspManager = new RuffLspManager();
-const astroLspManager = new AstroLspManager();
-const xmlLspManager = new XmlLspManager();
-const tomlLspManager = new TomlLspManager({});
-/** Language servers rooted at a worktree, which hear about its file changes. */
-const worktreeLspManagers = [
-  tsLspManager,
-  dockerLspManager,
-  terraformLspManager,
-  pythonLspManager,
-  ruffLspManager,
-  astroLspManager,
-  xmlLspManager,
-  tomlLspManager,
-];
+const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
+const schemaConsent = new SchemaConsent({
+  load: () => getStore(SCHEMA_CONSENT_STORE_KEY),
+  save: (json) => putStore(SCHEMA_CONSENT_STORE_KEY, json),
+  onStateChanged: (data) => {
+    tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
+    broadcastAll({ type: "schema_consent_changed", data });
+  },
+  onDecision: (change) => {
+    void (change === "revoked"
+      ? schemaDownloads.onRevoked()
+      : schemaDownloads.onTrusted(change.trusted));
+  },
+});
+const schemaDownloads = new SchemaDownloads({
+  tombiCacheDir: config.tombiSchemaCacheDir,
+  lemminxWorkDir: config.lemminxWorkDir,
+  fetchText: (url) => schemaService.fetchText(url),
+  request: (url) => schemaConsent.request(url),
+  addReferences: (root, references) => schemaConsent.addReferences(root, references),
+  restartServers: () => {
+    for (const manager of [yamlLspManager, tomlLspManager, xmlLspManager]) {
+      manager.restartSessions("schemas changed; reconnect");
+    }
+  },
+});
+tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
+const yamlLspManager = new YamlLspManager({}, (url) => schemaDownloads.contentFor(url));
+// A chosen toolchain reaches everything that shares the worktree's resolution (language servers,
+// terminals, format on save, the status bar) without a restart.
+for (const { onOverrideChange, refresh } of toolchainStatusModules) onOverrideChange(refresh);
+onRepoTrustStatusChange(() => broadcastAll({ type: "repo_trust_changed" }));
+const worktreeLspManagerByRoute = new Map(
+  worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
+);
+
+/** The worktree language-server connection a socket is, if it is one. */
+function worktreeLspData(ws: ServerWebSocket<WsData>): WorktreeLspData | null {
+  return ws.data && "wtPath" in ws.data ? ws.data : null;
+}
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {
@@ -925,7 +1133,9 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
           log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
           clientState.terminals.delete(msg.id);
           if (terminalOwners.get(msg.id) === ws) terminalOwners.delete(msg.id);
-          sendTo(ws, { type: "error", message: "Failed to attach terminal" });
+          // The panel says why, a terminal host that did not answer in time for one.
+          const message = err instanceof Error ? err.message : String(err);
+          sendTo(ws, { type: "terminal_notice", id: msg.id, notice: "attach_failed", message });
         });
       break;
     }
@@ -959,82 +1169,6 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         clients.get(ws)?.terminals.delete(msg.id);
         terminalOwners.delete(msg.id);
       }
-      break;
-    }
-
-    case "agent_create": {
-      const existingOwner = agentOwners.get(msg.id);
-      if (existingOwner && existingOwner !== ws) {
-        agentManager.detach(msg.id);
-      }
-
-      agentOwners.set(msg.id, ws);
-
-      const onEvent = (id: string, event: AgentEventPayload, seq: number) => {
-        const owner = agentOwners.get(id);
-        if (owner) sendTo(owner, { type: "agent_event", id, seq, event });
-      };
-      const onExit = (id: string, exitCode: number) => {
-        const owner = agentOwners.get(id);
-        if (owner) sendTo(owner, { type: "agent_exit", id, exitCode });
-      };
-
-      // Three distinct paths: reattach existing, create from fork, or create new
-      const reconnected = agentManager.reconnectClient(msg.id, onEvent, onExit);
-      if (!reconnected) {
-        const baseOptions = {
-          workspaceRoot: msg.workspaceRoot,
-          scopeKey: msg.scopeKey,
-          sessionOptions: msg.sessionOptions,
-        };
-        if (msg.forkedSessionId) {
-          agentManager.createFromFork(
-            msg.id,
-            {
-              ...baseOptions,
-              forkedSessionId: msg.forkedSessionId,
-              forkPointMessageId: msg.forkPointMessageId,
-            },
-            onEvent,
-            onExit,
-          );
-        } else {
-          agentManager.create(msg.id, baseOptions, onEvent, onExit);
-        }
-      }
-
-      sendTo(ws, { type: "agent_replay_done", id: msg.id });
-      break;
-    }
-
-    case "agent_request": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      const sent = agentManager.sendRequest(msg.id, msg.request);
-      if (!sent) {
-        sendTo(ws, { type: "agent_error", id: msg.id, message: "Session not found or exited" });
-      }
-      break;
-    }
-
-    case "agent_destroy": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      agentOwners.delete(msg.id);
-      agentManager.destroy(msg.id).catch((err: unknown) => {
-        log.error(`Failed to destroy agent session ${msg.id.slice(0, 8)}`, { error: err });
-      });
-      break;
-    }
-
-    case "agent_detach": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      agentOwners.delete(msg.id);
-      agentManager.detach(msg.id);
-      break;
-    }
-
-    case "agent_list": {
-      const sessions = agentManager.getSessionsByScope(msg.scopeKey);
-      sendTo(ws, { type: "agent_sessions", scopeKey: msg.scopeKey, sessions });
       break;
     }
 
@@ -1096,32 +1230,23 @@ function detachClientTerminals(ws: ServerWebSocket<WsData>) {
 function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSink {
   return {
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
-    sendOutput: (offset, data) => {
-      ws.send(encodeOutputFrame(id, offset, data));
-    },
-    sendExit: (exitCode) => sendTo(ws, { type: "terminal_exit", id, exitCode }),
+    sendOutput: ({ frame }) => ws.send(frame),
+    sendExit: (end) => sendTo(ws, { type: "terminal_exit", id, ...end }),
+    sendNotice: (notice) => sendTo(ws, { type: "terminal_notice", id, ...notice }),
   };
-}
-
-/** Detach (not destroy) all agent sessions owned by this client. */
-function detachClientAgents(ws: ServerWebSocket<WsData>) {
-  for (const [id, owner] of agentOwners) {
-    if (owner === ws) {
-      agentManager.detach(id);
-      agentOwners.delete(id);
-    }
-  }
 }
 
 // --- Startup ---
 
-// Load encryption key from Keychain (macOS) — must complete before any secret access
+// Take the encryption key from Electron, if it has one, before any secret access.
 await initSecretStore();
 
 // Resolve the login shell env for spawned tools (hooks, terminals, language servers) while the
-// projects load; serving waits for it below. Python environments resolved before a capture (with
-// the inherited PATH, or an older capture's) resolve again when it changed what they read.
-onLoginShellEnvChange((names) => refreshAllPythonEnvs(names));
+// projects load; serving waits for it below. Toolchains resolved before a capture (with the
+// inherited PATH, or an older capture's) resolve again when it changed what they read.
+for (const { refreshAll } of toolchainStatusModules) {
+  onLoginShellEnvChange((names) => refreshAll(names));
+}
 const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];
@@ -1143,6 +1268,9 @@ if (repoArg) {
 }
 
 // Initialize all projects in parallel — no worktree focus, client subscribes on connect
+await homeDrafts.start().catch((err: unknown) => {
+  log.error("Failed to start Home's drafts", { error: err });
+});
 const initResults = await Promise.allSettled(data.projects.map((p) => initializeProject(p.path)));
 
 for (let i = 0; i < initResults.length; i++) {
@@ -1170,7 +1298,7 @@ if (distDir) log.info(`Serving static files from ${distDir}`);
 // for a dev server; see request-origin.ts for the full policy.
 const requestPolicy = {
   port: config.port,
-  allowDevOrigins: config.isDev,
+  viteDevPort: config.viteDevPort,
 } satisfies RequestOriginPolicy;
 
 /** What the REST routes may do to server state; see routes.ts. */
@@ -1189,14 +1317,17 @@ const routeContext: RouteContext = {
   resolveFilePath,
   initializeProject,
   teardownProject,
-  shutdown,
+  isShuttingDown: () => shuttingDown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
+  schemaConsent,
+  ensureSchemas: (urls) => schemaDownloads.ensure(urls),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
   updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
   formatContent: (content, filePath, wtPath, settings) =>
     formatService.format(content, filePath, wtPath, settings),
   getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
   activeWindow,
+  homeDrafts,
   startTerminal: ({ command, ...target }) => {
     const settings = terminalSpawnSettings();
     return terminalManager.ensureSpawned(target.id, {
@@ -1208,11 +1339,52 @@ const routeContext: RouteContext = {
       command,
     });
   },
+  listTerminals: async ({ programs }) => {
+    const running = terminalManager.running();
+    const foreground = programs ? await terminalManager.foregroundProcesses() : {};
+    return {
+      terminals: running.map(({ id, meta }) => ({
+        id,
+        worktreePath: meta.worktreePath,
+        cwd: meta.cwd,
+        otherHostBuild: terminalHosts.runsOnOtherBuild(id),
+        ...(Object.hasOwn(foreground, id) ? { program: foreground[id] } : {}),
+      })),
+    };
+  },
 };
+
+// A server that cannot have the port must fail before it touches the terminal hosts: taking them
+// over would cut the running server off from its terminals. One stopping during startup holds the
+// port itself.
+try {
+  if (!stoppingInStartup) {
+    Bun.listen({ hostname: "127.0.0.1", port: config.port, socket: { data: () => {} } }).stop(true);
+  }
+} catch (err) {
+  throw new Error(`Port ${config.port} is in use; not starting`, { cause: err });
+}
+
+// Terminals that outlived the previous server are this one's before any client can attach to them.
+try {
+  const { ended } = await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+  const notice = endedHostsNotice(ended);
+  // Kept in the store, so the first window to connect gets it with notifications_sync.
+  if (notice) {
+    notificationStore.add({ source: { kind: "terminal_host" }, ...notice, urgency: "high" });
+  }
+} catch (err) {
+  log.error("Could not reach the running terminal hosts", { error: err });
+}
+terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminals));
 
 // Clients spawn language servers and terminals as soon as they connect, so let the login-shell PATH
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
+
+// Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
+// from here to `serving = true` waits, so a stop cannot arrive in between.
+if (stoppingInStartup) await new Promise<never>(() => {});
 
 const server = Bun.serve<WsData>({
   port: config.port,
@@ -1236,25 +1408,15 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
-    {
-      const worktreeLspTypes: WorktreeLspType[] = [
-        "ts-lsp",
-        "docker-lsp",
-        "terraform-lsp",
-        "python-lsp",
-        "ruff-lsp",
-        "astro-lsp",
-        "xml-lsp",
-        "toml-lsp",
-      ];
-      for (const lspType of worktreeLspTypes) {
-        if (url.pathname !== `/ws/${lspType}`) continue;
-        const wtPath = url.searchParams.get("wt");
-        if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-        const upgraded = server.upgrade(req, { data: { type: lspType, wtPath } });
-        if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-        return undefined;
-      }
+    const worktreeLspManager = worktreeLspManagerByRoute.get(url.pathname);
+    if (worktreeLspManager) {
+      const wtPath = url.searchParams.get("wt");
+      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
+      const upgraded = server.upgrade(req, {
+        data: { type: worktreeLspManager.name, wtPath, manager: worktreeLspManager },
+      });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+      return undefined;
     }
 
     if (url.pathname === "/ws") {
@@ -1265,8 +1427,11 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
+    // The relaunching app and the CLI poll /api/version while this server shuts down; counting
+    // those polls as work to drain would keep the drain's quiet period from ever starting.
+    if (url.pathname === "/api/version") return handleRequest(req, routeContext);
     if (url.pathname.startsWith("/api")) {
-      return handleRequest(req, routeContext);
+      return trackApiRequest(() => handleRequest(req, routeContext));
     }
 
     // Serve static files from dist/ when available (production mode)
@@ -1289,49 +1454,23 @@ const server = Bun.serve<WsData>({
         yamlLspManager.attach(ws);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        tsLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        dockerLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        terraformLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        pythonLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        ruffLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        astroLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        xmlLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        tomlLspManager.createSession(ws, ws.data.wtPath);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath);
         return;
       }
       if (shuttingDown) {
         ws.close(1001, "Server shutting down");
         return;
       }
-      if (idleShutdownTimer) {
-        clearTimeout(idleShutdownTimer);
-        idleShutdownTimer = null;
-        log.info("Idle shutdown cancelled — client connected");
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+        log.info("Idle timer cancelled — client connected");
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
+      sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
       log.debug(`Client connected (${clients.size} total)`);
     },
 
@@ -1340,106 +1479,31 @@ const server = Bun.serve<WsData>({
         yamlLspManager.detach(ws);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        tsLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        dockerLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        terraformLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        pythonLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        ruffLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        astroLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        xmlLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        tomlLspManager.destroySession(ws);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        worktreeLsp.manager.destroySession(ws);
         return;
       }
       unsubscribeAllWorktrees(ws);
       detachClientTerminals(ws);
-      detachClientAgents(ws);
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
-      if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {
-        const hasOrphans = terminalManager.hasOrphanSessions() || agentManager.hasOrphanSessions();
-        if (hasOrphans) {
-          // Orphaned sessions exist — give clients time to reconnect (e.g. after hibernation wake)
-          // before destroying them and shutting down
-          log.info(
-            `No clients remaining, orphaned sessions waiting for reattach ` +
-              `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
-          );
-          idleShutdownTimer = setTimeout(() => {
-            const destroyed = terminalManager.destroyOrphans();
-            if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, ORPHAN_CLEANUP_MS);
-        } else {
-          log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
-          idleShutdownTimer = setTimeout(() => {
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, IDLE_SHUTDOWN_MS);
-        }
-      }
+      if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
     },
 
     message(ws, message) {
+      // Shutdown waits for language servers to exit: nothing may start again behind its teardown.
+      if (shuttingDown) return;
       if (ws.data?.type === "yaml-lsp") {
         if (typeof message === "string") yamlLspManager.handleMessage(ws, message);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        if (typeof message === "string") tsLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        if (typeof message === "string") dockerLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        if (typeof message === "string") terraformLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        if (typeof message === "string") pythonLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        if (typeof message === "string") ruffLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        if (typeof message === "string") astroLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        if (typeof message === "string") xmlLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        if (typeof message === "string") tomlLspManager.handleMessage(ws, message);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        if (typeof message === "string") worktreeLsp.manager.handleMessage(ws, message);
         return;
       }
       if (typeof message === "string") {
@@ -1474,21 +1538,108 @@ logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count",
 // Server start implies no live renderers — any session rows are leftovers.
 recoverOrphanLayoutSessions();
 
+// Terminals from before a restart are orphans until their windows reattach: the same rule as when
+// the last window closes gives them time to.
+if (terminalManager.hasOrphanSessions()) startIdleTimer();
+
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 log.info(`State directory: ${config.stateDir}${config.isDev ? " (dev)" : ""}`);
 if (projects.size === 0) log.info("No projects registered, waiting for project selection");
 
 const perfMonitor = createServerPerfMonitor();
 
-function shutdown(exitCode = 0) {
+const SHUTDOWN_LSP_WAIT_MS = SERVER_STOP_GRACE_MS + 1000;
+
+/**
+ * The last app client disconnected. Orphaned sessions get time to be reattached (a window
+ * reloading, or waking from sleep) before they are destroyed. A server the desktop app started
+ * stays up until the app quits; a standalone one shuts down.
+ */
+function startIdleTimer(): void {
+  const ownedByApp = config.parentPid !== null;
+  const hasOrphans = terminalManager.hasOrphanSessions();
+  // A server the app owns always arms the cleanup: a terminal still resolving its environment is
+  // not an orphan yet, but becomes one when it spawns with no client attached.
+  if (hasOrphans || ownedByApp) {
+    log.info(
+      `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
+    );
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      const destroyed = terminalManager.destroyOrphans();
+      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+      if (ownedByApp) return;
+      log.info("Idle timeout reached, shutting down");
+      shutdown();
+    }, ORPHAN_CLEANUP_MS);
+    return;
+  }
+  log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
+  idleTimer = setTimeout(() => {
+    log.info("Idle timeout reached, shutting down");
+    shutdown();
+  }, IDLE_SHUTDOWN_MS);
+}
+
+// --- API requests in flight, drained before shutdown ---
+
+/** Shutdown waits this long without a new API request: a closing window's last writes may still be on their way. */
+const DRAIN_QUIET_MS = 300;
+/** The longest shutdown waits for API requests, such as a save that is formatting. */
+const DRAIN_MAX_MS = 5000;
+let apiRequestsInFlight = 0;
+let lastApiRequestAt = 0;
+
+async function trackApiRequest(run: () => Promise<Response>): Promise<Response> {
+  apiRequestsInFlight++;
+  lastApiRequestAt = Date.now();
+  try {
+    return await run();
+  } finally {
+    apiRequestsInFlight--;
+  }
+}
+
+/** Resolves once no API request is in flight or has started for DRAIN_QUIET_MS, or at DRAIN_MAX_MS. */
+async function drainApiRequests(): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DRAIN_MAX_MS) {
+    const quietSince = Math.max(startedAt, lastApiRequestAt);
+    if (apiRequestsInFlight === 0 && Date.now() - quietSince >= DRAIN_QUIET_MS) return;
+    await Bun.sleep(50);
+  }
+  if (apiRequestsInFlight > 0) {
+    log.warn(`Shutting down with ${apiRequestsInFlight} API request(s) still in flight`);
+  } else {
+    log.info(`API requests kept arriving for ${DRAIN_MAX_MS / 1000}s, shutting down`);
+  }
+}
+
+/**
+ * What a shutdown does to the terminals: `end` them, as a quit or an idle shutdown does, `keep`
+ * them running until a server comes back (Quit and Keep Terminals, Restart Loxel, an update), or
+ * `drop` the connections to their hosts as a crash would, so they get the hosts' grace period to
+ * be reattached by the next server.
+ */
+type TerminalsOnShutdown = ShutdownTerminals | "drop";
+
+/**
+ * Stop the server: let API requests finish first (saves, store writes, layout promotes), so a quit
+ * loses nothing the app already sent, then tear everything down and exit.
+ */
+function shutdown(exitCode = 0, terminals: TerminalsOnShutdown = "end") {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (idleShutdownTimer) {
-    clearTimeout(idleShutdownTimer);
-    idleShutdownTimer = null;
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
   }
   log.info("Server shutting down");
+  void drainApiRequests().finally(() => tearDown(exitCode, terminals));
+}
 
+function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
+  homeDrafts.stop();
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);
@@ -1499,31 +1650,40 @@ function shutdown(exitCode = 0) {
     teardownProject(cwd);
   }
 
-  terminalManager.destroyAll();
-  agentManager.destroyAll().catch(() => {});
+  // The hosts must have the disconnect before this process exits, or they take it for a crash.
+  const terminalsLeft =
+    terminals === "drop"
+      ? Promise.resolve(terminalHosts.dropAll())
+      : terminalHosts.disconnectAll(terminals);
   formatService.destroy();
-  yamlLspManager.destroy();
-  tsLspManager.destroy();
-  dockerLspManager.destroy();
-  terraformLspManager.destroy();
-  pythonLspManager.destroy();
-  ruffLspManager.destroy();
-  astroLspManager.destroy();
-  xmlLspManager.destroy();
-  tomlLspManager.destroy();
+  const lspServersStopped = Promise.all(
+    [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
+  );
+  gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();
-  logger.shutdown();
   server.stop();
-  process.exit(exitCode);
+  // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
+  // not even SIGKILL ends right away (stuck in the kernel).
+  void Promise.race([
+    Promise.all([lspServersStopped, terminalsLeft]),
+    Bun.sleep(SHUTDOWN_LSP_WAIT_MS),
+  ]).finally(() => {
+    logger.shutdown();
+    process.exit(exitCode);
+  });
 }
 
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
 
+// Only now can a shutdown tear the server down: see `leaveWithApp`.
+serving = true;
+
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });
-  shutdown(1);
+  // A crash: the terminals wait out the hosts' grace period for the restarted server.
+  shutdown(1, "drop");
 });
 
 process.on("unhandledRejection", (reason) => {
@@ -1532,11 +1692,3 @@ process.on("unhandledRejection", (reason) => {
     message: reason instanceof Error ? undefined : String(reason),
   });
 });
-
-// --- Background update check (production only) ---
-
-if (!config.isDev) {
-  const { cleanupStaleUpdates, checkForUpdate } = await import("./update");
-  cleanupStaleUpdates();
-  setTimeout(() => checkForUpdate(broadcastAll), 5_000);
-}

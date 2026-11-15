@@ -7,6 +7,7 @@ import { editorFilePath } from "./live-editor-model";
 import { isInProtectedFolder } from "./lsp-workspace-files";
 import type { FileLocation } from "./open-file";
 import { relativeTo } from "./project-file-helpers";
+import { isVirtualDocumentUri } from "./virtual-documents";
 
 const log = frontendLog.child("search");
 
@@ -20,8 +21,10 @@ export interface WorkspaceSymbolResult {
   symbol: WorkspaceSymbolItem;
   /** The client that returned the symbol, which can resolve its range. */
   source: WorkspaceSymbolSource;
-  /** Absolute path of the file holding the symbol. */
+  /** Absolute path of the file holding the symbol, or the path of its read-only document's URI. */
   filePath: string;
+  /** The symbol is in a language server's read-only document, not a file: that document's URI. */
+  virtualDocumentUri?: string;
   /** Indices of the characters of `symbol.name` that match the query. */
   indices: number[];
 }
@@ -57,8 +60,8 @@ export async function searchWorkspaceSymbols(
       pending -= 1;
       if (token.isCancellationRequested) return;
       for (const symbol of symbols) {
-        const filePath = symbolFilePath(symbol.uri);
-        if (filePath) candidates.push({ symbol, source, filePath });
+        const target = symbolTarget(symbol.uri);
+        if (target) candidates.push({ symbol, source, ...target });
       }
       onResults(rankWorkspaceSymbols(query, candidates, wtPath), pending === 0);
     }),
@@ -123,7 +126,7 @@ export function rankWorkspaceSymbols(
     scored.push({
       result: { ...candidate, indices: match?.indices ?? [] },
       score: nameScore(query, name, match?.score ?? 0),
-      isProjectFile: isProjectFile(candidate.filePath, wtPath),
+      isProjectFile: !candidate.virtualDocumentUri && isProjectFile(candidate.filePath, wtPath),
     });
   }
 
@@ -193,10 +196,16 @@ function isProjectFile(filePath: string, wtPath: string): boolean {
   return relative !== undefined && !isInProtectedFolder(relative);
 }
 
-/** The file path behind a symbol's URI, or null when it is not one an editor tab can open. */
-function symbolFilePath(uri: string): string | null {
+/** What a symbol's URI opens, or null when an editor tab cannot show it. */
+function symbolTarget(uri: string): Pick<Candidate, "filePath" | "virtualDocumentUri"> | null {
   try {
-    return editorFilePath(monaco.Uri.parse(uri, true));
+    const parsed = monaco.Uri.parse(uri, true);
+    const filePath = editorFilePath(parsed);
+    if (filePath) return { filePath };
+    const virtualDocumentUri = parsed.toString();
+    return isVirtualDocumentUri(virtualDocumentUri)
+      ? { filePath: parsed.path, virtualDocumentUri }
+      : null;
   } catch {
     // Not a URI.
     return null;

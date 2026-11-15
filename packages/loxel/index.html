@@ -5,6 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Loxel</title>
+    <script>
+      // Paint in the last session's theme until the settings load (src/lib/theme-cache.ts keeps it).
+      (() => {
+        let dark = true;
+        try {
+          dark = localStorage.getItem("loxel-dark-mode") !== "false";
+        } catch {}
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        // The custom theme colors, likewise (src/lib/theme-stylesheet.ts keeps them).
+        try {
+          const css = localStorage.getItem("loxel-theme-css");
+          if (css) {
+            const style = document.createElement("style");
+            style.id = "loxel-theme";
+            style.textContent = css;
+            document.head.append(style);
+          }
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

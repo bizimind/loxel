@@ -1,10 +1,14 @@
-import * as api from "@/api/client";
-import type { PythonEnv, PythonEnvSource, PythonInterpreter } from "@/api/python-env-model";
+import { getPythonEnvCandidates, setPythonOverride } from "@/api/python-env-client";
+import {
+  type PythonEnv,
+  type PythonEnvSource,
+  type PythonInterpreter,
+  pythonToolchain,
+} from "@/api/python-env-model";
 import { showToast } from "@/components/ui/toast";
-import { queryKeys } from "@/queries/query-keys";
-import { queryClient } from "@/query-client";
+import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
@@ -64,7 +68,7 @@ export function pythonEnvSourceDescription(source: PythonEnvSource): string {
  */
 export async function selectPythonInterpreter(wtPath: string): Promise<void> {
   const { homeDir } = useProjectStore.getState();
-  const state = api.getPythonEnvCandidates(wtPath);
+  const state = getPythonEnvCandidates(wtPath);
   const items = state.then(({ candidates, automaticPath, overridePath }) => {
     const automatic = candidates.find((c) => c.pythonPath === automaticPath);
     const list: QuickPickItem[] = [
@@ -99,9 +103,8 @@ export async function selectPythonInterpreter(wtPath: string): Promise<void> {
   }
 
   try {
-    const response = await api.setPythonOverride({ worktreePath: wtPath, pythonPath });
-    const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
-    queryClient.setQueryData(queryKeys.pythonEnv(projectPath, wtPath), response);
+    const response = await setPythonOverride({ worktreePath: wtPath, pythonPath });
+    setToolchainStatusData(pythonToolchain, wtPath, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Python interpreter");
   }

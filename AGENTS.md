@@ -24,7 +24,7 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 pnpm install                                   # Install all dependencies
 
 # Build a package (root `build` is intentionally disabled; packages with a build script:
-# cc-git-editor, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
+# cc-git-editor, code-analysis, excalidraw, loxel, site, whisper-cpp, wt)
 pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
@@ -74,13 +74,11 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **code-analysis**: Code analysis CLI with built-in plugins (loc, languages, git-churn, lint/type issues, import graph) that prints results or serves a live treemap or graph visualization. See `packages/code-analysis/README.md`.
 
-- **coding-agent**: Programmatic coding agent runtime used by loxel's agent panel (in-process `Session` SDK, or a stdio JSON protocol CLI). See `packages/coding-agent/README.md`.
-
 #### Libraries
 
 - **channel**: WebSocket client library for peer-to-peer messaging through the channel-worker relay; owns the shared wire protocol. See `packages/channel/README.md`.
 
-- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, coding-agent, and code-analysis. See `packages/cli-common/README.md`.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
 
 - **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
 
@@ -103,6 +101,8 @@ Each package README is the authoritative doc for that package; this list only or
 ### Key Patterns
 
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.
+
+**Privacy and Licensing**: Loxel never collects data about users without consent and does not require an account today. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
 
 **Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
@@ -241,7 +241,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`). Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
 
 ## Type Checking
 
@@ -249,7 +249,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 
 ## CI & Releases
 
-**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Automated code review runs Claude Code's CLI (`claude -p`, version pinned in `claude-code-review.yml`) with the `ci-code-review` skill, only on PRs whose branch is in this repo (never forks or Dependabot), using the PR's own `CLAUDE.md`, `.claude` and skills, and posts as `github-actions[bot]`. One review runs per PR at a time: pushes during a review are taken in by the running review or queue the next run, which resumes the same review session (kept in a private R2 bucket) when the previous run posted its summary. A run that finishes without posting its summary fails so it gets rerun, and Claude's output goes to a file on the runner, never to the public log.
+**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Installs run pnpm 12, which rejects a lockfile holding any version (transitive ones included) published inside the 7-day `minimumReleaseAge` window set in `pnpm-workspace.yaml`; wait for it to age out rather than adding a `minimumReleaseAgeExclude` entry, which is only for urgent security fixes. Automated code review runs Claude Code's CLI (`claude -p`, version pinned in `claude-code-review.yml`) with the `ci-code-review` skill, only on PRs whose branch is in this repo (never forks or Dependabot), using the PR's own `CLAUDE.md`, `.claude` and skills, and posts as `github-actions[bot]`. One review runs per PR at a time: pushes during a review are taken in by the running review or queue the next run, which resumes the same review session (kept in a private R2 bucket) when the previous run posted its summary. A run that finishes without posting its summary fails so it gets rerun, and Claude's output goes to a file on the runner, never to the public log.
 
 **Auto-releases**: `wt`, `code-analysis`, and `loxel` release automatically when changes under their package directory are merged to main (`release-<pkg>.yml`; `loxel` also supports `workflow_dispatch` for releases driven by root-level changes):
 
@@ -259,7 +259,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`)
 5. Creates a GitHub release with R2 download links (no binary attachments)
 
-**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
+**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
 
 **Version checking**: When debugging CLI issues, verify the user has the latest version. Check the manifest at `https://loxel.bizimind.io/<pkg>/manifest.json` for current version and compare with local binary. Don't manually bump versions - releases are automated.
 

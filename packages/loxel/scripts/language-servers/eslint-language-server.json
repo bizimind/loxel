@@ -1,0 +1,8 @@
+{
+  "script": "build-eslint-language-server.ts",
+  "resources": ["eslint-language-server"],
+  "license": "MIT",
+  "source": "https://github.com/microsoft/vscode-eslint/tree/release/3.0.34/server",
+  "licenseFile": "licenses/eslint-language-server.txt",
+  "note": "Bundles vscode-languageserver, vscode-languageserver-protocol, vscode-languageserver-textdocument, vscode-uri (MIT) and semver (ISC)."
+}

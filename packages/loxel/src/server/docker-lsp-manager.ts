@@ -1,6 +1,45 @@
 import path from "node:path";
 
-import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
+import { buildSpawnEnv, pathWithoutCommand } from "./shell-env";
+import {
+  type SpawnOptions,
+  type SuppressibleFeature,
+  WorktreeLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
+
+/**
+ * The answer to the server's `docker.lsp` configuration pulls. Scout sends `FROM` image references
+ * to Docker, and the server's defaults (used when it gets no answer) turn it on. `vulnerabilites` is
+ * the server's spelling.
+ */
+const DOCKER_LSP_SETTINGS = {
+  telemetry: "off",
+  experimental: {
+    vulnerabilityScanning: false,
+    scout: {
+      criticalHighVulnerabilities: false,
+      notPinnedDigest: false,
+      recommendedTag: false,
+      vulnerabilites: false,
+    },
+  },
+};
+
+const DOCKER = process.platform === "win32" ? "docker.exe" : "docker";
+
+/**
+ * Sends the server's HTTP clients to a closed loopback port. Nothing should reach it: this is the
+ * failsafe for the moment before a document's configuration pull is answered, when the server's
+ * defaults still have Scout on. Go reads `no_proxy` when `NO_PROXY` is empty, so both are cleared.
+ */
+const NO_OUTBOUND_HTTP_ENV = {
+  HTTP_PROXY: "http://127.0.0.1:9",
+  HTTPS_PROXY: "http://127.0.0.1:9",
+  NO_PROXY: "",
+  no_proxy: "",
+};
 
 /**
  * Manages Docker's official `docker-language-server` binary (Dockerfile +
@@ -9,16 +48,28 @@ import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
  * subprocess rooted at the worktree path so bake files resolve relative
  * `dockerfile = "./..."` references correctly.
  *
+ * The server itself sends nothing off the machine: scripts/build-docker-lsp.ts builds the binary
+ * without Docker's telemetry and BugSnag keys, the settings above turn Scout off, and inlay hints
+ * are suppressed because the server fetches their tag dates from Docker Hub, with no setting to
+ * stop it. Its Dockerfile lint would run `docker buildx build --call=check`, which contacts registries
+ * (for base image metadata and the frontend image a `syntax` directive names), so the server's `PATH`
+ * holds no `docker` and that lint never runs, in any repository.
+ *
  * Compose support is disabled at init time so our YAML LSP stays
- * authoritative for compose files. Full-text sync is forced because
- * docker-language-server overwrites its entire document with each
- * incremental fragment's replacement text (text_document_sync.go:33).
+ * authoritative for compose files. `removeOverlappingIssues` stays off: it
+ * drops all error-level diagnostics, on the assumption that a second
+ * Dockerfile server reports them, and Loxel has none. Full-text sync is
+ * forced because docker-language-server overwrites its entire document with
+ * each incremental fragment's replacement text (text_document_sync.go:33).
  * Semantic tokens are disabled because its token ranges routinely exceed
  * line length and Monaco rejects them.
  */
 export class DockerLspManager extends WorktreeLspManager {
   protected override readonly disableSemanticTokens = true;
   protected override readonly requiresFullTextSync = true;
+  protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
+    "textDocument/inlayHint",
+  ];
 
   constructor() {
     super("docker-lsp");
@@ -32,6 +83,11 @@ export class DockerLspManager extends WorktreeLspManager {
 
   protected override spawnArgs(): readonly string[] {
     return ["start", "--stdio"];
+  }
+
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
+    const PATH = pathWithoutCommand(buildSpawnEnv().PATH ?? "", DOCKER);
+    return { ...super.spawnOptions(context), env: { ...NO_OUTBOUND_HTTP_ENV, PATH } };
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {
@@ -59,19 +115,14 @@ export class DockerLspManager extends WorktreeLspManager {
     super.handleServerFrame(session, body);
   }
 
-  protected override onClientInitialized(session: WtLspSession): void {
-    const msg = JSON.stringify({
-      jsonrpc: "2.0",
-      method: "workspace/didChangeConfiguration",
-      params: {
-        settings: {
-          docker: { lsp: { experimental: { vulnerabilityScanning: false } } },
-          dockerfileExperimental: { removeOverlappingIssues: true },
-          dockercomposeExperimental: { composeSupport: false },
-          telemetry: "off",
-        },
-      },
-    });
-    this.writeToStdin(session, msg);
+  protected override getInitializationOptions(): Record<string, unknown> {
+    return { dockercomposeExperimental: { composeSupport: false }, telemetry: "off" };
+  }
+
+  protected override async workspaceConfiguration(
+    _session: WtLspSession,
+    section: string | undefined,
+  ): Promise<unknown> {
+    return section === "docker.lsp" ? DOCKER_LSP_SETTINGS : null;
   }
 }

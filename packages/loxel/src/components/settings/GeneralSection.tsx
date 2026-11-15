@@ -1,22 +1,42 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   CheckCircleIcon,
   DownloadIcon,
   LoaderIcon,
   RefreshCwIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback } from "react";
+import { useEffect, useState } from "react";
 
 import * as api from "@/api/client";
+import type { DefaultBrowserStatus } from "@/api/default-browser-model";
+import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
+import { BusyTerminalList } from "@/components/terminal/BusyTerminalList";
 import { Button } from "@/components/ui/button";
+import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { Switch } from "@/components/ui/switch";
+import { frontendLog } from "@/lib/frontend-logger";
+import type { TerminalRestartConfirmation } from "@/lib/update-terminal-restart";
+import {
+  restartsTerminalsOf,
+  terminalRestartConfirmation,
+  terminalRestartWarning,
+} from "@/lib/update-terminal-restart";
 import { queryKeys } from "@/queries/query-keys";
+import { useRunningTerminals } from "@/queries/use-running-terminals";
+import { useUpdateStatus } from "@/queries/use-update-status";
+import { queryClient } from "@/query-client";
 import { useSettingsStore } from "@/store/settings-store";
 
+const settingsLog = frontendLog.child("ui");
+const updateLog = frontendLog.child("update");
+
+/** The site's download page, for installing by hand when an update cannot install itself. */
+const DOWNLOAD_PAGE_URL = "https://bizimind.io/download";
+
 export function GeneralSection() {
-  const queryClient = useQueryClient();
   const autoReveal = useSettingsStore((s) => s.autoRevealInExplorer);
   const setAutoReveal = useSettingsStore((s) => s.setAutoRevealInExplorer);
 
@@ -25,49 +45,6 @@ export function GeneralSection() {
     queryFn: api.getVersion,
     staleTime: Infinity,
   });
-
-  const { data: status } = useQuery({
-    queryKey: queryKeys.updateStatus(),
-    queryFn: api.getUpdateStatus,
-    staleTime: 30_000,
-  });
-
-  const state = status?.state ?? "idle";
-
-  const handleCheck = useCallback(async () => {
-    try {
-      const result = await api.checkForUpdate();
-      queryClient.setQueryData(queryKeys.updateStatus(), result);
-    } catch {
-      queryClient.setQueryData(queryKeys.updateStatus(), {
-        state: "error",
-        message: "Failed to check for updates",
-      } satisfies UpdateState);
-    }
-  }, [queryClient]);
-
-  const handleDownload = useCallback(async () => {
-    try {
-      const result = await api.downloadUpdate();
-      queryClient.setQueryData(queryKeys.updateStatus(), result);
-    } catch {
-      queryClient.setQueryData(queryKeys.updateStatus(), {
-        state: "error",
-        message: "Failed to download update",
-      } satisfies UpdateState);
-    }
-  }, [queryClient]);
-
-  const handleInstall = useCallback(async () => {
-    try {
-      await api.installUpdate();
-    } catch {
-      queryClient.setQueryData(queryKeys.updateStatus(), {
-        state: "error",
-        message: "Failed to install update",
-      } satisfies UpdateState);
-    }
-  }, [queryClient]);
 
   return (
     <div className="space-y-5">
@@ -78,52 +55,11 @@ export function GeneralSection() {
         </p>
       </div>
 
-      <div className="space-y-3">
-        <UpdateStatusDisplay status={status} />
+      {window.electronAPI && <UpdateControls electronAPI={window.electronAPI} />}
 
-        <div className="flex items-center gap-2">
-          {(state === "idle" || state === "error" || state === "ready") && (
-            <Button variant="outline" size="xs" onClick={handleCheck}>
-              <RefreshCwIcon className="mr-1.5 size-3" />
-              Check for updates
-            </Button>
-          )}
-
-          {state === "checking" && (
-            <Button variant="outline" size="xs" disabled>
-              <LoaderIcon className="mr-1.5 size-3 animate-spin" />
-              Checking...
-            </Button>
-          )}
-
-          {state === "available" && (
-            <Button variant="outline" size="xs" onClick={handleDownload}>
-              <DownloadIcon className="mr-1.5 size-3" />
-              Download update
-            </Button>
-          )}
-
-          {state === "downloading" && (
-            <Button variant="outline" size="xs" disabled>
-              <LoaderIcon className="mr-1.5 size-3 animate-spin" />
-              Downloading...
-            </Button>
-          )}
-
-          {state === "ready" && (
-            <Button size="xs" onClick={handleInstall}>
-              Install & Restart
-            </Button>
-          )}
-
-          {state === "installing" && (
-            <Button size="xs" disabled>
-              <LoaderIcon className="mr-1.5 size-3 animate-spin" />
-              Restarting...
-            </Button>
-          )}
-        </div>
-      </div>
+      {window.electronAPI?.macOSVersion && (
+        <DefaultBrowserSetting electronAPI={window.electronAPI} />
+      )}
 
       <div className="space-y-2">
         <h4 className="text-foreground text-xs font-medium">Project Explorer</h4>
@@ -139,6 +75,230 @@ export function GeneralSection() {
   );
 }
 
+/** Check, download and install app updates; only the desktop app has them. */
+function UpdateControls({ electronAPI }: { electronAPI: NonNullable<Window["electronAPI"]> }) {
+  const autoCheck = useSettingsStore((s) => s.autoCheckForUpdates);
+  const setAutoCheck = useSettingsStore((s) => s.setAutoCheckForUpdates);
+  const status = useUpdateStatus();
+  const state = status?.state ?? "idle";
+  /** Install & Restart is listing the terminals to ask about. */
+  const [listing, setListing] = useState(false);
+
+  return (
+    <div className="space-y-3">
+      <UpdateStatusDisplay status={status} />
+
+      <div className="flex items-center gap-2">
+        {(state === "idle" || state === "error") && (
+          <Button variant="outline" size="xs" onClick={() => void electronAPI.checkForUpdates()}>
+            <RefreshCwIcon className="mr-1.5 size-3" />
+            Check for updates
+          </Button>
+        )}
+
+        {state === "checking" && (
+          <Button variant="outline" size="xs" disabled>
+            <LoaderIcon className="mr-1.5 size-3 animate-spin" />
+            Checking...
+          </Button>
+        )}
+
+        {state === "available" && (
+          <Button variant="outline" size="xs" onClick={() => void electronAPI.downloadUpdate()}>
+            <DownloadIcon className="mr-1.5 size-3" />
+            Download update
+          </Button>
+        )}
+
+        {status?.state === "downloading" && (
+          <Button variant="outline" size="xs" disabled>
+            <LoaderIcon className="mr-1.5 size-3 animate-spin" />
+            Downloading... {status.percent}%
+          </Button>
+        )}
+
+        {status?.state === "ready" && (
+          <Button
+            size="xs"
+            disabled={listing}
+            onClick={() => void installWithConfirmation(electronAPI, status, setListing)}
+          >
+            {listing && <LoaderIcon className="mr-1.5 size-3 animate-spin" />}
+            Install & Restart
+          </Button>
+        )}
+
+        {state === "installing" && (
+          <Button size="xs" disabled>
+            <LoaderIcon className="mr-1.5 size-3 animate-spin" />
+            Restarting...
+          </Button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-foreground text-xs">Check for updates automatically</span>
+        <span className="text-muted-foreground text-[10px]">
+          (ask the update server for the latest version when Loxel starts)
+        </span>
+        <Switch checked={autoCheck} onCheckedChange={setAutoCheck} className="ml-auto" />
+      </div>
+    </div>
+  );
+}
+
+function logDefaultBrowserError(action: "read" | "set", err: unknown): void {
+  settingsLog.error(`Could not ${action} the default browser`, {
+    error: err instanceof Error ? err : undefined,
+  });
+}
+
+/** Whether macOS opens web links in Loxel, and a button to make it the default browser. */
+function DefaultBrowserSetting({
+  electronAPI,
+}: {
+  electronAPI: NonNullable<Window["electronAPI"]>;
+}) {
+  const [status, setStatus] = useState<DefaultBrowserStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      electronAPI
+        .getDefaultBrowserStatus()
+        .then((next) => {
+          if (live) setStatus(next);
+        })
+        .catch((err: unknown) => logDefaultBrowserError("read", err));
+    };
+    refresh();
+    // macOS asks the user to confirm in a prompt of its own; focus comes back once it is answered.
+    const unsubscribe = electronAPI.onWindowFocusChange((focused) => {
+      if (focused) refresh();
+    });
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, [electronAPI]);
+
+  const isDefault = status?.isDefault ?? false;
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-foreground text-xs font-medium">Default Browser</h4>
+      <div className="flex items-center gap-2">
+        {isDefault ? (
+          <span className="text-foreground flex items-center gap-1.5 text-xs">
+            <CheckCircleIcon className="size-3.5 shrink-0" />
+            Loxel is your default web browser
+          </span>
+        ) : (
+          <>
+            <span className="text-foreground text-xs">Open web links in Loxel</span>
+            <span className="text-muted-foreground text-[10px]">
+              {status && !status.canSet
+                ? "(only the installed app can be the default browser)"
+                : "(links from other apps open in a browser panel)"}
+            </span>
+          </>
+        )}
+        {!isDefault && (
+          <Button
+            variant="outline"
+            size="xs"
+            className="ml-auto"
+            disabled={!status?.canSet}
+            onClick={() => {
+              electronAPI
+                .setAsDefaultBrowser()
+                .then(setStatus)
+                .catch((err: unknown) => logDefaultBrowserError("set", err));
+            }}
+          >
+            Set as default browser
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Install & Restart, once the user confirmed restarting the terminals if the update restarts any.
+ * The terminals are read fresh, with their foreground programs, so the list is current.
+ */
+async function installWithConfirmation(
+  electronAPI: NonNullable<Window["electronAPI"]>,
+  status: Extract<UpdateState, { state: "ready" }>,
+  setListing: (listing: boolean) => void,
+): Promise<void> {
+  if (status.restartsTerminals !== false) {
+    let running: readonly RunningTerminal[];
+    setListing(true);
+    try {
+      running = await api.getRunningTerminals({ programs: true });
+    } catch (err) {
+      updateLog.warn("Could not list the running terminals; counting the last known ones", {
+        error: err,
+      });
+      running = queryClient.getQueryData<RunningTerminal[]>(queryKeys.runningTerminals()) ?? [];
+    } finally {
+      setListing(false);
+    }
+    const confirmation = terminalRestartConfirmation(
+      status.version,
+      status.restartsTerminals,
+      running,
+    );
+    if (confirmation) {
+      const confirmed = await requestConfirmation({
+        title: confirmation.title,
+        description: <TerminalRestartDescription confirmation={confirmation} />,
+        confirmLabel: "Install & Restart",
+        destructive: status.restartsTerminals === true,
+      });
+      if (!confirmed) return;
+    }
+  }
+  electronAPI.installUpdate();
+}
+
+function TerminalRestartDescription({
+  confirmation,
+}: {
+  confirmation: TerminalRestartConfirmation;
+}) {
+  const { message, busy } = confirmation;
+  return (
+    <div className="space-y-2">
+      <p>{message}</p>
+      {busy.length > 0 && (
+        <div>
+          <p className="mb-1">
+            {busy.length === 1 ? "A program is running in:" : "Programs are running in:"}
+          </p>
+          <BusyTerminalList busy={busy} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "This update restarts N terminals", for an update that does. */
+function TerminalRestartNotice({ status }: { status: UpdateState }) {
+  const restartsTerminals = restartsTerminalsOf(status);
+  const running = useRunningTerminals({ enabled: restartsTerminals !== false });
+  const warning = terminalRestartWarning(restartsTerminals, running?.length ?? 0);
+  if (!warning) return null;
+  return (
+    <div className="text-warning flex items-center gap-2 text-xs">
+      <TriangleAlertIcon className="size-3.5 shrink-0" />
+      <span>{warning}</span>
+    </div>
+  );
+}
+
 function UpdateStatusDisplay({ status }: { status: UpdateState | undefined }) {
   if (!status || status.state === "idle") return null;
 
@@ -147,24 +307,36 @@ function UpdateStatusDisplay({ status }: { status: UpdateState | undefined }) {
       <div className="text-destructive flex items-center gap-2 text-xs">
         <AlertCircleIcon className="size-3.5 shrink-0" />
         <span>{status.message}</span>
+        <a href={DOWNLOAD_PAGE_URL} target="_blank" rel="noreferrer" className="underline">
+          Download the latest version
+        </a>
       </div>
     );
   }
 
   if (status.state === "available") {
     return (
-      <div className="text-foreground flex items-center gap-2 text-xs">
-        <DownloadIcon className="size-3.5 shrink-0" />
-        <span>Version {status.version} is available</span>
+      <div className="space-y-1.5">
+        <div className="text-foreground flex items-center gap-2 text-xs">
+          <DownloadIcon className="size-3.5 shrink-0" />
+          <span>Version {status.version} is available</span>
+        </div>
+        <TerminalRestartNotice status={status} />
       </div>
     );
   }
 
+  // The progress is on the button; the warning stays.
+  if (status.state === "downloading") return <TerminalRestartNotice status={status} />;
+
   if (status.state === "ready") {
     return (
-      <div className="text-foreground flex items-center gap-2 text-xs">
-        <CheckCircleIcon className="size-3.5 shrink-0" />
-        <span>Version {status.version} ready to install</span>
+      <div className="space-y-1.5">
+        <div className="text-foreground flex items-center gap-2 text-xs">
+          <CheckCircleIcon className="size-3.5 shrink-0" />
+          <span>Version {status.version} ready to install</span>
+        </div>
+        <TerminalRestartNotice status={status} />
       </div>
     );
   }

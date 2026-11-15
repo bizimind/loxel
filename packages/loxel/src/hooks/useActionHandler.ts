@@ -6,6 +6,10 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
+import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
+import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
   moveFocus,
@@ -17,14 +21,20 @@ import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
-import { selectPythonInterpreter } from "@/lib/python-interpreter";
+import { reopenClosedTab } from "@/lib/panel-creators";
+import { manageRepoTrust } from "@/lib/repo-trust-dialog";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
+import { toolchainStatusItems } from "@/lib/toolchain-status-items";
+import { getActiveWt } from "@/store/active-worktree";
+import { openAddProjectWizard } from "@/store/add-project-wizard";
+import { closeCenterTab } from "@/store/closed-tabs";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
+import { themeOfAction } from "@/store/keybindings/action-registry";
 import type { MoveDirection } from "@/store/layout-actions";
-import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
+import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -131,6 +141,15 @@ export function useActionHandler(): (actionId: ActionId) => void {
       return;
     }
 
+    if (isToolchainSelectAction(actionId)) {
+      // The worktree of the file being edited, which the status bar item shows.
+      const wtPath =
+        getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+      const item = toolchainStatusItems.find((i) => i.toolchain.selectAction.id === actionId);
+      if (wtPath && item) void item.select(wtPath);
+      return;
+    }
+
     switch (actionId) {
       // -- New tab of the active panel's type, in its group --
       case "panel.newTab":
@@ -140,12 +159,28 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- Panel close --
       case "panel.close": {
         const active = getCenterApi()?.activePanel;
-        if (active) active.api.close();
+        if (active) closeCenterTab(active.api);
         break;
       }
 
+      case "panel.reopenClosed":
+        reopenClosedTab();
+        break;
+
       case "panel.rename":
         renameActiveTab();
+        break;
+
+      case "panel.toggleMaximize":
+        toggleActiveGroupMaximized();
+        break;
+
+      case "browser.hardRefresh":
+        getFocusedBrowserPanel()?.hardRefresh();
+        break;
+
+      case "browser.toggleBookmark":
+        getFocusedBrowserPanel()?.toggleBookmark();
         break;
 
       // -- Panel navigation --
@@ -153,13 +188,14 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "panel.prev": {
         const api = getCenterApi();
         if (!api) break;
-        const allPanels = api.panels;
+        // Stay in a maximized group: leaving it for another group's tab would restore the layout.
+        const allPanels = api.hasMaximizedGroup() ? (api.activeGroup?.panels ?? []) : api.panels;
         if (allPanels.length === 0) break;
         const activeIdx = allPanels.findIndex((p) => p.api.isActive);
         const dir = actionId === "panel.next" ? 1 : -1;
         const nextIdx = (activeIdx + dir + allPanels.length) % allPanels.length;
         const next = allPanels[nextIdx];
-        if (next) activatePanel(api, next);
+        if (next) next.api.setActive();
         break;
       }
 
@@ -177,7 +213,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         if (!api) break;
         const idx = Number(actionId.split(".").pop()) - 1;
         const target = api.panels[idx];
-        if (target) activatePanel(api, target);
+        if (target) target.api.setActive();
         break;
       }
 
@@ -201,13 +237,16 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const posMap = { right: "right", left: "left", up: "top", down: "bottom" } as const;
         const position = posMap[direction];
 
+        // Moving changes the grid, which restores the layout anyway; do it first so the hidden groups
+        // are there to move to.
+        if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
         const adjacent = findAdjacentCenterGroup(api, active.group, direction);
         if (adjacent) {
           active.api.moveTo({ group: adjacent, position: "center" });
         } else {
           splitOrPromote(active, position);
         }
-        requestAnimationFrame(() => activatePanel(api, active));
+        requestAnimationFrame(() => active.api.setActive());
         break;
       }
 
@@ -236,7 +275,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
           "panel.move.newDown": "bottom",
         } as const;
         splitOrPromote(active, posMap[actionId]);
-        requestAnimationFrame(() => activatePanel(api, active));
+        requestAnimationFrame(() => active.api.setActive());
         break;
       }
 
@@ -255,9 +294,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       case "toggle.logs":
         toggleSidebarPanel("logs");
-        break;
-      case "toggle.forkTree":
-        toggleSidebarPanel("forkTree");
         break;
 
       // -- Worktree sidebar expand/collapse --
@@ -390,26 +426,44 @@ export function useActionHandler(): (actionId: ActionId) => void {
         void changeIndentation();
         break;
 
-      // -- Languages --
-      case "python.selectInterpreter": {
-        // The worktree of the file being edited, which the status bar item shows.
-        const wtPath =
-          getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
-        if (wtPath) void selectPythonInterpreter(wtPath);
+      case "codeAction.quickFix":
+      case "codeAction.fixAll":
+      case "codeAction.organizeImports":
+      case "codeAction.sourceAction":
+      case "codeAction.refactor":
+        runEditorCodeAction(actionId);
         break;
-      }
-
       case "language.restartServers":
         restartLanguageServers();
+        break;
+      case "worktree.manageRepoTrust":
+        void manageRepoTrust(getActiveWt());
+        break;
+      case "project.add":
+        openAddProjectWizard();
         break;
 
       // -- App --
       case "app.settings":
         useSettingsStore.getState().openSettings();
         break;
+      case "app.quitKeepingTerminals":
+        window.electronAPI?.quitKeepingTerminals();
+        break;
+      case "app.quitEndingTerminals":
+        window.electronAPI?.quitEndingTerminals();
+        break;
+      case "app.restart":
+        window.electronAPI?.restartApp();
+        break;
+      // The same store write as Settings > Appearance > Theme, which persists it.
+      case "theme.dark":
+      case "theme.light":
+      case "theme.system":
+        useSettingsStore.getState().setTheme(themeOfAction(actionId));
+        break;
 
       // -- Panel creation (handled above via getCreateEventForAction early return) --
-      case "panel.new.agent":
       case "panel.new.browser":
       case "panel.new.drawing":
       case "panel.new.markdown":

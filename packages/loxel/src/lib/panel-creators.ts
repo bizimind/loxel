@@ -9,11 +9,14 @@ import type {
   AddPanelOptions,
   AddPanelPositionOptions,
   DockviewApi,
+  DockviewGroupPanel,
   IDockviewPanel,
   PanelOptions,
 } from "dockview-react";
 
 import * as api from "@/api/client";
+import { fileDiffPath } from "@/api/diff-model";
+import { HOME_KEY } from "@/api/home-model";
 import type {
   PanelOpenOptions,
   PanelPlacement,
@@ -29,16 +32,24 @@ import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { filePanelType } from "@/lib/open-file";
 import type { FilePanelType } from "@/lib/open-file";
+import { parseUnifiedDiff } from "@/lib/parse-unified-diff";
 import { isWithin } from "@/lib/project-file-helpers";
 import { saveEditorContent } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
+import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-documents";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
+import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
-import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
-import { getCenterPanelDefByType } from "@/store/panel-config";
-import { getCenterApi } from "@/store/tools-bar";
+import {
+  getCenterPanelDef,
+  getCenterPanelDefByType,
+  panelTypeNeedsWorktree,
+} from "@/store/panel-config";
+import { useProjectStore } from "@/store/projects";
+import { getCenterApi, getCenterApiLayoutKey } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -123,7 +134,7 @@ function keepingUserFocus<T>(dv: DockviewApi, focus: boolean, change: () => T): 
   const focused = document.activeElement;
   const result = change();
   if (active && dv.activePanel !== active && dv.getPanel(active.id) === active) {
-    activatePanel(dv, active);
+    active.api.setActive();
   }
   if (focused instanceof HTMLElement && focused.isConnected && document.activeElement !== focused) {
     focused.focus({ preventScroll: true });
@@ -148,6 +159,28 @@ function placedPosition(
   return { referencePanel: ref.id, direction: "within" };
 }
 
+/** The group the latest placement batch opened in, in the layout it opened in. */
+let latestBatch: { id: string; dv: DockviewApi; group: DockviewGroupPanel } | null = null;
+
+/** The group a batched placement joins: its batch's, if that is still open in this layout. */
+function batchGroup(
+  dv: DockviewApi,
+  placement: PanelPlacement | undefined,
+): DockviewGroupPanel | undefined {
+  if (!latestBatch || latestBatch.id !== placement?.batch || latestBatch.dv !== dv)
+    return undefined;
+  return dv.groups.includes(latestBatch.group) ? latestBatch.group : undefined;
+}
+
+/** Remember where the first panel of a batch went, for the rest of it. */
+function rememberBatch(
+  dv: DockviewApi,
+  placement: PanelPlacement | undefined,
+  group: DockviewGroupPanel,
+): void {
+  if (placement?.batch) latestBatch = { id: placement.batch, dv, group };
+}
+
 /**
  * Add a panel where `placement` asks, closing the tab it replaces. With no tab open at all the
  * panel simply opens. Without `focus` it is added without activating it or its group.
@@ -158,15 +191,15 @@ function addPlacedPanel(
   options: PanelOptions & Pick<AddPanelOptions, "renderer">,
   focus = true,
 ): IDockviewPanel {
-  const ref = placementReference(dv, placement);
+  const joined = batchGroup(dv, placement);
+  const ref = joined ? undefined : placementReference(dv, placement);
   return keepingUserFocus(dv, focus, () => {
     const panel = dv.addPanel({
       ...options,
-      position: ref && placedPosition(ref, placement),
+      position: joined ? { referenceGroup: joined } : ref && placedPosition(ref, placement),
       inactive: !focus,
     });
-    // A background `renderer: "always"` tab (a browser) detaches the group's shown content.
-    if (!focus) reattachActiveContent(panel.group);
+    if (!joined) rememberBatch(dv, placement, panel.group);
     // Added before closing, so a group holding only the replaced tab isn't removed in between.
     if (ref && placement?.replace) ref.api.close();
     return panel;
@@ -185,10 +218,15 @@ function movePlacedPanel(
   placement: PanelPlacement,
   focus: boolean,
 ): void {
-  const ref = placementReference(dv, placement);
+  const joined = batchGroup(dv, placement);
+  const ref = joined ? undefined : placementReference(dv, placement);
   const skipSetActive = !focus;
   keepingUserFocus(dv, focus, () => {
-    if (ref === panel) {
+    if (joined) {
+      if (panel.group !== joined) {
+        panel.api.moveTo({ group: joined, position: "center", skipSetActive });
+      }
+    } else if (ref === panel) {
       if (placement.split && panel.group.panels.length > 1) {
         panel.api.moveTo({
           group: panel.group,
@@ -216,10 +254,20 @@ function movePlacedPanel(
       }
     }
   });
-  if (focus) activatePanel(dv, panel);
+  if (!joined) rememberBatch(dv, placement, panel.group);
+  if (focus) panel.api.setActive();
 }
 
 // -- Panel creators --
+
+/**
+ * The center layout, if it can hold a panel of `type`: Home, shown with no worktree active, holds
+ * only the types that need no worktree, and has no component for the others.
+ */
+function centerApiFor(type: string): DockviewApi | null {
+  const hasWorktree = useWorktreeStore.getState().activeWorktreePath !== null;
+  return hasWorktree || !panelTypeNeedsWorktree(type) ? getCenterApi() : null;
+}
 
 export interface CreateTerminalOptions extends PanelOpenOptions {
   /** Session ID to bind to; minted here when absent. The server names it for `loxel terminal`. */
@@ -232,20 +280,24 @@ export interface CreateTerminalOptions extends PanelOpenOptions {
 export function createTerminal({
   placement,
   focus,
-  cwd,
+  cwd: requestedCwd,
   ...options
 }: CreateTerminalOptions = {}): void {
-  const cApi = getCenterApi();
-  if (!cApi) return;
+  const cApi = centerApiFor("terminal");
+  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  // A Home terminal belongs to no worktree and starts in the user's home directory.
+  const cwd = requestedCwd ?? (worktreePath ? undefined : useProjectStore.getState().homeDir);
+  if (!cApi || (!worktreePath && !cwd)) return;
 
   const terminalId = options.terminalId ?? crypto.randomUUID();
   const title = options.title ?? nextPanelTitle(cApi, "Terminal");
   const panelId = `terminal-${terminalId}`;
 
-  getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  if (worktreePath) {
+    getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
+  }
   uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   addPlacedPanel(
     cApi,
     placement,
@@ -254,7 +306,11 @@ export function createTerminal({
       component: "terminal",
       tabComponent: "terminalTab",
       title,
-      params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
+      params: {
+        terminalId,
+        ...(worktreePath ? { worktreePath } : {}),
+        ...(cwd && cwd !== worktreePath ? { cwd } : {}),
+      },
     },
     focus,
   );
@@ -270,9 +326,9 @@ export async function createEditor(options?: {
   creatingEditor = true;
   try {
     const wt = useWorktreeStore.getState().activeWorktreePath;
-    if (!wt) return;
+    // In Home the plan is one of Home's drafts, which belong to no worktree.
     const { name, path: filePath } = await api.createDetachedFile({
-      wt,
+      wt: wt ?? HOME_KEY,
       prefix: "Note",
       ext: "md",
       content: options?.content ?? "# ",
@@ -289,7 +345,7 @@ export async function createEditor(options?: {
       component: "editor",
       tabComponent: "markdownEditorTab",
       title,
-      params: { filePath, worktreePath: wt },
+      params: { filePath, ...(wt ? { worktreePath: wt } : {}) },
     });
     uiLog.info("Panel created", { panelType: "editor", panelId, filePath });
 
@@ -405,85 +461,6 @@ export function openBrowserTab(
   lastTabOpenedFrom.set(sourcePanelId, options.id);
 }
 
-export function createAgent(placement?: PanelPlacement): void {
-  const cApi = getCenterApi();
-  if (!cApi) return;
-
-  const sessionId = crypto.randomUUID();
-  const panelId = `agent-${sessionId}`;
-  const title = nextPanelTitle(cApi, "Agent");
-
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  addPlacedPanel(cApi, placement, {
-    id: panelId,
-    component: "codingAgent",
-    tabComponent: "codingAgentTab",
-    title,
-    params: { sessionId, worktreePath },
-  });
-  uiLog.info("Panel created", { panelType: "agent", panelId, sessionId });
-}
-
-/** Open a panel for a forked coding-agent session. Deduplicates — focuses existing if found. */
-export function openForkedAgent(forkedSessionId: string, forkPointMessageId?: string): void {
-  const cApi = getCenterApi();
-  if (!cApi) return;
-
-  // Dedup: focus existing panel if one already exists for this forked session
-  const existing = cApi.panels.find((p) => {
-    const params = p.params;
-    return (
-      typeof params === "object" &&
-      params !== null &&
-      (params as Record<string, unknown>).forkedSessionId === forkedSessionId
-    );
-  });
-  if (existing) {
-    activatePanel(cApi, existing);
-    return;
-  }
-
-  const sessionId = crypto.randomUUID();
-  const panelId = `agent-${sessionId}`;
-  const title = nextPanelTitle(cApi, "Agent");
-
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  addPlacedPanel(cApi, undefined, {
-    id: panelId,
-    component: "codingAgent",
-    tabComponent: "codingAgentTab",
-    title,
-    params: { sessionId, worktreePath, forkedSessionId, forkPointMessageId },
-  });
-  uiLog.info("Panel created (fork)", { panelType: "agent", panelId, sessionId, forkedSessionId });
-}
-
-export function openAgentDevtools(sessionId: string): void {
-  const dv = getCenterApi();
-  if (!dv) return;
-
-  const panelId = `agentdevtools-${sessionId}`;
-  const existing = dv.getPanel(panelId);
-  if (existing) {
-    activatePanel(dv, existing);
-    return;
-  }
-
-  const agentPanel = dv.getPanel(`agent-${sessionId}`);
-  const options = {
-    id: panelId,
-    component: "agentDevTools",
-    tabComponent: "agentDevToolsTab",
-    title: "DevTools",
-    params: { sessionId },
-  };
-  if (agentPanel) {
-    dv.addPanel({ ...options, position: { referencePanel: agentPanel.id, direction: "right" } });
-  } else {
-    addPlacedPanel(dv, undefined, options);
-  }
-}
-
 export async function createCodeEditor(options?: {
   ext?: string;
   placement?: PanelPlacement;
@@ -519,6 +496,48 @@ export async function createCodeEditor(options?: {
   }
 }
 
+// -- Reopening closed tabs --
+
+/**
+ * Bring back the current worktree's most recently closed tab, active, where it was: at its old
+ * index if its group is still there, else as a tab of the active group. Its panel state comes back
+ * through its params; a terminal's session ended with the tab, so it opens a new one under the
+ * same title. The tabs of a removed group follow the first one reopened, keeping their order.
+ */
+export function reopenClosedTab(): void {
+  const dv = getCenterApi();
+  const layoutKey = getCenterApiLayoutKey();
+  // While switching worktrees the center is about to be replaced, and the panel with it.
+  if (!dv || !layoutKey || layoutKey !== activeLayoutKey()) return;
+  const tab = takeLastClosedTab(layoutKey, (id) => dv.getPanel(id) !== undefined);
+  if (!tab) return;
+
+  const { groupId, index, ...options } = tab;
+  if (getCenterPanelDef(options.id)?.type === "terminal") {
+    const terminalId = crypto.randomUUID();
+    options.id = `terminal-${terminalId}`;
+    options.params = { ...options.params, terminalId };
+    const title = options.title ?? nextPanelTitle(dv, "Terminal");
+    options.title = title;
+    if (layoutKey !== HOME_LAYOUT_KEY) {
+      getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+    }
+  }
+
+  const group = dv.getGroup(groupId);
+  const panel = group
+    ? dv.addPanel({
+        ...options,
+        position: { referenceGroup: groupId, index: Math.min(index, group.panels.length) },
+      })
+    : addPlacedPanel(dv, undefined, options);
+  if (panel.group.id !== groupId) {
+    const newIndex = panel.group.panels.indexOf(panel);
+    retargetClosedTabs(layoutKey, groupId, panel.group.id, newIndex - index);
+  }
+  uiLog.info("Panel reopened", { panelId: options.id });
+}
+
 // -- File-backed panel opener --
 
 /** An exact slot for a new file-backed panel, e.g. a moved file's tab taking its old tab's place. */
@@ -539,15 +558,18 @@ export function openFileBacked(
   filePath: string,
   { params, slot, placement, focus = true }: OpenFileBackedOptions = {},
 ): IDockviewPanel | undefined {
-  const cApi = getCenterApi();
-  if (!cApi) return undefined;
+  const cApi = centerApiFor(type);
+  if (!cApi) {
+    uiLog.warn("No editor area here can show the file", { panelType: type, filePath });
+    return undefined;
+  }
   const def = getCenterPanelDefByType(type);
   if (!def) return undefined;
   const panelId = `${def.idPrefix}${filePath}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
     if (placement) movePlacedPanel(cApi, existing, placement, focus);
-    else if (focus) activatePanel(cApi, existing);
+    else if (focus) existing.api.setActive();
     if (params?.line) {
       existing.api.updateParameters({ line: params.line, column: params.column });
     }
@@ -563,6 +585,34 @@ export function openFileBacked(
   return slot
     ? cApi.addPanel({ ...options, ...slot })
     : addPlacedPanel(cApi, placement, options, focus);
+}
+
+/**
+ * Open or focus the tab of a language server's read-only document, deduplicating by URI. The tab is
+ * tied to the connection that serves the document now; without one nothing opens.
+ */
+export function openVirtualDocument(
+  uri: string,
+  { line, column }: { line?: number; column?: number } = {},
+): void {
+  const cApi = centerApiFor("virtualDocument");
+  const connection = virtualDocumentConnection(uri);
+  if (!cApi || !connection) return;
+  const panelId = `virtual-document-${uri}`;
+  const existing = cApi.getPanel(panelId);
+  if (existing) {
+    existing.api.setActive();
+    if (line) existing.api.updateParameters({ line, column });
+    return;
+  }
+  addPlacedPanel(cApi, undefined, {
+    id: panelId,
+    component: "virtualDocument",
+    tabComponent: "virtualDocumentTab",
+    title: virtualDocumentTitle(uri),
+    params: { uri, connectionId: connection.id, line, column },
+  });
+  uiLog.info("Panel created", { panelType: "virtualDocument" });
 }
 
 // -- File lifecycle handlers --
@@ -709,7 +759,7 @@ function replaceMovedPanel(
   });
   if (newPanel && wasVisible) {
     if (dv.activeGroup === group) {
-      activatePanel(dv, newPanel);
+      newPanel.api.setActive();
     } else {
       group.model.openPanel(newPanel, { skipSetGroupActive: true });
     }
@@ -747,12 +797,12 @@ export function handleFileDeleted(filePath: string): void {
 
 /** Handle open-diff events: open or focus the singleton diff panel. */
 export function openDiff(): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("diff");
   if (!cApi) return;
 
   const existing = cApi.getPanel("diff");
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     return;
   }
 
@@ -766,13 +816,83 @@ export function openDiff(): void {
   });
 }
 
+/** Dockview params of a patch's diff panel: the unified diff text and the file it came from. */
+export interface PatchDiffParams {
+  patch: string;
+  sourcePath: string;
+}
+
+/**
+ * Tab title of a patch's diff panel: the file name when the patch changes one named file, and
+ * otherwise (several files, or a snippet without file headers) the source file's name.
+ */
+export function patchDiffTitle({ patch, sourcePath }: PatchDiffParams): string {
+  const paths = new Set(parseUnifiedDiff(patch)?.files.map(fileDiffPath));
+  const [only] = paths;
+  const name = paths.size === 1 && only ? only : sourcePath;
+  return `${getDisplayFilename(name)} patch`;
+}
+
+/**
+ * Open a patch's diff in its own panel, or focus the panel already showing that text from that
+ * file. The panel keeps the text it opened with.
+ */
+export function openPatchDiff(params: PatchDiffParams): void {
+  const cApi = centerApiFor("patchDiff");
+  if (!cApi) return;
+  const existing = cApi.panels.find((panel) => {
+    const open: Partial<Record<keyof PatchDiffParams, unknown>> = panel.params ?? {};
+    return (
+      getCenterPanelDef(panel.id)?.type === "patchDiff" &&
+      open.patch === params.patch &&
+      open.sourcePath === params.sourcePath
+    );
+  });
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  addPatchDiffPanel(cApi, params);
+}
+
+/**
+ * Split or new-tab actions on a patch's diff panel carry no patch: open the same patch again next
+ * to the panel the placement is relative to (the active one by default).
+ */
+export function duplicatePatchDiff(placement?: PanelPlacement): void {
+  const cApi = centerApiFor("patchDiff");
+  if (!cApi) return;
+  const params: Partial<Record<keyof PatchDiffParams, unknown>> =
+    placementReference(cApi, placement)?.params ?? {};
+  const { patch, sourcePath } = params;
+  if (typeof patch !== "string" || typeof sourcePath !== "string") return;
+  addPatchDiffPanel(cApi, { patch, sourcePath }, placement);
+}
+
+function addPatchDiffPanel(
+  cApi: DockviewApi,
+  params: PatchDiffParams,
+  placement?: PanelPlacement,
+): void {
+  const def = getCenterPanelDefByType("patchDiff")!;
+  const panelId = `${def.idPrefix}${crypto.randomUUID()}`;
+  addPlacedPanel(cApi, placement, {
+    id: panelId,
+    component: def.component,
+    tabComponent: def.tabComponent,
+    title: patchDiffTitle(params),
+    params: { patch: params.patch, sourcePath: params.sourcePath } satisfies PatchDiffParams,
+  });
+  uiLog.info("Panel created", { panelType: def.type, panelId });
+}
+
 /** Open a panel comparing two files; every comparison gets its own panel. */
 export function openCompareFiles(
   oldPath: string,
   newPath: string,
   placement?: PanelPlacement,
 ): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("compare");
   if (!cApi) return;
 
   const panelId = `compare-${crypto.randomUUID()}`;
@@ -792,7 +912,7 @@ export function openCompareFiles(
  * next to the panel the placement is relative to (the active one by default).
  */
 export function duplicateComparison(placement?: PanelPlacement): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("compare");
   if (!cApi) return;
   const params: unknown = placementReference(cApi, placement)?.params;
   if (typeof params !== "object" || params === null) return;
@@ -803,12 +923,12 @@ export function duplicateComparison(placement?: PanelPlacement): void {
 
 /** Open or focus the singleton LocalDb panel. */
 export function openLocalDb(): void {
-  const cApi = getCenterApi();
+  const cApi = centerApiFor("localDb");
   if (!cApi) return;
 
   const existing = cApi.getPanel("localdb-main");
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     return;
   }
 

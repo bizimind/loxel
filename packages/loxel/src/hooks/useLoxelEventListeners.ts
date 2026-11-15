@@ -8,27 +8,27 @@ import { useEffect } from "react";
 
 import { onLoxelEvent } from "@/lib/loxel-events";
 import {
-  createAgent,
   createBrowser,
   createCodeEditor,
   createDrawing,
   createEditor,
   createTerminal,
   duplicateComparison,
+  duplicatePatchDiff,
   handleFileDeleted,
   handleFileMoved,
-  openAgentDevtools,
   openCompareFiles,
   openDiff,
   openLocalDb,
   openFileBacked,
+  openPatchDiff,
+  openVirtualDocument,
 } from "@/lib/panel-creators";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
 export function useLoxelEventListeners(): void {
   useEffect(() => {
     const cleanups = [
-      onLoxelEvent("loxel-create-agent", (d) => createAgent(d?.placement)),
       // A CustomEvent dispatched without a detail carries null, which the default parameter does not cover.
       onLoxelEvent("loxel-create-terminal", (d) => createTerminal(d ?? {})),
       onLoxelEvent("loxel-create-editor", (d) => createEditor({ placement: d?.placement })),
@@ -40,13 +40,15 @@ export function useLoxelEventListeners(): void {
       onLoxelEvent("loxel-create-editor-with-content", (d) =>
         createEditor({ content: d.content, title: d.title }),
       ),
-      onLoxelEvent("loxel-open-agent-devtools", (d) => openAgentDevtools(d.sessionId)),
       onLoxelEvent("loxel-open-code-editor", (d) =>
         openFileBacked("codeEditor", d.filePath, {
           params: { line: d.line, column: d.column },
           placement: d.placement,
           focus: d.focus,
         }),
+      ),
+      onLoxelEvent("loxel-open-virtual-document", (d) =>
+        openVirtualDocument(d.uri, { line: d.line, column: d.column }),
       ),
       onLoxelEvent("loxel-open-markdown-editor", (d) =>
         openFileBacked("editor", d.filePath, {
@@ -62,6 +64,9 @@ export function useLoxelEventListeners(): void {
         openFileBacked("media", d.filePath, { placement: d.placement, focus: d.focus }),
       ),
       onLoxelEvent("loxel-open-diff", () => openDiff()),
+      onLoxelEvent("loxel-open-patch-diff", (d) =>
+        "patch" in d ? openPatchDiff(d) : duplicatePatchDiff(d.placement),
+      ),
       onLoxelEvent("loxel-compare-files", (d) =>
         "oldPath" in d ? openCompareFiles(d.oldPath, d.newPath) : duplicateComparison(d.placement),
       ),

@@ -1,16 +1,29 @@
 ---
 title: Language Intelligence
-description: Per-worktree language servers for TypeScript, Python, TOML and more, Python environments and the interpreter picker.
-order: 13
+description: Per-worktree language servers, the features they provide, and how they start and stop.
+section: "In the code"
+order: 2
+# Sections that moved to a language's own page; old links to them keep working.
+movedAnchors:
+  typescript-server: /docs/languages/typescript
+  python: /docs/languages/python
+  type-checking-rules: /docs/languages/python#type-checking-rules
+  python-environment: /docs/languages/python#python-environment
+  seeing-and-changing-the-interpreter: /docs/languages/python#seeing-and-changing-the-interpreter
+  python-linting: /docs/languages/python#python-linting
+  mypy: /docs/languages/python#mypy
+  toml: /docs/languages/toml
 ---
 
-Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
+Loxel runs language servers for TypeScript, JavaScript, Python, Go, Rust, C and C++, Java, C#, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
 
 ---
 
 ## Per-worktree language servers
 
 The active worktree gets its own language server processes; only the YAML server is shared. Switching worktrees stops them and starts fresh ones for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config, a different Python environment or a different version of your packages, it does not affect any other worktree's language servers.
+
+A language feature that depends on running a repository's own code waits until you [trust the repository](/docs/repository-trust).
 
 ### When a language server stops
 
@@ -30,7 +43,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | ----------------- | ----------------------------------------------------------------------- |
 | Hover             | Type information and JSDoc for any symbol                               |
 | Go-to-definition  | Jump to the declaration of any symbol                                   |
-| Find references   | Jump to the usages of a symbol                                          |
+| Find references   | List the usages of a symbol across files                                |
 | Completions       | Context-aware autocompletion as you type                                |
 | Rename            | Rename a symbol and update all references                               |
 | Code actions      | Quick fixes, imports, and refactors                                     |
@@ -39,7 +52,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | Workspace symbols | [Go to Symbol](/docs/editor#go-to-symbol) in the projects of open files |
 | Folding ranges    | Collapse functions, blocks, and regions                                 |
 
-These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
+These use Monaco's default keys (for example `F2` to rename); the code editor has no right-click menu. Code actions are also in the command palette: **Quick Fix…** (`Cmd+.`), **Fix All** (`Ctrl+Shift+.`), **Organize Imports** (`Shift+Alt+O`), **Source Action…** (`Ctrl+Alt+S`) and **Refactor…** (`Ctrl+Alt+R`), listed while a code editor has focus and its language server offers them; you can remap them in **Settings > Keybindings**. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 
 ---
 
@@ -53,7 +66,9 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. Some servers hold these sources themselves, such as Java's for JDK classes, and they open read-only. When a symbol has several definitions, a peek lists them instead.
+
+Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
 ---
 
@@ -63,133 +78,41 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ---
 
-## TypeScript server
-
-Loxel uses the official TypeScript 7 native compiler and language server. It provides diagnostics, completions, navigation, refactors, and other editor features.
-
-Changes made outside the editor reach it without a restart: a `git checkout`, an agent's edits, and packages you install, upgrade or remove with npm, pnpm, yarn or bun, including in a monorepo's per-package `node_modules`. Imports of a newly installed package resolve, and auto-imports offer it, about a second after the install finishes.
-
----
-
 ## Other languages
 
-Loxel runs language servers for seven other languages. Each one is independent of the TypeScript server.
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation: [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [Go](/docs/languages/go), [Rust](/docs/languages/rust), [C and C++](/docs/languages/c-cpp), [Java](/docs/languages/java), [Kotlin](/docs/languages/kotlin), [C#](/docs/languages/csharp) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
 | YAML      | Always active              | `.yml`, `.yaml`                                                  |
 | Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
 | Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
-| Python    | First matching file opened | `.py`, `.pyi`, `.pyw`                                            |
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
-| TOML      | First matching file opened | `.toml`, `Pipfile`, `Cargo.lock`, `poetry.lock`, `uv.lock`       |
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
----
+The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile checks are local only: Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries, so Dockerfiles keep the language server's other features but get no lint warnings. Run `docker build --check` in a terminal for those.
 
-## Python
-
-Python files are checked by [basedpyright](https://docs.basedpyright.com), a type checker and language server built on Pyright. Besides diagnostics, hover, go-to-definition, references, rename and signature help, you get:
-
-- **Semantic highlighting**: `self` and `cls`, decorators, builtins, modules, methods and constants are colored by what they are, not only by syntax.
-- **Inlay hints**: inferred types of variables, return types of functions without an annotation, and parameter names at call sites, shown inline.
-- **Auto-imports**: completions include names from the standard library and installed packages, and picking one adds its `import`.
-- **Quick fixes** (`Cmd+.`): import an undefined name, or silence a rule on one line with `# pyright: ignore[<rule>]`.
-- **Docs for compiled modules**: hover shows documentation for built-in modules such as `math` too.
-
-### Type-checking rules
-
-Without a configuration file, Loxel checks with basedpyright's `standard` ruleset, the default of plain Pyright. To choose rules for a project, add a `[tool.basedpyright]` table to `pyproject.toml` or a `pyrightconfig.json` file (a `[tool.pyright]` table works too). Once a project has one, basedpyright's own defaults apply to everything it leaves out, including the stricter `recommended` ruleset, so set `typeCheckingMode` there:
-
-```toml
-[tool.basedpyright]
-typeCheckingMode = "recommended" # or "basic", "standard", "strict", "all"
-reportUnusedCallResult = "none"
-```
-
-See basedpyright's [configuration reference](https://docs.basedpyright.com/latest/configuration/config-files/) for every rule.
-
-### Python environment
-
-The Python server checks your code against the project's own Python environment, so imports of installed packages resolve and checks follow that Python version. For each worktree Loxel uses the first of:
-
-1. The interpreter you chose for the worktree (see below).
-2. The virtual environment or conda environment that was active in the shell Loxel was started from, if it is inside the worktree.
-3. The environment set by uv's `UV_PROJECT_ENVIRONMENT`, or a `.venv`, `venv` or `env` virtual environment at the worktree root (what uv, PDM and `python -m venv` create).
-4. Pixi's default environment.
-5. Poetry's environment, when the project has a `poetry.lock`, or Pipenv's, when it has a `Pipfile.lock`.
-6. In a monorepo without an environment at the root, the virtual environment of the one project folder below the root that has one. When several do, choose one as described below.
-7. `python3`, or else `python`, on your shell's `PATH`.
-
-Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
-
-Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
-
-### Seeing and changing the interpreter
-
-While a Python file is the active editor, the status bar shows the worktree's interpreter, for example `Python 3.12.13 (.venv)`. Hover it to see the interpreter's full path and how it was found.
-
-Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+Shift+P`), to choose another one:
-
-- **Enter interpreter path…** takes the path of a Python executable or of an environment directory, such as `~/envs/py313`.
-- **Use automatic detection** goes back to the order above.
-- The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
-
-The choice is saved for that worktree and survives restarts. The language servers switch to it right away, without a restart. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
-
-A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
-
-```toml
-[tool.basedpyright]
-venvPath = "."
-venv = ".venv-py313"
-```
-
-The type checker only reads that environment's installed packages and never runs its interpreter; Ruff, format on save and terminals are not affected by this setting.
-
-### Python linting
-
-Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside type checking:
-
-- Lint problems are underlined as you type, and `Cmd+.` offers Ruff's quick fixes, including disabling a rule for one line with a `# noqa` comment.
-- `Shift+Option+O` organizes the file's imports.
-- **Fix All** (press `F1` and search for it) applies every automatic fix in the file.
-
-Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
-
-If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed.
 
 ---
 
-## TOML
+## Schemas a file names
 
-TOML files are checked by [Tombi](https://tombi-toml.github.io/tombi/). It underlines syntax errors and values that do not match the file's JSON Schema, and the schema also drives completions and hover documentation for keys and values. You also get the document outline, folding, go-to-definition and quick fixes.
+A file can name its own schema: `$schema` in a JSON file, a `# yaml-language-server: $schema=` comment in YAML, a `#:schema` comment in TOML, or a schema or DTD in XML. Before Loxel downloads a schema at an address a file names, it shows a notification with the full address, so opening a project you just cloned does not contact hosts that project chooses. Files work normally until you answer, without checks and completions from that schema.
 
-Schemas come from **Settings > Schemas**, the same mappings JSON and YAML files use. These files have built-in schemas from [SchemaStore](https://www.schemastore.org):
+- **Allow** trusts this address. Loxel downloads the schema now and whenever it needs it again, along with files it references on the same site.
+- **Don't fetch** skips this address, and Loxel does not ask about it again.
+- **Never ask** stops downloading schemas named by files, including ones you trusted, with no further prompts.
 
-- `pyproject.toml`, including tool tables such as `[tool.ruff]` and `[tool.uv]`
-- `Cargo.toml` and `.cargo/config.toml`
-- `ruff.toml` and `.ruff.toml`
-- `uv.toml`
-- `rustfmt.toml` and `.rustfmt.toml`
+Your choices last across restarts and apply to every project. To review or change them, open **Settings > Security**: remove an address to be asked about it again, or use the **Never fetch schemas named by files** switch.
 
-Turn a built-in schema off to stop checking files against it, or add your own mapping: a glob ending in `.toml` and the schema's URL or local path. Your mappings take precedence over the built-in ones for the same file. A TOML glob with wildcards, such as `config/*.toml`, applies only to files inside the project, and its `*` also matches files in subfolders. Schemas are downloaded when a file first needs them and cached for a day.
-
-A `#:schema` comment at the top of a file picks its schema directly, by URL or by a path relative to the file, and takes precedence over the settings:
-
-```toml
-#:schema ./schemas/app.schema.json
-name = "demo"
-```
-
-Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` file or a `[tool.tombi]` table in `pyproject.toml`, use that configuration instead of the Schemas settings, so the editor agrees with the `tombi` command line. A `~/.config/tombi/config.toml` of your own does the same for every project. Formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+Schemas in [**Settings > Schemas**](/docs/reference-env-files-cli-settings), including the built-in ones, are your own choice and do not ask. Loxel downloads one the first time you open a file that matches it. When Loxel does download a schema, the request goes from your machine to that address, which sees your IP address like any web request.
 
 ---
 
 ## See also
 
 - [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save
-- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

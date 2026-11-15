@@ -5,7 +5,7 @@ description: Like /quick-pr (a PR in a fresh worktree, handed to a detached Clau
 
 # child-pr
 
-Run `/quick-pr` (`.agents/skills/quick-pr/SKILL.md`) step by step, with one change: the new worktree records the current one as its parent (`loxel-parent-wt = <parent's wt-id>`), so Loxel shows it nested under the worktree you run in. Naming, base, prompt, terminal and report are exactly as in `/quick-pr`.
+Run `/quick-pr` (`.agents/skills/quick-pr/SKILL.md`) step by step, with one change: the new worktree records the current one as its parent (`loxel-parent-wt = <parent's wt-id>`), so Loxel shows it nested under the worktree you run in. Naming, title, base, prompt, terminal and report are exactly as in `/quick-pr`.
 
 ## Before `/quick-pr` step 2: get the parent's id
 
@@ -20,12 +20,12 @@ It fails with the reason when there is nothing to nest under: you are not in a w
 ## In `/quick-pr` step 2: pass the id to `wt add`
 
 ```bash
-wt add fix/terminal-title-after-rename --meta loxel-parent-wt=<id> -j
+wt add fix/terminal-title-after-rename --meta loxel-parent-wt=<id> --meta 'loxel-title=Term Title Rename' -j
 ```
 
 ## When the script fails
 
-Continue with `/quick-pr` unchanged (a flat worktree, no `--meta`) and add a note to your report: the worktree is not nested, with the script's reason. Do not run the `wt init` it suggests yourself: it changes the repo's git config.
+Continue with `/quick-pr` unchanged, minus `--meta loxel-parent-wt` (`/quick-pr` step 2 still passes the title, and already falls back when metadata is off), and add a note to your report: the worktree is not nested, with the script's reason. Do not run the `wt init` it suggests yourself: it changes the repo's git config.
 
 ## Listing children
 

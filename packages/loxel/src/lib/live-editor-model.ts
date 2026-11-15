@@ -17,10 +17,24 @@ export function editorFilePath(uri: ModelUri): string | null {
   return isEditorScheme ? uri.path : null;
 }
 
+/** Read-only snapshots of files shown in peek widgets (see `peek-text-models.ts`). */
+const previewModels = new WeakSet<object>();
+
+/** Marks `model` as a peek widget's read-only snapshot of a file, which is never live. */
+export function markPreviewModel(model: object): void {
+  previewModels.add(model);
+}
+
+/** Whether `model` is a peek widget's read-only snapshot of a file (see `markPreviewModel`). */
+export function isPreviewModel(model: object): boolean {
+  return previewModels.has(model);
+}
+
 /**
- * Whether `model` is an editor tab's live model (see `editorFilePath`). Only those are synced to
- * language servers or counted as a reason to spawn one.
+ * Whether `model` is an editor tab's live model (see `editorFilePath`): not a peek widget's
+ * snapshot of a file, which has the file's URI too. Only live models are synced to language
+ * servers, get their language features or are counted as a reason to spawn one.
  */
 export function isLiveEditorModel(model: { readonly uri: ModelUri }): boolean {
-  return editorFilePath(model.uri) !== null;
+  return editorFilePath(model.uri) !== null && !previewModels.has(model);
 }

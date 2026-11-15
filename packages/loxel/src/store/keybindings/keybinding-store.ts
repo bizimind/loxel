@@ -12,10 +12,10 @@ import { serverKeybindingsStorage } from "../server-storage";
 import type { ActionId } from "./action-registry";
 import { ACTION_IDS } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
-import { bindingsOverlap, normalizeKeyBinding } from "./key-combo";
+import { normalizeKeyBinding } from "./key-combo";
 import { buildChordPrefixes, buildReverseLookup } from "./keybinding-resolver";
 import type { BindingTemplate, TemplateName } from "./keybinding-schema";
-import { TEMPLATES } from "./keybinding-schema";
+import { TEMPLATES, bindingsConflict } from "./keybinding-schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,8 +30,8 @@ export interface KeybindingState {
   /** User overrides — only contains actions the user has explicitly remapped. */
   overrides: BindingOverrides;
 
-  /** Reverse lookup: key binding -> action ID. Derived, not persisted. */
-  lookup: Map<KeyBinding, ActionId>;
+  /** Reverse lookup: key binding -> the actions holding it. Derived, not persisted. */
+  lookup: Map<KeyBinding, readonly ActionId[]>;
 
   /** Strict prefixes of bound chords; a pressed prefix waits for the next key. Derived. */
   chordPrefixes: Set<KeyBinding>;
@@ -78,8 +78,8 @@ export function hasOverride(state: KeybindingState, actionId: ActionId): boolean
 }
 
 /**
- * Actions (other than `actionId`) with a binding that overlaps `binding` — the same binding, or
- * one that is a chord prefix of the other.
+ * Actions (other than `actionId`) with a binding that conflicts with `binding` — the same binding
+ * (unless the two may share a key), or one that is a chord prefix of the other.
  */
 export function findOverlappingActions(
   state: KeybindingState,
@@ -89,15 +89,16 @@ export function findOverlappingActions(
   const effective = getEffectiveTemplate(state);
   return (Object.entries(effective) as [ActionId, readonly KeyBinding[]][])
     .filter(
-      ([id, bindings]) => id !== actionId && bindings.some((b) => bindingsOverlap(b, binding)),
+      ([id, bindings]) =>
+        id !== actionId && bindings.some((b) => bindingsConflict(id, b, actionId, binding)),
     )
     .map(([id]) => id);
 }
 
 /**
- * Set `actionId`'s override and remove overlapping bindings (equal, or chord prefixes) from every
- * other action. Template actions whose bindings are stolen get explicit overrides, so the UI shows
- * the binding removed from them.
+ * Set `actionId`'s override and remove conflicting bindings (equal unless the two may share a key,
+ * or chord prefixes) from every other action. Template actions whose bindings are stolen get
+ * explicit overrides, so the UI shows the binding removed from them.
  */
 function applyOverride(
   template: BindingTemplate,
@@ -106,11 +107,12 @@ function applyOverride(
   bindings: readonly KeyBinding[],
 ): BindingOverrides {
   const overrides: BindingOverrides = { ...current, [actionId]: bindings };
-  const conflicts = (b: KeyBinding) => bindings.some((nb) => bindingsOverlap(nb, b));
   const effective = { ...template, ...overrides };
   for (const [otherId, otherBindings] of Object.entries(effective)) {
     if (otherId === actionId || !otherBindings) continue;
-    const filtered = otherBindings.filter((b) => !conflicts(b));
+    const filtered = otherBindings.filter(
+      (b) => !bindings.some((nb) => bindingsConflict(actionId, nb, otherId as ActionId, b)),
+    );
     if (filtered.length !== otherBindings.length) overrides[otherId as ActionId] = filtered;
   }
   return overrides;
@@ -159,9 +161,13 @@ export const useKeybindingStore = create<KeybindingState>()(
       },
 
       removeOverride: (actionId) => {
-        const overrides = { ...get().overrides };
-        delete overrides[actionId];
-        set({ overrides, ...deriveKeybindingState(get().activeTemplate, overrides) });
+        const remaining = { ...get().overrides };
+        delete remaining[actionId];
+        // Re-applied so the restored template bindings can't overlap the remaining overrides, the
+        // same result the next load would give.
+        const template = get().activeTemplate;
+        const overrides = parseBindingOverrides(template, remaining);
+        set({ overrides, ...deriveKeybindingState(template, overrides) });
       },
 
       resetAllOverrides: () => {

@@ -6,28 +6,27 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
+import type { Highlighter } from "shiki";
 
 import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
-import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { createEditorOpener } from "./editor-opener";
-import { registerDockerBakeMonarch } from "./hcl-monarch";
+import { followEditorThemes } from "./editor-themes";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
-import { resumeLanguageServers } from "./lsp-client";
-import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
-import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
+import { BUILTIN_THEMES } from "./loxel-theme";
+import { type LspClient, resumeLanguageServers } from "./lsp-client";
+import { lazyLspClients } from "./lsp-clients";
+import { registerLoxelLanguages } from "./monaco-languages";
+import { enhanceMonacoThemes, getMonacoThemeName, registerMonacoThemes } from "./monaco-theme";
+import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
-import { registerPythonLanguageConfiguration } from "./python-language-config";
-import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
-import { connectRuffLsp, disconnectRuffLsp } from "./ruff-lsp-client";
-import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
-import { connectTomlLsp, disconnectTomlLsp } from "./toml-lsp-client";
-import { connectTsLsp } from "./ts-lsp-client";
-import { connectXmlLsp, disconnectXmlLsp } from "./xml-lsp-client";
+import { installRenameSummary } from "./rename-summary";
+import { connectTsLsp, disconnectTsLsp } from "./ts-lsp-client";
+import { installVirtualDocumentLinks } from "./virtual-document-links";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
 self.MonacoEnvironment = {
@@ -65,103 +64,42 @@ monaco.typescript.javascriptDefaults.setModeConfiguration(disabledModeConfig);
 // Register themes before any editor mounts to prevent flicker
 registerMonacoThemes();
 
-// Register languages that Monaco doesn't ship out of the box so model
-// creation + LSP client registration work. Dockerfile is built in.
-monaco.languages.register({
-  id: "terraform",
-  extensions: [".tf", ".tfvars", ".hcl"],
-  aliases: ["Terraform", "HCL", "terraform"],
-});
+// Languages Monaco doesn't ship (Dockerfile is built in), so model creation, LSP client
+// registration and shikiToMonaco's TextMate tokenizers work for them.
+registerLoxelLanguages();
 
-monaco.languages.register({ id: "astro", extensions: [".astro"], aliases: ["Astro", "astro"] });
-
-// TSX/JSX as distinct language IDs so shikiToMonaco can attach TextMate tokenizers.
-// Monaco has built-in "typescript"/"javascript" but not "tsx"/"jsx". TS language
-// features come from the TypeScript LSP, not Monaco's built-in TS workers (disabled above).
-monaco.languages.register({
-  id: "tsx",
-  extensions: [".tsx"],
-  aliases: ["TypeScript React", "tsx"],
-});
-monaco.languages.register({
-  id: "jsx",
-  extensions: [".jsx"],
-  aliases: ["JavaScript React", "jsx"],
-});
-
-// docker-bake HCL — served by docker-language-server, not terraform-ls.
-monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerbake"] });
-
-// Monarch tokenizer for docker-bake HCL — not a Shiki-bundled language.
-registerDockerBakeMonarch();
-
-// pip requirements files — Shiki has no grammar for them, so a Monarch tokenizer.
-registerPipRequirementsLanguage();
-
-// TOML as its own language ID so shikiToMonaco attaches Shiki's TOML grammar (Monaco ships none).
-monaco.languages.register({ id: "toml", extensions: [".toml"], aliases: ["TOML", "toml"] });
-monaco.languages.setLanguageConfiguration("toml", {
-  comments: { lineComment: "#" },
-  brackets: [
-    ["{", "}"],
-    ["[", "]"],
-  ],
-  autoClosingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: '"""', close: '"""', notIn: ["comment"] },
-    { open: "'''", close: "'''", notIn: ["comment"] },
-    { open: '"', close: '"', notIn: ["string"] },
-    { open: "'", close: "'", notIn: ["string", "comment"] },
-  ],
-  surroundingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-  ],
-});
-
-// Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
-void registerPythonLanguageConfiguration();
-
-// Astro language configuration (brackets, comments, auto-closing pairs).
-// shikiToMonaco handles tokenization; this provides editing behavior.
-monaco.languages.setLanguageConfiguration("astro", {
-  comments: { lineComment: "//", blockComment: ["/*", "*/"] },
-  brackets: [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-    ["<", ">"],
-  ],
-  autoClosingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-    { open: "`", close: "`" },
-    { open: "<!--", close: "-->" },
-  ],
-  surroundingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-    { open: "`", close: "`" },
-    { open: "<", close: ">" },
-  ],
-});
+// Editing behavior on top of Monaco's built-in configs: each `<language>-language-config.ts`
+// registers its own, so a new one edits no shared file.
+for (const register of Object.values(
+  import.meta.glob<() => void>("./*-language-config.ts", {
+    eager: true,
+    import: "registerLanguageConfiguration",
+  }),
+)) {
+  register();
+}
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
-// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark is
+// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark and loxel-light are
 // loaded as Shiki themes so shikiToMonaco recognizes them natively.
-void getHighlighter().then((highlighter) => {
+// shikiToMonaco wraps `setTheme` and `create` and captures each loaded theme's colors. A custom
+// theme's syntax colors load later as a theme of their own (editor-themes.ts) and need bridging
+// again: restoring Monaco's own functions first replaces the wrappers instead of nesting them.
+const monacoSetTheme = monaco.editor.setTheme;
+const monacoCreate = monaco.editor.create;
+function bridgeShiki(highlighter: Highlighter): void {
+  monaco.editor.setTheme = monacoSetTheme;
+  monaco.editor.create = monacoCreate;
   shikiToMonaco(highlighter, monaco);
-  enhanceMonacoThemes(highlighter);
+}
+
+void getHighlighter().then((highlighter) => {
+  bridgeShiki(highlighter);
+  enhanceMonacoThemes(highlighter, BUILTIN_THEMES);
+  // shikiToMonaco activates the first loaded theme (loxel-dark); Monaco themes are global.
+  monaco.editor.setTheme(getMonacoThemeName(useUIStore.getState().darkMode));
+  followEditorThemes(highlighter, bridgeShiki);
 });
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
@@ -182,20 +120,17 @@ wsClient.onReconnect(resumeLanguageServers);
   const initialWt = useWorktreeStore.getState().activeWorktreePath;
   if (initialWt) reconnectPerWorktree(initialWt);
   useWorktreeStore.subscribe((state, prev) => {
-    if (state.activeWorktreePath && state.activeWorktreePath !== prev.activeWorktreePath) {
-      reconnectPerWorktree(state.activeWorktreePath);
-    }
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath) reconnectPerWorktree(state.activeWorktreePath);
+    // The last worktree of a bare project was removed: nothing is left to serve.
+    else disconnectTsLsp();
   });
 }
 
 // Some LSPs are expensive to spawn (they walk the whole workspace) and most
 // worktrees have zero files for them. Defer spawning until a matching model
 // exists in the active worktree, and disconnect when the last one goes away.
-function createLazyLspConnector(opts: {
-  languageIds: readonly string[];
-  connect: (wtPath: string) => void;
-  disconnect: () => void;
-}): void {
+function createLazyLspConnector(opts: LspClient): void {
   let activeWt: string | null = useWorktreeStore.getState().activeWorktreePath ?? null;
   let modelCount = 0;
   // Models counted at creation; `isMatch` can change meanwhile (projects load, worktree switch).
@@ -204,6 +139,8 @@ function createLazyLspConnector(opts: {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
+    // Wherever its URI's path seems to lead: it holds the connection it opened on.
+    if (opts.ownsVirtualDocument(model)) return true;
     if (!isLiveEditorModel(model)) return false;
     if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
@@ -214,7 +151,8 @@ function createLazyLspConnector(opts: {
     counted = new WeakSet();
     let n = 0;
     for (const model of monaco.editor.getModels()) {
-      if (!isMatch(model)) continue;
+      // Those open now belong to the connection this recount may end, and are no reason to start one.
+      if (!isMatch(model) || opts.ownsVirtualDocument(model)) continue;
       counted.add(model);
       n += 1;
     }
@@ -246,61 +184,14 @@ function createLazyLspConnector(opts: {
   });
 
   useWorktreeStore.subscribe((state, prev) => {
-    if (!state.activeWorktreePath || state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
     activeWt = state.activeWorktreePath;
     modelCount = countExistingModels();
     syncConnection();
   });
 }
 
-// terraform-ls: only worktrees with `.tf`/`.tfvars`/`.hcl` files pay the cost.
-createLazyLspConnector({
-  languageIds: ["terraform"],
-  connect: connectTerraformLsp,
-  disconnect: disconnectTerraformLsp,
-});
-
-// docker-language-server: only worktrees with Dockerfile/docker-bake.hcl pay.
-createLazyLspConnector({
-  languageIds: ["dockerfile", "dockerbake"],
-  connect: connectDockerLsp,
-  disconnect: disconnectDockerLsp,
-});
-
-// basedpyright: only worktrees with .py/.pyi files pay the cost.
-createLazyLspConnector({
-  languageIds: ["python"],
-  connect: connectPythonLsp,
-  disconnect: disconnectPythonLsp,
-});
-
-// ruff server: lint diagnostics, quick fixes, fix all and organize imports, next to basedpyright.
-createLazyLspConnector({
-  languageIds: ["python"],
-  connect: connectRuffLsp,
-  disconnect: disconnectRuffLsp,
-});
-
-// astro-ls: only worktrees with .astro files pay the cost.
-createLazyLspConnector({
-  languageIds: ["astro"],
-  connect: connectAstroLsp,
-  disconnect: disconnectAstroLsp,
-});
-
-// lemminx: only worktrees with .xml files pay the cost.
-createLazyLspConnector({
-  languageIds: ["xml"],
-  connect: connectXmlLsp,
-  disconnect: disconnectXmlLsp,
-});
-
-// Tombi: schema validation and completion for TOML (Settings > Schemas), plus TOML syntax checks.
-createLazyLspConnector({
-  languageIds: ["toml"],
-  connect: connectTomlLsp,
-  disconnect: disconnectTomlLsp,
-});
+for (const client of lazyLspClients) createLazyLspConnector(client);
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
 // Permissive mode: comments/trailing commas are NOT flagged here.
@@ -323,5 +214,15 @@ initSchemaSync();
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 
-// Go to definition and links that lead to another file open it in an editor tab.
+// Go to definition, peek picks and links that lead to another file open it in an editor tab.
 monaco.editor.registerEditorOpener(createEditorOpener());
+
+// Peek widgets show files no tab has open as read-only snapshots.
+installPeekModelResolver();
+
+// Rename announcements say what a language server's rename changed.
+installRenameSummary();
+monaco.editor.onDidCreateEditor(keepPreviewModelsReadOnly);
+
+// Hover links to a language server's read-only documents survive Monaco's markdown sanitizer.
+installVirtualDocumentLinks();

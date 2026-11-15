@@ -39,15 +39,28 @@ export const fakeMonaco = {
   commands: new Map<string, CommandHandler>(),
   /** Language providers registered through `monaco.languages.register<Kind>Provider`, by kind. */
   providers: new Map<string, unknown>(),
+  /** The selector each provider in `providers` was registered with, by kind. */
+  providerSelectors: new Map<string, unknown>(),
   didCreateModel: new FakeEmitter<monaco.editor.ITextModel>(),
+  willDisposeModel: new FakeEmitter<monaco.editor.ITextModel>(),
   /** owner → model URI → markers, as set through `setModelMarkers`. */
   markers: new Map<string, Map<string, monaco.editor.IMarkerData[]>>(),
+  /**
+   * The markers on `uri` from every owner as Monaco hands them to code action providers: its own
+   * copies (`IMarker`s with owner and resource), not the objects that were set.
+   */
+  readMarkers(uri: string): monaco.editor.IMarker[] {
+    return [...this.markers].flatMap(([owner, byModel]) =>
+      (byModel.get(uri) ?? []).map((marker) => ({ ...marker, owner, resource: URI.parse(uri) })),
+    );
+  },
   reset(): void {
     this.models.length = 0;
     this.editors.length = 0;
     this.commands.clear();
     this.markers.clear();
     this.providers.clear();
+    this.providerSelectors.clear();
   },
 };
 
@@ -63,8 +76,9 @@ const languagesNamespace: unknown = new Proxy(
     get: (_target, key) => {
       const kind = /^register(\w+)Provider$/.exec(String(key))?.[1];
       if (!kind) return anyEnum;
-      return (_selector: unknown, provider: unknown): IDisposable => {
+      return (selector: unknown, provider: unknown): IDisposable => {
         fakeMonaco.providers.set(kind, provider);
+        fakeMonaco.providerSelectors.set(kind, selector);
         return { dispose: () => fakeMonaco.providers.delete(kind) };
       };
     },
@@ -86,6 +100,7 @@ export const fakeMonacoModule = {
     getModel: (uri: monaco.Uri) =>
       fakeMonaco.models.find((m) => m.uri.toString() === uri.toString()) ?? null,
     onDidCreateModel: fakeMonaco.didCreateModel.event,
+    onWillDisposeModel: fakeMonaco.willDisposeModel.event,
     setModelMarkers: (
       model: monaco.editor.ITextModel,
       owner: string,

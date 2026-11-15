@@ -16,10 +16,15 @@ function RefLabel({ ref }: { ref: RefInfo }) {
     <span
       className={cn(
         "pointer-events-auto inline-block h-5 min-w-0 shrink overflow-hidden rounded px-1.5 text-[10px] leading-5 font-medium [text-overflow:ellipsis] whitespace-nowrap transition-all [direction:rtl] hover:z-10 hover:shrink-0 hover:overflow-visible",
-        ref.type === "HEAD" && "bg-ref-head text-white",
-        ref.type === "head" && "bg-ref-local/20 text-ref-local",
-        ref.type === "remote" && "bg-ref-remote/20 text-ref-remote",
-        ref.type === "tag" && "bg-ref-tag/20 text-ref-tag",
+        ref.type === "HEAD" &&
+          "bg-ref-head-bg text-ref-head ring-ref-head/35 dark:bg-ref-head font-semibold ring-1 ring-inset dark:font-medium dark:text-white dark:ring-0",
+        // Light pills are opaque tints with a hairline edge, so they stay clean on a selected row.
+        ref.type === "head" &&
+          "bg-ref-local-bg text-ref-local ring-ref-local/30 dark:bg-ref-local/20 ring-1 ring-inset dark:ring-0",
+        ref.type === "remote" &&
+          "bg-ref-remote-bg text-ref-remote ring-ref-remote/30 dark:bg-ref-remote/20 ring-1 ring-inset dark:ring-0",
+        ref.type === "tag" &&
+          "bg-ref-tag-bg text-ref-tag ring-ref-tag/30 dark:bg-ref-tag/20 ring-1 ring-inset dark:ring-0",
       )}
       title={ref.name}
     >

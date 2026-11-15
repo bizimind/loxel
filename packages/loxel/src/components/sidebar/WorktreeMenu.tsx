@@ -22,7 +22,9 @@ import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMen
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { showToast } from "@/components/ui/toast";
 import { copyToClipboard } from "@/lib/clipboard";
+import { askToTrustRepo } from "@/lib/repo-trust-dialog";
 import { archivedSet, resolveParents } from "@/lib/worktree-hierarchy";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -45,8 +47,6 @@ export function useWorktreeContextMenu(projectPath: string) {
     position: { x: number; y: number };
     worktree: WorktreeEntry;
   } | null>(null);
-  /** Error of the last remove, move or title change; shown in the remove dialog while it is open. */
-  const [error, setError] = useState<string | null>(null);
   const [enablingNesting, setEnablingNesting] = useState(false);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, wt: WorktreeEntry) => {
@@ -57,11 +57,10 @@ export function useWorktreeContextMenu(projectPath: string) {
   const handleRemoveRequest = useCallback(
     async (wt: WorktreeEntry) => {
       setContextMenu(null);
-      setError(null);
       try {
         await requestRemoveWorktree(projectPath, wt);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to inspect worktree");
+        showToast(err instanceof Error ? err.message : "Failed to inspect worktree");
       }
     },
     [requestRemoveWorktree, projectPath],
@@ -69,11 +68,11 @@ export function useWorktreeContextMenu(projectPath: string) {
 
   const handlePlanRemoveConfirm = useCallback(
     async (options: { deleteBranch: boolean; force: boolean; nested: NestedRemoval }) => {
-      setError(null);
+      // The store closes the dialog before it removes, so failures land in a toast.
       try {
         await confirmRemoveWorktree(options);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to remove worktree");
+        showToast(err instanceof Error ? err.message : "Failed to remove worktree");
       }
     },
     [confirmRemoveWorktree],
@@ -83,11 +82,10 @@ export function useWorktreeContextMenu(projectPath: string) {
   const handleSetParent = useCallback(
     async (path: string, parentPath: string | null) => {
       setContextMenu(null);
-      setError(null);
       try {
         await setWorktreeParent(projectPath, path, parentPath);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to move worktree");
+        showToast(err instanceof Error ? err.message : "Failed to move worktree");
       }
     },
     [setWorktreeParent, projectPath],
@@ -97,8 +95,6 @@ export function useWorktreeContextMenu(projectPath: string) {
     projectPath,
     contextMenu,
     setContextMenu,
-    error,
-    setError,
     enablingNesting,
     setEnablingNesting,
     pendingRemovePlan,
@@ -242,12 +238,8 @@ export function WorktreeContextMenu({
       {menu.pendingRemovePlan && (
         <RemoveWorktreeDialog
           plan={menu.pendingRemovePlan}
-          error={menu.error}
           onConfirm={menu.handlePlanRemoveConfirm}
-          onCancel={() => {
-            menu.dismissPendingPlan();
-            menu.setError(null);
-          }}
+          onCancel={menu.dismissPendingPlan}
         />
       )}
 
@@ -257,25 +249,16 @@ export function WorktreeContextMenu({
           onClose={() => menu.setEnablingNesting(false)}
         />
       )}
-
-      {/* Global error toast */}
-      {menu.error && !menu.pendingRemovePlan && (
-        <div className="text-destructive absolute right-2 bottom-2 left-2 text-[10px]">
-          {menu.error}
-        </div>
-      )}
     </>
   );
 }
 
 function RemoveWorktreeDialog({
   plan,
-  error,
   onConfirm,
   onCancel,
 }: {
   plan: NonNullable<ReturnType<typeof useWorktreeStore.getState>["pendingRemovePlan"]>;
-  error: string | null;
   onConfirm: (options: { deleteBranch: boolean; force: boolean; nested: NestedRemoval }) => void;
   onCancel: () => void;
 }) {
@@ -284,6 +267,23 @@ function RemoveWorktreeDialog({
   const [nested, setNested] = useState<NestedRemoval>("move-up");
   const worktrees =
     useWorktreeStore((s) => s.byProject[plan.projectPath]?.worktrees) ?? EMPTY_WORKTREES;
+  const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
+  // Once trusted, planning again clears the notice, and the removal runs clean.wt.sh.
+  const trustForCleanHook = async () => {
+    try {
+      const trusted = await askToTrustRepo(plan.wtPath, {
+        title: "Trust this repository and run clean.wt.sh?",
+        reason: "Removing the worktree runs the repository's clean.wt.sh once it is trusted.",
+        confirmLabel: "Trust Repository",
+      });
+      const entry = worktrees.find((wt) => wt.path === plan.wtPath);
+      // Not when the removal was cancelled meanwhile: planning again would reopen the dialog.
+      const stillAsking = useWorktreeStore.getState().pendingRemovePlan?.wtPath === plan.wtPath;
+      if (trusted && entry && stillAsking) await requestRemoveWorktree(plan.projectPath, entry);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not change repository trust");
+    }
+  };
 
   const nestedCount = plan.nested.length;
   const them = nestedCount === 1 ? "it" : "them";
@@ -369,6 +369,23 @@ function RemoveWorktreeDialog({
           </div>
         )}
 
+        {plan.cleanHookHeld && (
+          <div className="border-border mt-3 rounded-md border p-2.5">
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              The repository&rsquo;s <code>clean.wt.sh</code> won&rsquo;t run: hooks run in trusted
+              repositories.
+            </p>
+            <Button
+              variant="link"
+              size="xs"
+              className="h-auto px-0 text-[11px]"
+              onClick={() => void trustForCleanHook()}
+            >
+              Trust repository and run it
+            </Button>
+          </div>
+        )}
+
         <div className="mt-3 flex flex-col gap-1.5">
           {needsForce && (
             <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
@@ -397,8 +414,6 @@ function RemoveWorktreeDialog({
             </label>
           )}
         </div>
-
-        {error && <div className="text-destructive mt-2 text-[10px]">{error}</div>}
       </div>
 
       <div className="flex flex-col gap-1.5 px-4 py-3">

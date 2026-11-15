@@ -4,9 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { DetectedFormatter } from "@/api/client";
 import * as api from "@/api/client";
 import { Input } from "@/components/ui/input";
-import type { FormatterOverride } from "@/lib/formatting-model";
+import type {
+  FormatterOverride,
+  MarkdownOutputChoiceKey,
+  MarkdownOutputSettings,
+} from "@/lib/formatting-model";
+import { isMarkdownOutputChoice, MARKDOWN_OUTPUT_CHOICES } from "@/lib/formatting-model";
 import { cn } from "@/lib/utils";
-import type { IndentationOverride } from "@/store/settings-store";
+import type { IndentationOverride, InlayHintsMode } from "@/store/settings-store";
 import {
   BUILTIN_LANGUAGE_INDENTATION,
   DEFAULT_EDITOR_SETTINGS,
@@ -21,6 +26,13 @@ const BUILTIN_INDENTATION_SUMMARY = [...BUILTIN_LANGUAGE_INDENTATION]
   )
   .join(", ");
 
+const INLAY_HINTS_OPTIONS: readonly { value: InlayHintsMode; label: string }[] = [
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+  { value: "onUnlessPressed", label: "On, hidden while holding Ctrl+Alt" },
+  { value: "offUnlessPressed", label: "Off, shown while holding Ctrl+Alt" },
+];
+
 export function EditorSection() {
   const indentation = useSettingsStore((s) => s.editor.indentation);
   const overrides = useSettingsStore((s) => s.editor.overrides);
@@ -29,8 +41,12 @@ export function EditorSection() {
   const updateEditorOverride = useSettingsStore((s) => s.updateEditorOverride);
   const removeEditorOverride = useSettingsStore((s) => s.removeEditorOverride);
 
+  const inlayHints = useSettingsStore((s) => s.editor.inlayHints);
+  const setEditorInlayHints = useSettingsStore((s) => s.setEditorInlayHints);
+
   const formatting = useSettingsStore((s) => s.editor.formatting);
   const updateFormatting = useSettingsStore((s) => s.updateFormatting);
+  const updateMarkdownOutput = useSettingsStore((s) => s.updateMarkdownOutput);
   const addFormatterOverride = useSettingsStore((s) => s.addFormatterOverride);
   const updateFormatterOverride = useSettingsStore((s) => s.updateFormatterOverride);
   const removeFormatterOverride = useSettingsStore((s) => s.removeFormatterOverride);
@@ -90,7 +106,7 @@ export function EditorSection() {
       <div>
         <h3 className="text-foreground text-sm font-medium">Editor</h3>
         <p className="text-muted-foreground mt-1 text-xs">
-          Configure editor indentation and formatting.
+          Configure editor indentation, inlay hints and formatting.
         </p>
       </div>
 
@@ -163,6 +179,31 @@ export function EditorSection() {
           <PlusIcon className="size-3.5" />
           Add Override
         </button>
+      </div>
+
+      {/* --- Inlay Hints --- */}
+      <div className="border-border space-y-1.5 border-t pt-4">
+        <label htmlFor="editor-inlay-hints" className="text-muted-foreground text-xs">
+          Inlay Hints
+        </label>
+        <p className="text-muted-foreground text-[10px]">
+          Types and parameter names that language servers show inline in the code.
+        </p>
+        <select
+          id="editor-inlay-hints"
+          value={inlayHints}
+          onChange={(e) => {
+            const option = INLAY_HINTS_OPTIONS.find(({ value }) => value === e.target.value);
+            if (option) setEditorInlayHints(option.value);
+          }}
+          className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+        >
+          {INLAY_HINTS_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* --- Formatting --- */}
@@ -276,6 +317,108 @@ export function EditorSection() {
           </div>
         )}
       </div>
+
+      {/* --- Markdown output --- */}
+      <div className="border-border space-y-3 border-t pt-4">
+        <div>
+          <label className="text-muted-foreground text-xs">Markdown Output</label>
+          <p className="text-muted-foreground mt-1 text-[10px]">
+            Block markers the markdown editor writes. When format on save is enabled and a markdown
+            formatter (prettier, oxfmt) is detected, it overrides these on save.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          {MARKDOWN_OUTPUT_FIELDS.map((field) => (
+            <MarkdownOutputSelect
+              key={field.key}
+              field={field}
+              value={formatting.markdownOutput[field.key]}
+              onChange={(value) => updateMarkdownOutput({ [field.key]: value })}
+            />
+          ))}
+        </div>
+
+        <div className="space-y-2">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={formatting.markdownOutput.incrementListMarker}
+              onChange={() =>
+                updateMarkdownOutput({
+                  incrementListMarker: !formatting.markdownOutput.incrementListMarker,
+                })
+              }
+              className="accent-primary size-3.5 rounded"
+            />
+            <span className="text-foreground text-xs">Increment ordered list numbers</span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={formatting.markdownOutput.setext}
+              onChange={() => updateMarkdownOutput({ setext: !formatting.markdownOutput.setext })}
+              className="accent-primary size-3.5 rounded"
+            />
+            <span className="text-foreground text-xs">
+              Underlined (setext) headings for levels 1 and 2
+            </span>
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Markdown output selects
+// ---------------------------------------------------------------------------
+
+interface MarkdownOutputField {
+  key: MarkdownOutputChoiceKey;
+  label: string;
+  /** Display label per choice value; falls back to the raw value. */
+  labels?: Record<string, string>;
+}
+
+const MARKDOWN_OUTPUT_FIELDS: MarkdownOutputField[] = [
+  { key: "bullet", label: "Bullet marker" },
+  { key: "bulletOrdered", label: "Ordered marker", labels: { ".": "1.", ")": "1)" } },
+  { key: "fence", label: "Code fence", labels: { "`": "```", "~": "~~~" } },
+  { key: "rule", label: "Horizontal rule", labels: { "-": "---", "*": "***", _: "___" } },
+  {
+    key: "listItemIndent",
+    label: "List item indent",
+    labels: { one: "One space", tab: "Tab stop", mixed: "Mixed" },
+  },
+];
+
+function MarkdownOutputSelect({
+  field,
+  value,
+  onChange,
+}: {
+  field: MarkdownOutputField;
+  value: MarkdownOutputSettings[MarkdownOutputChoiceKey];
+  onChange: (value: MarkdownOutputSettings[MarkdownOutputChoiceKey]) => void;
+}) {
+  const choices: readonly string[] = MARKDOWN_OUTPUT_CHOICES[field.key];
+  return (
+    <div className="space-y-1">
+      <label className="text-muted-foreground text-[10px]">{field.label}</label>
+      <select
+        value={value}
+        onChange={(e) => {
+          if (isMarkdownOutputChoice(field.key, e.target.value)) onChange(e.target.value);
+        }}
+        className="h-7 w-full rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 font-mono text-xs text-[var(--foreground)] transition-colors"
+      >
+        {choices.map((choice) => (
+          <option key={choice} value={choice}>
+            {field.labels?.[choice] ?? choice}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export interface BranchInfo {
   upstream?: string;
   ahead: number;
   behind: number;
-  lastUpdated?: string; // ISO timestamp of last ref update
+  lastUpdated?: string; // ISO author date of the commit at the branch's newest reflog entry
 }
 
 /** Working tree status */

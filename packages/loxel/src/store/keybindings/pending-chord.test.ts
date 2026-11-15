@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
+import type { DockviewApi } from "dockview-react";
+
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { registerFindTarget } from "@/lib/find-targets";
+import { registerTabRename } from "@/lib/tab-rename";
 
 import { applyStoreUpdate } from "../store-sync";
+import { setCenterApi } from "../tools-bar";
+import { useWorktreeStore } from "../worktrees";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
-import { useKeybindingStore } from "./keybinding-store";
+import { findOverlappingActions, useKeybindingStore } from "./keybinding-store";
 import {
   cancelPendingChord,
   hasPendingChord,
@@ -17,6 +23,7 @@ const key = normalizeKeyCombo;
 afterEach(() => {
   cancelPendingChord();
   useKeybindingStore.getState().resetAllOverrides();
+  useWorktreeStore.setState({ activeWorktreePath: null });
 });
 
 describe("resolveKeystroke", () => {
@@ -41,12 +48,20 @@ describe("resolveKeystroke", () => {
   });
 
   test("resolves a three-step typed split chord", () => {
+    useWorktreeStore.setState({ activeWorktreePath: "/wt" });
     resolveKeystroke(key("Cmd+Backslash"));
     expect(resolveKeystroke(key("T"))).toEqual({ kind: "pending" });
     expect(resolveKeystroke(key("ArrowDown"))).toEqual({
       kind: "action",
       actionId: "panel.split.terminal.down",
     });
+  });
+
+  test("leaves a chord for a panel Home can't hold unbound in Home", () => {
+    // A drawing needs a worktree for its draft.
+    resolveKeystroke(key("Cmd+Backslash"));
+    resolveKeystroke(key("D"));
+    expect(resolveKeystroke(key("ArrowDown"))).toEqual({ kind: "cancelled" });
   });
 
   test("accepts later steps typed with ⌘ still held", () => {
@@ -154,6 +169,101 @@ describe("context-dependent actions", () => {
       unregister();
     }
     expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "unbound" });
+  });
+});
+
+describe("⇧⌘R, shared by Rename Tab and a browser panel's hard refresh", () => {
+  const HARD_REFRESH = { kind: "action", actionId: "browser.hardRefresh" } as const;
+  const RENAME = { kind: "action", actionId: "panel.rename" } as const;
+  const SHARED_KEY = key("Cmd+Shift+R");
+
+  /** A renameable active tab in a center group, and a browser panel in another group. */
+  function renameableTabBesideBrowser() {
+    const browserRoot = document.createElement("div");
+    browserRoot.innerHTML = "<input />";
+    const tabGroup = document.createElement("div");
+    tabGroup.innerHTML = "<input />";
+    const center = document.createElement("div");
+    center.dataset["focusArea"] = "center";
+    center.append(browserRoot, tabGroup);
+    document.body.append(center);
+
+    const panel = { id: "tab", group: { element: tabGroup } };
+    setCenterApi({ activePanel: panel } as unknown as DockviewApi);
+    const offRename = registerTabRename(panel.id, () => {});
+    const offHardRefresh = registerBrowserPanelTarget(browserRoot, {
+      hardRefresh: () => {},
+      toggleBookmark: () => {},
+    });
+    return {
+      browserInput: browserRoot.querySelector("input")!,
+      tabInput: tabGroup.querySelector("input")!,
+      remove: () => {
+        offRename();
+        offHardRefresh();
+        setCenterApi(null);
+        center.remove();
+      },
+    };
+  }
+
+  test("hard refreshes in the focused browser panel and renames everywhere else", () => {
+    const { browserInput, tabInput, remove } = renameableTabBesideBrowser();
+    try {
+      browserInput.focus();
+      expect(resolveKeystroke(SHARED_KEY)).toEqual(HARD_REFRESH);
+      tabInput.focus();
+      expect(resolveKeystroke(SHARED_KEY)).toEqual(RENAME);
+    } finally {
+      remove();
+    }
+  });
+
+  test("remapping one leaves the other on the key", () => {
+    const { browserInput, tabInput, remove } = renameableTabBesideBrowser();
+    try {
+      useKeybindingStore.getState().setOverride("panel.rename", [key("Cmd+Shift+Y")]);
+      expect(useKeybindingStore.getState().overrides["browser.hardRefresh"]).toBeUndefined();
+      browserInput.focus();
+      expect(resolveKeystroke(SHARED_KEY)).toEqual(HARD_REFRESH);
+      tabInput.focus();
+      expect(resolveKeystroke(SHARED_KEY)).toEqual({ kind: "unbound" });
+      expect(resolveKeystroke(key("Cmd+Shift+Y"))).toEqual(RENAME);
+    } finally {
+      remove();
+    }
+  });
+
+  test("another action taking the key removes it from both", () => {
+    useKeybindingStore.getState().setOverride("app.settings", [SHARED_KEY]);
+    const { overrides } = useKeybindingStore.getState();
+    expect(overrides["panel.rename"]).toEqual([]);
+    expect(overrides["browser.hardRefresh"]).toEqual([]);
+  });
+
+  test("a chord starting with the key doesn't share it", () => {
+    useKeybindingStore
+      .getState()
+      .setOverride("panel.rename", [normalizeKeyBinding("Cmd+Shift+R Z")]);
+    expect(useKeybindingStore.getState().overrides["browser.hardRefresh"]).toEqual([]);
+  });
+
+  test("resetting one can't bring back a key another action now holds", () => {
+    const store = useKeybindingStore.getState();
+    store.setOverride("panel.rename", [normalizeKeyBinding("Cmd+Shift+R Z")]);
+    store.removeOverride("browser.hardRefresh");
+    expect(useKeybindingStore.getState().overrides["browser.hardRefresh"]).toEqual([]);
+    expect(resolveKeystroke(SHARED_KEY)).toEqual({ kind: "pending" });
+  });
+
+  test("the recorder doesn't report the other as a conflict", () => {
+    const state = useKeybindingStore.getState();
+    expect(findOverlappingActions(state, "panel.rename", SHARED_KEY)).toEqual([]);
+    expect(findOverlappingActions(state, "browser.hardRefresh", SHARED_KEY)).toEqual([]);
+    expect(findOverlappingActions(state, "app.settings", SHARED_KEY).sort()).toEqual([
+      "browser.hardRefresh",
+      "panel.rename",
+    ]);
   });
 });
 

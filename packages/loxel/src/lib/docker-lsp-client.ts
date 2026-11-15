@@ -1,9 +1,8 @@
 import { createLspClient } from "./lsp-client";
 
-const { connect: connectDockerLsp, disconnect: disconnectDockerLsp } = createLspClient({
+// docker-language-server: only worktrees with Dockerfile/docker-bake.hcl pay.
+export default createLspClient({
   route: "ws/docker-lsp",
   name: "Docker",
   languageId: ["dockerfile", "dockerbake"],
 });
-
-export { connectDockerLsp, disconnectDockerLsp };

@@ -1,10 +1,15 @@
 ---
 title: Panel Layout
-description: The five fixed zones, panel rearrangement, keyboard navigation, and per-context persistence.
-order: 5
+description: The five fixed zones, panel rearrangement, keyboard navigation, and the layout each task keeps.
+section: "Tasks & context"
+order: 3
+# Sections that moved; old links to them keep working.
+movedAnchors:
+  browser-panels: /docs/browser
+  per-context-persistence: /docs/panel-layout#per-task-layouts
 ---
 
-Loxel's workspace is divided into five fixed zones. Within those zones, panels are free-form: you can move them between groups, split areas horizontally or vertically, and resize everything. The layout for each worktree is saved automatically and restored when you switch back.
+Loxel's workspace is divided into five fixed zones. Within those zones, panels are free-form: you can move them between groups, split areas horizontally or vertically, and resize everything. Each task keeps its own layout, saved as you go and restored when you switch back to it.
 
 ---
 
@@ -26,7 +31,6 @@ Every tool panel has an icon in the tool bars at the window's left and right edg
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 The **worktree sidebar** to the far left lists your projects and their worktrees. Collapse or expand it with the sidebar button at the left of the top bar, or `Ctrl+Alt+B`. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
@@ -41,16 +45,19 @@ The center area is the main content area. Every editor and interactive view open
 - **Code editor** — Monaco-based editor with language server features, format on save, and autosave
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
-- **Coding agent** — the built-in agent's timeline UI
 - **Terminals** — full-featured terminal tabs
-- **Browser** — web pages, see [Browser panels](#browser-panels)
+- **Browser** — web pages, with DevTools and bookmarks; see [Browser](/docs/browser)
 - **Media viewer** — images, SVGs, and videos
 
 Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
+Press `Cmd+Shift+T` (**Reopen Closed Tab** in the command palette) to bring back the tab you last closed in this worktree; keep pressing to go further back. It returns to its place among its group's tabs, or to the active group if its group is gone. Editors and browsers come back on the same file or page, a code editor with its cursor where you left it. A browser's back and forward history doesn't come back, and a terminal's session ended when you closed it, so you get a new terminal with the same title. Closed tabs are remembered until you close the window.
+
+Press `Ctrl+Shift+Enter` (**Maximize Group** in the command palette), or right-click a tab and choose **Maximize Group**, to let a group fill the center area. The other groups stay open behind it, and terminals in them keep running at their size. The tool panels and sidebars stay where they are. Next and previous tab stay inside the group, and `Ctrl+Shift+Arrow` skips the hidden groups. To get them back, press the shortcut again, choose **Restore Group Size**, or click the icon at the right of the group's tabs. Going to a tab in another group, opening a new split, or reloading the window also restores them, and switching to another worktree and back does too.
+
 ### Right sidebar
 
-The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork Tree** of coding agent sessions.
+The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).
 
 ### Bottom
 
@@ -67,34 +74,11 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **Upstream tracking** — `↑ X ↓ Y` (commits ahead / behind) and the upstream branch name
 - **Working tree counts** — staged, modified, untracked, and conflicted file counts
 - **Indentation and line endings** — while a code file is the active editor, its indentation and where it came from, and `LF` or `CRLF`; click the indentation to change it (see [Indentation](/docs/editor#indentation))
-- **Python interpreter** — while a Python file is the active editor, the worktree's interpreter; click it to choose another (see [Python environment](/docs/language-intelligence#python-environment))
+- **Python interpreter** — while a Python file is the active editor, the worktree's interpreter; click it to choose another (see [Python environment](/docs/languages/python#python-environment))
+- **JDK** — while a Java or Kotlin file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
+- **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
-- **New panel buttons** — open a new agent, markdown editor, drawing, browser, or terminal
-
----
-
-## Browser panels
-
-A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page.
-
-A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
-
-- **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.
-- **`Cmd+Shift`-click** opens the link in a new tab and switches to it.
-- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it. Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab.
-
-Right-click in a page for a context menu that matches what you clicked:
-
-- **Link** — open it in a new tab (next to the current one, in the background), open it in your default browser, or copy its address.
-- **Image** — open it in a new tab, save it, copy it, or copy its address.
-- **Selected text** — copy it or search the web for it. In a text field you can also cut, paste and select all.
-- **Page** — back, forward, reload, or view the page source in a new tab.
-
-Every menu ends with **Inspect Element**, which opens DevTools on the element you clicked.
-
-All browser panels share one persistent session, so cookies and logins carry across panels and restarts. In the signed macOS app, sites can create and use passkeys with Touch ID. Open a URL in a browser panel with `loxel <url>` from a terminal, or by `Cmd`-clicking a link in terminal output.
-
-When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over that page and names the site that asked. Only that browser panel waits for your answer; the rest of Loxel stays usable. `Enter` confirms and `Esc` cancels. Starting from a page's second dialog, you can check **Don't allow this page to show more dialogs** to silence it until it reloads or navigates. Reloading or navigating also dismisses any dialog that is open.
+- **New panel buttons** — open a new markdown editor, drawing, browser, or terminal
 
 ---
 
@@ -111,7 +95,7 @@ You can also split the current panel from the keyboard:
 | Action                    | Shortcut                                                          |
 | ------------------------- | ----------------------------------------------------------------- |
 | Split (same panel type)   | `Cmd+\` then an arrow                                             |
-| Split as a new panel type | `Cmd+\` then `T` / `A` / `M` / `D` / `B`, then an arrow           |
+| Split as a new panel type | `Cmd+\` then `T` / `M` / `D` / `B`, then an arrow                 |
 | New tab in the group      | `Cmd+\` then `Enter` (same type), or the type letter then `Enter` |
 
 ---
@@ -143,11 +127,11 @@ Move focus between panels without the mouse.
 
 ---
 
-## Per-context persistence
+## Per-task layouts
 
-Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per worktree context. When you switch to a different worktree, Loxel saves the current layout and restores the layout from the last time you were in the destination worktree.
+Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per task. When you switch to another task, Loxel saves the current layout and restores the one you left in the task you're switching to.
 
-Layouts are saved by Loxel, not by the window, so they survive closing windows and restarting the app. See [Worktrees & Projects](/docs/worktrees-and-projects#per-context-layout-persistence) for how layouts behave across multiple windows.
+Layouts are saved by Loxel, not by the window, so they survive closing windows and restarting the app. See [Worktrees & Tasks](/docs/worktrees-and-tasks#per-task-layouts) for how layouts behave across multiple windows.
 
 ---
 

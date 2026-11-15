@@ -3,18 +3,20 @@
  *
  * The outer dockview manages sidebar zones (left/bottom/right) and the center host.
  * This component renders a second PersistedLayoutComponent for center panels
- * (editors, terminals, agents, etc.) with their own persistence and tab management.
+ * (editors, terminals, etc.) with their own persistence and tab management. Home, shown with no
+ * worktree active, renders the same center layout on its own, without the outer dockview.
  */
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
-import { useAgentDevToolsStore } from "@/store/agent-devtools";
-import { reattachActiveContent } from "@/store/layout-actions";
+import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { getCenterApi, setCenterApi } from "@/store/tools-bar";
@@ -22,18 +24,58 @@ import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
+import { CenterWatermark } from "./center-watermark";
 import { syncTerminalsFromLayout } from "./default-layout";
-import { CenterWatermark, centerComponents, centerTabComponents } from "./panels";
-import { PersistedLayoutComponent, isOuterSwapping } from "./PersistedLayout";
+import { MaximizedGroupActions } from "./maximized-group-actions";
+import { centerComponents, centerTabComponents, homeComponents, homeTabComponents } from "./panels";
+import {
+  PersistedLayoutComponent,
+  type PersistedLayoutProps,
+  isOuterSwapping,
+} from "./PersistedLayout";
 
 const CENTER_LAYOUT_VERSION = 1;
 const uiLog = frontendLog.child("ui");
 
+/**
+ * The active worktree's editor area, in the outer dockview's `centerHost` panel. A worktree switch
+ * remounts it (the outer swap removes its panel). Leaving for Home unmounts the outer dockview, so
+ * a null active worktree keeps the key it has until then.
+ */
 export function CenterHostComponent(_props: IDockviewPanelProps) {
-  const layoutKey = useWorktreeStore((s) => s.activeWorktreePath ?? "default");
-  // The worktree this instance shows: a worktree switch remounts CenterHost (the outer swap removes
-  // its panel), so the worktree active at mount is the one it belongs to.
-  const worktreePathRef = useRef(useWorktreeStore.getState().activeWorktreePath);
+  const mountedKeyRef = useRef(activeLayoutKey());
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  return (
+    <CenterLayout
+      layoutKey={activeWorktreePath ?? mountedKeyRef.current}
+      components={centerComponents}
+      tabComponents={centerTabComponents}
+    />
+  );
+}
+
+/** Home's editor area: the panels that need no worktree, in a layout of its own. */
+export function HomeCenter() {
+  return (
+    <CenterLayout
+      layoutKey={HOME_LAYOUT_KEY}
+      components={homeComponents}
+      tabComponents={homeTabComponents}
+    />
+  );
+}
+
+function CenterLayout({
+  layoutKey,
+  components,
+  tabComponents,
+}: {
+  layoutKey: string;
+  components: PersistedLayoutProps["components"];
+  tabComponents: PersistedLayoutProps["tabComponents"];
+}) {
+  // The layout this instance belongs to: the one shown at mount.
+  const layoutKeyRef = useRef(layoutKey);
   const centerApiRef = useRef<DockviewApi | null>(null);
   const swappingRef = useRef(false);
 
@@ -43,17 +85,18 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
   }, []);
 
   const handleApiReady = useCallback((api: DockviewApi) => {
-    setCenterApi(api, worktreePathRef.current);
+    setCenterApi(api, layoutKeyRef.current);
 
     // Populate terminal instances from restored layout
-    syncTerminalsFromLayout(api);
+    syncTerminals(api, layoutKeyRef.current);
 
-    // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
-    // move. The move event fires once the move has settled; add events are suppressed during moves
-    // and fire before the active panel switches, so they can't be used here.
-    api.onDidMovePanel(({ from, to }) => {
-      reattachActiveContent(from);
-      reattachActiveContent(to);
+    restoreLayoutWhenAnotherGroupActivates(api);
+
+    // A swap's groups come back with their ids when the layout is restored; these are gone for good.
+    api.onDidRemoveGroup((group) => {
+      if (!swappingRef.current && !isOuterSwapping()) {
+        forgetClosedTabGroup(layoutKeyRef.current, group.id);
+      }
     });
 
     api.onDidRemovePanel((event) => {
@@ -72,28 +115,8 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
           wsClient.send({ type: "terminal_destroy", id: terminalId });
           usePanelNotificationStore.getState().unregisterPanel(terminalId);
         }
-        getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
-      }
-
-      if (removedDef?.type === "agentDevTools") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          useAgentDevToolsStore.getState().removeSession(sessionId);
-        }
-      }
-
-      if (removedDef?.type === "agent") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          wsClient.send({ type: "agent_detach", id: sessionId });
+        if (layoutKeyRef.current !== HOME_LAYOUT_KEY) {
+          getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
         }
       }
 
@@ -112,22 +135,20 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     });
 
     // Open panels queued for this worktree while its editor area was being swapped in or had not
-    // mounted yet (see openFile and openTerminal). Deferred so only the instance that stays
+    // mounted yet (see openInWorktree). Deferred so only the instance that stays
     // mounted takes them — React StrictMode mounts the layout twice in dev — and left queued if
     // the worktree was switched away again meanwhile, for the next center mounted for it.
     queueMicrotask(() => {
-      const worktreePath = worktreePathRef.current;
-      if (getCenterApi() !== api || !worktreePath) return;
-      if (useWorktreeStore.getState().activeWorktreePath !== worktreePath) return;
-      for (const open of getWorktreeUI(worktreePath).getState().takePendingOpens()) {
+      const key = layoutKeyRef.current;
+      if (getCenterApi() !== api || activeLayoutKey() !== key) return;
+      for (const open of getWorktreeUI(key).getState().takePendingOpens()) {
         dispatchPendingOpen(open);
       }
     });
   }, []);
 
   const handleLayoutRestored = useCallback((api: DockviewApi) => {
-    syncTerminalsFromLayout(api);
-    for (const group of api.groups) reattachActiveContent(group);
+    syncTerminals(api, layoutKeyRef.current);
   }, []);
 
   const handleClear = useCallback((api: DockviewApi) => {
@@ -145,15 +166,21 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         onApiReady={handleApiReady}
         onLayoutRestored={handleLayoutRestored}
         performClear={handleClear}
-        components={centerComponents}
-        tabComponents={centerTabComponents}
+        components={components}
+        tabComponents={tabComponents}
         watermarkComponent={CenterWatermark}
+        rightHeaderActionsComponent={MaximizedGroupActions}
         scrollbars="native"
         apiRef={centerApiRef}
         swappingRef={swappingRef}
       />
     </div>
   );
+}
+
+/** Rebuild the worktree's terminal bookkeeping from its layout. Home's terminals are in no tools bar. */
+function syncTerminals(api: DockviewApi, layoutKey: string): void {
+  if (layoutKey !== HOME_LAYOUT_KEY) syncTerminalsFromLayout(api);
 }
 
 /** Files a center panel shows, from its params: `filePath` for editors, both sides for a comparison. */
