@@ -1,0 +1,292 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleksandr Kulkov <adamant.pwn@gmail.com>
+Date: Wed, 28 Oct 2026 00:20:07 +0100
+Subject: [PATCH 2/4] fix: rely on Chromium's PIN validation; cover
+ collect-webauthn-pin in specs
+
+Chromium's AuthTokenRequester already validates every entered PIN (length,
+encoding, same as the current PIN) and asks again through CollectPIN() with
+the error set, so Electron no longer validates it a second time with its own
+rules. A callback from an earlier prompt in the same request is ignored, so
+a late answer to a superseded prompt cannot answer the current one.
+
+Specs on the simulated UV-locked security key cover a correct, wrong,
+too-short and cancelled PIN. The no-listener warning now names the event
+that enables PIN entry, and the docs describe `error` and `minPinLength`
+as Chromium reports them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/api/session.md                           |  9 +--
+ ...n_authenticator_request_client_delegate.cc | 59 ++++++---------
+ ...on_authenticator_request_client_delegate.h | 11 ++-
+ spec/api-web-authn.spec.ts                    | 74 +++++++++++++++++++
+ 4 files changed, 104 insertions(+), 49 deletions(-)
+
+diff --git a/docs/api/session.md b/docs/api/session.md
+index 3766cbe13e..300219d5f0 100644
+--- a/docs/api/session.md
++++ b/docs/api/session.md
+@@ -807,10 +807,9 @@ Returns:
+     `invalid-characters`, `same-as-current-pin` or `internal-uv-locked`.
+     `internal-uv-locked` means the authenticator's built-in user verification
+     (e.g. a fingerprint sensor) is locked and the request fell back to PIN
+-    entry. `null` on the first prompt.
+-  * `minPinLength` Integer - The minimum length the authenticator will accept
+-    for a new PIN. When `reason` is `challenge`, the existing PIN may be
+-    shorter than this if it was set before the minimum was raised.
++    entry. `null` when there is nothing to report.
++  * `minPinLength` Integer - The minimum PIN length. For `challenge` it
++    applies to the existing PIN; for `set` and `change`, to the new PIN.
+   * `attemptsRemaining` Integer | null - The number of attempts remaining
+     before the authenticator locks itself. Only set when `reason` is
+     `challenge`; `null` otherwise.
+@@ -847,7 +846,7 @@ platforms where no system-level WebAuthn UI exists (notably Linux). On
+ Windows, security key requests are handled by the operating system's own
+ dialogs and this event is not emitted.
+ 
+-```js
++```js @ts-expect-error=[6]
+ const { BrowserWindow, session } = require('electron')
+ 
+ session.defaultSession.on('collect-webauthn-pin', async (event, details, callback) => {
+diff --git a/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc b/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
+index d35e69517f..3161fc0d5b 100644
+--- a/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
++++ b/shell/browser/webauthn/electron_authenticator_request_client_delegate.cc
+@@ -21,7 +21,6 @@
+ #include "device/fido/authenticator_get_assertion_response.h"
+ #include "device/fido/fido_authenticator.h"
+ #include "device/fido/pin.h"
+-#include "device/fido/public/fido_constants.h"
+ #include "device/fido/public/fido_types.h"
+ #include "device/fido/public/public_key_credential_descriptor.h"
+ #include "device/fido/public/public_key_credential_user_entity.h"
+@@ -559,12 +558,13 @@ void ElectronAuthenticatorRequestClientDelegate::CollectPIN(
+     base::OnceCallback<void(std::u16string)> provide_pin_cb) {
+   // May be called several times per request (e.g. once per wrong-PIN retry);
+   // each call supersedes the previous exchange.
+-  pending_pin_options_ = options;
+   provide_pin_callback_ = std::move(provide_pin_cb);
+-  EmitCollectPinEvent();
++  ++pin_prompt_id_;
++  EmitCollectPinEvent(options);
+ }
+ 
+-void ElectronAuthenticatorRequestClientDelegate::EmitCollectPinEvent() {
++void ElectronAuthenticatorRequestClientDelegate::EmitCollectPinEvent(
++    const CollectPINOptions& options) {
+   gin::WeakCell<api::Session>* session = GetSession();
+   if (!session || !session->Get()) {
+     CancelPendingPinCollection();
+@@ -579,19 +579,16 @@ void ElectronAuthenticatorRequestClientDelegate::EmitCollectPinEvent() {
+ 
+   gin::DataObjectBuilder details(isolate);
+   details.Set("relyingPartyId", relying_party_id_);
+-  details.Set("reason",
+-              std::string(PinEntryReasonToString(pending_pin_options_.reason)));
+-  if (pending_pin_options_.error == device::pin::PINEntryError::kNoError) {
++  details.Set("reason", std::string(PinEntryReasonToString(options.reason)));
++  if (options.error == device::pin::PINEntryError::kNoError) {
+     details.Set("error", v8::Null(isolate).As<v8::Value>());
+   } else {
+-    details.Set("error",
+-                std::string(PinEntryErrorToString(pending_pin_options_.error)));
++    details.Set("error", std::string(PinEntryErrorToString(options.error)));
+   }
+-  details.Set("minPinLength",
+-              static_cast<int32_t>(pending_pin_options_.min_pin_length));
++  details.Set("minPinLength", static_cast<int32_t>(options.min_pin_length));
+   // Per CollectPINOptions, |attempts| is only meaningful for kChallenge.
+-  if (pending_pin_options_.reason == device::pin::PINEntryReason::kChallenge) {
+-    details.Set("attemptsRemaining", pending_pin_options_.attempts);
++  if (options.reason == device::pin::PINEntryReason::kChallenge) {
++    details.Set("attemptsRemaining", options.attempts);
+   } else {
+     details.Set("attemptsRemaining", v8::Null(isolate).As<v8::Value>());
+   }
+@@ -616,7 +613,7 @@ void ElectronAuthenticatorRequestClientDelegate::EmitCollectPinEvent() {
+       details.Build(),
+       base::BindRepeating(
+           &ElectronAuthenticatorRequestClientDelegate::OnPinProvided,
+-          weak_factory_.GetWeakPtr()));
++          weak_factory_.GetWeakPtr(), pin_prompt_id_));
+   if (!weak_this) {
+     return;
+   }
+@@ -631,18 +628,20 @@ void ElectronAuthenticatorRequestClientDelegate::EmitCollectPinEvent() {
+       rfh->AddMessageToConsole(
+           blink::mojom::ConsoleMessageLevel::kWarning,
+           "The security key needs its PIN to continue, but Electron does not "
+-          "support WebAuthn PIN entry "
+-          "(https://github.com/electron/electron/issues/24573). The request "
+-          "was cancelled.");
++          "support WebAuthn PIN entry without a 'collect-webauthn-pin' "
++          "listener (https://github.com/electron/electron/issues/24573). The "
++          "request was cancelled.");
+     }
+     CancelPendingPinCollection();
+   }
+ }
+ 
+ void ElectronAuthenticatorRequestClientDelegate::OnPinProvided(
++    uint64_t prompt_id,
+     gin::Arguments* args) {
+-  // Repeating callback: ignore any call after the first.
+-  if (!provide_pin_callback_) {
++  // Repeating callback: ignore any call after the first, and calls to the
++  // callback of an earlier prompt in the same request.
++  if (!provide_pin_callback_ || prompt_id != pin_prompt_id_) {
+     return;
+   }
+ 
+@@ -652,25 +651,9 @@ void ElectronAuthenticatorRequestClientDelegate::OnPinProvided(
+     return;
+   }
+ 
+-  // Validate locally before sending the PIN to the authenticator: an entry
+-  // that cannot possibly be accepted must not consume one of the limited
+-  // attempts before the authenticator locks. Chrome's PIN dialog validates
+-  // inline the same way; here the listener is re-invoked with |error| set.
+-  // When collecting an existing PIN the authenticator-reported minimum only
+-  // applies to *new* PINs — a PIN set before a minPinLength increase may be
+-  // shorter — so only the CTAP2 floor is enforced for kChallenge.
+-  const uint32_t min_pin_length =
+-      pending_pin_options_.reason == device::pin::PINEntryReason::kChallenge
+-          ? device::kMinPinLength
+-          : pending_pin_options_.min_pin_length;
+-  device::pin::PINEntryError error =
+-      device::pin::ValidatePIN(pin, min_pin_length);
+-  if (error != device::pin::PINEntryError::kNoError) {
+-    pending_pin_options_.error = error;
+-    EmitCollectPinEvent();
+-    return;
+-  }
+-
++  // Chromium validates the entry itself (length, encoding, same as the current
++  // PIN) before contacting the authenticator, and asks again through
++  // CollectPIN() with |error| set if it is rejected.
+   std::move(provide_pin_callback_).Run(std::move(pin));
+ }
+ 
+diff --git a/shell/browser/webauthn/electron_authenticator_request_client_delegate.h b/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
+index 7fbba5bac1..ad5141d1fb 100644
+--- a/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
++++ b/shell/browser/webauthn/electron_authenticator_request_client_delegate.h
+@@ -5,6 +5,7 @@
+ #ifndef ELECTRON_SHELL_BROWSER_WEBAUTHN_ELECTRON_AUTHENTICATOR_REQUEST_CLIENT_DELEGATE_H_
+ #define ELECTRON_SHELL_BROWSER_WEBAUTHN_ELECTRON_AUTHENTICATOR_REQUEST_CLIENT_DELEGATE_H_
+ 
++#include <cstdint>
+ #include <memory>
+ #include <string>
+ #include <vector>
+@@ -102,8 +103,8 @@ class ElectronAuthenticatorRequestClientDelegate
+   void MaybeEmitSelectAuthenticatorEvent();
+   void DispatchDefaultAuthenticator();
+   void OnAuthenticatorSelected(gin::Arguments* args);
+-  void EmitCollectPinEvent();
+-  void OnPinProvided(gin::Arguments* args);
++  void EmitCollectPinEvent(const CollectPINOptions& options);
++  void OnPinProvided(uint64_t prompt_id, gin::Arguments* args);
+   void CancelPendingPinCollection();
+ 
+   const content::GlobalRenderFrameHostId render_frame_host_id_;
+@@ -122,11 +123,9 @@ class ElectronAuthenticatorRequestClientDelegate
+   std::vector<PendingAuthenticator> pending_authenticators_;
+   bool controls_dispatch_ = false;
+ 
+-  // CollectPINOptions has no default for |reason|; the value here is
+-  // meaningless and always overwritten in CollectPIN() before use.
+-  CollectPINOptions pending_pin_options_{
+-      .reason = device::pin::PINEntryReason::kChallenge};
+   base::OnceCallback<void(std::u16string)> provide_pin_callback_;
++  // Identifies the current 'collect-webauthn-pin' emission.
++  uint64_t pin_prompt_id_ = 0;
+ 
+   base::WeakPtrFactory<ElectronAuthenticatorRequestClientDelegate>
+       weak_factory_{this};
+diff --git a/spec/api-web-authn.spec.ts b/spec/api-web-authn.spec.ts
+index ba75365761..461bd14ead 100644
+--- a/spec/api-web-authn.spec.ts
++++ b/spec/api-web-authn.spec.ts
+@@ -604,5 +604,79 @@ ifdescribe(process.platform !== 'win32' && isTestingBindingAvailable())(
+       expect(result).toEqual({ ok: false, name: 'NotAllowedError' });
+       await warned;
+     });
++
++    describe("with a 'collect-webauthn-pin' listener", () => {
++      // The simulated key's PIN, see UvLockedPinSecurityKeyDiscovery.
++      const pin = '123456';
++
++      afterEach(() => {
++        session.defaultSession.removeAllListeners('collect-webauthn-pin');
++      });
++
++      const createCredential = () =>
++        w.webContents.executeJavaScript(`
++          navigator.credentials.create({
++            publicKey: {
++              rp: { id: 'localhost', name: 'Electron Spec' },
++              user: {
++                id: new TextEncoder().encode('user-1'),
++                name: 'alice@example.com',
++                displayName: 'Alice'
++              },
++              challenge: new Uint8Array(32),
++              pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
++              authenticatorSelection: { userVerification: 'required' }
++            }
++          }).then(
++            c => ({ ok: true }),
++            e => ({ ok: false, name: e.name })
++          )
++        `);
++
++      // Answers each event with the next entry, recording the details it saw.
++      const answerWith = (entries: (string | undefined)[]) => {
++        const seen: any[] = [];
++        session.defaultSession.on('collect-webauthn-pin' as any, (event: any, details: any, callback: any) => {
++          seen.push({ ...details, frame: undefined });
++          callback(entries[seen.length - 1]);
++        });
++        return seen;
++      };
++
++      it('completes the request with the PIN from the listener', async () => {
++        const seen = answerWith([pin]);
++        expect(await createCredential()).toEqual({ ok: true });
++        expect(seen).toHaveLength(1);
++        // The simulated key's built-in user verification is locked, which is
++        // why Chromium falls back to the PIN.
++        expect(seen[0]).toMatchObject({
++          relyingPartyId: 'localhost',
++          reason: 'challenge',
++          error: 'internal-uv-locked'
++        });
++        expect(seen[0].attemptsRemaining).toBeGreaterThan(0);
++      });
++
++      it('asks again after a wrong PIN, with one attempt fewer', async () => {
++        const seen = answerWith(['654321', pin]);
++        expect(await createCredential()).toEqual({ ok: true });
++        expect(seen).toHaveLength(2);
++        expect(seen[1].error).toBe('wrong-pin');
++        expect(seen[1].attemptsRemaining).toBe(seen[0].attemptsRemaining - 1);
++      });
++
++      it('asks again after a PIN that is too short, without using an attempt', async () => {
++        const seen = answerWith(['12', pin]);
++        expect(await createCredential()).toEqual({ ok: true });
++        expect(seen).toHaveLength(2);
++        expect(seen[1].error).toBe('too-short');
++        expect(seen[1].attemptsRemaining).toBe(seen[0].attemptsRemaining);
++      });
++
++      it('rejects with NotAllowedError when the listener cancels', async () => {
++        answerWith([undefined]);
++        expect(await createCredential()).toEqual({ ok: false, name: 'NotAllowedError' });
++      });
++    });
+   }
+ );

@@ -19,34 +19,44 @@ import {
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
-import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
-import { reattachActiveContent } from "@/store/layout-actions";
+import {
+  type BrowserBookmark,
+  useBrowserBookmarksStore,
+  useIsBookmarked,
+} from "@/store/browser-bookmarks";
+import { isHttpUrl } from "@/url-utils";
 
+import {
+  BookmarksMenu,
+  BookmarksStartPage,
+  BookmarkToggle,
+  type OpenBookmark,
+} from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
 import { JavaScriptDialog } from "./JavaScriptDialog";
+import { NotificationPermissionBar } from "./NotificationPermissionBar";
+import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
+import { useBrowserNotifications } from "./useBrowserNotifications";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
-import { webSearchUrl } from "./web-search";
+import { addressBarUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
 /**
  * Let pages ask for new tabs and windows (⌘-click, middle-click, `target="_blank"`,
- * `window.open`), which the main process turns into browser tabs. Only with a preload that
- * delivers those requests: an older main process opens them in the system browser instead.
- * Passed as a string: React drops `true` for attributes it does not know, though @types/react
+ * `window.open`), which the main process turns into browser tabs. Passed as a string: React drops `true` for attributes it does not know, though @types/react
  * types this one as a boolean.
  */
-const popupAttributes: Record<string, string> = window.electronAPI?.onOpenInNewBrowserTab
-  ? { allowpopups: "" }
-  : {};
+const popupAttributes: Record<string, string> = window.electronAPI ? { allowpopups: "" } : {};
 
 /** Whether `url` is the empty page a new browser panel opens on. */
 function isBlankPage(url: string): boolean {
@@ -81,6 +91,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   useEffect(() => {
     currentUrlRef.current = currentUrl;
   }, [currentUrl]);
+  // The page that committed, which a bookmark saves: the address bar and the panel title run ahead
+  // of it while the next page loads, and the title and favicon arrive after it commits. Its URL is
+  // empty while there is none, or after a load failed.
+  const pageRef = useRef<BrowserBookmark>({ url: "", title: "" });
+  const [pageUrl, setPageUrl] = useState("");
+  const isBookmarked = useIsBookmarked(pageUrl);
 
   // The page's alert() / confirm() / prompt(), shown over the page one at a time.
   // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
@@ -90,6 +106,11 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     dismissAll: dismissDialogs,
   } = useJavaScriptDialogs(webContentsId);
   const dialogFocusRef = useRef<HTMLElement | null>(null);
+
+  // The page's web notifications go to the notification center; a site asking to show them gets
+  // a bar under the toolbar.
+  const { request: notificationRequest, answer: answerNotificationRequest } =
+    useBrowserNotifications(webContentsId, panelApi.id);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -124,7 +145,6 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   useEffect(() => {
     if (panelApi.renderer === "always") return;
     panelApi.setRenderer("always");
-    reattachActiveContent(panelApi.group);
   }, [panelApi]);
 
   // Hand keyboard focus to the page when the panel is activated (e.g. directional focus), or to
@@ -153,7 +173,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
   useEffect(
     () =>
-      window.electronAPI?.onOpenInNewBrowserTab?.((webContentsId, url, background) => {
+      window.electronAPI?.onOpenInNewBrowserTab((webContentsId, url, background) => {
         const webview = webviewRef.current;
         if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
         openBrowserTab(url, { sourcePanelId: panelApi.id, activate: !background });
@@ -208,24 +228,37 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       const url = webview.getURL();
       setCurrentUrl(url);
       setInputUrl(url);
-      panelApi.updateParameters({ url, faviconUrl: undefined });
+      setPageUrl(url);
+      if (event.type === "did-navigate") {
+        pageRef.current = { url, title: "" };
+        panelApi.updateParameters({ url, faviconUrl: undefined });
+      } else {
+        // The same document, which keeps its title and favicon (Chromium reports them per document).
+        pageRef.current = { ...pageRef.current, url };
+        panelApi.updateParameters({ url });
+      }
       updateNavState();
     };
 
     const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
+      pageRef.current = { ...pageRef.current, title: event.title };
       panelApi.setTitle(event.title);
     };
 
     const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
       const favicon = event.favicons[0];
       if (favicon) {
+        pageRef.current = { ...pageRef.current, faviconUrl: favicon };
         panelApi.updateParameters({ faviconUrl: favicon });
       }
     };
 
     const onFailLoad = (event: DidFailLoadEvent) => {
-      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error
-      if (event.errorCode === -3) return;
+      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error. A subframe that
+      // fails (a dead or framing-blocked embed) leaves the page itself loaded.
+      if (event.errorCode === -3 || !event.isMainFrame) return;
+      pageRef.current = { url: "", title: "" };
+      setPageUrl("");
       setLoadError(
         `Failed to load ${event.validatedURL}: ${event.errorDescription} (${event.errorCode})`,
       );
@@ -285,17 +318,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       const webview = webviewRef.current;
       if (!webview || !readyRef.current) return;
 
-      let normalized = url.trim();
-      // A web URL, or the source view of one (View Page Source puts those in the address bar).
-      if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
-        // If it looks like a domain (contains a dot), prepend https://
-        // Otherwise treat it as a search query
-        if (/^[^\s]+\.[^\s]+/.test(normalized)) {
-          normalized = `https://${normalized}`;
-        } else {
-          normalized = webSearchUrl(normalized);
-        }
-      }
+      const normalized = addressBarUrl(url);
 
       setInputUrl(normalized);
       setCurrentUrl(normalized);
@@ -330,11 +353,23 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     webviewRef.current?.reloadIgnoringCache();
   }, [dismissDialogs]);
 
+  // Pages of the web only: not the blank page, or Chromium's error and internal pages.
+  const canBookmark = isHttpUrl(pageUrl);
+  const toggleBookmark = useCallback(() => {
+    const page = pageRef.current;
+    if (!isHttpUrl(page.url)) return;
+    useBrowserBookmarksStore.getState().toggleBookmark({ ...page, title: page.title || page.url });
+  }, []);
+
+  const browserPanelTarget = useMemo(
+    () => ({ hardRefresh, toggleBookmark }),
+    [hardRefresh, toggleBookmark],
+  );
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    return registerHardRefreshTarget(root, hardRefresh);
-  }, [hardRefresh]);
+    return registerBrowserPanelTarget(root, browserPanelTarget);
+  }, [browserPanelTarget]);
 
   const stopLoading = useCallback(() => {
     if (readyRef.current) webviewRef.current?.stop();
@@ -349,6 +384,18 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       wv.openDevTools();
     }
   }, []);
+
+  const openBookmark = useCallback<OpenBookmark>(
+    (url, inNewTab) => {
+      if (inNewTab) {
+        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: inNewTab.activate });
+        return;
+      }
+      navigate(url);
+      webviewRef.current?.focus();
+    },
+    [navigate, panelApi],
+  );
 
   // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
   const returnFocusToPage = useCallback(() => webviewRef.current?.focus(), []);
@@ -380,7 +427,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             href={initialUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary text-sm underline"
+            className="text-link text-sm underline"
           >
             Open in browser
           </a>
@@ -420,7 +467,14 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             className="text-foreground min-w-0 flex-1 bg-transparent text-xs outline-none"
             spellCheck={false}
           />
+          <BookmarkToggle
+            bookmarked={isBookmarked}
+            disabled={!canBookmark}
+            onToggle={toggleBookmark}
+          />
         </div>
+
+        <BookmarksMenu onOpen={openBookmark} />
 
         <NavButton
           onClick={toggleDevTools}
@@ -429,6 +483,14 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           <BugIcon className={cn("size-3.5", devToolsOpen && "text-foreground")} />
         </NavButton>
       </div>
+
+      {notificationRequest && (
+        <NotificationPermissionBar
+          key={notificationRequest.id}
+          request={notificationRequest}
+          onAnswer={answerNotificationRequest}
+        />
+      )}
 
       {/* Error banner */}
       {loadError && (
@@ -448,6 +510,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           className="flex-1"
           style={{ display: "flex" }}
         />
+        {isBlankPage(currentUrl) && <BookmarksStartPage onOpen={openBookmark} />}
         {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
         {dialog && (
           <JavaScriptDialog
@@ -459,6 +522,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             onReturnFocus={returnFocusToPage}
           />
         )}
+        <PasskeyQrOverlay webContentsId={webContentsId} />
       </div>
       {contextMenu && (
         <BrowserContextMenu

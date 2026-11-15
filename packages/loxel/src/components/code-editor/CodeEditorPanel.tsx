@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
+import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -18,9 +19,11 @@ import {
   useDiskSyncedContent,
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
+import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
@@ -30,12 +33,14 @@ import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
+import { requestSchemasForOpenFiles } from "@/lib/schema-sync";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { registerClosedTabParams } from "@/store/closed-tabs";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import {
   type IndentationLayer,
   resolveIndentation,
@@ -135,6 +140,9 @@ function getResolvedMonacoColor(
 
   return colorMap[fgIndex].toString();
 }
+
+/** Long enough that a schema URL being typed is not taken for the finished address and prompted. */
+const SCHEMA_DETECTION_DELAY_MS = 2000;
 
 /** Extract $schema URL from the first few lines of a JSON file. */
 const DOLLAR_SCHEMA_RE = /"\$schema"\s*:\s*"([^"]+)"/;
@@ -347,38 +355,14 @@ export function CodeEditorPanel({
     }
 
     const editor = monaco.editor.create(container, {
+      ...CODE_EDITOR_OPTIONS,
       model,
       theme: getMonacoThemeName(darkMode),
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
-      // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
-      // every open model's indentation. Indentation is set per model below; this constant flag only
-      // keeps Monaco from overriding it.
-      detectIndentation: false,
       inlayHints: inlayHintsOption(),
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      lineHeight: 22,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
-      automaticLayout: true,
-      contextmenu: false,
-      lineNumbers: "on",
-      glyphMargin: true,
-      folding: true,
-      fixedOverflowWidgets: true,
-      suggest: { insertMode: "replace", showIcons: true },
-      suggestFontSize: 13,
-      suggestLineHeight: 28,
-      "semanticHighlighting.enabled": true,
-      stickyScroll: { enabled: false },
-      renderLineHighlight: "line",
-      scrollbar: { vertical: "auto", horizontal: "auto" },
-      overviewRulerLanes: 3,
-      padding: { top: 4 },
-      // `gotoLocation` keeps Monaco's defaults: several targets open a peek widget, which shows
-      // files no tab has open through peek-text-models.ts; a single one opens a tab through the
-      // editor opener (editor-opener.ts).
+      ...caretOptionsFor(darkMode),
+      ...codeFontOptions(),
     });
 
     editorRef.current = editor;
@@ -412,7 +396,7 @@ export function CodeEditorPanel({
         editor.layoutContentWidget(widget);
         return;
       }
-      const themeName = "loxel-dark";
+      const themeName = getMonacoThemeName(useUIStore.getState().darkMode);
       inspectTokenAtPosition(lineText, pos.column, lang, themeName)
         .then((data) => {
           if (data) {
@@ -434,6 +418,7 @@ export function CodeEditorPanel({
         });
     }
 
+    const caretRow = trackCaretRow(editor);
     const cursorDisposable = editor.onDidChangeCursorPosition(() => {
       if (!inspectorOpenRef.current) return;
       clearTimeout(inspectTimer);
@@ -534,8 +519,17 @@ export function CodeEditorPanel({
           : new URL(schemaUrl, `file://${filePath}`).href;
       api.resolveSchema(schemaUrl, baseDir).then((schema) => {
         if (schema) setDollarSchema(fileUriStr, resolvedUrl, schema);
+        else removeDollarSchema(fileUriStr);
       });
     }
+
+    // A decision on a schema URL can change what this file's `$schema` resolves to.
+    const unsubscribeSchemaConsent = isJsonFile
+      ? useSchemaConsentStore.subscribe(() => {
+          lastDollarSchema = null;
+          detectAndApplyDollarSchema();
+        })
+      : undefined;
 
     if (isJsonFile) {
       // Initial detection
@@ -543,7 +537,17 @@ export function CodeEditorPanel({
       // Debounced on content change
       editor.onDidChangeModelContent(() => {
         clearTimeout(dollarSchemaTimer);
-        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, 300);
+        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, SCHEMA_DETECTION_DELAY_MS);
+      });
+    }
+
+    // Configured schemas this file matches, and remote schemas a TOML or XML file names.
+    requestSchemasForOpenFiles();
+    let schemaRequestTimer: ReturnType<typeof setTimeout> | undefined;
+    if (language === "toml" || language === "xml") {
+      editor.onDidChangeModelContent(() => {
+        clearTimeout(schemaRequestTimer);
+        schemaRequestTimer = setTimeout(requestSchemasForOpenFiles, SCHEMA_DETECTION_DELAY_MS);
       });
     }
 
@@ -566,7 +570,10 @@ export function CodeEditorPanel({
     return () => {
       if (navRafId !== undefined) cancelAnimationFrame(navRafId);
       clearTimeout(dollarSchemaTimer);
+      clearTimeout(schemaRequestTimer);
+      unsubscribeSchemaConsent?.();
       clearTimeout(inspectTimer);
+      caretRow.dispose();
       cursorDisposable.dispose();
       if (inspectorWidgetRef.current) {
         editor.removeContentWidget(inspectorWidgetRef.current);
@@ -654,9 +661,11 @@ export function CodeEditorPanel({
   // Update theme
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
+    editorRef.current?.updateOptions(caretOptionsFor(darkMode));
   }, [darkMode]);
 
   useInlayHintsOption(editorRef);
+  useCodeFontOptions(editorRef);
 
   // Apply indentation live, as its sources change.
   useEffect(() => {

@@ -11,7 +11,7 @@ import {
   writeHook,
   type TestRepo,
 } from "../test-repo.ts";
-import { executeAdd, planAdd } from "./add.ts";
+import { executeAdd, planAdd, runInitHook } from "./add.ts";
 import { listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
 
 let repo: TestRepo;
@@ -431,6 +431,53 @@ describe("executeAdd", () => {
     expect(result.hookRan).toBe(true);
     const recorded = (await Bun.file(join(result.path, "hook.txt")).text()).trim();
     expect(recorded).toBe(["hooked", result.path, repo.root, "hooked", result.path].join("|"));
+  });
+
+  test("allowHook false creates the worktree without running init.wt.sh", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "init.wt.sh", "touch hook.txt");
+    const asked: string[] = [];
+
+    const result = await executeAdd({
+      name: "held",
+      repoPath: repo.root,
+      allowHook: (worktreePath) => {
+        asked.push(worktreePath);
+        return false;
+      },
+    });
+
+    expect(asked).toEqual([result.path]);
+    expect(result).toMatchObject({ created: true, hookRan: false, hookSkipped: true });
+    expect(await pathExists(join(result.path, "hook.txt"))).toBe(false);
+
+    await expect(
+      runInitHook({ name: "held", repoPath: repo.root, expectedPath: repo.root }),
+    ).rejects.toThrow("unexpected path");
+    expect(await pathExists(join(result.path, "hook.txt"))).toBe(false);
+
+    expect(
+      await runInitHook({ name: "held", repoPath: repo.root, expectedPath: result.path }),
+    ).toBe(true);
+    expect(await pathExists(join(result.path, "hook.txt"))).toBe(true);
+  });
+
+  test("allowHook is not asked, and nothing is skipped, without an init.wt.sh", async () => {
+    repo = await createTestRepo({ bare: true });
+
+    let asked = false;
+    const result = await executeAdd({
+      name: "plain",
+      repoPath: repo.root,
+      allowHook: () => {
+        asked = true;
+        return false;
+      },
+    });
+
+    expect(asked).toBe(false);
+    expect(result.hookRan).toBe(false);
+    expect(result.hookSkipped).toBeUndefined();
   });
 
   test("a failing init.wt.sh warns but keeps the worktree", async () => {

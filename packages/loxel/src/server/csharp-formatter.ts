@@ -7,6 +7,7 @@ import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
 import {
+  dotnetArgsRunProjectTool,
   isVersionManagerShim,
   prepareDotnet,
   readDotnetToolManifests,
@@ -22,10 +23,10 @@ import {
   type LanguageFormatter,
 } from "./language-formatter";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo } from "./shipped-by-repo";
+import { isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("format");
 
@@ -38,6 +39,7 @@ export const csharpFormatter: LanguageFormatter = {
   detect: detectCSharpFormatter,
   spawnOptions: csharpSpawnOptions,
   failureNotice: csharpFailureNotice,
+  overrideRunsProjectTool: dotnetArgsRunProjectTool,
 };
 
 /**

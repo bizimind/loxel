@@ -11,12 +11,19 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { editorFilePath, isPreviewModel, markPreviewModel } from "./live-editor-model";
 import { toMonacoLanguage } from "./monaco-theme";
 import { resolveLanguage } from "./resolve-language";
+import {
+  isVirtualDocumentUri,
+  VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE,
+  virtualDocumentConnection,
+} from "./virtual-documents";
 
 export interface PreviewSource {
   /** The content of the file at `path`. */
   readFile(path: string): Promise<string>;
   /** The Monaco language of the file at `path`. */
   languageOf(path: string, content: string): string;
+  /** The text and language of a language server's read-only document, while it is connected. */
+  readVirtualDocument(uri: string): Promise<{ content: string; language: string }> | null;
 }
 
 /**
@@ -33,7 +40,8 @@ export interface PreviewSource {
  * stay off in the peek. Every reference reads its own snapshot and disposes it with itself: not
  * every Monaco consumer disposes its reference (the references list can drop one acquired while
  * the peek closes), and a cached snapshot it pinned would show a stale read in every later peek.
- * Registered models (open tabs, diff sides) and other URIs go to the service.
+ * A language server's read-only document (`virtual-documents.ts`) gets the same kind of snapshot,
+ * read from its server. Registered models (open tabs, diff sides) and other URIs go to the service.
  *
  * Returns a disposable that restores the service.
  */
@@ -45,19 +53,27 @@ export function installPeekModelResolver(
   const fallback = service.createModelReference.bind(service);
 
   service.createModelReference = async (resource) => {
+    if (monaco.editor.getModel(resource)) return fallback(resource);
     const path = editorFilePath(resource);
-    if (path === null || monaco.editor.getModel(resource)) return fallback(resource);
+    const reading =
+      path === null
+        ? source.readVirtualDocument(resource.toString())
+        : source
+            .readFile(path)
+            .then((content) => ({ content, language: source.languageOf(path, content) }));
+    if (!reading) return fallback(resource);
 
     let content: string;
+    let language: string;
     try {
-      content = await source.readFile(path);
+      ({ content, language } = await reading);
     } catch (error) {
-      throw new Error(`Could not read ${path} for a preview`, { cause: error });
+      throw new Error(`Could not read ${path ?? resource.path} for a preview`, { cause: error });
     }
     const model = instantiation.createInstance(
       TextModel,
       content,
-      source.languageOf(path, content),
+      language,
       TextModel.DEFAULT_CREATION_OPTIONS,
       resource,
     );
@@ -78,20 +94,23 @@ export function installPeekModelResolver(
 }
 
 /**
- * Makes `editor` read-only while it shows a preview model, which is a snapshot nothing saves. Peek
- * widgets show one in their embedded editor, which follows its parent's options otherwise.
+ * Makes `editor` read-only while it shows a preview model, which is a snapshot nothing saves, or a
+ * language server's read-only document. Peek widgets show them in their embedded editor, which
+ * follows its parent's options otherwise.
  */
 export function keepPreviewModelsReadOnly(editor: monaco.editor.ICodeEditor): void {
-  let readOnly = false;
+  let message: string | null = null;
   editor.onDidChangeModel(() => {
     const model = editor.getModel();
-    const preview = model !== null && isPreviewModel(model);
-    if (preview === readOnly) return;
-    readOnly = preview;
-    editor.updateOptions({
-      readOnly,
-      readOnlyMessage: { value: "This is a preview. Open the file to edit it." },
-    });
+    let next: string | null = null;
+    if (model && isVirtualDocumentUri(model.uri.toString())) {
+      next = VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE;
+    } else if (model && isPreviewModel(model)) {
+      next = "This is a preview. Open the file to edit it.";
+    }
+    if (next === message) return;
+    message = next;
+    editor.updateOptions({ readOnly: next !== null, readOnlyMessage: { value: next ?? "" } });
   });
 }
 
@@ -104,5 +123,13 @@ const previewSource: PreviewSource = {
   languageOf(path, content) {
     const associations = selectEffectiveFileAssociations(useSettingsStore.getState());
     return toMonacoLanguage(resolveLanguage(path, associations, content));
+  },
+  readVirtualDocument(uri) {
+    const connection = virtualDocumentConnection(uri);
+    return connection
+      ? connection
+          .read(uri, new monaco.CancellationTokenSource().token)
+          .then((content) => ({ content, language: connection.languageId }))
+      : null;
   },
 };

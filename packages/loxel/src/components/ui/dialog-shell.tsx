@@ -12,6 +12,9 @@ interface DialogShellProps {
 
 export function DialogShell({ open, onCancel, className, children }: DialogShellProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  /** Whether the current press started on the backdrop. A drag that starts inside the dialog and
+   *  ends on the backdrop also clicks the dialog element, and must not close it. */
+  const pressedBackdropRef = useRef(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -28,12 +31,15 @@ export function DialogShell({ open, onCancel, className, children }: DialogShell
       <dialog
         ref={dialogRef}
         className={cn(
-          "bg-popover text-foreground border-border m-auto rounded-lg border p-0 shadow-2xl backdrop:bg-black/50",
+          "bg-popover text-foreground border-border m-auto rounded-lg border p-0 shadow-(--shadow-dialog) backdrop:bg-black/20 dark:backdrop:bg-black/50",
           className,
         )}
         onClose={onCancel}
+        onMouseDown={(e) => {
+          pressedBackdropRef.current = e.target === e.currentTarget;
+        }}
         onClick={(e) => {
-          if (e.target === e.currentTarget) onCancel();
+          if (e.target === e.currentTarget && pressedBackdropRef.current) onCancel();
         }}
       >
         {children}

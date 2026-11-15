@@ -10,6 +10,9 @@ import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { undo } from "@milkdown/kit/prose/history";
 import { TextSelection } from "@milkdown/kit/prose/state";
 
+import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
+
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 import {
   applyBodyToEditor,
   serializeBody,
@@ -26,11 +29,13 @@ beforeEach(async () => {
   crepe = new Crepe({ root, defaultValue: "hello\n\nworld\n" });
   // Mirror the component's stringify config so canonical forms match production.
   crepe.editor.config((ctx) => {
-    ctx.set(remarkStringifyOptionsCtx, {
-      ...ctx.get(remarkStringifyOptionsCtx),
-      bullet: "-",
-      rule: "-",
-    });
+    ctx.set(
+      remarkStringifyOptionsCtx,
+      buildRemarkStringifyOptions(
+        ctx.get(remarkStringifyOptionsCtx),
+        DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+      ),
+    );
   });
   await crepe.create();
 });

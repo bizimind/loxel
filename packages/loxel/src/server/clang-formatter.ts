@@ -9,7 +9,7 @@ import {
   type LanguageFormatter,
 } from "./language-formatter";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { pathOutsideWorktree } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("format");

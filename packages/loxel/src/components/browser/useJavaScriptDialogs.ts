@@ -58,13 +58,12 @@ function handleClosed(value: unknown): void {
 
 /**
  * One window-wide subscription, kept for the window's lifetime and started when the first browser
- * panel mounts, before its webview loads a page. Bundles that predate dialogs have no
- * onJavaScriptDialog; their pages keep Electron's behavior.
+ * panel mounts, before its webview loads a page.
  */
 function listen(): void {
   if (listening) return;
   listening = true;
-  window.electronAPI?.onJavaScriptDialog?.(handleOpen, handleClosed);
+  window.electronAPI?.onJavaScriptDialog(handleOpen, handleClosed);
 }
 
 function subscribe(webContentsId: number, listener: DialogListener): () => void {
@@ -109,14 +108,14 @@ export function useJavaScriptDialogs(webContentsId: number | null): {
   const answer = useCallback(
     (reply: JavaScriptDialogAnswer) => {
       if (!dialog) return;
-      window.electronAPI?.respondToJavaScriptDialog?.({ id: dialog.id, ...reply });
+      window.electronAPI?.respondToJavaScriptDialog({ id: dialog.id, ...reply });
       setQueue((prev) => prev.filter((request) => request.id !== dialog.id));
     },
     [dialog],
   );
   const dismissAll = useCallback(() => {
     for (const request of current) {
-      window.electronAPI?.respondToJavaScriptDialog?.({ id: request.id, ...dismissed });
+      window.electronAPI?.respondToJavaScriptDialog({ id: request.id, ...dismissed });
     }
     if (current.length > 0) setQueue([]);
   }, [current]);

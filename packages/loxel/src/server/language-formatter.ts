@@ -13,6 +13,13 @@ export interface FileFormatter {
   backendDir?: string;
   /** Where a persistent backend starts looking for the tool's install. Default: `backendDir`. */
   backendToolDir?: string;
+  /**
+   * What `detect` cannot decide because it is synchronous and also runs for Settings, such as a
+   * tool's version: runs once per save, before spawning, and its result is what runs or declines.
+   */
+  prepare?(): Promise<FileFormatter | FormatterDecline>;
+  /** How to spawn this formatter, in place of the module's `spawnOptions` for its command. */
+  spawn?: FormatterSpawnOptions;
 }
 
 /**
@@ -76,6 +83,14 @@ export interface LanguageFormatter {
    * several modules claiming an extension, the first one's applies.
    */
   failureNotice?(failure: FormatterFailure): string | undefined;
+  /**
+   * Whether a manual override running `command` with `args` runs what the repository names rather
+   * than what it says, such as a tool a project manifest selects. `dirs` are the saved file's
+   * directory and its ancestors up to the worktree. Asked of every module whatever the file's
+   * extension, since the override's command is what runs; true from any of them holds the override
+   * back in an untrusted repository.
+   */
+  overrideRunsProjectTool?(command: string, args: string, dirs: readonly string[]): boolean;
 }
 
 /**

@@ -3,9 +3,8 @@
  * Accepts a filePath and optional callbacks.
  * Persists content to disk via autosave with conflict detection.
  */
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { Crepe } from "@milkdown/crepe";
 import {
   commandsCtx,
@@ -25,10 +24,15 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
+import { codeBlockSourcePlugin, keepSourcesClosed } from "@/components/editor/code-block-source";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { codeBlockText, handleDiffBlockClick } from "@/components/editor/diff-block-preview";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
+import { attachMermaidPreviewControls } from "@/components/editor/mermaid-preview-controls";
+import { MermaidDiagramViewer } from "@/components/editor/MermaidDiagramViewer";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { installSoftLineBreaks } from "@/components/editor/soft-line-break";
 import {
@@ -40,6 +44,7 @@ import {
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import {
   type MarkdownBlockCodec,
   type SourceBaseline,
@@ -52,7 +57,11 @@ import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { useEditorStateStore } from "@/store/editor-state";
+import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
+
+import { codeBlockLanguages } from "./code-block-highlight";
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
 
@@ -197,38 +206,45 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
   return serializeBody(crepe);
 }
 
-/** CodeMirror theme matching loxel's JetBrains dark palette. */
-const codeTheme = EditorView.theme({}, { dark: true });
+/** Holds each code block's `EditorView.darkTheme`, so it can follow the app theme. */
+const darkThemeCompartment = new Compartment();
 
-const codeHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "#cf8e6d" },
-  { tag: tags.operator, color: "#cf8e6d" },
-  { tag: tags.name, color: "#bcbec4" },
-  { tag: tags.variableName, color: "#bcbec4" },
-  { tag: tags.propertyName, color: "#c77dbb" },
-  { tag: tags.function(tags.variableName), color: "#56a8f5" },
-  { tag: tags.function(tags.propertyName), color: "#56a8f5" },
-  { tag: tags.definition(tags.variableName), color: "#bcbec4" },
-  { tag: tags.typeName, color: "#2fbaa3" },
-  { tag: tags.className, color: "#2fbaa3" },
-  { tag: tags.string, color: "#6aab73" },
-  { tag: tags.special(tags.string), color: "#6aab73" },
-  { tag: tags.number, color: "#2aacb8" },
-  { tag: tags.bool, color: "#cf8e6d" },
-  { tag: tags.null, color: "#cf8e6d" },
-  { tag: tags.comment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.lineComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.blockComment, color: "#7a7e85", fontStyle: "italic" },
-  { tag: tags.meta, color: "#bbb529" },
-  { tag: tags.regexp, color: "#6aab73" },
-  { tag: tags.tagName, color: "#e8bf6a" },
-  { tag: tags.attributeName, color: "#bababa" },
-  { tag: tags.attributeValue, color: "#6a8759" },
-  { tag: tags.heading, color: "#bcbec4", fontWeight: "bold" },
-  { tag: tags.link, color: "#56a8f5", textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
-]);
+/**
+ * Keeps a code block's `EditorView.darkTheme` (CodeMirror's own dark or light defaults, such as
+ * the cursor and selection) on the app theme: when the theme changes, and once at creation, since
+ * a block added after a change starts from the value the editor was created with.
+ */
+const followDarkMode = ViewPlugin.define((view) => {
+  let destroyed = false;
+  const apply = (darkMode: boolean) => {
+    if (destroyed || view.state.facet(EditorView.darkTheme) === darkMode) return;
+    view.dispatch({ effects: darkThemeCompartment.reconfigure(EditorView.darkTheme.of(darkMode)) });
+  };
+  // A view can't be updated while it is being constructed.
+  queueMicrotask(() => apply(useUIStore.getState().darkMode));
+  const unsubscribe = useUIStore.subscribe((state, prev) => {
+    if (state.darkMode !== prev.darkMode) apply(state.darkMode);
+  });
+  return {
+    destroy: () => {
+      destroyed = true;
+      unsubscribe();
+    },
+  };
+});
+
+/**
+ * Code-block theme: CodeMirror's own defaults for the app theme. Token colors come with each
+ * block's language (code-block-highlight.ts).
+ */
+function codeTheme() {
+  return [
+    darkThemeCompartment.of(EditorView.darkTheme.of(useUIStore.getState().darkMode)),
+    followDarkMode,
+  ];
+}
+
+const CODE_BLOCK_LANGUAGES = codeBlockLanguages();
 
 /** Scroll the editor so the current cursor is roughly 1/3 from the top of the viewport. */
 function scrollCursorNearTop(view: ProseMirrorView): void {
@@ -265,6 +281,7 @@ export function MarkdownEditor({
   panelApi,
 }: MarkdownEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
+  const diffViewMode = useUIStore((s) => s.diffViewMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
 
@@ -327,6 +344,9 @@ export function MarkdownEditor({
 
   // Keep save option refs in sync with formatting settings.
   useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
+  const markdownOutput = useSettingsStore((s) => s.editor.formatting.markdownOutput);
+  // Value key so async settings hydration (same values, new object) doesn't remount the editor.
+  const markdownOutputKey = JSON.stringify(markdownOutput);
 
   // Frontmatter state — kept as React state so FrontmatterEditor re-renders on change.
   // The ref mirrors the state for synchronous reads inside Crepe callbacks.
@@ -397,7 +417,12 @@ export function MarkdownEditor({
       features: { [Crepe.Feature.ImageBlock]: false, [Crepe.Feature.Latex]: false },
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
-        [Crepe.Feature.CodeMirror]: { theme: [codeTheme, syntaxHighlighting(codeHighlight)] },
+        [Crepe.Feature.CodeMirror]: {
+          theme: codeTheme(),
+          languages: CODE_BLOCK_LANGUAGES,
+          renderPreview: renderCodeBlockPreview,
+          previewLoading: "Rendering…",
+        },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {
             const dataGroup = builder.addGroup("data", "Data");
@@ -424,14 +449,15 @@ export function MarkdownEditor({
     }
 
     installSoftLineBreaks(crepe.editor);
+    crepe.editor.use(codeBlockSourcePlugin);
 
-    // Align remark-stringify output with oxfmt/Prettier markdown defaults.
+    // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
+    // remark-stringify at init, so changes recreate the editor via the effect deps below.
     crepe.editor.config((ctx) => {
-      ctx.set(remarkStringifyOptionsCtx, {
-        ...ctx.get(remarkStringifyOptionsCtx),
-        bullet: "-",
-        rule: "-",
-      });
+      ctx.set(
+        remarkStringifyOptionsCtx,
+        buildRemarkStringifyOptions(ctx.get(remarkStringifyOptionsCtx), markdownOutput),
+      );
     });
 
     // On every change: merge with frontmatter, update cache + trigger autosave
@@ -506,7 +532,8 @@ export function MarkdownEditor({
             } else if (!editorContentCache.has(effectCacheKey)) {
               // New editor — place cursor at end
               const end = doc.content.size;
-              view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(end))));
+              const placeCaret = view.state.tr.setSelection(Selection.near(doc.resolve(end)));
+              view.dispatch(keepSourcesClosed(placeCaret));
               if (isActivatedPanel(panelApi)) view.focus();
             }
           }
@@ -657,9 +684,10 @@ export function MarkdownEditor({
       crepeRef.current = null;
     };
     // Re-create when crepeKey changes (accept disk version), content first loads,
-    // or cache key changes (project/worktree switch)
+    // cache key changes (project/worktree switch), or markdown output settings change.
+    // Pending edits survive the remount via editorContentCache (written in cleanup).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crepeKey, diskContent !== null, cacheKey]);
+  }, [crepeKey, diskContent !== null, cacheKey, markdownOutputKey]);
 
   // Navigate to line:column when props change (e.g. clicking a different search result for
   // the same file). Skips the initial render — mount-time navigation is handled above.
@@ -871,6 +899,38 @@ export function MarkdownEditor({
     });
   }, [cacheKey]);
 
+  // Diff fence previews are static markup; their buttons work through this delegated handler.
+  const handleContainerClick = useCallback(
+    (event: React.MouseEvent) =>
+      handleDiffBlockClick(event, (codeBlock) => {
+        const patch = crepeRef.current?.editor.action((ctx) =>
+          codeBlockText(ctx.get(editorViewCtx), codeBlock),
+        );
+        if (patch) dispatchLoxelEvent("loxel-open-patch-diff", { patch, sourcePath: filePath });
+      }),
+    [filePath],
+  );
+
+  // Mermaid previews are static markup too; their zoom, pan, copy and open work by delegation.
+  // Opening reads the block's text from the document, so the viewer renders the current source.
+  const [viewerSource, setViewerSource] = useState<string | null>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    return attachMermaidPreviewControls(
+      container,
+      (codeBlock) => {
+        const source = crepeRef.current?.editor.action((ctx) =>
+          codeBlockText(ctx.get(editorViewCtx), codeBlock),
+        );
+        if (source) setViewerSource(source);
+      },
+      () => crepeRef.current?.editor.action((ctx) => ctx.get(editorViewCtx)),
+    );
+    // crepeKey re-attaches the listeners after the container is remounted (accept disk version).
+  }, [crepeKey]);
+  const closeViewer = useCallback(() => setViewerSource(null), []);
+
   // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
   // be re-created; only a file that never loaded has nothing to show.
   if (isError && diskContent === null) {
@@ -900,18 +960,32 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      <div ref={containerRef} key={crepeKey} className="flex-1 overflow-hidden" />
-      <button
-        onClick={handleCopy}
-        title="Copy markdown"
-        className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity group-hover/editor:opacity-100"
-      >
-        {copied ? (
-          <CheckIcon className="size-3.5 text-green-500" />
-        ) : (
-          <ClipboardIcon className="size-3.5" />
-        )}
-      </button>
+      {/* The copy button floats over the document body, below the banners and the frontmatter
+          header, so it never covers their controls. */}
+      <div className="relative min-h-0 flex-1">
+        {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+        <div
+          ref={containerRef}
+          key={crepeKey}
+          className="h-full overflow-hidden"
+          data-diff-view-mode={diffViewMode}
+          onClick={handleContainerClick}
+        />
+        <button
+          onClick={handleCopy}
+          title="Copy markdown"
+          className="bg-muted/80 border-border text-muted-foreground hover:text-foreground hover:bg-muted not-dark:bg-background not-dark:border-input not-dark:text-foreground/75 not-dark:hover:bg-muted not-dark:hover:text-foreground absolute top-3 right-3 flex size-7 items-center justify-center rounded-md border opacity-0 backdrop-blur-sm transition-opacity not-dark:shadow-sm group-hover/editor:opacity-100"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-green-500" />
+          ) : (
+            <ClipboardIcon className="size-3.5" />
+          )}
+        </button>
+      </div>
+      {viewerSource !== null && (
+        <MermaidDiagramViewer source={viewerSource} onClose={closeViewer} />
+      )}
     </div>
   );
 }

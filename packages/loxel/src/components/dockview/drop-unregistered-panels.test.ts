@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { SerializedDockview } from "dockview-react";
+import { Orientation, type SerializedDockview } from "dockview-react";
 
 import { dropUnregisteredPanels } from "./drop-unregistered-panels";
 
@@ -28,7 +28,7 @@ function layout(
       root: { type: "branch", data: rootChildren },
       width: 1000,
       height: 800,
-      orientation: "HORIZONTAL",
+      orientation: Orientation.HORIZONTAL,
     } as SerializedDockview["grid"],
     panels: Object.fromEntries(panels.map((p) => [p.id, p])),
     activeGroup,
@@ -131,7 +131,7 @@ describe("dropUnregisteredPanels", () => {
             root: { type: "branch", data: [leaf("nested", ["agent-1"], 100)] },
             width: 100,
             height: 100,
-            orientation: "HORIZONTAL",
+            orientation: Orientation.HORIZONTAL,
           } as NonNullable<NonNullable<SerializedDockview["floatingGroups"]>[number]["grid"]>,
           position,
         },

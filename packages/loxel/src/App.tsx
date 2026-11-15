@@ -4,33 +4,39 @@ import "dockview-react/dist/styles/dockview.css";
 import { useEffect, useRef } from "react";
 
 import { CommandPaletteModal } from "./components/command-palette/CommandPaletteModal";
+import { HomeCenter } from "./components/dockview/CenterHost";
 import { LAYOUT_VERSION, createDefaultLayout } from "./components/dockview/default-layout";
 import {
   onOuterLayoutChange,
   onOuterLayoutRestored,
+  onOuterSwapAbandoned,
   performOuterClear,
   setupOuterDockview,
 } from "./components/dockview/outer-dockview-setup";
 import { outerComponents } from "./components/dockview/panels";
 import { PersistedLayoutComponent } from "./components/dockview/PersistedLayout";
-import { EmptyState } from "./components/EmptyState";
 import { FileSearchModal } from "./components/file-search/FileSearchModal";
 import { StatusBar } from "./components/panels/StatusBar";
 import { TopBar } from "./components/panels/TopBar";
+import { AddProjectWizard } from "./components/projects/AddProjectWizard";
 import { SearchModal } from "./components/search/SearchModal";
+import { SchemaConsentPrompt } from "./components/settings/SchemaConsentPrompt";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { SymbolSearchModal } from "./components/symbol-search/SymbolSearchModal";
+import { QuitQuestionHost } from "./components/terminal/QuitQuestionHost";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
 import { ConfirmDialogHost } from "./components/ui/confirm-dialog-host";
 import { ToastContainer } from "./components/ui/toast";
 import { useDiffSource } from "./hooks/useDiffSource";
+import { useFontSettingsSync } from "./hooks/useFontSettingsSync";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
+import { useUpdateStatusBridge } from "./queries/use-update-status";
 import { useWsBridge } from "./queries/ws-bridge";
 import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
@@ -41,10 +47,12 @@ import { useWorktreeStore } from "./store/worktrees";
 
 export default function App() {
   useWsBridge();
+  useUpdateStatusBridge();
   useDiffSource();
   useKeybindings();
   useLoxelEventListeners();
   useThemeSync();
+  useFontSettingsSync();
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeLeftPanel = useWorktreeToolsBar((s) => s.activeLeftPanel);
@@ -89,6 +97,7 @@ export default function App() {
                 onLayoutRestored={onOuterLayoutRestored}
                 onLayoutChange={onOuterLayoutChange}
                 performClear={performOuterClear}
+                onSwapAbandoned={onOuterSwapAbandoned}
                 apiRef={apiRef}
                 components={outerComponents}
                 scrollbars="native"
@@ -99,20 +108,24 @@ export default function App() {
           <StatusBar />
         </>
       ) : (
+        // Home: no worktree active, so only the editor area, with panels that need no worktree
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <div className="flex-1 overflow-hidden">
-            <EmptyState />
+            <HomeCenter />
           </div>
         </div>
       )}
+      <AddProjectWizard />
       <SettingsModal />
       <SearchModal />
       <FileSearchModal />
       <CommandPaletteModal />
       <SymbolSearchModal />
       <ToastContainer />
+      <SchemaConsentPrompt />
       <ConfirmDialogHost />
+      <QuitQuestionHost />
     </div>
   );
 }

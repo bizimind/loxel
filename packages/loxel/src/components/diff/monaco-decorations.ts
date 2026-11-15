@@ -24,7 +24,8 @@ export function buildMonacoDecorations(regions: ChangeRegion[]): editor.IModelDe
         endLineNumber: region.endLine,
         endColumn: 1,
       },
-      options: { isWholeLine: true, className },
+      // The margin is the code inset (see EditorPanel); tinting it keeps changed rows full width.
+      options: { isWholeLine: true, className, marginClassName: className },
     };
   });
 }

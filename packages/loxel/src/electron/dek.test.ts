@@ -10,12 +10,23 @@ const dekFile = path.join(stateDir, "data-encryption-key.enc");
 const safeStorage = {
   available: true,
   encryptFails: false,
-  isEncryptionAvailable: () => safeStorage.available,
-  encryptString: (value: string) => {
+  keychainLocked: false,
+  reEncrypt: false,
+  encrypts: 0,
+  isAsyncEncryptionAvailable: async () => safeStorage.available,
+  encryptStringAsync: async (value: string) => {
     if (safeStorage.encryptFails) throw new Error("Keychain refused");
+    safeStorage.encrypts++;
     return Buffer.from(value, "utf8");
   },
-  decryptString: (value: Buffer) => value.toString("utf8"),
+  decryptStringAsync: async (value: Buffer) => {
+    if (safeStorage.keychainLocked) {
+      throw new Error(
+        "safeStorage.decryptStringAsync is temporarily unavailable. Please try again.",
+      );
+    }
+    return { result: value.toString("utf8"), shouldReEncrypt: safeStorage.reEncrypt };
+  },
 };
 const exit = mock(() => {});
 const showErrorBox = mock(() => {});
@@ -24,9 +35,11 @@ void mock.module("electron", () => ({ app: { exit }, dialog: { showErrorBox }, s
 
 /** A fresh module each time: it caches the key for the process. */
 let load = 0;
+async function freshDek(): Promise<typeof import("./dek")> {
+  return (await import(`./dek?${load++}`)) as typeof import("./dek");
+}
 async function loadOrCreateDek(): Promise<string | null> {
-  const dek = (await import(`./dek?${load++}`)) as typeof import("./dek");
-  return dek.loadOrCreateDek();
+  return (await freshDek()).initDek();
 }
 
 afterAll(() => fs.rmSync(stateDir, { recursive: true, force: true }));
@@ -34,10 +47,13 @@ afterAll(() => fs.rmSync(stateDir, { recursive: true, force: true }));
 beforeEach(() => {
   safeStorage.available = true;
   safeStorage.encryptFails = false;
+  safeStorage.keychainLocked = false;
+  safeStorage.reEncrypt = false;
+  safeStorage.encrypts = 0;
   fs.rmSync(dekFile, { force: true });
 });
 
-describe("loadOrCreateDek", () => {
+describe("initDek", () => {
   test("creates a key, then reads the same key back", async () => {
     const created = await loadOrCreateDek();
     expect(Buffer.from(created ?? "", "base64")).toHaveLength(32);
@@ -61,5 +77,30 @@ describe("loadOrCreateDek", () => {
     fs.writeFileSync(dekFile, "c2hvcnQ=");
     const replaced = await loadOrCreateDek();
     expect(Buffer.from(replaced ?? "", "base64")).toHaveLength(32);
+  });
+
+  test("keeps the stored key when the keychain withholds it", async () => {
+    const created = await loadOrCreateDek();
+    safeStorage.keychainLocked = true;
+    expect(await loadOrCreateDek()).toBeNull();
+    expect(fs.readFileSync(dekFile, "utf8")).toBe(created ?? "");
+  });
+
+  test("stores the key again when the keychain key rotated", async () => {
+    const created = await loadOrCreateDek();
+    expect(await loadOrCreateDek()).toBe(created);
+    expect(safeStorage.encrypts).toBe(1);
+    safeStorage.reEncrypt = true;
+    expect(await loadOrCreateDek()).toBe(created);
+    expect(safeStorage.encrypts).toBe(2);
+  });
+});
+
+describe("getDek", () => {
+  test("returns what initDek loaded", async () => {
+    const dek = await freshDek();
+    expect(() => dek.getDek()).toThrow();
+    const created = await dek.initDek();
+    expect(dek.getDek()).toBe(created);
   });
 });

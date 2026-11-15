@@ -167,7 +167,7 @@ describe("WorkspaceEditApplier", () => {
       },
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, summary: { edits: 3, files: 2 } });
     expect(open.calls).toEqual(["stop", "edit", "stop"]);
     expect(open.operations[0]?.map((op) => op.text)).toEqual(["sum_all"]);
     expect(open.operations[0]?.[0]?.range).toEqual({
@@ -233,7 +233,7 @@ describe("WorkspaceEditApplier", () => {
       changes: { "file:///others/x.py": [edit(0, 0, 1, "1")] },
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, summary: { edits: 1, files: 1 } });
     expect(open.calls).toEqual(["stop", "edit", "stop"]);
   });
 
@@ -342,7 +342,7 @@ describe("WorkspaceEditApplier", () => {
       ],
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, summary: { edits: 2, files: 1 } });
     expect(calls).toEqual(["create /w/new.py", "write /w/new.py"]);
     expect(disk.get("/w/new.py")).toBe("def moved(): ...\n");
   });
@@ -353,9 +353,15 @@ describe("WorkspaceEditApplier", () => {
       applier(fs).apply({ documentChanges: [{ kind: "create", uri: "file:///w/a.py", options }] });
 
     expect((await create()).failureReason).toBe("/w/a.py already exists");
-    expect(await create({ ignoreIfExists: true })).toEqual({ applied: true });
+    expect(await create({ ignoreIfExists: true })).toEqual({
+      applied: true,
+      summary: { edits: 0, files: 0 },
+    });
     expect(calls).toEqual([]);
-    expect(await create({ overwrite: true })).toEqual({ applied: true });
+    expect(await create({ overwrite: true })).toEqual({
+      applied: true,
+      summary: { edits: 1, files: 1 },
+    });
     expect(disk.get("/w/a.py")).toBe("");
   });
 
@@ -373,7 +379,7 @@ describe("WorkspaceEditApplier", () => {
       ],
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, summary: { edits: 3, files: 2 } });
     expect(calls).toEqual([
       "rename /w/pkg/a.py /w/pkg/b.py",
       "write /w/main.py",
@@ -382,6 +388,19 @@ describe("WorkspaceEditApplier", () => {
     expect(disk.get("/w/main.py")).toBe("import pkg.b\n");
     expect(disk.get("/w/pkg/b.py")).toBe("y = 1\n");
     expect(disk.has("/w/pkg/a.py")).toBe(false);
+  });
+
+  test("counts a file edited and then renamed once", async () => {
+    const { fs } = fakeFileSystem({ "/w/a.py": "x = 1\n" });
+
+    const result = await applier(fs).apply({
+      documentChanges: [
+        docEdit("file:///w/a.py", [edit(0, 0, 1, "y")]),
+        { kind: "rename", oldUri: "file:///w/a.py", newUri: "file:///w/b.py" },
+      ],
+    });
+
+    expect(result).toEqual({ applied: true, summary: { edits: 2, files: 1 } });
   });
 
   test("asks a registered server for the edits a rename implies and applies them first", async () => {
@@ -403,7 +422,7 @@ describe("WorkspaceEditApplier", () => {
       ],
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, summary: { edits: 2, files: 2 } });
     expect(lsp.asked).toEqual([
       { files: [{ oldUri: "file:///w/src/util.ts", newUri: "file:///w/src/tools.ts" }] },
     ]);
@@ -437,9 +456,15 @@ describe("WorkspaceEditApplier", () => {
       });
 
     expect((await rename()).failureReason).toBe("/w/b.py already exists");
-    expect(await rename({ ignoreIfExists: true })).toEqual({ applied: true });
+    expect(await rename({ ignoreIfExists: true })).toEqual({
+      applied: true,
+      summary: { edits: 0, files: 0 },
+    });
     expect(calls).toEqual([]);
-    expect(await rename({ overwrite: true })).toEqual({ applied: true });
+    expect(await rename({ overwrite: true })).toEqual({
+      applied: true,
+      summary: { edits: 2, files: 1 },
+    });
     expect(calls).toEqual(["delete /w/b.py", "rename /w/a.py /w/b.py"]);
   });
 
@@ -498,8 +523,9 @@ describe("WorkspaceEditApplier", () => {
       files.apply({ changes: { "file:///w/a.py": [edit(0, 0, 1, "X")] } }),
       files.apply({ changes: { "file:///w/a.py": [edit(0, 1, 1, "!")] } }),
     ]);
+    const one = { applied: true, summary: { edits: 1, files: 1 } };
 
-    expect(results).toEqual([{ applied: true }, { applied: true }]);
+    expect(results).toEqual([one, one]);
     expect(disk.get("/w/a.py")).toBe("X!");
   });
 
@@ -535,10 +561,16 @@ describe("WorkspaceEditApplier", () => {
       applier(fs).apply({ documentChanges: [{ kind: "delete", uri, options }] });
 
     expect((await del("file:///w/gone.py")).failureReason).toBe("/w/gone.py does not exist");
-    expect(await del("file:///w/gone.py", { ignoreIfNotExists: true })).toEqual({ applied: true });
+    expect(await del("file:///w/gone.py", { ignoreIfNotExists: true })).toEqual({
+      applied: true,
+      summary: { edits: 0, files: 0 },
+    });
     expect((await del("file:///w/pkg")).applied).toBe(false);
-    expect(await del("file:///w/pkg", { recursive: true })).toEqual({ applied: true });
-    expect(await del("file:///w/a.py")).toEqual({ applied: true });
+    expect(await del("file:///w/pkg", { recursive: true })).toEqual({
+      applied: true,
+      summary: { edits: 1, files: 1 },
+    });
+    expect(await del("file:///w/a.py")).toEqual({ applied: true, summary: { edits: 1, files: 1 } });
     expect(calls).toEqual(["delete /w/pkg", "delete /w/a.py"]);
   });
 });

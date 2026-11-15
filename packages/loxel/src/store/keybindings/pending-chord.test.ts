@@ -2,12 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { DockviewApi } from "dockview-react";
 
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { registerFindTarget } from "@/lib/find-targets";
-import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { registerTabRename } from "@/lib/tab-rename";
 
 import { applyStoreUpdate } from "../store-sync";
 import { setCenterApi } from "../tools-bar";
+import { useWorktreeStore } from "../worktrees";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
 import { findOverlappingActions, useKeybindingStore } from "./keybinding-store";
 import {
@@ -22,6 +23,7 @@ const key = normalizeKeyCombo;
 afterEach(() => {
   cancelPendingChord();
   useKeybindingStore.getState().resetAllOverrides();
+  useWorktreeStore.setState({ activeWorktreePath: null });
 });
 
 describe("resolveKeystroke", () => {
@@ -46,12 +48,20 @@ describe("resolveKeystroke", () => {
   });
 
   test("resolves a three-step typed split chord", () => {
+    useWorktreeStore.setState({ activeWorktreePath: "/wt" });
     resolveKeystroke(key("Cmd+Backslash"));
     expect(resolveKeystroke(key("T"))).toEqual({ kind: "pending" });
     expect(resolveKeystroke(key("ArrowDown"))).toEqual({
       kind: "action",
       actionId: "panel.split.terminal.down",
     });
+  });
+
+  test("leaves a chord for a panel Home can't hold unbound in Home", () => {
+    // A drawing needs a worktree for its draft.
+    resolveKeystroke(key("Cmd+Backslash"));
+    resolveKeystroke(key("D"));
+    expect(resolveKeystroke(key("ArrowDown"))).toEqual({ kind: "cancelled" });
   });
 
   test("accepts later steps typed with ⌘ still held", () => {
@@ -181,7 +191,10 @@ describe("⇧⌘R, shared by Rename Tab and a browser panel's hard refresh", () 
     const panel = { id: "tab", group: { element: tabGroup } };
     setCenterApi({ activePanel: panel } as unknown as DockviewApi);
     const offRename = registerTabRename(panel.id, () => {});
-    const offHardRefresh = registerHardRefreshTarget(browserRoot, () => {});
+    const offHardRefresh = registerBrowserPanelTarget(browserRoot, {
+      hardRefresh: () => {},
+      toggleBookmark: () => {},
+    });
     return {
       browserInput: browserRoot.querySelector("input")!,
       tabInput: tabGroup.querySelector("input")!,

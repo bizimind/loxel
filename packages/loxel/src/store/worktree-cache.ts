@@ -3,13 +3,13 @@
  *
  * Per-worktree state lives in worktree store instances (worktree-repository,
  * worktree-reviews, worktree-ui, worktree-tools-bar). This module handles:
- * - Worktree key transition on worktree switch (+ comment cleanup)
+ * - State cleanup on worktree switch (comments)
  * - Generic per-worktree cache (used by GraphPanel for inner dockview layouts)
  */
 import type { SerializedDockview } from "dockview-react";
 
 import { useCommentStore } from "./comments";
-import { getActiveWorktreeKey, setActiveWorktreeKey } from "./worktree-store";
+import { getActiveWorktreeKey } from "./worktree-store";
 
 // --- Generic per-worktree cache for component-local state ---
 
@@ -36,8 +36,18 @@ export function setWorktreeInnerLayout(containerId: string, layout: SerializedDo
   setWorktreeValue(containerId, layout);
 }
 
+/** Each mounted layout's own cache of the layouts it has shown, keyed by worktree. */
+const layoutCaches = new Set<Map<string, unknown>>();
+
+/** Have `cache` purged with its worktree. Returns an unregister function. */
+export function registerLayoutCache(cache: Map<string, unknown>): () => void {
+  layoutCaches.add(cache);
+  return () => layoutCaches.delete(cache);
+}
+
 /** Purge cached values for a worktree (worktree removal cleanup). */
 export function purgeWorktreeCache(scopeKey: string): void {
+  for (const cache of layoutCaches) cache.delete(scopeKey);
   const prefix = `${scopeKey}::`;
   for (const key of worktreeCache.keys()) {
     if (key.startsWith(prefix)) worktreeCache.delete(key);
@@ -45,11 +55,10 @@ export function purgeWorktreeCache(scopeKey: string): void {
 }
 
 /**
- * Transition to a new worktree. Sets the worktree key so all worktree store
- * hooks and imperative accessors resolve to the correct instance.
- * Clears comment state (comments are diff-specific, not persisted across scopes).
+ * Transition to a new worktree, after `activeWorktreePath` has changed (worktree store hooks and
+ * imperative accessors follow it on their own). Clears comment state (comments are diff-specific,
+ * not persisted across scopes).
  */
-export function transitionWorktreeState(_oldKey: string | null, newKey: string): void {
-  setActiveWorktreeKey(newKey);
+export function transitionWorktreeState(): void {
   useCommentStore.getState().clearAll();
 }

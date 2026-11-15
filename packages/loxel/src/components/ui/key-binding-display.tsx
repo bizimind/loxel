@@ -42,6 +42,13 @@ interface KeyBindingDisplayProps {
   className?: string;
 }
 
+/**
+ * The light theme's keycap look for a chip around a binding: a lightly filled key with a darker
+ * bottom edge. Light-only, so the dark theme keeps each list's own chip style (or none).
+ */
+export const LIGHT_KEYCAP_CLASS =
+  "not-dark:rounded not-dark:border not-dark:border-input not-dark:bg-card not-dark:px-[7px] not-dark:py-[3px] not-dark:font-sans not-dark:text-[12px] not-dark:leading-none not-dark:text-foreground not-dark:shadow-[inset_0_-1px_0_var(--input)]";
+
 export function KeyBindingDisplay({ binding, className }: KeyBindingDisplayProps) {
   return (
     <span className={cn("inline-flex items-center gap-[0.4em]", className)}>

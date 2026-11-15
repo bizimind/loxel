@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 
 import { logger } from "./logger";
 import { measureSpawn } from "./spawn-metrics";
@@ -260,6 +260,17 @@ export function refreshLoginShellEnv(): Promise<void> {
  */
 export function buildSpawnEnv(): Env {
   return withSpawnDefaults({ ...process.env, ...loginShellEnv.captured });
+}
+
+/**
+ * `path` without its relative entries and the directories holding an executable `command`, so a
+ * process spawned with it cannot run that command by name.
+ */
+export function pathWithoutCommand(path: string, command: string): string {
+  return path
+    .split(delimiter)
+    .filter((dir) => isAbsolute(dir) && !Bun.which(command, { PATH: dir }))
+    .join(delimiter);
 }
 
 /**

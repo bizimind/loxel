@@ -1,30 +1,33 @@
 ---
 title: Keyboard Shortcuts
 description: Complete keyboard shortcut reference for all panels, navigation, and worktree switching.
-order: 14
+section: "Reference"
+order: 2
 ---
 
 All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). Shortcuts use macOS key names; `Cmd` is the Command key.
 
-For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
+For what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Tasks](/docs/worktrees-and-tasks), [Browser](/docs/browser), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
 
 ---
 
 ## Panel management
 
-| Action                             | Shortcut                                                     |
-| ---------------------------------- | ------------------------------------------------------------ |
-| New terminal                       | `Cmd+T` or `` Ctrl+Shift+` ``                                |
-| New markdown draft                 | `Cmd+Shift+M` or `Cmd+N`                                     |
-| New drawing                        | `Cmd+Shift+D`                                                |
-| New browser                        | `Cmd+Shift+B`                                                |
-| New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
-| Close panel                        | `Cmd+W`                                                      |
-| Reopen closed tab                  | `Cmd+Shift+T`                                                |
-| Rename the active tab              | `Cmd+Shift+R`                                                |
-| Hard refresh a browser tab         | `Cmd+Shift+R` while the browser tab has focus                |
-| Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
+| Action                              | Shortcut                                                     |
+| ----------------------------------- | ------------------------------------------------------------ |
+| New terminal                        | `Cmd+T` or `` Ctrl+Shift+` ``                                |
+| New markdown draft                  | `Cmd+Shift+M` or `Cmd+N`                                     |
+| New drawing                         | `Cmd+Shift+D`                                                |
+| New browser                         | `Cmd+Shift+B`                                                |
+| New tab of the active panel's type  | `Cmd+\` then `Enter`                                         |
+| Close panel                         | `Cmd+W`                                                      |
+| Reopen closed tab                   | `Cmd+Shift+T`                                                |
+| Rename the active tab               | `Cmd+Shift+R`                                                |
+| Maximize / restore the active group | `Ctrl+Shift+Enter`                                           |
+| Hard refresh a browser tab          | `Cmd+Shift+R` while the browser tab has focus                |
+| Bookmark a browser page             | `Cmd+D` while the browser tab has focus                      |
+| Next / previous tab                 | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Focus panel 1–9                     | `Cmd+1` – `Cmd+9`                                            |
 
 `Cmd+Shift+R` depends on focus: in a browser tab, its page or its toolbar, it reloads the page and bypasses the cache; anywhere else it renames the active tab. Settings > Keybindings lists them as **Hard Refresh Browser Tab** and **Rename Tab**, and remapping one leaves the other on `Cmd+Shift+R`.
 
@@ -55,18 +58,27 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 
 ## Navigation & global
 
-| Action                                  | Shortcut      |
-| --------------------------------------- | ------------- |
-| Quick Open (file)                       | `Cmd+P`       |
-| Go to symbol in workspace               | `Cmd+Alt+O`   |
-| Find in files                           | `Cmd+Shift+F` |
-| Command palette                         | `Cmd+Shift+P` |
-| Open settings                           | `Cmd+,`       |
-| Reveal the active file in Project Files | `Cmd+Alt+E`   |
-| Go to the most recent notification      | `` Ctrl+` ``  |
-| Save                                    | `Cmd+S`       |
+| Action                                  | Shortcut                      |
+| --------------------------------------- | ----------------------------- |
+| Quick Open (file)                       | `Cmd+P`                       |
+| Go to symbol in workspace               | `Cmd+Alt+O`                   |
+| Find in files                           | `Cmd+Shift+F`                 |
+| Command palette                         | `Cmd+Shift+P`                 |
+| Open settings                           | `Cmd+,`                       |
+| Quit Loxel                              | `Cmd+Q`                       |
+| Quit and Keep Terminals                 | `Cmd+Alt+Q`                   |
+| Quit and End Terminals                  | command palette               |
+| Restart Loxel                           | Loxel menu or command palette |
+| Theme: Dark / Light / System            | unbound — command palette     |
+| Reveal the active file in Project Files | `Cmd+Alt+E`                   |
+| Go to the most recent notification      | `` Ctrl+` ``                  |
+| Save                                    | `Cmd+S`                       |
+
+`Cmd+Q` and `Cmd+Alt+Q` belong to the Loxel menu, so Settings > Keybindings can't remap them. `Cmd+Q` asks before ending terminals that are running programs, or follows **When Quitting Loxel** in Settings > Terminal. With that set to **Keep terminals running**, `Cmd+Q` keeps them and `Cmd+Alt+Q` is **Quit and End Terminals** instead. See [Terminals](/docs/terminals#quitting-without-ending-your-terminals) for what each quit keeps running.
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
+
+macOS window tiling shortcuts (macOS 15 and later) work in the editor, terminals and the rest of Loxel (in a browser tab, the page gets them first): `Fn+Ctrl+Arrow` moves the window to a half of the screen, `Fn+Ctrl+Shift+Arrow` arranges it with the window behind it, and `Fn+Ctrl+F` fills the screen. They are also listed under Window > Move & Resize in the menu bar. On Mac keyboards `Fn+Arrow` is `Home`, `End`, `Page Up` or `Page Down`, so binding one of those with `Ctrl` in Settings > Keybindings takes it from macOS.
 
 ---
 
@@ -91,6 +103,7 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | New worktree                             | `Ctrl+Alt+N`                                            |
 | Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
 | Delete worktree                          | unbound — command palette or right-click menu           |
+| Add project                              | unbound — command palette or worktree sidebar           |
 
 Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip archived worktrees.
 

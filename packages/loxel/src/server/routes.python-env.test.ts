@@ -10,6 +10,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "routes-python-env-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
 const { getPythonOverride } = await import("./python-override-store");
+const { setRepoTrusted } = await import("./repo-trust");
 type RouteContext = import("./routes").RouteContext;
 type ProjectState = import("./server-state").ProjectState;
 
@@ -68,6 +69,7 @@ beforeEach(async () => {
 
 describe("Python interpreter routes", () => {
   test("stores a chosen interpreter, reports it, and clears it", async () => {
+    setRepoTrusted(wt, true);
     const venvPython = await makeVenv(join(wt, ".venv"));
     const picked = await makeVenv(join(root, "picked"));
 
@@ -94,6 +96,15 @@ describe("Python interpreter routes", () => {
     const cleared = await get<PythonEnvResponse>("/api/python-env");
     expect(cleared.overridePath).toBeNull();
     expect(cleared.env?.pythonPath).toBe(venvPython);
+  });
+
+  test("runs no environment's own interpreter to check it until the repository is trusted", async () => {
+    const picked = await makeVenv(join(root, "picked"));
+    const res = await setOverride(picked);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("trusted first");
+    setRepoTrusted(wt, true);
+    expect((await setOverride(picked)).status).toBe(200);
   });
 
   test("rejects what is not a usable Python interpreter", async () => {

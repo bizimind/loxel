@@ -89,14 +89,18 @@ describe("project conversion preflight", () => {
       resolveFilePath: () => null,
       initializeProject: onInitialize,
       teardownProject: onTeardown,
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       activeWindow: () => null,
+      homeDrafts: {} as never,
       startTerminal: async () => {},
+      listTerminals: async () => ({ terminals: [] }),
     };
   }
 

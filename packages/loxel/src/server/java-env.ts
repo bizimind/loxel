@@ -8,8 +8,9 @@ import { isDirectory } from "@/fs-utils";
 
 import { getJavaOverride } from "./java-override-store";
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
-import { isEnvShippedByRepo, isInside, isShippedByRepo } from "./shipped-by-repo";
+import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 

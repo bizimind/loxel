@@ -5,7 +5,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { getCurrentRepositoryStore } from "@/store/worktree-repository";
-import { setActiveWorktreeKey } from "@/store/worktree-store";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -89,7 +88,6 @@ describe("FileTreePanel", () => {
     openedFiles.length = 0;
     missingPaths.clear();
     useWorktreeStore.setState({ activeWorktreePath: "/repo" });
-    setActiveWorktreeKey("/repo");
     getCurrentWorktreeUI().getState().setSelectedDiffFile("src/a.ts");
     getCurrentWorktreeUI().getState().setPendingReveal(null);
     getCurrentRepositoryStore()

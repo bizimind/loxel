@@ -19,50 +19,31 @@ import type { Project } from "@/api/project-model";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
-import { FileTypeIcon } from "@/lib/file-icons";
 import { focusSidebarEntryForPath, handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
 import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { cn } from "@/lib/utils";
+import { openAddProjectWizard } from "@/store/add-project-wizard";
 import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
+import { LoxelLogoTile } from "../ui/loxel-logo";
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { RAIL_PADDING, railDepth, railWidth } from "./worktree-geometry";
+import { ICON_PX, iconLeft, iconLeftExpanded, railDepth, railWidth } from "./worktree-geometry";
 import { WorktreeTree } from "./WorktreeTree";
 
-// ── Project icon with folder badge ──────────────────────────────────────
-
-/** ProjectIcon wrapped with a small folder badge in the bottom-right corner. */
-function ProjectIconWithBadge({
-  id,
-  name,
-  size,
-  active,
-}: {
-  id: string;
-  name: string;
-  size: "xs" | "sm" | "md";
-  active?: boolean;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <ProjectIcon id={id} name={name} size={size} active={active} />
-      <FileTypeIcon
-        filename="folder"
-        isFolder
-        className="absolute -right-1 -bottom-1 size-3 drop-shadow-[0_0_1px_var(--card)]"
-      />
-    </div>
-  );
-}
-
-/** Collapsed-rail tiles (32px) line up with the top-level worktree icons (24px). */
-const RAIL_TILE_LEFT = RAIL_PADDING - 4;
+/** Expanded project rows: the row's left padding, before the fold chevron. */
+const ROW_LEFT = 8;
+/** The fold chevron's width (`size-3.5`). */
+const CHEVRON_PX = 14;
+/** Puts the expanded project icon in the column of the top-level worktree icons below it. */
+const ICON_MARGIN_LEFT = iconLeftExpanded(0) - ROW_LEFT - CHEVRON_PX;
+/** The rail's Add project button (`size-8`), centered on the worktree icons' column. */
+const RAIL_ADD_PX = 32;
+const RAIL_ADD_LEFT = iconLeft(0) - (RAIL_ADD_PX - ICON_PX) / 2;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */
 const ENTRY_FOCUS_RING =
   "focus-visible:ring-ring focus-visible:ring-offset-card outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
@@ -77,13 +58,13 @@ export function Sidebar() {
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds);
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded);
-  const addProject = useProjectStore((s) => s.addProject);
   const removeProject = useProjectStore((s) => s.removeProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   const updateProject = useProjectStore((s) => s.updateProject);
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
+  const showHome = useWorktreeStore((s) => s.showHome);
 
   // Auto-expand newly loaded projects once so worktrees and the create action are visible.
   // The "once" marker lives in the persisted store, not a ref: the sidebar remounts when the
@@ -120,7 +101,6 @@ export function Sidebar() {
     [setSidebarWidth],
   );
 
-  const [wizardOpen, setWizardOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -154,15 +134,6 @@ export function Sidebar() {
       contextMenu !== null && s.byProject[contextMenu.project.path]?.worktreeMetadata === false,
   );
   const [nestingProjectPath, setNestingProjectPath] = useState<string | null>(null);
-
-  const handleAddProject = useCallback(async () => {
-    if (window.electronAPI?.openFolderDialog) {
-      const path = await window.electronAPI.openFolderDialog();
-      if (path) await addProject(path);
-    } else {
-      setWizardOpen(true);
-    }
-  }, [addProject]);
 
   const handleProjectContextMenu = useCallback((e: React.MouseEvent, project: Project) => {
     e.preventDefault();
@@ -262,6 +233,10 @@ export function Sidebar() {
     [activeWorktreePath, switchWorktree, toggleProjectExpanded],
   );
 
+  const isHome = activeWorktreePath === null;
+  // Always at full strength: the row's highlight and the rail's ring show when Home is shown.
+  const homeTileClass = "text-foreground size-6";
+
   return (
     <div
       className={cn(
@@ -285,6 +260,61 @@ export function Sidebar() {
         className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
+        {/* Home, what a window shows with no worktree, set off from the projects like they are */}
+        <div className="mb-2">
+          {sidebarExpanded ? (
+            // Laid out like a project row, so its logo sits in the column of the project icons.
+            <button
+              type="button"
+              className={cn(
+                "hover:bg-primary/50 focus-visible:ring-ring flex w-full cursor-pointer items-center py-1.5 text-left transition-colors outline-none not-dark:mx-1 not-dark:w-[calc(100%-0.5rem)] not-dark:rounded-md not-dark:pl-1! focus-visible:ring-2 focus-visible:ring-inset",
+                isHome && "bg-primary",
+              )}
+              style={{ paddingLeft: `${ROW_LEFT}px` }}
+              onClick={showHome}
+              aria-current={isHome ? "page" : undefined}
+            >
+              {/* Where a project row has its fold chevron */}
+              <span className="shrink-0" style={{ width: `${CHEVRON_PX}px` }} />
+              <span className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
+                <LoxelLogoTile className={homeTileClass} />
+              </span>
+              {/* As tall as a project row's two lines, with its name centered in that height */}
+              <span className="grid min-w-0 flex-1">
+                <span className="text-foreground col-start-1 row-start-1 self-center truncate text-xs font-medium">
+                  Home
+                </span>
+                <span aria-hidden className="invisible col-start-1 row-start-1">
+                  <span className="block text-xs font-medium">&nbsp;</span>
+                  <span className="block text-[10px]">&nbsp;</span>
+                </span>
+              </span>
+            </button>
+          ) : (
+            // The app's logo in the column of the worktree icons, ringed like the active project
+            // icon while Home is shown.
+            <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
+              <button
+                type="button"
+                className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
+                onClick={showHome}
+                title="Home"
+                aria-current={isHome ? "page" : undefined}
+              >
+                <LoxelLogoTile
+                  className={cn(
+                    homeTileClass,
+                    // The active project's ring, with a gap in the card color in both themes: its
+                    // white inner band would merge with the white tile.
+                    isHome &&
+                      "shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_color-mix(in_srgb,var(--ring)_75%,transparent)] dark:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--primary)]",
+                  )}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+
         {projects.map((project, index) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);
@@ -296,17 +326,19 @@ export function Sidebar() {
           return (
             <div
               key={project.id}
-              // A full-width line between projects
-              className={cn(index > 0 && "border-border mt-1 border-t pt-1")}
+              // Space, not a line, between projects: lines on the rail are the worktree tree's brackets
+              className={cn(index > 0 && "mt-2")}
               data-sidebar-project
             >
               {sidebarExpanded ? (
                 <div
                   className={cn(
-                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
+                    // Light insets the row with rounded corners like the worktree rows' highlight, taking
+                    // the inset out of its left padding (ROW_LEFT - 4px) so the icons keep their column
+                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center px-2.5 py-1.5 transition-colors outline-none not-dark:mx-1 not-dark:rounded-md not-dark:pl-1! focus-visible:ring-2 focus-visible:ring-inset",
                     isRootActive && "bg-primary",
                   )}
-                  style={{ paddingLeft: "8px" }}
+                  style={{ paddingLeft: `${ROW_LEFT}px` }}
                   tabIndex={-1}
                   {...sidebarEntryProps(project.path)}
                   onClick={() => !isRenaming && handleProjectClick(project)}
@@ -328,7 +360,9 @@ export function Sidebar() {
                     )}
                   </button>
 
-                  <ProjectIconWithBadge id={project.id} name={project.name} size="sm" />
+                  <div className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
+                    <ProjectIcon id={project.id} name={project.name} size="sm" />
+                  </div>
 
                   <div className="min-w-0 flex-1 overflow-hidden">
                     {isRenaming ? (
@@ -351,7 +385,10 @@ export function Sidebar() {
                           {project.name}
                         </div>
                         <div
-                          className="text-muted-foreground truncate text-[10px]"
+                          className={cn(
+                            "text-muted-foreground truncate text-[10px]",
+                            isRootActive && "not-dark:text-foreground/70",
+                          )}
                           title={project.path}
                         >
                           {abbreviateHomePath(project.path, homeDir)}
@@ -361,19 +398,20 @@ export function Sidebar() {
                   </div>
                 </div>
               ) : (
-                <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+                <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
                   <button
-                    className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
+                    // Rounded like the keyboard ring on a worktree icon
+                    className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
                     onClick={() => handleProjectClick(project)}
                     {...sidebarEntryProps(project.path)}
                     onContextMenu={(e) => handleProjectContextMenu(e, project)}
                     onKeyDown={onProjectKeyDown}
                     title={`${project.name}\n${project.path}`}
                   >
-                    <ProjectIconWithBadge
+                    <ProjectIcon
                       id={project.id}
                       name={project.name}
-                      size="md"
+                      size="sm"
                       active={isRootActive}
                     />
                   </button>
@@ -385,12 +423,12 @@ export function Sidebar() {
         })}
 
         {/* Add project button, set off from the projects like they are from each other */}
-        <div className={cn(projects.length > 0 && "border-border mt-1 border-t pt-1")}>
+        <div className={cn(projects.length > 0 && "mt-2")}>
           {sidebarExpanded ? (
             <div
-              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
+              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors not-dark:mx-1 not-dark:rounded-md not-dark:px-1.5"
               style={{ paddingLeft: "13px" }}
-              onClick={handleAddProject}
+              onClick={openAddProjectWizard}
             >
               <div className="flex size-6 shrink-0 items-center justify-center">
                 <FolderPlusIcon className="size-4" />
@@ -398,10 +436,10 @@ export function Sidebar() {
               <span className="text-xs">Add project</span>
             </div>
           ) : (
-            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_ADD_LEFT}px` }}>
               <button
                 className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
-                onClick={handleAddProject}
+                onClick={openAddProjectWizard}
                 title="Add project"
               >
                 <FolderPlusIcon className="size-5" />
@@ -410,8 +448,6 @@ export function Sidebar() {
           )}
         </div>
       </div>
-
-      <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
 
       {/* Project context menu */}
       {contextMenu && (

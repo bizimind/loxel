@@ -15,7 +15,9 @@ function normalizeName(value: string): string {
 /**
  * Creates a worktree: a title (when the project's worktrees have metadata) and a name, which
  * follows the title until it is edited directly. With `parent`, the worktree is nested under it.
- * A branch that already exists is resolved here too.
+ * A branch that already exists is resolved here too. The dialog closes as soon as the create has
+ * started: the sidebar shows the worktree as pending while it is created (the repo's init hook can
+ * take a while), and a failure from then on comes as a toast.
  */
 export function NewWorktreeDialog({
   projectPath,
@@ -46,7 +48,7 @@ export function NewWorktreeDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  /** Set when the dialog is closed while a create is still in flight. */
+  /** Set when the dialog is closed while a create is still being planned. */
   const abandoned = useRef(false);
 
   const cancel = () => {
@@ -55,7 +57,7 @@ export function NewWorktreeDialog({
     onClose();
   };
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
@@ -91,7 +93,7 @@ export function NewWorktreeDialog({
   };
 
   const fieldClass =
-    "bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-ring";
+    "bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-ring not-dark:focus:ring-3 not-dark:focus:ring-ring/20";
 
   return (
     <DialogShell open onCancel={cancel} className="w-[26rem]">
@@ -101,7 +103,7 @@ export function NewWorktreeDialog({
           submit();
         }}
       >
-        <div className="flex flex-col gap-3 px-4 pt-4 pb-2">
+        <div className="flex flex-col gap-3 px-4 pt-4 pb-2 not-dark:gap-4">
           <div>
             <h3 className="text-foreground text-sm font-medium">New worktree</h3>
             <p className="text-muted-foreground mt-1 text-xs">
@@ -118,7 +120,9 @@ export function NewWorktreeDialog({
 
           {titles && (
             <label className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-[11px]">Title</span>
+              <span className="text-muted-foreground not-dark:text-foreground/80 text-[11px] not-dark:text-[12px] not-dark:font-medium">
+                Title
+              </span>
               <input
                 autoFocus
                 value={title}
@@ -135,7 +139,9 @@ export function NewWorktreeDialog({
           )}
 
           <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground text-[11px]">Name</span>
+            <span className="text-muted-foreground not-dark:text-foreground/80 text-[11px] not-dark:text-[12px] not-dark:font-medium">
+              Name
+            </span>
             <input
               autoFocus={!titles}
               value={name}
@@ -149,7 +155,7 @@ export function NewWorktreeDialog({
               placeholder="worktree-name"
               className={`${fieldClass} font-mono`}
             />
-            <span className="text-muted-foreground text-[10px]">
+            <span className="text-muted-foreground text-[10px] not-dark:text-[11px] not-dark:leading-snug">
               {titles
                 ? "The worktree's directory and branch. Follows the title until you edit it."
                 : "The worktree's directory and branch. Enable worktree nesting to give worktrees titles."}

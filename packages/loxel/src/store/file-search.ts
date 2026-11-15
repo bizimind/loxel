@@ -26,6 +26,8 @@ interface FileSearchState {
   setFiles: (wtPath: string, files: string[], truncated: boolean) => void;
   /** Record a file open for MRU tracking. `relativePath` is relative to the worktree. */
   recordOpen: (wtPath: string, relativePath: string) => void;
+  /** Forget a removed worktree. */
+  purgeWorktree: (wtPath: string) => void;
 }
 
 export const useFileSearchStore = create<FileSearchState>()((set) => ({
@@ -46,6 +48,14 @@ export const useFileSearchStore = create<FileSearchState>()((set) => ({
       const next = new Map(state.indexByWorktree);
       next.set(wtPath, { files, truncated });
       return { indexByWorktree: next, loading: false, error: false };
+    }),
+  purgeWorktree: (wtPath) =>
+    set((state) => {
+      const index = new Map(state.indexByWorktree);
+      index.delete(wtPath);
+      const mru = new Map(state.mruByWorktree);
+      mru.delete(wtPath);
+      return { indexByWorktree: index, mruByWorktree: mru };
     }),
   recordOpen: (wtPath, relativePath) =>
     set((state) => {

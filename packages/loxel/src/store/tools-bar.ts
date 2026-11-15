@@ -50,8 +50,11 @@ export function getActiveSidebarPanel(zone: SidebarZone): PanelId | null {
 let outerApi: DockviewApi | null = null;
 /** Module-level reference to the center (editor/terminal) dockview API. */
 let centerApi: DockviewApi | null = null;
-/** The worktree the center API was mounted for — a worktree switch remounts the center. */
-let centerApiWorktree: string | null = null;
+/**
+ * The layout key the center API was mounted for: a worktree path, or `HOME_LAYOUT_KEY`. A worktree
+ * switch remounts the center.
+ */
+let centerApiLayoutKey: string | null = null;
 const centerApiListeners = new Set<(api: DockviewApi | null) => void>();
 
 /** Set the outer dockview API reference. Called from App.tsx onReady. */
@@ -64,10 +67,13 @@ export function getSidebarPanelElement(panelId: PanelId): HTMLElement | null {
   return outerApi?.getPanel(panelId)?.view.content.element ?? null;
 }
 
-/** Set the center dockview API reference and the worktree it shows. Called from CenterHost. */
-export function setCenterApi(api: DockviewApi | null, worktreePath: string | null = null): void {
+/**
+ * Set the center dockview API reference and the key of the layout it shows (a worktree path, or
+ * Home's). Called from the center layout.
+ */
+export function setCenterApi(api: DockviewApi | null, layoutKey: string | null = null): void {
   centerApi = api;
-  centerApiWorktree = api ? worktreePath : null;
+  centerApiLayoutKey = api ? layoutKey : null;
   for (const listener of centerApiListeners) {
     listener(api);
   }
@@ -79,11 +85,12 @@ export function getCenterApi(): DockviewApi | null {
 }
 
 /**
- * The worktree the current center API belongs to. Right after a worktree switch the outgoing
- * center stays registered until it unmounts, so it still reports the previous worktree.
+ * The layout key (worktree path, or `HOME_LAYOUT_KEY`) the current center API belongs to. Right
+ * after a worktree switch the outgoing center stays registered until it unmounts, so it still
+ * reports the previous worktree.
  */
-export function getCenterApiWorktree(): string | null {
-  return centerApiWorktree;
+export function getCenterApiLayoutKey(): string | null {
+  return centerApiLayoutKey;
 }
 
 export function subscribeCenterApi(listener: (api: DockviewApi | null) => void): () => void {

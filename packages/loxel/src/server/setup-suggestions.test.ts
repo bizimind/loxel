@@ -76,6 +76,11 @@ describe("scanSetupSuggestions", () => {
     });
   });
 
+  test("lists each language's commands in the order of the language list", async () => {
+    const dir = await project({ "uv.lock": "", "App.sln": "" });
+    expect((await scanSetupSuggestions(dir, "")).commands).toEqual(["dotnet restore", "uv sync"]);
+  });
+
   test("suggests dotnet restore for a root solution or project, with dotnet not on PATH", async () => {
     for (const file of ["App.sln", "App.slnx", "App.csproj"]) {
       await rm(join(root, "project"), { recursive: true, force: true });

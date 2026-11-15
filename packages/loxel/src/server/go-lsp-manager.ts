@@ -318,6 +318,12 @@ export class GoLspManager extends WorktreeLspManager {
     this.watches.delete(session);
   }
 
+  // gopls cancels its `go` commands only when a request ends, and has no signal handler, so its stop
+  // leaves the package loads it was running.
+  protected override stopsProcessTree(): boolean {
+    return true;
+  }
+
   /** The user's gopls, or the bundled one when they have none. */
   private pick(env: GoEnv): GoplsPick | null {
     const dev = path.resolve(import.meta.dir, "../../build", GOPLS);

@@ -32,6 +32,15 @@ export function filePanelType(filePath: string): FilePanelType {
   return "codeEditor";
 }
 
+/** Open a language server's read-only document (see `virtual-documents.ts`) in its own tab. */
+export function dispatchOpenVirtualDocument(uri: string, location?: FileLocation): void {
+  dispatchLoxelEvent("loxel-open-virtual-document", {
+    uri,
+    line: location?.line,
+    column: location?.column,
+  });
+}
+
 /** Dispatch the appropriate panel-open event based on file type. */
 export function dispatchOpenFile(
   filePath: string,

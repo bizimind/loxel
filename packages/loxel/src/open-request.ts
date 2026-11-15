@@ -19,8 +19,9 @@ export interface OpenTerminalRequest {
 /**
  * Body of `POST /api/open`: a file or folder or a new terminal for the window in use (`windowId`'s,
  * else the focused one), or a URL for the windows showing a worktree (`windowId`'s gets the
- * placement), else for the window in use. A folder, revealed in the file tree, ignores `placement`
- * and `pinWtPath`, and needs focus.
+ * placement), else for the window in use. A URL without `wtPath` (a link macOS hands to Loxel as
+ * the browser) is for the window in use, which opens it in its worktree, or in Home. A folder,
+ * revealed in the file tree, ignores `placement` and `pinWtPath`, and needs focus.
  *
  * `pinWtPath` is the worktree to open in, overriding the one a file or terminal belongs to.
  * `commandWtPath` does the same for a file sent with a URL for that worktree, but is dropped if it
@@ -28,7 +29,7 @@ export interface OpenTerminalRequest {
  */
 export type OpenRequest = (
   | { filePath: string; pinWtPath?: string; commandWtPath?: string }
-  | { url: string; wtPath: string }
+  | { url: string; wtPath?: string }
   | { terminal: OpenTerminalRequest; pinWtPath?: string }
 ) & { windowId?: string } & PanelOpenOptions;
 
@@ -46,31 +47,41 @@ interface RequestOpenOptions {
 /**
  * Ask the Loxel server at `serverUrl` to open a file, folder, URL or terminal. Files, folders and
  * terminals are sent to a window, so a 503 means none has connected yet — Loxel is still
- * launching — and the request is retried for a while instead of failing.
+ * launching — and the request is retried for a while instead of failing. So is a request no server
+ * answers, as between a server that is exiting (quit, update restart, crash) and its replacement.
  */
 export async function requestOpen(
   serverUrl: string,
   request: OpenRequest,
   { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
 ): Promise<OpenResult> {
-  const post = () =>
-    fetch(`${serverUrl}/api/open`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
+  let unreachable: unknown = null;
+  /** The response, or null when no server answered: one may be handing over to the next. */
+  const post = async (): Promise<Response | null> => {
+    try {
+      return await fetch(`${serverUrl}/api/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+    } catch (err) {
+      unreachable = err;
+      return null;
+    }
+  };
 
   let res = await post();
-  if (res.status === 503) {
+  if (res === null || res.status === 503) {
     onWaiting?.();
     const start = Date.now();
-    while (res.status === 503 && Date.now() - start < windowWaitMs) {
+    while ((res === null || res.status === 503) && Date.now() - start < windowWaitMs) {
       await new Promise((resolve) => {
         setTimeout(resolve, RETRY_INTERVAL_MS);
       });
       res = await post();
     }
   }
+  if (res === null) throw new Error(`Cannot reach Loxel at ${serverUrl}`, { cause: unreachable });
   const data: unknown = await res.json().catch(() => null);
   if (res.ok) {
     const warning =

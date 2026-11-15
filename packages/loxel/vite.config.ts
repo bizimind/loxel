@@ -6,6 +6,8 @@ import react from "@vitejs/plugin-react";
 import { type Plugin, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 
+import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
+
 const isElectron = !!process.env.ELECTRON;
 
 const XTERM_WEBGL_MODULE = "@xterm/addon-webgl/lib/addon-webgl.mjs";
@@ -74,6 +76,43 @@ const XTERM_WEBGL_ROW_TRANSFORM_PATCHES = [
   },
 ];
 
+/**
+ * Minimum contrast fixes, active only with a ratio set: light themes', in src/lib/loxel-theme.ts
+ * (dark ones keep 1, which skips this code). Only the WebGL renderer is patched: a terminal on the
+ * DOM fallback keeps stock xterm's handling of dim text.
+ */
+const XTERM_WEBGL_CONTRAST_PATCHES = [
+  // Hold dim (SGR 2) text to the ratio as drawn. Stock xterm checks the undimmed color against half
+  // the ratio and then draws it at 50% opacity, so dim text on white ends up near 2:1. Here the
+  // check blends the color 50% over the background first, the way it is drawn, against 1.4 times
+  // the full ratio (dim text is small secondary text); colors that fail are drawn opaque
+  // at that ratio, which still keeps them lighter than normal text.
+  {
+    find: "I=this._resolveForegroundRgba(o,r,a,l),L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio/(u?2:1))",
+    replace:
+      "I=this._resolveForegroundRgba(o,r,a,l);u&&(I=((f>>>24)+(I>>>24)>>1<<24|((f>>16&255)+(I>>16&255)>>1)<<16|((f>>8&255)+(I>>8&255)>>1)<<8|255)>>>0);let L=Te.ensureContrastRatio(f,I,this._config.minimumContrastRatio*(u?1.4:1))",
+  },
+  // When a color can't reach the ratio in its own direction (black text on a dark red swatch can't
+  // get dark enough), stock xterm flips it only as far as the ratio, leaving a mid grey; flip it
+  // all the way to white (or black) instead, so the text stays crisp.
+  { find: "if(L<l){let M=n(r,a,l),q=", replace: "if(L<l){let M=n(r,a,21),q=" },
+  { find: "if(f<l){let I=t(r,a,l),L=", replace: "if(f<l){let I=t(r,a,21),L=" },
+];
+
+/**
+ * Give upright text in the glyph atlas an explicit `normal` style. The addon builds the canvas
+ * font as `${italic} ${weight} ...`, which starts with a space for upright text; Electron 45's
+ * Chromium rejects that value (electron/electron#55616) and the atlas stays on the canvas default
+ * of 10px sans-serif. Upstream fix: xtermjs/xterm.js#6312. The addon's `_getFont` builds the same
+ * string but only for `_fillCharTrueColor`, which nothing calls, so it is left as is.
+ */
+const XTERM_WEBGL_FONT_PATCHES = [
+  {
+    find: 'ue=I?"italic":"";this._tmpCtx.font=`${ue} ${G} ',
+    replace: 'ue=I?"italic":"normal";this._tmpCtx.font=`${ue} ${G} ',
+  },
+];
+
 function xtermWebglPatches(): Plugin {
   let isBuild = false;
   let patched = false;
@@ -94,6 +133,8 @@ function xtermWebglPatches(): Plugin {
       for (const { find, replace } of [
         ...XTERM_WEBGL_PIXEL_GRID_PATCHES,
         ...XTERM_WEBGL_ROW_TRANSFORM_PATCHES,
+        ...XTERM_WEBGL_CONTRAST_PATCHES,
+        ...XTERM_WEBGL_FONT_PATCHES,
       ]) {
         if (source.split(find).length !== 2) {
           throw new Error(`xterm-webgl-patches: expected one match in ${id} for: ${find}`);
@@ -107,7 +148,9 @@ function xtermWebglPatches(): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
-  const serverPort = mode === "development" ? 7434 : 7433;
+  const serverPort =
+    parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
+    (mode === "development" ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
 
   return {
     plugins: [
@@ -170,7 +213,7 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       // The server only admits this origin in dev (src/server/request-origin.ts), so fail
       // loudly instead of silently moving to another port.
-      port: 5173,
+      port: vitePort(process.env),
       strictPort: true,
       proxy: {
         "/api": { target: `http://127.0.0.1:${serverPort}`, changeOrigin: true },

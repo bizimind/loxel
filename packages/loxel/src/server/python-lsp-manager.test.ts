@@ -10,7 +10,9 @@ import type { ExternalTypeChecker } from "./python-lsp-manager";
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "python-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
-const { PythonLspManager, pythonSettings } = await import("./python-lsp-manager");
+const { PYTHON_REPO_TRUST_RESTRICTION, PythonLspManager, pythonSettings } =
+  await import("./python-lsp-manager");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { setPythonOverride } = await import("./python-override-store");
 const { refreshPythonEnv } = await import("./python-env");
 
@@ -249,7 +251,7 @@ class UnresolvedEnvManager extends PythonLspManager {
     session: Parameters<InstanceType<typeof PythonLspManager>["workspaceConfiguration"]>[0],
     section: string | undefined,
   ): Promise<unknown> {
-    if (section === "python") return pythonSettings(null, session.wtPath);
+    if (section === "python") return pythonSettings(null, session.wtPath, session.repoTrusted);
     return super.workspaceConfiguration(session, section);
   }
 }
@@ -310,6 +312,30 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
       await chmod(join(bin, "python"), 0o755);
       await analyzeMain(wt, () => new UnresolvedEnvManager());
       expect(await Bun.file(marker).exists()).toBe(false);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "runs the environment's own interpreter only in a trusted repository",
+    async () => {
+      const wt = await makeWorktree();
+      await makeVenvWithPackage(join(wt, ".venv"));
+      const marker = join(root!, "ran");
+      const python = join(wt, ".venv", "bin", "python");
+      await rm(python);
+      await writeFile(python, `#!/bin/sh\ntouch '${marker}'\nexec '${python3}' "$@"\n`);
+      await chmod(python, 0o755);
+
+      // Its packages are read as files.
+      expect(hasMissingImport(await analyzeMain(wt))).toBe(false);
+      expect(await Bun.file(marker).exists()).toBe(false);
+      expect(getRepoTrustStatus(wt).restrictions).toEqual([PYTHON_REPO_TRUST_RESTRICTION]);
+
+      await manager?.destroy();
+      setRepoTrusted(wt, true);
+      await analyzeMain(wt);
+      expect(await Bun.file(marker).exists()).toBe(true);
     },
     TEST_TIMEOUT_MS,
   );

@@ -1,7 +1,8 @@
 ---
 title: Diff Viewer
-description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, and comparing any two files.
-order: 9
+description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, editing your working tree in place, and comparing any two files.
+section: "In the code"
+order: 4
 ---
 
 The diff viewer is where you inspect changes — whether that's your working tree, a single commit, a range between two refs, or two files you pick. The standout behavior is synchronized scrolling that keeps context lines aligned across both panels even when the two sides have unequal line counts.
@@ -46,7 +47,7 @@ Within a modified line, the characters that actually changed are highlighted: re
 
 ## Syntax highlighting
 
-Code in the diff viewer is syntax-highlighted with GitHub's color themes, following your dark/light mode setting.
+Code in the diff viewer is syntax-highlighted in colors that follow the [theme](/docs/themes) of the current mode: in light mode the code editor's own colors, and in dark mode GitHub's dark colors, unless the dark mode theme sets its own syntax colors.
 
 ---
 
@@ -59,8 +60,23 @@ The diff viewer can compare:
 - Commit vs commit
 - Branch range
 - Any two files (see [Comparing two files](#comparing-two-files))
+- A patch written in a markdown file (see [Patches from markdown](#patches-from-markdown))
 
 To open a diff, select one or more commits in the commit graph, then double-click a file in the Changes panel (or right-click it and choose **Open Diff**). See [Git](/docs/git) for how the commit graph and Changes panel work.
+
+---
+
+## Editing the working tree
+
+When the right side of a diff is your working tree, as in your uncommitted changes against HEAD or against an older commit, you can edit it right there in split view. The left side is a past version and stays read-only, as does a file that was already deleted when you opened it.
+
+- **Live coloring.** The highlights, connectors and collapsed regions update as you type, without waiting for the file to save. Expanded unchanged regions stay expanded while you edit. The unified view, the added and removed line counts and the Changes panel catch up once the file is saved, and can group a change slightly differently than split view does while you type.
+- **Saving.** Edits save automatically like in an editor tab, and **Cmd+S** saves right away. If the file is also open in an editor tab, edits in one show up in the other once saved.
+- **Conflicts and deleted files.** If the file changes on disk while you have unsaved edits, for example when an agent edits it, a banner lets you accept the disk version or keep yours, and the diff viewer's tab shows a yellow dot. If the file is deleted while you edit it, your text stays, a banner offers to re-create the file, and the tab's title is struck through.
+- **Undoing all changes.** If your edits make the file match the version on the left, it drops out of the Changes panel, but the diff viewer keeps showing it with no changes until you pick another file, discard it, or switch to the unified view.
+- **Review comments.** Comment markers keep their position while you type, and follow the code to where it moved after each save.
+
+The unified view is read-only, and so are the uncommitted changes of a worktree other than the current one.
 
 ---
 
@@ -76,6 +92,14 @@ The comparison opens in its own tab with the same split and unified views, synch
 - **Conflicts and deleted files.** If a file changes on disk while you have unsaved edits to it, a banner above the comparison names the file and lets you accept the disk version or keep yours. A comparison stays on the paths it was opened with: if a compared file is deleted, renamed or moved, a banner offers to re-create it.
 
 Comparisons have no previous/next file navigation and no review comments.
+
+---
+
+## Patches from markdown
+
+A ` ```diff ` or ` ```patch ` block in a markdown file shows its diff in the editor. Click **Open in diff panel** above it to read the diff in its own tab, with the same split and unified views. The tab is named after the file the patch changes, or after the markdown file when the patch touches several files or names none, and clicking the button again on the same block brings that tab back.
+
+The tab shows the block as it was when you opened it: edit the block and open it again to see the new version. A patch carries only the lines it lists, so split view shows the two sides of each hunk in a table, and the lines between hunks are not available. Patches have no review comments and can't be edited in the diff viewer; edit the block in the markdown file instead. With several files, the previous/next file buttons step through them in the order the patch lists them.
 
 ---
 

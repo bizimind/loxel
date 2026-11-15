@@ -6,21 +6,27 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
+import type { Highlighter } from "shiki";
 
 import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
+import { followEditorThemes } from "./editor-themes";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
+import { BUILTIN_THEMES } from "./loxel-theme";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
-import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
+import { enhanceMonacoThemes, getMonacoThemeName, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
-import { connectTsLsp } from "./ts-lsp-client";
+import { installRenameSummary } from "./rename-summary";
+import { connectTsLsp, disconnectTsLsp } from "./ts-lsp-client";
+import { installVirtualDocumentLinks } from "./virtual-document-links";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
 self.MonacoEnvironment = {
@@ -75,11 +81,25 @@ for (const register of Object.values(
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
-// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark is
+// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark and loxel-light are
 // loaded as Shiki themes so shikiToMonaco recognizes them natively.
-void getHighlighter().then((highlighter) => {
+// shikiToMonaco wraps `setTheme` and `create` and captures each loaded theme's colors. A custom
+// theme's syntax colors load later as a theme of their own (editor-themes.ts) and need bridging
+// again: restoring Monaco's own functions first replaces the wrappers instead of nesting them.
+const monacoSetTheme = monaco.editor.setTheme;
+const monacoCreate = monaco.editor.create;
+function bridgeShiki(highlighter: Highlighter): void {
+  monaco.editor.setTheme = monacoSetTheme;
+  monaco.editor.create = monacoCreate;
   shikiToMonaco(highlighter, monaco);
-  enhanceMonacoThemes(highlighter);
+}
+
+void getHighlighter().then((highlighter) => {
+  bridgeShiki(highlighter);
+  enhanceMonacoThemes(highlighter, BUILTIN_THEMES);
+  // shikiToMonaco activates the first loaded theme (loxel-dark); Monaco themes are global.
+  monaco.editor.setTheme(getMonacoThemeName(useUIStore.getState().darkMode));
+  followEditorThemes(highlighter, bridgeShiki);
 });
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
@@ -100,9 +120,10 @@ wsClient.onReconnect(resumeLanguageServers);
   const initialWt = useWorktreeStore.getState().activeWorktreePath;
   if (initialWt) reconnectPerWorktree(initialWt);
   useWorktreeStore.subscribe((state, prev) => {
-    if (state.activeWorktreePath && state.activeWorktreePath !== prev.activeWorktreePath) {
-      reconnectPerWorktree(state.activeWorktreePath);
-    }
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath) reconnectPerWorktree(state.activeWorktreePath);
+    // The last worktree of a bare project was removed: nothing is left to serve.
+    else disconnectTsLsp();
   });
 }
 
@@ -118,6 +139,8 @@ function createLazyLspConnector(opts: LspClient): void {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
+    // Wherever its URI's path seems to lead: it holds the connection it opened on.
+    if (opts.ownsVirtualDocument(model)) return true;
     if (!isLiveEditorModel(model)) return false;
     if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
@@ -128,7 +151,8 @@ function createLazyLspConnector(opts: LspClient): void {
     counted = new WeakSet();
     let n = 0;
     for (const model of monaco.editor.getModels()) {
-      if (!isMatch(model)) continue;
+      // Those open now belong to the connection this recount may end, and are no reason to start one.
+      if (!isMatch(model) || opts.ownsVirtualDocument(model)) continue;
       counted.add(model);
       n += 1;
     }
@@ -160,7 +184,7 @@ function createLazyLspConnector(opts: LspClient): void {
   });
 
   useWorktreeStore.subscribe((state, prev) => {
-    if (!state.activeWorktreePath || state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
     activeWt = state.activeWorktreePath;
     modelCount = countExistingModels();
     syncConnection();
@@ -195,4 +219,10 @@ monaco.editor.registerEditorOpener(createEditorOpener());
 
 // Peek widgets show files no tab has open as read-only snapshots.
 installPeekModelResolver();
+
+// Rename announcements say what a language server's rename changed.
+installRenameSummary();
 monaco.editor.onDidCreateEditor(keepPreviewModelsReadOnly);
+
+// Hover links to a language server's read-only documents survive Monaco's markdown sanitizer.
+installVirtualDocumentLinks();

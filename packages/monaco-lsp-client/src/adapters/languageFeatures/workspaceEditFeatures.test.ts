@@ -8,10 +8,11 @@ import { capabilities } from "../../types";
 import type { IDisposable } from "../../utils";
 import type { ILspCapabilitiesRegistry } from "../LspCapabilitiesRegistry";
 import type { LspConnection } from "../LspConnection";
+import type { WorkspaceEditOutcome } from "../WorkspaceEditApplier";
 
 mock.module("monaco-editor", () => fakeMonacoModule);
 
-const { LspRenameFeature } = await import("./LspRenameFeature");
+const { LspRenameFeature, appliedRenameSummary } = await import("./LspRenameFeature");
 const { LspCodeActionFeature } = await import("./LspCodeActionFeature");
 const { LspApplyEditFeature } = await import("./LspApplyEditFeature");
 
@@ -21,7 +22,7 @@ const cancellation = (cancelled = false) =>
   ({ isCancellationRequested: cancelled }) as monaco.CancellationToken;
 
 /** A connection whose server answers `server` and whose workspace edits resolve to `result`. */
-function setup(server: Record<string, unknown>, result: ApplyWorkspaceEditResult) {
+function setup(server: Record<string, unknown>, result: WorkspaceEditOutcome) {
   const applied: WorkspaceEdit[] = [];
   const executed: Command[] = [];
   const handlers = new Map<unknown, (options: unknown) => IDisposable>();
@@ -68,7 +69,7 @@ function setup(server: Record<string, unknown>, result: ApplyWorkspaceEditResult
 describe("LspRenameFeature", () => {
   beforeEach(() => fakeMonaco.reset());
 
-  function renameProvider(result: ApplyWorkspaceEditResult) {
+  function renameProvider(result: WorkspaceEditOutcome) {
     const ctx = setup({ textDocumentRename: async () => renameEdit }, result);
     const feature = new LspRenameFeature(ctx.connection);
     ctx.register(capabilities.textDocumentRename, { documentSelector: null });
@@ -76,12 +77,15 @@ describe("LspRenameFeature", () => {
     return { ...ctx, feature, provider };
   }
 
-  test("applies the server's edit itself and hands Monaco an empty edit", async () => {
-    const { provider, applied } = renameProvider({ applied: true });
+  test("applies the server's edit itself and hands Monaco an empty edit that tells what it changed", async () => {
+    const summary = { edits: 3, files: 2 };
+    const { provider, applied } = renameProvider({ applied: true, summary });
     const position = { lineNumber: 1, column: 1 } as monaco.Position;
     const result = await provider.provideRenameEdits(model, position, "y", cancellation());
     expect(result).toEqual({ edits: [] });
     expect(applied).toEqual([renameEdit]);
+    expect(result && appliedRenameSummary(result)).toEqual(summary);
+    expect(appliedRenameSummary({ edits: [] })).toBeUndefined();
   });
 
   test("leaves reporting a failure to the applier, and Monaco tries no other provider", async () => {
@@ -89,6 +93,7 @@ describe("LspRenameFeature", () => {
     const position = { lineNumber: 1, column: 1 } as monaco.Position;
     const result = await provider.provideRenameEdits(model, position, "y", cancellation());
     expect(result).toEqual({ edits: [] });
+    expect(result && appliedRenameSummary(result)).toBeNull();
   });
 
   test("applies nothing once Monaco cancelled the rename", async () => {
@@ -215,8 +220,9 @@ describe("LspCodeActionFeature", () => {
 });
 
 describe("LspApplyEditFeature", () => {
-  test("answers workspace/applyEdit with the workspace-edit path's result", async () => {
-    const ctx = setup({}, { applied: false, failureReason: "outside" });
+  /** The feature's `workspace/applyEdit` answer when the workspace-edit path resolves to `result`. */
+  async function answer(result: WorkspaceEditOutcome) {
+    const ctx = setup({}, result);
     let handler: ((params: { edit: WorkspaceEdit }) => Promise<unknown>) | undefined;
     const connection = ctx.connection as unknown as { connection: unknown };
     connection.connection = {
@@ -226,11 +232,21 @@ describe("LspApplyEditFeature", () => {
       },
     };
     const feature = new LspApplyEditFeature(ctx.connection);
-
-    const answer = await handler?.({ edit: renameEdit });
-
-    expect(answer).toEqual({ ok: { applied: false, failureReason: "outside" } });
-    expect(ctx.applied).toEqual([renameEdit]);
+    const answered = await handler?.({ edit: renameEdit });
     feature.dispose();
+    expect(ctx.applied).toEqual([renameEdit]);
+    return answered;
+  }
+
+  test("answers workspace/applyEdit with the workspace-edit path's result", async () => {
+    expect(await answer({ applied: false, failureReason: "outside" })).toEqual({
+      ok: { applied: false, failureReason: "outside" },
+    });
+  });
+
+  test("keeps the summary, which is for the user, out of the server's answer", async () => {
+    expect(await answer({ applied: true, summary: { edits: 1, files: 1 } })).toStrictEqual({
+      ok: { applied: true, failureReason: undefined, failedChange: undefined },
+    });
   });
 });

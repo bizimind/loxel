@@ -5,6 +5,7 @@
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { THEME_PREFERENCES } from "@/lib/theme-preference";
 
 import type { ActionId, SplitPanelType } from "./action-registry";
 import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES, canShareBinding } from "./action-registry";
@@ -101,6 +102,10 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   // on whether a browser panel has focus.
   "panel.rename": ["Cmd+Shift+R"],
   "browser.hardRefresh": ["Cmd+Shift+R"],
+  // Browsers' key; only taken while a browser panel has focus, so Monaco keeps its ⌘D elsewhere.
+  "browser.toggleBookmark": ["Cmd+D"],
+  // Beside ⌃⇧+arrow, which moves between the groups this hides. ⇧⌘↩ is Monaco's Insert Line Above.
+  "panel.toggleMaximize": ["Ctrl+Shift+Enter"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],
@@ -183,7 +188,13 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "terminal.toggleBidiText": [],
   "language.restartServers": [],
   "worktree.manageRepoTrust": [],
+  "project.add": [],
   "app.settings": ["Cmd+Comma"],
+  // ⌥⌘Q is the app menu's, like ⌘Q: macOS menus take their keys before the page.
+  "app.quitKeepingTerminals": [],
+  "app.quitEndingTerminals": [],
+  "app.restart": [],
+  ...Object.fromEntries(THEME_PREFERENCES.map((theme) => [`theme.${theme}`, []])),
 });
 
 export const TEMPLATES: Record<TemplateName, BindingTemplate> = { loxel: LOXEL_DEFAULT_TEMPLATE };

@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from "bun:test";
 import * as monaco from "monaco-editor";
 
 import { createEditorOpener } from "./editor-opener";
+import { registerVirtualDocumentScheme } from "./virtual-documents";
 
 const sourceAt = (uri: string, peek: object | null = null) =>
   ({
@@ -21,6 +22,29 @@ function open(resource: string, source = sourceAt("loxel://HEAD/repo/main.ts")) 
 }
 
 describe("createEditorOpener", () => {
+  test("opens a connected server's read-only document in its own tab, canonically encoded", () => {
+    const scheme = registerVirtualDocumentScheme({ scheme: "opener-doc" }, "java");
+    const openFile = mock();
+    const openVirtual = mock();
+    const opener = createEditorOpener(openFile, openVirtual);
+    const resource = monaco.Uri.parse("opener-doc://contents/a/List.java?=p/x%28List.class");
+    const source = sourceAt("file:///repo/main.java");
+
+    // No connection: Monaco's to handle, like any other unknown scheme.
+    expect(opener.openCodeEditor(source, resource, new monaco.Position(1, 1))).toBe(false);
+
+    const end = scheme.connected({ request: async () => null });
+    expect(opener.openCodeEditor(source, resource, new monaco.Range(3, 5, 3, 9))).toBe(true);
+    expect(openVirtual.mock.calls).toEqual([[resource.toString(), { line: 3, column: 5 }]]);
+    expect(openFile).not.toHaveBeenCalled();
+
+    // A definition inside the document itself is revealed in place.
+    expect(
+      opener.openCodeEditor(sourceAt(resource.toString()), resource, new monaco.Position(2, 1)),
+    ).toBe(false);
+    end();
+  });
+
   test("opens file: and loxel://HEAD targets at the selection's start, decoded", () => {
     expect(open("file:///usr/lib/python3.12/os.py")).toEqual({
       handled: true,

@@ -19,7 +19,7 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview-react";
 
-import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
+import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import type { MoveDirection } from "@/store/layout-actions";
 import type { PanelId } from "@/store/panel-config";
 import { useProjectStore } from "@/store/projects";
@@ -127,7 +127,7 @@ function currentArea(): FocusArea {
 // ---------------------------------------------------------------------------
 
 function focusCenterPanel(api: DockviewApi, panel: IDockviewPanel): void {
-  activatePanel(api, panel);
+  panel.api.setActive();
   // Activation moves DOM focus via usePanelActivationFocus, but re-activating the already active
   // panel fires no event — focus it explicitly once the activation settles.
   afterLayout(() => focusPanelContent(panel.id, panel.view.content.element));
@@ -154,7 +154,10 @@ function moveInCenter(direction: MoveDirection): boolean {
 function enterCenter(from: CenterEdge): boolean {
   const api = getCenterApi();
   if (!api) return false;
-  const groups = api.groups.filter((g) => g.panels.length > 0);
+  // A maximized group is the only one on screen.
+  const groups = api.groups.filter(
+    (g) => g.panels.length > 0 && (!api.hasMaximizedGroup() || g.api.isMaximized()),
+  );
   if (groups.length === 0) return false;
 
   const rects = new Map(groups.map((g) => [g, g.element.getBoundingClientRect()]));

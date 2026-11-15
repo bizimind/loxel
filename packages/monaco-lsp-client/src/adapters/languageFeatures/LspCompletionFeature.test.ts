@@ -11,6 +11,7 @@ import type { LspConnection } from "../LspConnection";
 mock.module("monaco-editor", () => fakeMonacoModule);
 
 const { LspCompletionFeature } = await import("./LspCompletionFeature");
+const { languages } = await import("monaco-editor");
 
 const URI = "file:///wt/main.rs";
 const model = {
@@ -71,7 +72,7 @@ function client(items: CompletionItem[], resolve: (item: CompletionItem) => Comp
     const list = await provider.provideCompletionItems(
       model,
       position,
-      { triggerKind: 0 } as monaco.languages.CompletionContext,
+      { triggerKind: languages.CompletionTriggerKind.Invoke },
       { isCancellationRequested: false } as monaco.CancellationToken,
     );
     return list?.suggestions ?? [];

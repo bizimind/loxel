@@ -118,7 +118,12 @@ function OpenInAppItem({
         }}
       />
       {app.name}
-      {isDefault && <span className="text-muted-foreground ml-auto pl-4">default</span>}
+      {isDefault && (
+        // Light shows the tag as a small pill so it reads as a label, not a faint hint
+        <span className="text-muted-foreground not-dark:text-foreground/75 not-dark:bg-muted ml-auto pl-4 not-dark:rounded not-dark:px-1.5 not-dark:py-px not-dark:text-[11px]">
+          default
+        </span>
+      )}
     </ContextMenuItem>
   );
 }

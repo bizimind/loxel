@@ -6,9 +6,7 @@ function subscribe(onChange: () => void): () => void {
   return () => window.removeEventListener("resize", onChange);
 }
 
-// `getZoomFactor` is optional: an in-app update ships a newer renderer with the older
-// app bundle's preload, which may not expose it.
-const getZoomFactor = () => window.electronAPI?.getZoomFactor?.() ?? 1;
+const getZoomFactor = () => window.electronAPI?.getZoomFactor() ?? 1;
 
 /**
  * Tracks the Electron page zoom factor (Cmd+/Cmd-). Page zoom scales CSS `px` too, so

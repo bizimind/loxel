@@ -6,7 +6,10 @@
  * conflict when two branches insert at the same spot; merging main locally then needs no edits.
  */
 import { AstroLspManager } from "./astro-lsp-manager";
+import { BiomeLspManager } from "./biome-lsp-manager";
+import { CheckstyleLspManager } from "./checkstyle-lsp-manager";
 import { ClangdLspManager } from "./clangd-lsp-manager";
+import { config } from "./config";
 import { CSharpLspManager } from "./csharp-lsp-manager";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { EslintLspManager } from "./eslint-lsp-manager";
@@ -28,10 +31,13 @@ import { XmlLspManager } from "./xml-lsp-manager";
 // mypy, in projects configured for it, takes over basedpyright's type-checking diagnostics.
 const mypyLspManager = new MypyLspManager();
 
-export const tomlLspManager = new TomlLspManager({});
+export const tomlLspManager = new TomlLspManager({}, config.tombiSchemaCacheDir);
+export const xmlLspManager = new XmlLspManager(config.lemminxWorkDir);
 
 export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new AstroLspManager(),
+  new CheckstyleLspManager(),
+  new BiomeLspManager(),
   new ClangdLspManager(),
   new CSharpLspManager(),
   new DockerLspManager(),
@@ -49,5 +55,5 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new TerraformLspManager(),
   tomlLspManager,
   new TsLspManager(),
-  new XmlLspManager(),
+  xmlLspManager,
 ];

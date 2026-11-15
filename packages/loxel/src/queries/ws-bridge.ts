@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { HOME_KEY } from "@/api/home-model";
 import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
@@ -16,6 +17,7 @@ import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -44,7 +46,7 @@ function invalidateEditorConfigBelow(dir: string): void {
  */
 export function refreshOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   nonces: string[],
 ): void {
@@ -99,7 +101,7 @@ export function refreshOpenFile(
  */
 async function fetchIntoOpenFile(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
   path: string,
   nonces: string[],
@@ -131,7 +133,7 @@ async function fetchIntoOpenFile(
  */
 export async function checkOpenFileExists(
   projectPath: string | null,
-  wtPath: string,
+  wtPath: string | undefined,
   editorKey: string,
 ): Promise<void> {
   const initial = useEditorStateStore.getState().files.get(editorKey);
@@ -181,13 +183,6 @@ async function applyFetchedContent(
 export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
-
-    // On reconnect, invalidate update status so React Query refetches from the (new) server.
-    // This clears the stale "installing" state when the version didn't change (failed update
-    // fallback) — if the version DID change, the WsClient reloads the page instead.
-    const unsubReconnect = wsClient.onReconnect(() => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.updateStatus() });
-    });
 
     const getLogsIsActive = (): boolean => {
       const { activeLeftPanel, activeBottomPanel, activeRightPanel } =
@@ -256,15 +251,17 @@ export function useWsBridge(): void {
             invalidateEditorConfigBelow(changedPath.slice(0, -EDITORCONFIG_SUFFIX.length + 1));
           }
 
+          // Home's drafts belong to no worktree, like the editors that show them.
+          const editorWtPath = message.wtPath === HOME_KEY ? undefined : message.wtPath;
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
             if (entry.filePath === changedPath) {
-              refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
+              refreshOpenFile(projectPath, editorWtPath, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
               // file reports itself), so just re-check that, and re-read the `.editorconfig`s
               // that may have come or gone with it.
-              void checkOpenFileExists(projectPath, message.wtPath, editorKey);
+              void checkOpenFileExists(projectPath, editorWtPath, editorKey);
               queryClient.invalidateQueries({
                 queryKey: queryKeys.editorConfigPrefix(entry.filePath),
               });
@@ -429,11 +426,11 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "update_status_changed":
-          queryClient.setQueryData(queryKeys.updateStatus(), message.data);
-          break;
-
         // --- Notification events (global) ---
+
+        case "schema_consent_changed":
+          useSchemaConsentStore.setState(message.data);
+          break;
 
         case "notifications_sync":
           usePanelNotificationStore.getState().syncAll(message.data);
@@ -462,7 +459,12 @@ export function useWsBridge(): void {
           applyStoreUpdate(message.key, message.state);
           break;
 
+        case "terminals_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
+          break;
+
         case "terminal_exit":
+        case "terminal_notice":
         case "terminal_state":
         case "error":
           break;
@@ -477,7 +479,6 @@ export function useWsBridge(): void {
     });
 
     return () => {
-      unsubReconnect();
       unsubscribe();
       wsClient.disconnect();
     };

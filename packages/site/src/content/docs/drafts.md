@@ -1,7 +1,8 @@
 ---
 title: Drafts
 description: Markdown and Excalidraw files outside your repo, and how to move them in.
-order: 11
+section: "Tasks & context"
+order: 4
 ---
 
 Drafts let you sketch a design doc or architecture diagram before deciding where it lives in your repo. They exist outside any git tree — no branch, no staging, no tracking — until you explicitly move them in.
@@ -11,6 +12,8 @@ Drafts let you sketch a design doc or architecture diagram before deciding where
 ## What drafts are
 
 A draft is a file — usually markdown (`.md`) or Excalidraw (`.excalidraw`) — stored in Loxel's own state directory, outside your project. Drafts appear in a **Drafts** section at the top of the Project Files panel, shown once you have at least one, with their names in muted italics to set them apart from repo files.
+
+Plans you create in [Home](/docs/worktrees-and-tasks#home) are drafts too, kept apart from every project's. Home has no Project Files panel, so reopen one from its tab, or with **Reopen Closed Tab** after closing it.
 
 They behave identically to their repo-file counterparts:
 
@@ -76,5 +79,5 @@ The same works for architecture diagrams: `Cmd+Shift+D`, sketch the system, drag
 ## See also
 
 - [Editor](/docs/editor) — autosave behavior that applies equally to drafts; format on save
-- [Terminals](/docs/terminals#tui-agents) — running the agent you hand draft context documents to
-- [Worktrees & Projects](/docs/worktrees-and-projects) — drafts are scoped per project + worktree, just like layout state
+- [Running Coding Agents](/docs/coding-agents) — running the agent you hand your drafts to
+- [Worktrees & Tasks](/docs/worktrees-and-tasks) — drafts are scoped per project + worktree, just like the rest of a task's context

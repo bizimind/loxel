@@ -18,7 +18,8 @@ import { $ } from "bun";
 import { BUILD_DIR, downloadReleaseBinary } from "./download-release-binary";
 
 const VERSION = "23.1.0";
-const MAJOR = VERSION.split(".")[0];
+/** The major version, the name of clangd's resource directory (`lib/clang/<major>`). */
+const MAJOR = VERSION.slice(0, VERSION.indexOf("."));
 
 /** Pinned SHA256 digest of `clangd-mac-23.1.0.zip`, a universal binary. */
 const SHA256 = "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253";

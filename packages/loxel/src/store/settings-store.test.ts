@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
+import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
+import { DEFAULT_THEME_SETTINGS, type LoxelTheme } from "@/lib/loxel-theme";
 import { classifySchemaGlob } from "@/lib/schema-glob";
 
 import {
@@ -11,6 +14,7 @@ import {
   resolveIndentation,
   type SettingsState,
   useSettingsStore,
+  withValidSettings,
 } from "./settings-store";
 
 function settings(overrides: EditorSettings["overrides"] = []): EditorSettings {
@@ -279,13 +283,6 @@ describe("settings migration", () => {
     const migrated = (await migrate?.({ autoCheckForUpdates: false }, 11)) as SettingsState;
     expect(migrated.autoCheckForUpdates).toBe(false);
   });
-
-  test("v14 adds bidirectional text to terminal settings, off", async () => {
-    const migrated = (await migrate?.({ terminal: { scrollbackLines: 123 } }, 14)) as SettingsState;
-    expect(migrated.terminal).toEqual(
-      expect.objectContaining({ scrollbackLines: 123, bidiText: false }),
-    );
-  });
 });
 
 describe("settings migration v13: the built-in coding agent is gone", () => {
@@ -304,7 +301,7 @@ describe("settings migration v13: the built-in coding agent is gone", () => {
     expect(migrated).not.toHaveProperty("models");
     expect(migrated).not.toHaveProperty("codingAgent");
     expect(migrated.autoCheckForUpdates).toBe(false);
-    expect(migrated.terminal).toEqual({ scrollbackLines: 123, bidiText: false });
+    expect(migrated.terminal).toEqual({ scrollbackLines: 123 });
   });
 
   test("takes the Fork Tree out of every zone", async () => {
@@ -371,5 +368,179 @@ describe("settings migration v13: the built-in coding agent is gone", () => {
 
   test("tolerates a row without a layout", async () => {
     expect(await run({ models: [] })).toEqual(expect.not.objectContaining({ models: [] }));
+  });
+});
+
+describe("settings migration v16: font settings", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("adds the default fonts", async () => {
+    const migrated = (await migrate?.({ autoCheckForUpdates: false }, 15)) as SettingsState;
+    expect(migrated.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+  });
+
+  test("chains after the older steps, and keeps fonts a row already has", async () => {
+    const fromOld = (await migrate?.({ editor: {} }, 13)) as SettingsState;
+    expect(fromOld.fonts).toEqual(DEFAULT_FONT_SETTINGS);
+    expect(fromOld.editor.inlayHints).toBe("on");
+    const fonts = { ...DEFAULT_FONT_SETTINGS, prose: { family: "Georgia", size: 17 } };
+    const kept = (await migrate?.({ fonts }, 15)) as SettingsState;
+    expect(kept.fonts).toEqual(fonts);
+  });
+
+  test("updating one font keeps the others", () => {
+    const { updateFont } = useSettingsStore.getState();
+    updateFont("terminal", { family: "Menlo" });
+    expect(useSettingsStore.getState().fonts).toEqual({
+      ...DEFAULT_FONT_SETTINGS,
+      terminal: { family: "Menlo", size: null },
+    });
+    useSettingsStore.setState({ fonts: structuredClone(DEFAULT_FONT_SETTINGS) });
+  });
+});
+
+describe("settings migration v17: markdown output markers", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("v16 formatting settings get the markdownOutput defaults, and keep the rest", async () => {
+    const formatting = { enabled: true, formatOnAutoSave: false, autoDetect: true, overrides: [] };
+    const migrated = (await migrate?.({ editor: { formatting } }, 16)) as SettingsState;
+    expect(migrated.editor.formatting).toEqual({
+      ...formatting,
+      markdownOutput: DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+    });
+  });
+
+  test("valid pre-existing markdownOutput values survive migration", async () => {
+    const migrated = (await migrate?.(
+      { editor: { formatting: { enabled: true, markdownOutput: { bullet: "*", setext: true } } } },
+      16,
+    )) as SettingsState;
+    expect(migrated.editor.formatting.markdownOutput).toEqual({
+      ...DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+      bullet: "*",
+      setext: true,
+    });
+  });
+
+  test("a v7 row gets formatting including markdownOutput", async () => {
+    const migrated = (await migrate?.(
+      { editor: { indentation: { tabSize: 2, insertSpaces: true } } },
+      7,
+    )) as SettingsState;
+    expect(migrated.editor.formatting.markdownOutput).toEqual(DEFAULT_MARKDOWN_OUTPUT_SETTINGS);
+  });
+});
+
+describe("updateMarkdownOutput", () => {
+  test("merges partial updates", () => {
+    const before = useSettingsStore.getState().editor.formatting.markdownOutput;
+    useSettingsStore.getState().updateMarkdownOutput({ fence: "~" });
+    const { markdownOutput } = useSettingsStore.getState().editor.formatting;
+    expect(markdownOutput).toEqual({ ...before, fence: "~" });
+    useSettingsStore.getState().updateMarkdownOutput(before);
+  });
+});
+
+describe("color themes", () => {
+  const harbor = {
+    name: "Harbor Night",
+    base: "dark" as const,
+    colors: { "editor-surface": "#0f1a2b" },
+    terminal: { red: "#e8676b" },
+    syntax: { keyword: "#5fa8e8" },
+  };
+  const reset = () =>
+    useSettingsStore.setState({ themes: structuredClone(DEFAULT_THEME_SETTINGS) });
+  const themes = () => useSettingsStore.getState().themes;
+
+  test("defaults to Loxel Light and Loxel Dark with no custom themes", () => {
+    reset();
+    expect(themes()).toEqual({ light: "loxel-light", dark: "loxel-dark", custom: [] });
+  });
+
+  test("an imported theme is used for its mode, and importing its name again replaces it", () => {
+    reset();
+    const id = useSettingsStore.getState().importTheme(harbor);
+    expect(themes()).toEqual({ light: "loxel-light", dark: id, custom: [{ id, ...harbor }] });
+    const recolored = { ...harbor, colors: { "editor-surface": "#000000" } };
+    expect(useSettingsStore.getState().importTheme(recolored)).toBe(id);
+    expect(themes().custom).toEqual([{ id, ...recolored }]);
+    reset();
+  });
+
+  test("a theme named like a built-in is told apart from it", () => {
+    reset();
+    useSettingsStore.getState().importTheme({ ...harbor, name: "Loxel Dark" });
+    expect(themes().custom[0]?.name).toBe("Loxel Dark (imported)");
+    reset();
+  });
+
+  test("duplicating copies the colors under a new name and uses the copy", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    const first = store.duplicateTheme("loxel-light")!;
+    const second = store.duplicateTheme("loxel-light")!;
+    const copies = themes().custom;
+    expect(copies.map((t) => [t.id, t.name, t.base])).toEqual([
+      [first, "Loxel Light copy", "light"],
+      [second, "Loxel Light copy 2", "light"],
+    ]);
+    expect(themes().light).toBe(second);
+    expect(store.duplicateTheme("nothing")).toBeNull();
+    reset();
+  });
+
+  test("updates change custom themes only", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    const id = store.importTheme(harbor);
+    store.updateTheme(id, { name: "Harbor", syntax: {} });
+    store.updateTheme("loxel-dark", { name: "Changed" });
+    expect(themes().custom).toEqual([{ ...harbor, id, name: "Harbor", syntax: {} } as LoxelTheme]);
+    reset();
+  });
+
+  test("removing a theme puts a mode using it back on its built-in", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    const dark = store.importTheme(harbor);
+    const light = store.duplicateTheme("loxel-light")!;
+    store.removeTheme(dark);
+    expect(themes()).toEqual({ light, dark: "loxel-dark", custom: [themes().custom[0]!] });
+    reset();
+  });
+
+  test("stored themes are checked on load", () => {
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    const stored = {
+      light: "loxel-light",
+      dark: "custom:1",
+      custom: [
+        { id: "custom:1", ...harbor, colors: { "editor-surface": "red; } body { x" } },
+        { id: "loxel-dark", ...harbor },
+      ],
+    };
+    const merged = merge({ themes: stored }, useSettingsStore.getState());
+    expect(merged.themes).toEqual({
+      light: "loxel-light",
+      dark: "custom:1",
+      custom: [{ id: "custom:1", ...harbor, colors: {} }],
+    });
+  });
+});
+
+describe("withValidSettings: terminal bidirectional text", () => {
+  const bidiText = (terminal: Record<string, unknown>) =>
+    withValidSettings({ terminal }).terminal.bidiText;
+
+  test("is off for a row from before the setting, or a value that is not true", () => {
+    expect(bidiText({ scrollbackLines: 123 })).toBe(false);
+    expect(bidiText({ bidiText: "yes" })).toBe(false);
+  });
+
+  test("keeps a stored choice", () => {
+    expect(bidiText({ bidiText: true })).toBe(true);
+    expect(bidiText({ bidiText: false })).toBe(false);
   });
 });

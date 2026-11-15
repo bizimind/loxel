@@ -16,7 +16,16 @@ const readFile = mock(async (path: string) => {
   if (content === undefined) throw new Error(`ENOENT ${path}`);
   return content;
 });
-const installed = installPeekModelResolver({ readFile, languageOf: () => "python" });
+const readVirtualDocument = mock((uri: string) =>
+  uri.startsWith("fake-virtual:")
+    ? Promise.resolve({ content: "class List {}\n", language: "java" })
+    : null,
+);
+const installed = installPeekModelResolver({
+  readFile,
+  languageOf: () => "python",
+  readVirtualDocument,
+});
 const service = StandaloneServices.get(ITextModelService);
 const resolve = (uri: string) => service.createModelReference(monaco.Uri.parse(uri));
 
@@ -30,6 +39,23 @@ afterEach(() => {
 afterAll(() => installed.dispose());
 
 describe("installPeekModelResolver", () => {
+  test("gives a server's read-only document a snapshot read from that server", async () => {
+    const ref = await resolve("fake-virtual://contents/java.util/List.java?=p/x%28List.class");
+    const model = ref.object.textEditorModel;
+
+    expect(model.getValue()).toBe("class List {}\n");
+    expect(model.getLanguageId()).toBe("java");
+    expect(isPreviewModel(model)).toBe(true);
+    expect(isLiveEditorModel(model)).toBe(false);
+    expect(monaco.editor.getModel(model.uri)).toBeNull();
+    ref.dispose();
+    expect(model.isDisposed()).toBe(true);
+  });
+
+  test("leaves a scheme no server owns to the service", async () => {
+    await expect(resolve("other-scheme://a/b.java")).rejects.toThrow();
+  });
+
   test("gives a file no tab has open a read-only snapshot that is never registered", async () => {
     const created = mock();
     disposables.push(monaco.editor.onDidCreateModel(created));

@@ -11,7 +11,7 @@ import type {
 
 import { getCompileDatabaseChoice } from "./compile-database-store";
 import { logger } from "./logger";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 
 const log = logger.child("clangd-lsp");
 

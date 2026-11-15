@@ -12,11 +12,11 @@ import type {
 import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { isVersionManagerShim } from "./rust-tool-shim";
 import { getRustChoice } from "./rust-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
-import { isInside, isShippedByRepo } from "./shipped-by-repo";
+import { isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 

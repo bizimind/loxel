@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { git, listWorktrees, resolveRepoRoot } from "../git/index.ts";
 import type { HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
-import { executeAdd } from "./add.ts";
+import { executeAdd, type AddParams, type AddResult } from "./add.ts";
 import {
   describeStep,
   evaluate,
@@ -43,6 +43,8 @@ export interface InitDecisions {
   apply: InitActionId[];
   /** Base environment for init.wt.sh when an action adds a worktree (default: process.env) */
   hookEnv?: HookContext["baseEnv"];
+  /** Asked before init.wt.sh runs in a worktree an action adds; see `AddParams.allowHook` */
+  allowHook?: AddParams["allowHook"];
 }
 
 export interface ActionOutcome {
@@ -53,6 +55,8 @@ export interface ActionOutcome {
   commands: string[];
   /** Why it failed */
   error?: string;
+  /** The worktree the action added (`main-worktree`), `hookSkipped` included */
+  worktree?: AddResult;
 }
 
 export interface InitResult {
@@ -71,6 +75,8 @@ export interface CloneParams {
   cwd: string;
   /** Base environment for init.wt.sh in the first worktree (default: process.env) */
   hookEnv?: HookContext["baseEnv"];
+  /** Asked before init.wt.sh runs in the first worktree; see `AddParams.allowHook` */
+  allowHook?: AddParams["allowHook"];
   /** The setup actions to apply after cloning (default: `CLONE_ACTIONS`) */
   apply?: InitActionId[];
 }
@@ -142,13 +148,14 @@ export async function executeInit(
     progress.log(action.title);
     const commands: string[] = [];
     try {
+      let worktree: AddResult | undefined;
       for (const step of action.steps) {
         const command = describeStep(step);
         commands.push(command);
         progress.log(`  $ ${command}`);
-        await runStep(step, root, decisions.hookEnv, progress);
+        worktree = (await runStep(step, root, decisions, progress)) ?? worktree;
       }
-      outcomes.push({ id, status: "applied", commands });
+      outcomes.push({ id, status: "applied", commands, ...(worktree && { worktree }) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       progress.warn(`${id} failed: ${message}`);
@@ -176,7 +183,11 @@ export async function cloneBareRepo(
 
   return executeInit(
     target,
-    { apply: [...(params.apply ?? CLONE_ACTIONS)], hookEnv: params.hookEnv },
+    {
+      apply: [...(params.apply ?? CLONE_ACTIONS)],
+      hookEnv: params.hookEnv,
+      allowHook: params.allowHook,
+    },
     progress,
   );
 }
@@ -201,15 +212,18 @@ function assertValidDecisions(apply: InitActionId[]): void {
   }
 }
 
+/** Run one step; an `add-worktree` step returns the worktree it added. */
 async function runStep(
   step: InitStep,
   root: string,
-  hookEnv: HookContext["baseEnv"],
+  { hookEnv, allowHook }: Pick<InitDecisions, "hookEnv" | "allowHook">,
   progress: ProgressHandler,
-): Promise<void> {
+): Promise<AddResult | undefined> {
   if (step.kind === "add-worktree") {
-    await executeAdd({ name: step.name, repoPath: root, branch: step.branch, hookEnv }, progress);
-    return;
+    return executeAdd(
+      { name: step.name, repoPath: root, branch: step.branch, hookEnv, allowHook },
+      progress,
+    );
   }
   if (step.kind === "assign-worktree-ids") {
     await assignWorktreeIds(step.paths, root, progress);

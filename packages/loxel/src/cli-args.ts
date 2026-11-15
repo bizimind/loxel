@@ -233,8 +233,9 @@ export interface PlannedOpen {
 /**
  * The requests of `loxel <target>...`, in order. A command with a worktree opens every target
  * there: `pinnedWorktree` (`--worktree`) must be a project's, while `commandWorktree` (the one a URL
- * needs) is the CWD's, so a file ignores it if it is not. Several targets with `--split` share one
- * split, through a `batch` on their placement.
+ * needs) is the CWD's, so a file ignores it if it is not. With neither, `urlsToWindow` (a Home
+ * terminal's command) sends URLs with no worktree, for the window to open in what it shows. Several
+ * targets with `--split` share one split, through a `batch` on their placement.
  */
 export function planOpens(
   { targets, placement }: Pick<OpenArgs, "targets" | "placement">,
@@ -242,11 +243,13 @@ export function planOpens(
     baseDir,
     pinnedWorktree,
     commandWorktree,
+    urlsToWindow = false,
     options,
   }: {
     baseDir: string;
     pinnedWorktree: string | null;
     commandWorktree: string | null;
+    urlsToWindow?: boolean;
     options: Pick<OpenRequest, "focus" | "windowId">;
   },
 ): PlannedOpen[] {
@@ -268,8 +271,8 @@ export function planOpens(
     if (!isHttpUrl(target)) {
       return { label, request: { filePath: resolve(baseDir, target), ...worktree, ...opened } };
     }
-    return commandWorktree
-      ? { label, request: { url: target, wtPath: commandWorktree, ...opened } }
-      : { label };
+    if (commandWorktree)
+      return { label, request: { url: target, wtPath: commandWorktree, ...opened } };
+    return urlsToWindow ? { label, request: { url: target, ...opened } } : { label };
   });
 }

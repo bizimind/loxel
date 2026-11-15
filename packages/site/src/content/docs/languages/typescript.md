@@ -1,7 +1,6 @@
 ---
 title: TypeScript
 description: The TypeScript language server, its diagnostics, completions, refactors and inlay hints, and how outside changes reach it.
-order: 13.5
 ---
 
 Loxel uses the official TypeScript 7 native compiler and language server. It provides diagnostics, completions, navigation, refactors, and other editor features.

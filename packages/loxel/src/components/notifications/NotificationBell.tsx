@@ -1,5 +1,5 @@
 import { BellIcon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   DropdownMenu,
@@ -8,13 +8,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
+import { groupNotifications } from "./notification-groups";
 import { NotificationItem } from "./NotificationItem";
+import { NotificationSiteGroup } from "./NotificationSiteGroup";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
 export function NotificationBell() {
   const notifications = usePanelNotificationStore((s) => s.notifications);
   const hasNotifications = notifications.length > 0;
+  const entries = useMemo(() => groupNotifications(notifications), [notifications]);
   const [open, setOpen] = useState(false);
 
   const closeMenu = useCallback(() => setOpen(false), []);
@@ -33,11 +36,13 @@ export function NotificationBell() {
 
       <DropdownMenuContent align="end" sideOffset={4} className="w-80">
         {/* Header */}
-        <div className="flex items-center justify-between px-2 py-1.5">
+        <div className="not-dark:border-border flex items-center justify-between px-2 py-1.5 not-dark:mb-1 not-dark:border-b not-dark:pb-2">
           <span className="text-foreground text-xs font-medium">Notifications</span>
           {hasNotifications && (
             <button
-              className="text-muted-foreground hover:text-foreground text-[10px]"
+              // The popover can open with this focused; light gives it a padded button look
+              // and an accent ring in place of the browser's default outline.
+              className="text-muted-foreground hover:text-foreground not-dark:text-foreground not-dark:bg-muted not-dark:hover:bg-secondary not-dark:hover:text-foreground not-dark:focus-visible:ring-ring/60 text-[10px] not-dark:-my-0.5 not-dark:rounded not-dark:px-1.5 not-dark:py-0.5 not-dark:text-[11px] not-dark:outline-none not-dark:focus-visible:ring-1"
               onClick={() => usePanelNotificationStore.getState().dismissAll()}
             >
               Clear all
@@ -47,10 +52,22 @@ export function NotificationBell() {
 
         {/* List */}
         {hasNotifications ? (
-          <div className="max-h-96 overflow-y-auto">
-            {notifications.map((n) => (
-              <NotificationItem key={n.id} notification={n} onNavigate={closeMenu} />
-            ))}
+          <div className="not-dark:divide-border/60 max-h-96 overflow-y-auto not-dark:divide-y">
+            {entries.map((entry) =>
+              entry.kind === "single" ? (
+                <NotificationItem
+                  key={entry.notification.id}
+                  notification={entry.notification}
+                  onNavigate={closeMenu}
+                />
+              ) : (
+                <NotificationSiteGroup
+                  key={entry.key}
+                  notifications={entry.notifications}
+                  onNavigate={closeMenu}
+                />
+              ),
+            )}
           </div>
         ) : (
           <div className="text-muted-foreground px-2 py-6 text-center text-xs">

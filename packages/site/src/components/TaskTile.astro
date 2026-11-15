@@ -1,0 +1,34 @@
+---
+// One task avatar, as in Loxel's sidebar. Decorative: always used inside an `aria-hidden` layer.
+import { TASK_COLORS, TASK_GLYPHS, type TaskColor, type TaskGlyph } from "../lib/task-tiles";
+
+interface Props {
+  color: TaskColor;
+  glyph: TaskGlyph;
+  /** Width and height, in px. */
+  size: number;
+  /** Resting tilt, in degrees. */
+  tilt?: number;
+}
+
+const { color, glyph, size, tilt = 0 } = Astro.props;
+const fill = TASK_COLORS[color];
+
+// A 21-unit tile: the 5×5 glyph's 3-unit cells sit inside a 3-unit margin, each pixel inset a little
+// so the grid reads as pixels, as in the app.
+const pixels = TASK_GLYPHS[glyph].flatMap((row, y) =>
+  [...row].flatMap((cell, x) => (cell === "#" ? [{ x: 3.2 + x * 3, y: 3.2 + y * 3 }] : [])),
+);
+---
+
+<svg
+  width={size}
+  height={size}
+  viewBox="0 0 21 21"
+  class="block"
+  style={`rotate: ${tilt}deg; filter: drop-shadow(0 ${size / 6}px ${size / 3}px color-mix(in srgb, ${fill} 45%, transparent));`}
+>
+  <rect width="21" height="21" rx="6" fill={fill} />
+  <rect width="21" height="10.5" rx="6" fill="white" opacity="0.07" />
+  {pixels.map((p) => <rect x={p.x} y={p.y} width="2.6" height="2.6" fill="#f2f5ee" opacity="0.92" />)}
+</svg>

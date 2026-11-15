@@ -7,14 +7,19 @@ import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { activeGroupMaximizeLabel, canToggleActiveGroupMaximized } from "@/lib/center-maximize";
 import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
-import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
+import type { ThemePreference } from "@/lib/theme-preference";
+import { THEME_PREFERENCE_LABELS, THEME_PREFERENCES } from "@/lib/theme-preference";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
+import { panelTypeNeedsWorktree } from "@/store/panel-config";
+import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -31,7 +36,9 @@ export type ActionId =
   | "panel.reopenClosed"
   | "panel.newTab"
   | "panel.rename"
+  | "panel.toggleMaximize"
   | "browser.hardRefresh"
+  | "browser.toggleBookmark"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -64,6 +71,7 @@ export type ActionId =
   | "toggle.logs"
   | "nav.project"
   | "nav.worktree"
+  | "project.add"
   | "nav.commandPalette"
   | "nav.search"
   | "nav.openFile"
@@ -104,7 +112,21 @@ export type ActionId =
   | EditorCodeActionId
   | "language.restartServers"
   | "worktree.manageRepoTrust"
-  | "app.settings";
+  | "app.settings"
+  | "app.quitKeepingTerminals"
+  | "app.quitEndingTerminals"
+  | "app.restart"
+  | ThemeActionId;
+
+/** The action that switches Settings > Appearance > Theme to one choice. */
+export type ThemeActionId = `theme.${ThemePreference}`;
+
+/** The theme a theme action switches to. */
+export function themeOfAction(id: ThemeActionId): ThemePreference {
+  const theme = THEME_PREFERENCES.find((t) => id === `theme.${t}`);
+  if (!theme) throw new Error(`Unknown theme action: ${id}`);
+  return theme;
+}
 
 /**
  * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`
@@ -140,6 +162,10 @@ export type ActionCategory =
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the command palette calls the action now, when that depends on the state it would change. */
+  contextLabel?: () => string;
+  /** Whether the state this action sets is the one in effect now; the palette marks it with a check. */
+  isCurrent?: () => boolean;
   category: ActionCategory;
   hidden?: boolean;
   /**
@@ -164,6 +190,20 @@ function hasActiveWorktree(): boolean {
   return useWorktreeStore.getState().activeWorktreePath !== null;
 }
 
+/** Whether a center panel of `type` can open where the window is: Home holds only some. */
+function canOpenPanelType(type: string): boolean {
+  return hasActiveWorktree() || !panelTypeNeedsWorktree(type);
+}
+
+function isBrowserPanelFocused(): boolean {
+  return getFocusedBrowserPanel() !== undefined;
+}
+
+/** Whether this window is the desktop app's, which can quit and restart; not a browser tab. */
+function isDesktopApp(): boolean {
+  return window.electronAPI !== undefined;
+}
+
 function isFindTargetFocused(): boolean {
   return getFocusedFindTarget() !== undefined;
 }
@@ -173,12 +213,37 @@ function isFindTargetFocused(): boolean {
  * Derived lookups (by id, by category) are built below.
  */
 export const ACTIONS: readonly ActionDef[] = [
-  // Panel creation
-  { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
-  { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
-  { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
-  { id: "panel.new.browser", label: "New Browser", category: "panel" },
-  { id: "panel.open.localdb", label: "Open Database", category: "panel" },
+  // Panel creation. Home (no worktree active) has only the panels that need no worktree.
+  {
+    id: "panel.new.terminal",
+    label: "New Terminal",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("terminal"),
+  },
+  {
+    id: "panel.new.markdown",
+    label: "New Markdown Editor",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("editor"),
+  },
+  {
+    id: "panel.new.drawing",
+    label: "New Drawing",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("excalidraw"),
+  },
+  {
+    id: "panel.new.browser",
+    label: "New Browser",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("browser"),
+  },
+  {
+    id: "panel.open.localdb",
+    label: "Open Database",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("localDb"),
+  },
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
@@ -191,13 +256,29 @@ export const ACTIONS: readonly ActionDef[] = [
   // what focus holds: a browser panel's hard refresh, or the focused widget.
   { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
 
+  {
+    id: "panel.toggleMaximize",
+    label: "Maximize / Restore Group",
+    contextLabel: activeGroupMaximizeLabel,
+    category: "panel",
+    isEnabled: canToggleActiveGroupMaximized,
+  },
+
   // Reload the focused browser panel's page, bypassing the cache.
   {
     id: "browser.hardRefresh",
     label: "Hard Refresh Browser Tab",
     category: "panel",
-    isEnabled: () => getFocusedHardRefreshTarget() !== undefined,
+    isEnabled: isBrowserPanelFocused,
     sharesKeyWith: "panel.rename",
+  },
+
+  // Bookmark the focused browser panel's page, or remove its bookmark.
+  {
+    id: "browser.toggleBookmark",
+    label: "Bookmark Browser Page",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
   },
 
   // Split — new panel of the active panel's type, or of a specific type
@@ -211,6 +292,7 @@ export const ACTIONS: readonly ActionDef[] = [
       id: `panel.split.${type}.${dir}`,
       label: `Split ${label} ${DIRECTION_LABELS[dir]}`,
       category: "panel",
+      isEnabled: () => canOpenPanelType(type),
     })),
   ),
 
@@ -275,7 +357,8 @@ export const ACTIONS: readonly ActionDef[] = [
     isEnabled: () => !isFocusInCenter(),
   },
 
-  // Worktree management
+  // Project and worktree management
+  { id: "project.add", label: "Add Project", category: "worktree" },
   { id: "worktree.back", label: "Go Back to Previous Worktree", category: "worktree" },
   { id: "worktree.forward", label: "Go Forward to Next Worktree", category: "worktree" },
   { id: "worktree.new", label: "New Worktree", category: "worktree" },
@@ -377,6 +460,27 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
+  ...THEME_PREFERENCES.map((theme): ActionDef => ({
+    id: `theme.${theme}`,
+    label: `Theme: ${THEME_PREFERENCE_LABELS[theme]}`,
+    category: "app",
+    isCurrent: () => useSettingsStore.getState().theme === theme,
+  })),
+  // Both explicit quits, whatever Quit Loxel does. The app menu offers the one it doesn't on ⌥⌘Q.
+  // Only the desktop app can quit.
+  {
+    id: "app.quitKeepingTerminals",
+    label: "Quit and Keep Terminals",
+    category: "app",
+    isEnabled: isDesktopApp,
+  },
+  {
+    id: "app.quitEndingTerminals",
+    label: "Quit and End Terminals",
+    category: "app",
+    isEnabled: isDesktopApp,
+  },
+  { id: "app.restart", label: "Restart Loxel", category: "app", isEnabled: isDesktopApp },
 ];
 
 // --- Derived lookups ---

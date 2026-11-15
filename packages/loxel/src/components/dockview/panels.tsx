@@ -9,15 +9,16 @@
  * logs them to the frontend logger, and shows a per-panel fallback with
  * the panel's icon, error message, and a retry button.
  */
-import type { IDockviewPanelProps, IWatermarkPanelProps } from "dockview-react";
+import type { IDockviewPanelProps } from "dockview-react";
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
+import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
 import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
-import { DiffViewerPanel } from "@/components/diff-viewer/DiffViewerPanel";
+import { DiffViewerPanel, type DiffViewerSource } from "@/components/diff-viewer/DiffViewerPanel";
 import { MarkdownEditorPanelComponent } from "@/components/editor/MarkdownEditorPanel";
 import { ExcalidrawEditor } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { GraphPanel } from "@/components/graph/GraphPanel";
@@ -28,16 +29,14 @@ import { FileTreePanel } from "@/components/panels/FileTreePanel";
 import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
-import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
-import type { ActionId } from "@/store/keybindings/action-registry";
-import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
-import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
+import type { PatchDiffParams } from "@/lib/panel-creators";
+import { CENTER_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
 
 import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
 import { CodeEditorTab } from "./code-editor-tab";
 import { CompareTab } from "./compare-tab";
-import { DiffTab } from "./diff-tab";
+import { DiffTab, PatchDiffTab } from "./diff-tab";
 import { ExcalidrawEditorTab } from "./excalidraw-editor-tab";
 import { LocalDbTab } from "./localdb-tab";
 import { MarkdownEditorTab } from "./markdown-editor-tab";
@@ -45,6 +44,7 @@ import { MediaTab } from "./media-tab";
 import { PanelContext } from "./panel-context";
 import { PanelErrorBoundary } from "./panel-error-boundary";
 import { TerminalTab } from "./terminal-tab";
+import { VirtualDocumentTab } from "./virtual-document-tab";
 
 // ---------------------------------------------------------------------------
 // Icon map — derived from the panel registries so the error boundary fallback
@@ -99,8 +99,20 @@ function GraphPanelComponent(_props: IDockviewPanelProps) {
   return <GraphPanel />;
 }
 
+const GIT_DIFF_SOURCE: DiffViewerSource = { type: "git" };
+
 function DiffViewerComponent(_props: IDockviewPanelProps) {
-  return <DiffViewerPanel />;
+  return <DiffViewerPanel source={GIT_DIFF_SOURCE} />;
+}
+
+/** A patch's diff, such as a markdown diff fence's, from the text captured when it opened. */
+function PatchDiffComponent(props: IDockviewPanelProps<PatchDiffParams>) {
+  const { patch, sourcePath } = props.params;
+  const source = useMemo<DiffViewerSource>(
+    () => ({ type: "patch", patch, sourcePath }),
+    [patch, sourcePath],
+  );
+  return <DiffViewerPanel source={source} />;
 }
 
 /** Two files compared side by side, both editable. */
@@ -134,57 +146,6 @@ function TerminalPanelComponent(
         panelApi={props.api}
       />
     </PanelContext.Provider>
-  );
-}
-
-/** Center watermark — visible when no center panels are open. */
-export function CenterWatermark(_props: IWatermarkPanelProps) {
-  return (
-    <div className="bg-editor-surface flex h-full items-center justify-center">
-      <div className="flex items-center gap-10">
-        <img src="/watermark.svg" alt="" className="h-20 w-20 select-none" draggable={false} />
-
-        <div className="flex flex-col gap-1.5">
-          {QUICKSTART_PANELS.map((def) => (
-            <QuickAction
-              key={def.type}
-              icon={<def.icon className="size-4" />}
-              label={def.quickstartLabel}
-              onClick={() => window.dispatchEvent(new CustomEvent(def.createEvent))}
-              actionId={def.actionId ?? undefined}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  onClick,
-  actionId,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  actionId?: ActionId;
-}) {
-  const store = useKeybindingStore();
-  const binding = actionId ? getBindingsForAction(store, actionId)[0] : undefined;
-
-  return (
-    <button
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground hover:bg-muted flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition-colors"
-    >
-      {icon}
-      <span className="flex-1 text-left">{label}</span>
-      {binding && (
-        <KeyBindingDisplay binding={binding} className="text-muted-foreground/60 ml-4 text-xs" />
-      )}
-    </button>
   );
 }
 
@@ -253,6 +214,21 @@ function CodeEditorPanelComponent(
   );
 }
 
+/** A language server's read-only document in the center group. */
+function VirtualDocumentPanelComponent(
+  props: IDockviewPanelProps<{ uri: string; connectionId: string; line?: number; column?: number }>,
+) {
+  return (
+    <VirtualDocumentPanel
+      uri={props.params.uri}
+      connectionId={props.params.connectionId}
+      line={props.params.line}
+      column={props.params.column}
+      panelApi={props.api}
+    />
+  );
+}
+
 /** Browser panel in the center group. */
 function BrowserPanelComponent(props: IDockviewPanelProps<BrowserPanelParams>) {
   return <BrowserPanel url={props.params.url} panelApi={props.api} />;
@@ -296,11 +272,13 @@ export const outerComponents = wrapPanelComponents(
 export const centerComponents = wrapPanelComponents(
   {
     diff: DiffViewerComponent,
+    patchDiff: PatchDiffComponent,
     compare: CompareFilesPanelComponent,
     terminal: TerminalPanelComponent,
     editor: MarkdownEditorPanelComponent,
     excalidraw: ExcalidrawPanelComponent,
     codeEditor: CodeEditorPanelComponent,
+    virtualDocument: VirtualDocumentPanelComponent,
     browser: BrowserPanelComponent,
     media: MediaViewerPanelComponent,
     localDb: LocalDbPanelComponent,
@@ -314,9 +292,25 @@ export const centerTabComponents = {
   codeEditorTab: CodeEditorTab,
   compareTab: CompareTab,
   diffTab: DiffTab,
+  patchDiffTab: PatchDiffTab,
   markdownEditorTab: MarkdownEditorTab,
   excalidrawEditorTab: ExcalidrawEditorTab,
   mediaTab: MediaTab,
   terminalTab: TerminalTab,
   localDbTab: LocalDbTab,
+  virtualDocumentTab: VirtualDocumentTab,
 };
+
+/** Dockview components (content or tab) of the center panels that need no worktree. */
+function withoutWorktreePanels<T>(registry: Record<string, T>, key: "component" | "tabComponent") {
+  const keys = new Set<string>(
+    CENTER_PANELS.filter((def) => !def.needsWorktree).map((def) => def[key]),
+  );
+  return Object.fromEntries(Object.entries(registry).filter(([name]) => keys.has(name)));
+}
+
+/** Home's center components: only panels that need no worktree. */
+export const homeComponents = withoutWorktreePanels(centerComponents, "component");
+
+/** Tabs of Home's center panels. */
+export const homeTabComponents = withoutWorktreePanels(centerTabComponents, "tabComponent");

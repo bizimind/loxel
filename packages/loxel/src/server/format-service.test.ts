@@ -15,8 +15,10 @@ import type { FormatterFailure, LanguageFormatter } from "./language-formatter";
 const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
-const { findVenvBin } = await import("./python-formatter");
+const { BLACK_FORMAT_RESTRICTION, BUNDLED_RUFF_FORMAT_RESTRICTION, findVenvBin } =
+  await import("./python-formatter");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { bundledRuff } = await import("./ruff-lsp-manager");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -143,6 +145,7 @@ describe("FormatService Python detection", () => {
 
   test("formats .py and .pyi with ruff from the project venv, honoring ruff excludes", async () => {
     const wt = await makeWorktree({ "pyproject.toml": "[tool.ruff]" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     const service = new FormatService();
     for (const file of ["app.py", "stubs/app.pyi"]) {
@@ -154,6 +157,7 @@ describe("FormatService Python detection", () => {
 
   test("formats with black from the nearest venv when black is configured", async () => {
     const wt = await makeWorktree({ "pyproject.toml": "[tool.black]" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, "venv"), "black");
     const path = join(wt, "app.py");
     const result = await new FormatService().format("x=1\n", path, wt, AUTO_DETECT);
@@ -167,6 +171,7 @@ describe("FormatService Python detection", () => {
       "services/api/pyproject.toml": "[tool.ruff]",
       "services/web/pyproject.toml": "[project]\nname = 'web'",
     });
+    setRepoTrusted(wt, true);
     // The root venv's ruff prints a marker, so the echoed args below prove the subproject's own
     // venv won over the root one.
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho root-venv\n");
@@ -192,6 +197,7 @@ describe("FormatService Python detection", () => {
       "lib/sub/pyproject.toml": "[dependency-groups]\ndev = ['ruff']\n[tool.ruff.lint]",
       "..hidden/pyproject.toml": "[tool.black]",
     });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     await makeFakeVenv(join(wt, ".venv"), "black");
     const service = new FormatService();
@@ -297,8 +303,43 @@ describe("FormatService Python detection", () => {
     expect(await findVenvBin(join(wt, "sub"), wt, "ruff")).toBeUndefined();
   });
 
+  test("runs nothing from the project's environment until the repository is trusted", async () => {
+    const wt = await makeWorktree({ "ruff.toml": "", "legacy/pyproject.toml": "[tool.black]" });
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    await makeFakeVenv(join(wt, ".venv"), "black");
+    const service = new FormatService();
+    const ruffFile = join(wt, "app.py");
+    const blackFile = join(wt, "legacy/app.py");
+    const override: FormattingSettings = {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o1", extensions: "py", command: "ruff", args: "format -" }],
+    };
+
+    // Ruff is Loxel's own, when it is built here, and black does not run; the save goes out.
+    const ruff = await service.format("x=1\n", ruffFile, wt, AUTO_DETECT);
+    expect(ruff.content ?? "").not.toStartWith("ruff ");
+    expect(await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).toEqual({ content: null });
+    const overridden = await service.format("x=1\n", ruffFile, wt, override);
+    expect(overridden.content ?? "").not.toStartWith("ruff ");
+    // Loxel's own ruff stands in for the project's only in a build that has it.
+    const held = bundledRuff() ? [BUNDLED_RUFF_FORMAT_RESTRICTION] : [];
+    expect(getRepoTrustStatus(wt).restrictions.toSorted()).toEqual(
+      [...held, BLACK_FORMAT_RESTRICTION].toSorted(),
+    );
+
+    setRepoTrusted(wt, true);
+    expect((await service.format("x=1\n", ruffFile, wt, AUTO_DETECT)).content).toStartWith(
+      "ruff format",
+    );
+    expect((await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).content).toStartWith(
+      "black",
+    );
+    expect((await service.format("x=1\n", ruffFile, wt, override)).content).toBe("ruff format -\n");
+  });
+
   test("accepts worktree-relative file paths", async () => {
     const wt = await makeWorktree({ "pkg/ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
     const result = await new FormatService().format("x=1\n", "pkg/app.py", wt, AUTO_DETECT);
     expect(result.content).toBe("ruff format --force-exclude --stdin-filename pkg/app.py\n");
@@ -518,6 +559,7 @@ describe("FormatService language modules", () => {
 
   test("a Python override still prefers the project venv", async () => {
     const wt = await makeWorktree({});
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     const settings: FormattingSettings = {
       ...AUTO_DETECT,
@@ -662,6 +704,7 @@ describe("FormatService failure notices", () => {
 
   test("reports a formatter that is found but cannot start", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/nonexistent/python3\n");
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({
@@ -673,6 +716,7 @@ describe("FormatService failure notices", () => {
 
   test("reports a formatter that is not a runnable file", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     // No shebang and no binary header: the kernel refuses to run it (ENOEXEC).
     await makeFakeVenv(join(wt, ".venv"), "ruff", "not a program\n");
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
@@ -700,6 +744,7 @@ describe("FormatService failure notices", () => {
   for (const [name, stdin] of Object.entries(closedStdinCases)) {
     test(`a formatter gone before reading stdin is judged by its output (${name})`, async () => {
       const wt = await makeWorktree({ "ruff.toml": "" });
+      setRepoTrusted(wt, true);
       await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho formatted\n");
       // Whether the real pipe is closed yet is a race, so the failure itself is simulated.
       const spawn = Bun.spawn;
@@ -720,6 +765,7 @@ describe("FormatService failure notices", () => {
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\nexit 2\n");
     const result = await new FormatService().format("def (", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });

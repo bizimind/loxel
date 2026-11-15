@@ -12,7 +12,8 @@ export interface DekSource {
 }
 
 export function createDekSource(): DekSource {
-  if (process.env.LOXEL_DEV === "1") {
+  // A demo holds no real secrets either, and must not prompt for the keychain.
+  if (process.env.LOXEL_DEV === "1" || process.env.LOXEL_DEMO === "1") {
     return new DevDekSource();
   }
   const dekFile = process.env.LOXEL_DEK_FILE;

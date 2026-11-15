@@ -1,3 +1,4 @@
+import type { InitActionId } from "@bizimind/wt/lib";
 import {
   AlertTriangleIcon,
   FolderIcon,
@@ -6,16 +7,22 @@ import {
   InfoIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import type { DetectPathResult, WorkspaceSetup } from "@/api/project-model";
+import type { DetectPathResult, ProjectSetupResult, WorkspaceSetup } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { showToast } from "@/components/ui/toast";
+import { frontendLog } from "@/lib/frontend-logger";
+import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { cn } from "@/lib/utils";
+import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useProjectStore } from "@/store/projects";
 
 import { FolderPickerContent } from "./FolderPicker";
+import { defaultSetupActions, toggleSetupAction } from "./repo-setup";
+import { RepoSetupChecks } from "./RepoSetupChecks";
 import { looksLikeGitUrl, repoNameFromUrl } from "./wizard-detection";
 import { type WorkspaceConfig, WorkspaceConfigStep } from "./WorkspaceConfigStep";
 
@@ -31,14 +38,28 @@ type ImportStep =
 
 type NewStep = "form" | "workspace-config";
 
-interface AddProjectWizardProps {
-  open: boolean;
-  onClose: () => void;
+const log = frontendLog.child("worktrees");
+
+/** Offers to run the first worktree's setup hook when the new project's repository held it back. */
+function offerHeldInitHook(project: ProjectSetupResult): void {
+  if (project.initHookSkippedAt) void offerToRunInitHook(project.path, project.initHookSkippedAt);
 }
 
-export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
-  const [tab, setTab] = useState<WizardTab>("new");
-  const fetchProjects = useProjectStore((s) => s.fetchProjects);
+/**
+ * The one Add Project dialog, mounted by App and opened with `openAddProjectWizard`. Each opening
+ * gets a fresh dialog (keyed by `session`): nothing from the last one shows, and a request it left
+ * running can't land in the new one.
+ */
+export function AddProjectWizard() {
+  const open = useAddProjectWizardStore((s) => s.isOpen);
+  const session = useAddProjectWizardStore((s) => s.session);
+  const close = useAddProjectWizardStore((s) => s.close);
+  return <AddProjectDialog key={session} open={open} onClose={close} />;
+}
+
+function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [tab, setTab] = useState<WizardTab>("import");
+  const showAddedProject = useProjectStore((s) => s.showAddedProject);
 
   // --- New project state ---
   const [newName, setNewName] = useState("");
@@ -59,6 +80,8 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
     copyFiles: [],
     setupCommands: [],
   });
+  /** The `wt init` fixes to apply when an existing repository is added as it is. */
+  const [importApply, setImportApply] = useState<InitActionId[]>([]);
   // --- Shared state ---
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -66,28 +89,6 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
   const [locationPickerTarget, setLocationPickerTarget] = useState<"new" | "clone" | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Reset on open/close
-  useEffect(() => {
-    if (open) {
-      setTab("import");
-      setNewStep("form");
-      setNewName("");
-      setNewSetup("multi");
-      setNewConfig({ copyFiles: [], setupCommands: [] });
-      setImportStep("select-source");
-      setImportInput("");
-      setDetection(null);
-      setImportName("");
-      setImportSetup("multi");
-      setImportConfig({ copyFiles: [], setupCommands: [] });
-      setSubmitting(false);
-      setErrorMsg(null);
-      setShowLocationPicker(false);
-      setNewLocation("~/projects");
-      setCloneDestination("~/git");
-    }
-  }, [open]);
 
   const handleClose = useCallback(() => {
     if (!submitting) onClose();
@@ -112,6 +113,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
       const result = await api.detectPath(trimmed);
       setDetection(result);
       setImportName(result.name);
+      setImportApply(result.setup ? defaultSetupActions(result.setup) : []);
 
       switch (result.type) {
         case "git-repo-bare":
@@ -141,6 +143,14 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
     }
   }, []);
 
+  const handleToggleApply = useCallback(
+    (id: InitActionId) => {
+      const plan = detection?.setup;
+      if (plan) setImportApply((current) => toggleSetupAction(plan, current, id));
+    },
+    [detection],
+  );
+
   const handleImportInputSubmit = useCallback(() => {
     runDetection(importInput);
   }, [importInput, runDetection]);
@@ -154,102 +164,103 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
   );
 
   // --- Actions ---
+  /** Run one way of adding a project; once the server added it, show it and close. */
+  const submit = useCallback(
+    async (add: () => Promise<ProjectSetupResult>, failure: string) => {
+      setSubmitting(true);
+      setErrorMsg(null);
+      let project: ProjectSetupResult;
+      try {
+        project = await add();
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : failure);
+        setSubmitting(false);
+        return;
+      }
+      // The project is added: from here nothing sends the user back to the dialog to retry.
+      onClose();
+      setSubmitting(false);
+      if (project.setupFailures) {
+        showToast(
+          `${project.name} was added, but some setup fixes failed: ${project.setupFailures}`,
+        );
+      }
+      try {
+        await showAddedProject(project);
+      } catch (err) {
+        log.error("Failed to switch to the added project", { path: project.path, error: err });
+      }
+      offerHeldInitHook(project);
+    },
+    [showAddedProject, onClose],
+  );
+
   const handleAddAsIs = useCallback(async () => {
     if (!detection) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      await api.addProject(detection.path, importName || undefined);
-      await fetchProjects();
-      onClose();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to add project");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [detection, importName, fetchProjects, onClose]);
+    await submit(
+      () =>
+        api.addProject({ path: detection.path, name: importName || undefined, apply: importApply }),
+      "Failed to add project",
+    );
+  }, [detection, importName, importApply, submit]);
 
   const handleCreateNew = useCallback(async () => {
     if (!newName.trim()) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      await api.createProject({
-        name: newName.trim(),
-        location: newLocation,
-        setup: newSetup,
-        copyFiles: newConfig.copyFiles,
-        setupCommands: newConfig.setupCommands,
-      });
-      await fetchProjects();
-      onClose();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to create project");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [newName, newLocation, newSetup, newConfig, fetchProjects, onClose]);
+    await submit(
+      () =>
+        api.createProject({
+          name: newName.trim(),
+          location: newLocation,
+          setup: newSetup,
+          copyFiles: newConfig.copyFiles,
+          setupCommands: newConfig.setupCommands,
+        }),
+      "Failed to create project",
+    );
+  }, [newName, newLocation, newSetup, newConfig, submit]);
 
   const handleClone = useCallback(async () => {
     if (!detection) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      await api.cloneProject({
-        url: detection.path,
-        destination: cloneDestination,
-        setup: importSetup,
-        copyFiles: importConfig.copyFiles,
-        setupCommands: importConfig.setupCommands,
-      });
-      await fetchProjects();
-      onClose();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to clone");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [detection, cloneDestination, importSetup, importConfig, fetchProjects, onClose]);
+    await submit(
+      () =>
+        api.cloneProject({
+          url: detection.path,
+          destination: cloneDestination,
+          setup: importSetup,
+          copyFiles: importConfig.copyFiles,
+          setupCommands: importConfig.setupCommands,
+        }),
+      "Failed to clone",
+    );
+  }, [detection, cloneDestination, importSetup, importConfig, submit]);
 
   const handleInit = useCallback(async () => {
     if (!detection) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      await api.initProject({
-        path: detection.path,
-        name: importName || undefined,
-        setup: importSetup,
-        copyFiles: importConfig.copyFiles,
-        setupCommands: importConfig.setupCommands,
-      });
-      await fetchProjects();
-      onClose();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to initialize");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [detection, importName, importSetup, importConfig, fetchProjects, onClose]);
+    await submit(
+      () =>
+        api.initProject({
+          path: detection.path,
+          name: importName || undefined,
+          setup: importSetup,
+          copyFiles: importConfig.copyFiles,
+          setupCommands: importConfig.setupCommands,
+        }),
+      "Failed to initialize",
+    );
+  }, [detection, importName, importSetup, importConfig, submit]);
 
   const handleConvert = useCallback(async () => {
     if (!detection) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      await api.convertProject({
-        path: detection.path,
-        copyFiles: importConfig.copyFiles,
-        setupCommands: importConfig.setupCommands,
-      });
-      await fetchProjects();
-      onClose();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to convert");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [detection, importConfig, fetchProjects, onClose]);
+    await submit(
+      () =>
+        api.convertProject({
+          path: detection.path,
+          copyFiles: importConfig.copyFiles,
+          setupCommands: importConfig.setupCommands,
+        }),
+      "Failed to convert",
+    );
+  }, [detection, importConfig, submit]);
 
   // --- Location picker overlay ---
   if (showLocationPicker) {
@@ -402,6 +413,8 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
             onNameChange={setImportName}
             importSetup={importSetup}
             onSetupChange={setImportSetup}
+            importApply={importApply}
+            onToggleApply={handleToggleApply}
             cloneDestination={cloneDestination}
             onBrowseCloneDestination={() => {
               setLocationPickerTarget("clone");
@@ -512,6 +525,8 @@ function ImportFlow({
   onNameChange,
   importSetup,
   onSetupChange,
+  importApply,
+  onToggleApply,
   cloneDestination,
   onBrowseCloneDestination,
   onAddAsIs,
@@ -535,6 +550,8 @@ function ImportFlow({
   onNameChange: (v: string) => void;
   importSetup: WorkspaceSetup;
   onSetupChange: (v: WorkspaceSetup) => void;
+  importApply: InitActionId[];
+  onToggleApply: (id: InitActionId) => void;
   cloneDestination: string;
   onBrowseCloneDestination: () => void;
   onAddAsIs: () => void;
@@ -609,6 +626,8 @@ function ImportFlow({
             onNameChange={onNameChange}
             setup={importSetup}
             onSetupChange={onSetupChange}
+            apply={importApply}
+            onToggleApply={onToggleApply}
           />
         )}
 
@@ -637,7 +656,7 @@ function ImportFlow({
               Did you mean to create a new project?{" "}
               <button
                 onClick={onSwitchToNew}
-                className="text-primary cursor-pointer underline underline-offset-2"
+                className="text-link cursor-pointer underline underline-offset-2"
               >
                 Switch to New Project
               </button>
@@ -682,12 +701,16 @@ function DetectedRepoPanel({
   onNameChange,
   setup,
   onSetupChange,
+  apply,
+  onToggleApply,
 }: {
   detection: DetectPathResult;
   name: string;
   onNameChange: (v: string) => void;
   setup: WorkspaceSetup;
   onSetupChange: (v: WorkspaceSetup) => void;
+  apply: InitActionId[];
+  onToggleApply: (id: InitActionId) => void;
 }) {
   const isBare = detection.type === "git-repo-bare";
   const label = isBare ? "bare" : "regular";
@@ -726,6 +749,11 @@ function DetectedRepoPanel({
             <StatusLine icon="success" text="Working tree is clean" />
           )}
         </div>
+      )}
+
+      {/* Converting sets the repository up anew; added as it is, it gets the chosen fixes. */}
+      {detection.setup && (isBare || setup === "single") && (
+        <RepoSetupChecks plan={detection.setup} apply={apply} onToggle={onToggleApply} />
       )}
     </div>
   );
@@ -869,7 +897,7 @@ function SetupOption({
         </div>
         <span className="text-foreground text-xs font-medium">{title}</span>
         {recommended && (
-          <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">
+          <span className="bg-primary/10 text-link rounded px-1.5 py-0.5 text-[10px] font-medium">
             recommended
           </span>
         )}
@@ -882,13 +910,13 @@ function SetupOption({
 function StatusLine({ icon, text }: { icon: "success" | "error" | "info"; text: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      {icon === "success" && <GitBranchIcon className="text-primary size-3.5 shrink-0" />}
+      {icon === "success" && <GitBranchIcon className="text-link size-3.5 shrink-0" />}
       {icon === "error" && <XCircleIcon className="text-destructive size-3.5 shrink-0" />}
       {icon === "info" && <InfoIcon className="text-muted-foreground size-3.5 shrink-0" />}
       <span
         className={cn(
           "text-xs",
-          icon === "success" && "text-primary",
+          icon === "success" && "text-link",
           icon === "error" && "text-destructive",
           icon === "info" && "text-muted-foreground",
         )}
@@ -900,8 +928,8 @@ function StatusLine({ icon, text }: { icon: "success" | "error" | "info"; text: 
 }
 
 function SourceIcon({ type }: { type: DetectPathResult["type"] | undefined }) {
-  if (type === "git-url") return <GlobeIcon className="text-primary size-3.5 shrink-0" />;
+  if (type === "git-url") return <GlobeIcon className="text-link size-3.5 shrink-0" />;
   if (type === "git-repo-bare" || type === "git-repo-regular")
-    return <GitBranchIcon className="text-primary size-3.5 shrink-0" />;
+    return <GitBranchIcon className="text-link size-3.5 shrink-0" />;
   return <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />;
 }

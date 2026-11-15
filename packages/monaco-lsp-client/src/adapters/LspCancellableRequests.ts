@@ -3,6 +3,7 @@ import { RequestHandlingError } from "@hediet/json-rpc";
 import type * as monaco from "monaco-editor";
 
 import type { api } from "../types";
+import { LSPErrorCodes } from "../types";
 
 /** The error Monaco's `isCancellationError` recognizes (name and message both "Canceled"). */
 export class CancellationError extends Error {
@@ -10,6 +11,55 @@ export class CancellationError extends Error {
     super("Canceled");
     this.name = "Canceled";
   }
+}
+
+/** The answers by which a server says it dropped a request rather than failed it. */
+const SERVER_CANCELLATION_CODES: ReadonlySet<number> = new Set([
+  LSPErrorCodes.RequestCancelled,
+  LSPErrorCodes.ServerCancelled,
+  LSPErrorCodes.ContentModified,
+]);
+
+/**
+ * A request the server cancelled: `RequestCancelled`, `ServerCancelled` (`data` may hold
+ * `retriggerRequest`) or `ContentModified`, which servers such as rust-analyzer and clangd answer to
+ * requests made stale by an edit. Monaco treats it as a cancelled request, not a failure to report,
+ * and asks again after the edit.
+ */
+export class ServerCancellationError extends CancellationError {
+  constructor(
+    readonly code: number,
+    /** The server's own message, since `message` must stay "Canceled" for Monaco. */
+    readonly serverMessage: string,
+    readonly data: unknown,
+  ) {
+    super();
+  }
+}
+
+/**
+ * `sender`, rejecting with a `ServerCancellationError` where the server answered that it cancelled
+ * the request, so every request made through the client gets it instead of a failure.
+ */
+export function rejectingServerCancellations<TContext>(
+  sender: IRequestSender<TContext>,
+): IRequestSender<TContext> {
+  return {
+    async sendRequest(request, context, messageIdCallback) {
+      const response = await sender.sendRequest(request, context, messageIdCallback);
+      if (!("error" in response) || !response.error) return response;
+      const code = Number(response.error.code);
+      if (SERVER_CANCELLATION_CODES.has(code)) {
+        throw new ServerCancellationError(code, response.error.message, response.error.data);
+      }
+      return response;
+    },
+    sendNotification: (notification, context) => sender.sendNotification(notification, context),
+    toString: () => sender.toString(),
+    get state() {
+      return sender.state;
+    },
+  };
 }
 
 /** `promise`, or a `CancellationError` as soon as `token` is cancelled. */
@@ -100,6 +150,10 @@ export class LspCancellableRequests {
         },
         (error: unknown) => {
           cancellation.dispose();
+          if (error instanceof ServerCancellationError) {
+            reject(error);
+            return;
+          }
           reject(new Error(`${type.method}: request could not be sent`, { cause: error }));
         },
       );

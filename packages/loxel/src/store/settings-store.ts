@@ -2,12 +2,28 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
+import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
+import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
 import {
-  DEFAULT_SCROLLBACK_LINES,
-  DEFAULT_NOTIFICATION_SEQUENCES,
-  type NotificationSequences,
-} from "@/api/ws-protocol";
+  type NotificationSiteDecision,
+  type NotificationSites,
+  parseNotificationSites,
+} from "@/electron/browser-notification-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { isRecord } from "@/lib/is-record";
+import {
+  allThemes,
+  BUILTIN_THEMES,
+  DEFAULT_THEME_SETTINGS,
+  isBuiltinTheme,
+  type LoxelTheme,
+  parseThemeSettings,
+  type ThemeBase,
+  type ThemeSettings,
+} from "@/lib/loxel-theme";
+import { DEFAULT_WHEN_QUITTING, parseWhenQuitting, type WhenQuitting } from "@/lib/quit-terminals";
+import type { ParsedTheme } from "@/lib/theme-file";
+import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
 import type { PanelId } from "./panel-config";
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
@@ -20,6 +36,31 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
+/**
+ * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
+ * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
+ * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The browser's
+ * per-site decisions keep only valid entries, since the Electron main process enforces them. The
+ * terminal's "When quitting Loxel" falls back to its default when it is missing (a row from before
+ * it) or unknown, as main does with the value it is sent, and bidirectional text is on only when
+ * stored as true.
+ */
+export function withValidSettings<T extends object>(slice: T): T {
+  const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
+  if ("theme" in valid) valid.theme = parseThemePreference(valid.theme);
+  if ("themes" in valid) valid.themes = parseThemeSettings(valid.themes);
+  if (isRecord(valid.terminal)) {
+    valid.terminal = {
+      ...valid.terminal,
+      whenQuitting: parseWhenQuitting(valid.terminal.whenQuitting),
+      bidiText: valid.terminal.bidiText === true,
+    };
+  }
+  if ("browser" in valid) valid.browser = parseBrowserSettings(valid.browser);
+  // Only fields already in the slice were replaced, each with a valid value of its type.
+  return valid as T;
+}
+
 export interface TerminalSettings {
   /** Maximum number of lines kept in terminal scrollback history. */
   scrollbackLines: number;
@@ -27,11 +68,29 @@ export interface TerminalSettings {
   notificationSequences: NotificationSequences;
   /** Activate the worktree's Python environment in new terminals. */
   activatePythonEnv: boolean;
+  /** What Quit Loxel does to the terminals ("When quitting Loxel"). */
+  whenQuitting: WhenQuitting;
   /** Draw right-to-left text (Hebrew, Arabic, ...) in display order. */
   bidiText: boolean;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
+
+export interface BrowserSettings {
+  /**
+   * Whether each site (by origin) may show notifications from browser panels; sites not listed
+   * ask. The Electron main process enforces these (see browser-notifications.ts).
+   */
+  notificationSites: NotificationSites;
+}
+
+function parseBrowserSettings(value: unknown): BrowserSettings {
+  const sites =
+    typeof value === "object" && value !== null && "notificationSites" in value
+      ? value.notificationSites
+      : undefined;
+  return { notificationSites: parseNotificationSites(sites) };
+}
 
 // ---------------------------------------------------------------------------
 // Editor / Indentation
@@ -54,8 +113,14 @@ export interface IndentationOverride {
 // Formatting
 // ---------------------------------------------------------------------------
 
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
-import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import type { FontKind, FontSettings } from "@/lib/font-settings";
+import { DEFAULT_FONT_SETTINGS } from "@/lib/font-settings";
+import type {
+  FormatterOverride,
+  FormattingSettings,
+  MarkdownOutputSettings,
+} from "@/lib/formatting-model";
+import { DEFAULT_FORMATTING_SETTINGS, parseMarkdownOutputSettings } from "@/lib/formatting-model";
 
 /** When an editor shows inlay hints; the values of Monaco's `inlayHints.enabled`. */
 export type InlayHintsMode = "on" | "off" | "onUnlessPressed" | "offUnlessPressed";
@@ -392,7 +457,7 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     url: "https://json.schemastore.org/babelrc.json",
     enabled: true,
   },
-  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can fetch (Monaco's
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can ask for (Monaco's
   // JSON worker gets schemas inline and would report the reference as a problem on every file).
   {
     id: builtinId("**/.eslintrc.{yml,yaml}"),
@@ -493,18 +558,26 @@ export const selectEffectiveSchemas = createBuiltinMergeSelector(
 
 type SettingsSection =
   | "general"
+  | "appearance"
   | "keybindings"
   | "layout"
   | "terminal"
+  | "browser"
   | "editor"
   | "schemas"
   | "fileAssociations"
+  | "security"
   | "worktrees";
 
 export interface SettingsState {
+  /** Color theme. Dark by default. */
+  theme: ThemePreference;
+  /** The color theme each mode uses, and the user's own themes. */
+  themes: ThemeSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
+  fonts: FontSettings;
   /** User-added schemas + builtin overrides (disabled builtins). */
   schemas: SchemaMapping[];
   /** User file association overrides (language per glob). */
@@ -513,13 +586,31 @@ export interface SettingsState {
   autoRevealInExplorer: boolean;
   /** Check for updates when the server starts. The server reads this from the persisted settings. */
   autoCheckForUpdates: boolean;
+  browser: BrowserSettings;
 
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
 
+  setTheme: (theme: ThemePreference) => void;
+
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
+
+  // Color theme actions
+  /** Use a theme for the mode of its base. */
+  setModeTheme: (base: ThemeBase, themeId: string) => void;
+  /**
+   * Add a theme from a file and use it for its mode. One with the name and base of a custom theme
+   * replaces it and keeps its id; one named like a built-in gets " (imported)". Returns its id.
+   */
+  importTheme: (theme: ParsedTheme) => string;
+  /** Copy a theme as a new custom one and use it for its mode. Returns its id. */
+  duplicateTheme: (themeId: string) => string | null;
+  /** Change a custom theme's name or colors; built-ins do not change. */
+  updateTheme: (themeId: string, patch: Partial<Omit<LoxelTheme, "id" | "base">>) => void;
+  /** Remove a custom theme; a mode using it goes back to its built-in. */
+  removeTheme: (themeId: string) => void;
 
   // Layout actions
   updateLayout: (partial: Partial<LayoutSettings>) => void;
@@ -534,10 +625,16 @@ export interface SettingsState {
   removeEditorOverride: (id: string) => void;
 
   // Formatting actions
-  updateFormatting: (partial: Partial<Omit<FormattingSettings, "overrides">>) => void;
+  updateFormatting: (
+    partial: Partial<Omit<FormattingSettings, "overrides" | "markdownOutput">>,
+  ) => void;
+  updateMarkdownOutput: (partial: Partial<MarkdownOutputSettings>) => void;
   addFormatterOverride: (extensions: string, command: string, args: string) => void;
   updateFormatterOverride: (id: string, updates: Partial<Omit<FormatterOverride, "id">>) => void;
   removeFormatterOverride: (id: string) => void;
+
+  // Font actions
+  updateFont: <K extends FontKind>(kind: K, partial: Partial<FontSettings[K]>) => void;
 
   // Schema actions
   addSchema: (glob: string, url: string) => void;
@@ -562,6 +659,10 @@ export interface SettingsState {
 
   // Updates
   setAutoCheckForUpdates: (enabled: boolean) => void;
+
+  // Browser actions
+  /** Allow or block notifications from a site, or forget its decision (`null`) so it asks again. */
+  setNotificationSite: (origin: string, decision: NotificationSiteDecision | null) => void;
 
   // Wt config actions
 
@@ -616,32 +717,116 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
   }
 }
 
+function newThemeId(): string {
+  return `custom:${crypto.randomUUID()}`;
+}
+
+/** The persisted slice of the settings store; cross-window sync applies the same slice. */
+export function persistedSettings(state: SettingsState) {
+  return {
+    theme: state.theme,
+    themes: state.themes,
+    layout: state.layout,
+    terminal: state.terminal,
+    editor: state.editor,
+    fonts: state.fonts,
+    schemas: state.schemas,
+    fileAssociations: state.fileAssociations,
+    autoRevealInExplorer: state.autoRevealInExplorer,
+    autoCheckForUpdates: state.autoCheckForUpdates,
+    browser: state.browser,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
+      theme: "dark",
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
+        whenQuitting: DEFAULT_WHEN_QUITTING,
         bidiText: false,
       },
+      themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
+      fonts: structuredClone(DEFAULT_FONT_SETTINGS),
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
       autoCheckForUpdates: true,
+      browser: { notificationSites: {} },
 
       isOpen: false,
       activeSection: "general",
 
+      setTheme: (theme) => set({ theme }),
+
       // -- Terminal --
 
       updateTerminal: (partial) => set((s) => ({ terminal: { ...s.terminal, ...partial } })),
+
+      // -- Color themes --
+
+      setModeTheme: (base, themeId) => set((s) => ({ themes: { ...s.themes, [base]: themeId } })),
+
+      importTheme: (parsed) => {
+        const { custom } = get().themes;
+        const name = BUILTIN_THEMES.some((b) => b.name === parsed.name)
+          ? `${parsed.name} (imported)`
+          : parsed.name;
+        const previous = custom.find((t) => t.name === name && t.base === parsed.base);
+        const theme: LoxelTheme = { ...parsed, name, id: previous?.id ?? newThemeId() };
+        set((s) => ({
+          themes: {
+            ...s.themes,
+            [theme.base]: theme.id,
+            custom: previous
+              ? s.themes.custom.map((t) => (t.id === theme.id ? theme : t))
+              : [...s.themes.custom, theme],
+          },
+        }));
+        return theme.id;
+      },
+
+      duplicateTheme: (themeId) => {
+        const { themes } = get();
+        const source = allThemes(themes).find((t) => t.id === themeId);
+        if (!source) return null;
+        const names = new Set(allThemes(themes).map((t) => t.name));
+        let name = `${source.name} copy`;
+        for (let n = 2; names.has(name); n++) name = `${source.name} copy ${n}`;
+        const theme: LoxelTheme = { ...structuredClone(source), id: newThemeId(), name };
+        set((s) => ({
+          themes: { ...s.themes, [theme.base]: theme.id, custom: [...s.themes.custom, theme] },
+        }));
+        return theme.id;
+      },
+
+      updateTheme: (themeId, patch) =>
+        set((s) => {
+          if (isBuiltinTheme(themeId)) return {};
+          const custom = s.themes.custom.map((t) => (t.id === themeId ? { ...t, ...patch } : t));
+          return { themes: { ...s.themes, custom } };
+        }),
+
+      removeTheme: (themeId) =>
+        set((s) => {
+          const { light, dark, custom } = s.themes;
+          return {
+            themes: {
+              light: light === themeId ? DEFAULT_THEME_SETTINGS.light : light,
+              dark: dark === themeId ? DEFAULT_THEME_SETTINGS.dark : dark,
+              custom: custom.filter((t) => t.id !== themeId),
+            },
+          };
+        }),
 
       // -- Layout --
 
@@ -735,6 +920,17 @@ export const useSettingsStore = create<SettingsState>()(
           editor: { ...s.editor, formatting: { ...s.editor.formatting, ...partial } },
         })),
 
+      updateMarkdownOutput: (partial) =>
+        set((s) => ({
+          editor: {
+            ...s.editor,
+            formatting: {
+              ...s.editor.formatting,
+              markdownOutput: { ...s.editor.formatting.markdownOutput, ...partial },
+            },
+          },
+        })),
+
       addFormatterOverride: (extensions, command, args) =>
         set((s) => ({
           editor: {
@@ -772,6 +968,11 @@ export const useSettingsStore = create<SettingsState>()(
             },
           },
         })),
+
+      // -- Fonts --
+
+      updateFont: (kind, partial) =>
+        set((s) => ({ fonts: { ...s.fonts, [kind]: { ...s.fonts[kind], ...partial } } })),
 
       // -- Schemas --
 
@@ -847,6 +1048,15 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoCheckForUpdates: (enabled) => set({ autoCheckForUpdates: enabled }),
 
+      // -- Browser --
+
+      setNotificationSite: (origin, decision) =>
+        set((s) => {
+          const { [origin]: _previous, ...others } = s.browser.notificationSites;
+          const notificationSites = decision ? { ...others, [origin]: decision } : others;
+          return { browser: { ...s.browser, notificationSites } };
+        }),
+
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -855,16 +1065,14 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
-      partialize: (state) => ({
-        layout: state.layout,
-        terminal: state.terminal,
-        editor: state.editor,
-        schemas: state.schemas,
-        fileAssociations: state.fileAssociations,
-        autoRevealInExplorer: state.autoRevealInExplorer,
-        autoCheckForUpdates: state.autoCheckForUpdates,
+      partialize: persistedSettings,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(typeof persisted === "object" && persisted !== null
+          ? withValidSettings(persisted)
+          : {}),
       }),
-      version: 15,
+      version: 18,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -1001,14 +1209,32 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
-        if (version <= 14) {
-          // v14 → v15: add the bidirectional text setting to terminal settings
-          const terminal =
-            typeof state.terminal === "object" && state.terminal !== null
-              ? (state.terminal as Record<string, unknown>)
+        if (version <= 15) {
+          // v15 → v16: add font settings
+          if (typeof state.fonts !== "object" || state.fonts === null) {
+            state.fonts = structuredClone(DEFAULT_FONT_SETTINGS);
+          }
+        }
+
+        if (version <= 16) {
+          // v16 → v17: add markdown output markers to formatting settings
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
               : undefined;
-          if (terminal && typeof terminal.bidiText !== "boolean") {
-            terminal.bidiText = false;
+          const formatting =
+            editor && typeof editor.formatting === "object" && editor.formatting !== null
+              ? (editor.formatting as Record<string, unknown>)
+              : undefined;
+          if (formatting) {
+            formatting.markdownOutput = parseMarkdownOutputSettings(formatting.markdownOutput);
+          }
+        }
+
+        if (version <= 17) {
+          // v17 → v18: add browser settings (per-site notification decisions)
+          if (typeof state.browser !== "object" || state.browser === null) {
+            state.browser = { notificationSites: {} };
           }
         }
 

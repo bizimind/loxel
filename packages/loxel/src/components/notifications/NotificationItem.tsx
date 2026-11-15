@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 
-import type { ServerNotification } from "@/api/notification-model";
+import type { NotificationSource, ServerNotification } from "@/api/notification-model";
+import { hostOf } from "@/components/browser/BrowserBookmarks";
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { cn } from "@/lib/utils";
@@ -8,29 +9,63 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 
 const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
   low: "bg-muted-foreground/40",
-  normal: "bg-blue-500",
-  high: "bg-orange-500",
+  // Light takes the accent blue and a deeper amber, which sit calmer on white
+  normal: "bg-blue-500 not-dark:bg-button-primary",
+  high: "bg-orange-500 not-dark:bg-amber-600",
   critical: "bg-red-500",
 };
 
-function sourceLabel(notification: ServerNotification): string {
-  const { source } = notification;
-  if ("worktreePath" in source && source.worktreePath) {
-    return source.worktreePath.split("/").pop() ?? "terminal";
+/** A worktree's name, or "Home" for a Home panel's notification (no worktree). */
+function placeName(worktreePath: string | null): string {
+  if (worktreePath === null) return "Home";
+  return worktreePath.split("/").pop() || worktreePath;
+}
+
+/** Where the notification came from: the worktree or Home, and the site for a browser page. */
+export function sourceLabel({ source }: ServerNotification): string {
+  switch (source.kind) {
+    case "terminal_host":
+      return "Loxel";
+    case "terminal":
+      return placeName(source.worktreePath);
+    case "browser":
+      return `${hostOf(source.origin)} · ${placeName(source.worktreePath)}`;
+    default: {
+      const unknown: never = source;
+      return String(unknown);
+    }
   }
-  return source.kind;
+}
+
+const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
+  terminal: "Terminal notification",
+  browser: "Browser notification",
+  terminal_host: "Terminal host notification",
+};
+
+/** A collapsed site group shown through its newest notification. */
+interface NotificationStack {
+  /** How many notifications the group holds, this one included. */
+  count: number;
+  onExpand: () => void;
+  onDismissAll: () => void;
 }
 
 export function NotificationItem({
   notification,
   onNavigate,
+  stack,
+  inGroup = false,
 }: {
   notification: ServerNotification;
   onNavigate?: () => void;
+  /** Show this notification as the face of its site's collapsed group. */
+  stack?: NotificationStack;
+  /** Listed under its expanded group's header, which already names the source. */
+  inGroup?: boolean;
 }) {
-  const title =
-    notification.title ??
-    `${notification.source.kind[0]!.toUpperCase()}${notification.source.kind.slice(1)} notification`;
+  const title = notification.title || DEFAULT_TITLES[notification.source.kind];
+  const source = sourceLabel(notification);
 
   return (
     <div
@@ -42,27 +77,53 @@ export function NotificationItem({
     >
       {/* Urgency bar */}
       <div
-        className={cn("mt-1 h-4 w-0.5 shrink-0 rounded-full", URGENCY_COLORS[notification.urgency])}
+        className={cn(
+          "mt-1 h-4 w-0.5 shrink-0 rounded-full not-dark:my-0.5 not-dark:h-auto not-dark:w-[3px]",
+          URGENCY_COLORS[notification.urgency],
+        )}
       />
 
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="text-foreground truncate text-xs font-medium">{title}</div>
         {notification.body && (
-          <div className="text-muted-foreground line-clamp-2 text-[11px] leading-tight">
+          <div className="text-muted-foreground not-dark:text-foreground/85 line-clamp-2 text-[11px] leading-tight">
             {notification.body}
           </div>
         )}
-        <div className="text-muted-foreground mt-0.5 text-[10px]">
-          {sourceLabel(notification)} &middot; {dayjs(notification.timestamp).fromNow()}
+        <div className="text-muted-foreground mt-0.5 text-[10px] not-dark:text-[11px]">
+          {!inGroup && <>{source} &middot; </>}
+          {dayjs(notification.timestamp).fromNow()}
         </div>
       </div>
 
-      {/* Dismiss button */}
+      {/* The rest of the site's notifications, behind this one */}
+      {stack && (
+        <button
+          aria-label={`+${stack.count - 1} more from ${source}`}
+          aria-expanded={false}
+          title="Show all"
+          className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary mt-0.5 h-4 shrink-0 rounded border px-1 text-[10px] leading-[14px] font-medium tabular-nums"
+          onClick={(e) => {
+            e.stopPropagation();
+            stack.onExpand();
+          }}
+        >
+          +{stack.count - 1}
+        </button>
+      )}
+
+      {/* Dismiss button: this one, or the whole stack */}
       <button
-        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        aria-label={stack ? `Dismiss all ${stack.count} from ${source}` : "Dismiss"}
+        title={stack ? "Dismiss all" : "Dismiss"}
+        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
+          if (stack) {
+            stack.onDismissAll();
+            return;
+          }
           usePanelNotificationStore.getState().dismiss(notification.id);
         }}
       >

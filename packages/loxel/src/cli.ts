@@ -1,18 +1,27 @@
 #!/usr/bin/env bun
+import { DEFAULT_SERVER_PORT } from "./app-ports";
 import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { isCodingAgent } from "./coding-agent-env";
 import { requestOpenAll } from "./open-request";
 import { isHttpUrl } from "./url-utils";
 
-const PROD_PORT = 7433;
-const DEV_PORT = 7434;
+const PROD_PORT = DEFAULT_SERVER_PORT.production;
+const DEV_PORT = DEFAULT_SERVER_PORT.dev;
 
+/** Whether a Loxel server is answering on `port`. One that is shutting down (its app is quitting or restarting to update) does not count: its replacement is the one to talk to. */
 async function isServerRunning(port: number): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/version`, {
       signal: AbortSignal.timeout(1000),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const body: unknown = await res.json().catch(() => null);
+    return !(
+      typeof body === "object" &&
+      body !== null &&
+      "shuttingDown" in body &&
+      body.shuttingDown === true
+    );
   } catch {
     return false;
   }
@@ -84,12 +93,15 @@ async function main(): Promise<void> {
   // command of only files needs none: each file opens in its own worktree.
   const pinnedWorktree = parsed.worktree ? await detectWorktree(parsed.worktree) : null;
   let commandWorktree = pinnedWorktree;
+  // A Home terminal has a window but no worktree: its pages open in what that window shows.
+  let urlsToWindow = false;
   let urlError: string | null = null;
   if (!commandWorktree && urlCount > 0) {
     try {
       commandWorktree = await detectWorktree(process.cwd());
     } catch (err) {
       if (isInsideLoxel && envWorktree) commandWorktree = envWorktree;
+      else if (isInsideLoxel && envWindowId) urlsToWindow = true;
       // With nothing else to open, fail before launching anything.
       else if (urlCount === targets.length) throw err;
       else urlError = err instanceof Error ? err.message : String(err);
@@ -121,7 +133,13 @@ async function main(): Promise<void> {
             request: { terminal: parsed.terminal, placement: parsed.placement, ...pin, ...options },
           },
         ]
-      : planOpens(parsed, { baseDir: process.cwd(), pinnedWorktree, commandWorktree, options });
+      : planOpens(parsed, {
+          baseDir: process.cwd(),
+          pinnedWorktree,
+          commandWorktree,
+          urlsToWindow,
+          options,
+        });
   for (const { label } of opens.filter((open) => !open.request)) {
     process.stderr.write(`loxel: ${label}${urlError}\n`);
   }

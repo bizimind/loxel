@@ -3,7 +3,8 @@ import path from "node:path";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
+import { isRepoTrusted } from "./repo-trust";
 import { parseToml, recordAt } from "./toml-file";
 
 export const RUST_MANIFEST = "Cargo.toml";
@@ -52,6 +53,15 @@ function readManifest(manifest: string, realRoot: string): string | undefined {
 export function isReadableRustManifest(manifest: string, wtPath: string): boolean {
   const realRoot = realPathOf(wtPath);
   return realRoot !== null && readManifest(manifest, realRoot) !== undefined;
+}
+
+/**
+ * The folder between the worktree and `manifest` that is a repository of its own and not trusted, a
+ * submodule included, or null. A worktree's trust does not reach it.
+ */
+export function untrustedNestedRepo(manifest: string, wtPath: string): string | null {
+  const nested = dirsUpToRoot(path.dirname(manifest), path.resolve(wtPath)).slice(0, -1);
+  return nested.find((dir) => existsSync(path.join(dir, ".git")) && !isRepoTrusted(dir)) ?? null;
 }
 
 function isLinkedWorktree(dir: string): boolean {

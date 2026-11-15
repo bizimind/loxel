@@ -33,10 +33,10 @@ import { isSupportedGolangciLint, runGolangciLint } from "./golangci-lint-runner
 import { dirsUpToRoot } from "./language-formatter";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import type { WorktreeLspServer } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside } from "./shipped-by-repo";
 
 const log = logger.child("golangci-lint-lsp");
 

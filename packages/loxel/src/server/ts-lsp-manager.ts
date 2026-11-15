@@ -274,8 +274,7 @@ export class TsLspManager extends WorktreeLspManager {
     // client/(un)registerCapability: DO NOT swallow. TypeScript announces the
     // semantic-tokens capability dynamically via client/registerCapability,
     // and if we ack it locally the real Monaco client never sees the
-    // registration — so no semantic-token provider is registered and our
-    // JSX augmentation has no provider legend to sit on.
+    // registration, so no semantic-token provider is registered.
     if (m.method === "client/registerCapability" || m.method === "client/unregisterCapability") {
       return false;
     }

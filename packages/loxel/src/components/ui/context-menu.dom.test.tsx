@@ -3,6 +3,8 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 
+import { stubElectronAPI } from "@/test/electron-api-stub";
+
 import {
   ContextMenu,
   ContextMenuItem,
@@ -88,16 +90,12 @@ describe("ContextMenu", () => {
   test("closes when the main process reports a webview took focus", async () => {
     let notifyWebviewFocused = () => {};
     const off = mock(() => {});
-    window.electronAPI = {
-      onOpenInBrowserTab: () => () => {},
-      setDockBadge: () => {},
-      onWindowFocusChange: () => () => {},
-      openFolderDialog: async () => null,
+    window.electronAPI = stubElectronAPI({
       onWebviewFocused: (callback) => {
         notifyWebviewFocused = callback;
         return off;
       },
-    };
+    });
 
     try {
       render(<Harness />);

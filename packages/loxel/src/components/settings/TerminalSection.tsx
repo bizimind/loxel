@@ -3,12 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { NotificationSequence } from "@/api/ws-protocol";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { WHEN_QUITTING_LABELS, WhenQuittingSchema } from "@/lib/quit-terminals";
 import { DEFAULT_TERMINAL_SCROLLBACK, useSettingsStore } from "@/store/settings-store";
 
 export function TerminalSection() {
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
   const notificationSequences = useSettingsStore((s) => s.terminal.notificationSequences);
   const activatePythonEnv = useSettingsStore((s) => s.terminal.activatePythonEnv);
+  const whenQuitting = useSettingsStore((s) => s.terminal.whenQuitting);
   const bidiText = useSettingsStore((s) => s.terminal.bidiText);
   const updateTerminal = useSettingsStore((s) => s.updateTerminal);
 
@@ -106,6 +108,32 @@ export function TerminalSection() {
           Start new terminals with the worktree&apos;s Python virtual environment active, the one
           the Python language server uses. Open terminals keep their environment.
         </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label htmlFor="terminal-when-quitting" className="text-muted-foreground text-xs">
+          When Quitting Loxel
+        </label>
+        <p className="text-muted-foreground text-[10px]">
+          What Quit Loxel (Cmd+Q) does to your terminals. Kept terminals go on running while Loxel
+          is closed and reconnect when it opens again. Cmd+Alt+Q keeps them, or ends them when Cmd+Q
+          keeps them.
+        </p>
+        <select
+          id="terminal-when-quitting"
+          value={whenQuitting}
+          onChange={(e) => {
+            const parsed = WhenQuittingSchema.safeParse(e.target.value);
+            if (parsed.success) updateTerminal({ whenQuitting: parsed.data });
+          }}
+          className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+        >
+          {WhenQuittingSchema.options.map((choice) => (
+            <option key={choice} value={choice}>
+              {WHEN_QUITTING_LABELS[choice]}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="space-y-1.5">

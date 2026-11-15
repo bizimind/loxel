@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { DockviewComponent, type IContentRenderer, type SerializedDockview } from "dockview-react";
+import {
+  DockviewComponent,
+  type IContentRenderer,
+  Orientation,
+  type SerializedDockview,
+} from "dockview-react";
 
 import { dropUnregisteredPanels } from "./drop-unregistered-panels";
 
@@ -38,7 +43,7 @@ describe("a layout with panels no longer registered", () => {
         },
         width: 1000,
         height: 800,
-        orientation: "HORIZONTAL",
+        orientation: Orientation.HORIZONTAL,
       },
       panels: {
         "agent-1": panel("agent-1", "codingAgent"),
@@ -69,7 +74,7 @@ describe("a layout with panels no longer registered", () => {
         root: { type: "branch", data: [leaf("g1", ["t1"], 1000)] },
         width: 1000,
         height: 800,
-        orientation: "HORIZONTAL",
+        orientation: Orientation.HORIZONTAL,
       },
       panels: { t1: panel("t1", "terminal"), "agent-1": panel("agent-1", "codingAgent") },
       floatingGroups: [

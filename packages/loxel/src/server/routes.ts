@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -7,10 +7,9 @@ import { pathToFileURL } from "node:url";
 import {
   assertCanTransformToBare,
   planAdd,
-  executeAdd,
   planRemove,
-  executeRemove,
   getWorktreeName,
+  HOOK_INIT,
   listManagedWorktrees,
   detectRepoType,
   hasUncommittedChanges,
@@ -18,11 +17,13 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
-  executeInit,
+  INIT_ACTION_ORDER,
   planInit,
   shellQuote,
   type AddPlan,
+  type AddResult,
   type InitActionId,
+  type InitResult,
   type ProgressHandler,
   type RemovePlan,
   type RemoveResult,
@@ -31,6 +32,7 @@ import {
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
+import { HOME_KEY } from "@/api/home-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelPlacement } from "@/api/panel-placement-model";
@@ -39,9 +41,14 @@ import type {
   BrowseEntry,
   DetectPathResult,
   ProjectsResponse,
+  Project,
+  ProjectSetupResult,
+  RepoSetupPlan,
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
+import type { RepoTrustDecision, RepoTrustListResponse } from "@/api/repo-trust-model";
+import type { RunningTerminals } from "@/api/running-terminals-model";
 import type { SearchMatch } from "@/api/search-model";
 import type {
   NestedRemoval,
@@ -51,18 +58,19 @@ import type {
 } from "@/api/worktree-removal-model";
 import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
+import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 import { classifySchemaGlob } from "@/lib/schema-glob";
+import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
+import type { DetachedFilesService } from "./detached-files-service";
 import { getDiagnostics } from "./diagnostics";
 import { resolveEditorConfig } from "./editorconfig";
 import { describeError } from "./error-message";
 import type { FileTree } from "./external-folders-service";
-import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import type { FormatResult } from "./format-service";
@@ -83,9 +91,17 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
-import { getRepoTrustStatus, isRepoTrustStoreKey, setRepoTrusted } from "./repo-trust";
+import {
+  forgetRepoTrust,
+  getRepoTrustStatus,
+  isRepoTrustStoreKey,
+  listRepoTrust,
+  setRepoTrustDecision,
+  setRepoTrusted,
+} from "./repo-trust";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
+import type { SchemaConsent } from "./schema-consent";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
@@ -94,8 +110,17 @@ import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
-import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
+import {
+  addFirstWorktreeOfNewRepo,
+  addWorktree,
+  applyInitActions,
+  cloneRepository,
+  isCleanHookHeld,
+  removeWorktree,
+  runHeldInitHook,
+} from "./worktree-hooks";
+import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
 import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
 
@@ -155,9 +180,14 @@ export interface RouteContext {
   resolveFilePath: (absolutePath: string, preferredWtPath?: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
   teardownProject: (cwd: string) => void;
-  shutdown: (exitCode?: number) => void;
+  /** The server is shutting down: it still answers API requests while they drain, then exits. */
+  isShuttingDown: () => boolean;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
+  /** The user's decisions on schema URLs named by project files. */
+  schemaConsent: SchemaConsent;
+  /** Download what open files name or match, as far as they may be fetched. */
+  ensureSchemas: (urls: readonly string[]) => Promise<void>;
   /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
   updateYamlSchemas: (schemaMap: Record<string, string[]>) => void;
   /** Update TOML LSP schema mappings (schema URL → globs) on all active sessions. */
@@ -167,12 +197,14 @@ export interface RouteContext {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
-    settings: FormattingSettings,
+    settings: FormatOnSaveSettings,
   ) => Promise<FormatResult>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
   /** The window `sendToActiveWindow` delivers to, or null when no window is connected. */
   activeWindow: (windowId: string | null) => ActiveWindow | null;
+  /** Drafts made in Home, which belong to no worktree; the drafts routes take `HOME_KEY` for them. */
+  homeDrafts: DetachedFilesService;
   /**
    * Start a terminal's shell with no panel attached, typing `command` into it; the panel's first
    * attach binds to the running session. Resolves once the shell is running.
@@ -182,6 +214,8 @@ export interface RouteContext {
       command?: string;
     },
   ) => Promise<void>;
+  /** The terminals the server runs; with `programs`, their foreground programs where known. */
+  listTerminals: (options: { programs: boolean }) => Promise<RunningTerminals>;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -291,7 +325,7 @@ function requireString(body: Record<string, unknown>, field: string): string {
 }
 
 /** Validate and narrow the formatting settings from the request body. */
-function parseFormattingSettings(raw: unknown): FormattingSettings | undefined {
+function parseFormatOnSaveSettings(raw: unknown): FormatOnSaveSettings | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const obj = raw as Record<string, unknown>;
   if (typeof obj.enabled !== "boolean" || typeof obj.autoDetect !== "boolean") return undefined;
@@ -514,9 +548,7 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
       return error("File not found in any active worktree", 404);
     }
     if (resolved.type === "detached") {
-      return readFileContentResponse(() =>
-        resolved.resources.detachedFilesService.readFileContent(resolved.name),
-      );
+      return readFileContentResponse(() => resolved.service.readFileContent(resolved.name));
     }
     if (resolved.type === "external") {
       return readFileContentResponse(() =>
@@ -658,19 +690,53 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     const svgContent = await file.text();
     bodyContent = `${svgContent}
     <script>
-      var el = document.querySelector("svg");
-      if (el) {
-        var vb = el.getAttribute("viewBox");
-        if (vb) {
-          var parts = vb.split(/[\\s,]+/).map(Number);
-          postDimensions(parts[2] || el.clientWidth, parts[3] || el.clientHeight);
-        } else {
-          postDimensions(
-            parseFloat(el.getAttribute("width")) || el.clientWidth || 300,
-            parseFloat(el.getAttribute("height")) || el.clientHeight || 150
-          );
+      // Sizes the SVG the way the viewer's zoom math expects (ContentSize in
+      // components/pan-zoom/pan-zoom.ts). Its scripts share this window, so keep our names out of
+      // the globals.
+      (function () {
+        var el = document.querySelector("svg");
+        if (!el) return;
+        // Measure it out of flow with the frame's caps lifted, in containing blocks of two sizes:
+        // a box that does not change is the SVG's own size (attributes or CSS); one that does is
+        // relative to the frame.
+        var body = document.body;
+        var svgCss = el.style.cssText;
+        var bodyCss = body.style.cssText;
+        el.style.cssText += ";position:absolute;max-width:none;max-height:none";
+        function measure(px) {
+          if (px) body.style.cssText = bodyCss + ";position:relative;width:" + px + "px;height:" + px + "px";
+          var r = el.getBoundingClientRect();
+          return { width: r.width, height: r.height };
         }
-      }
+        var inFrame = measure(0);
+        var small = measure(1000);
+        var large = measure(2000);
+        el.style.cssText = svgCss;
+        body.style.cssText = bodyCss;
+        var ownSize = small.width === large.width && small.height === large.height;
+        var vb = el.viewBox && el.viewBox.baseVal;
+        var hasViewBox = vb && vb.width > 0 && vb.height > 0;
+        if (!ownSize && hasViewBox) {
+          // Sized only by its viewBox (or percentages): the frame scales it to fit, enlarging it
+          // if needed, and the viewBox is its 1:1 size. Percentages other than 100% are not
+          // modelled.
+          postDimensions(vb.width, vb.height, true);
+          return;
+        }
+        if (!ownSize) {
+          // Frame-relative with no viewBox: its drawing is never scaled, only its box.
+          postDimensions(inFrame.width, inFrame.height);
+          return;
+        }
+        if (!hasViewBox && small.width > 0 && small.height > 0) {
+          // Without a viewBox the frame's cap would crop the drawing rather than shrink it, so
+          // give it one, with its size pinned (a viewBox alone would make it fill the frame).
+          el.setAttribute("width", small.width);
+          el.setAttribute("height", small.height);
+          el.setAttribute("viewBox", "0 0 " + small.width + " " + small.height);
+        }
+        postDimensions(small.width || 300, small.height || 150);
+      })();
     </script>`;
   } else if (mediaType === "video") {
     bodyContent = `<video id="v" src="${rawUrl}" onloadedmetadata="postDimensions(this.videoWidth, this.videoHeight)"></video>
@@ -716,8 +782,13 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   const html = `<!DOCTYPE html>
 <html><head>
 <script>
-  function postDimensions(w, h) {
-    window.parent.postMessage({ type: "media-dimensions", width: w, height: h }, "*");
+  // scalesToFit: the frame scales the media to fit, enlarging it if needed (see the SVG branch);
+  // otherwise it draws at its natural size and only shrinks it to fit.
+  function postDimensions(w, h, scalesToFit) {
+    window.parent.postMessage(
+      { type: "media-dimensions", width: w, height: h, scalesToFit: scalesToFit === true },
+      "*"
+    );
   }
   // Forward wheel events to parent for zoom/pan — wheel events inside the iframe
   // don't cross the browsing context boundary, so the parent can't capture them.
@@ -736,6 +807,13 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Chromium paints an opaque canvas behind a frame whose color scheme differs from its
+     <iframe> element's, hiding the viewer's checkerboard under transparent pixels. This root and
+     the <iframe> element (its inline style in MediaViewerPanel.tsx) both declare "light dark",
+     which each resolves to the browser's preferred scheme (the OS's), so they match under either
+     app theme; an inlined SVG's own :root rule cannot override it, and the SVG's
+     prefers-color-scheme and light-dark() rules follow the OS. */
+  :root { color-scheme: light dark !important; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
   body { display: flex; align-items: center; justify-content: center; }
   img, video, svg { display: block; max-width: 100%; max-height: 100%; }
@@ -962,7 +1040,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
   const nonce = requireString(body, "nonce");
   const shouldFormat = body.format === true;
   const formattingSettings = shouldFormat
-    ? parseFormattingSettings(body.formattingSettings)
+    ? parseFormatOnSaveSettings(body.formattingSettings)
     : undefined;
 
   // Returned to the client so it can tell the user why a save went out unformatted.
@@ -984,7 +1062,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     );
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
-      await resolved.resources.detachedFilesService.writeFileContent(resolved.name, content, nonce);
+      await resolved.service.writeFileContent(resolved.name, content, nonce);
       return json({ success: true });
     }
     if (resolved.type === "external") {
@@ -1108,15 +1186,51 @@ async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Resp
   return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
 }
 
+const REPO_TRUST_DECISIONS: readonly RepoTrustDecision[] = ["trusted", "declined", "undecided"];
+
+function isRepoTrustDecision(value: unknown): value is RepoTrustDecision {
+  return REPO_TRUST_DECISIONS.some((decision) => decision === value);
+}
+
+/**
+ * Answer for a worktree's repository, or forget an answer by repository id: a repository no project
+ * uses has no worktree to name, and forgetting can only take trust away.
+ */
 async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  if (typeof body.trusted !== "boolean") return error("Missing 'trusted' boolean in body", 400);
+  const { decision } = body;
+  if (!isRepoTrustDecision(decision)) return error("Missing 'decision' in body", 400);
+  if (typeof body.repositoryId === "string") {
+    if (decision !== "undecided") return error("Only forgetting takes a repository id", 400);
+    forgetRepoTrust(body.repositoryId);
+    return json({ success: true });
+  }
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
   const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
   if (wtPath instanceof Response) return wtPath;
-  setRepoTrusted(wtPath, body.trusted);
+  setRepoTrustDecision(wtPath, decision, { unlessTrusted: body.unlessTrusted === true });
   return json(getRepoTrustStatus(wtPath));
+}
+
+/** Every project's repository and every stored answer, for Settings > Security. */
+async function handleListRepoTrust(): Promise<Response> {
+  const { projects } = await projectStore.loadProjects();
+  const worktrees = await Promise.all(
+    projects.map(async (project) => {
+      // A project whose folder is gone has nothing to answer through; its stored answer is still
+      // listed. A bare root's identity is not its worktrees', so it answers through those.
+      if (!existsSync(project.path)) return [];
+      if (!project.isBare) return [project.path];
+      try {
+        return (await listManagedWorktrees(project.path)).map((wt) => wt.path);
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const response: RepoTrustListResponse = { repositories: listRepoTrust(worktrees.flat()) };
+  return json(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -1509,14 +1623,17 @@ async function handleFileCopy(req: Request, ctx: RouteContext): Promise<Response
 // Service-dependent routes: detached files
 // ---------------------------------------------------------------------------
 
+/** The drafts `wt` names: an active worktree's, or Home's (`HOME_KEY`). */
+function draftsFor(ctx: RouteContext, wt: string): DetachedFilesService | undefined {
+  return wt === HOME_KEY ? ctx.homeDrafts : ctx.getWorktreeResources(wt)?.detachedFilesService;
+}
+
 // GET /api/detached-files?wt=
 function handleDetachedFiles(req: Request, ctx: RouteContext): Response {
   const url = new URL(req.url);
   const wt = url.searchParams.get("wt");
   if (!wt) return error("Missing wt parameter", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return json([]);
-  return json(resources.detachedFilesService.listFiles());
+  return json(draftsFor(ctx, wt)?.listFiles() ?? []);
 }
 
 // GET /api/external-files?wt= — list the Others section (open folders, then open files)
@@ -1534,13 +1651,13 @@ async function handleDetachedFileContent(req: Request, ctx: RouteContext): Promi
   const url = new URL(req.url);
   const wt = url.searchParams.get("wt");
   if (!wt) return error("Missing wt parameter", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const name = url.searchParams.get("name");
   if (!name) return error("Missing name parameter", 400);
   if (name.includes("/") || name.includes("..")) return error("Invalid file name", 400);
   try {
-    const content = await resources.detachedFilesService.readFileContent(name);
+    const content = await drafts.readFileContent(name);
     return json({ content });
   } catch {
     return error("File not found", 404);
@@ -1552,15 +1669,15 @@ async function handleDetachedFileCreate(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const prefix = requireString(body, "prefix");
   const ext = typeof body.ext === "string" ? body.ext : undefined;
   if (prefix.includes("/") || prefix.includes("..")) return error("Invalid prefix", 400);
   if (ext && (ext.includes("/") || ext.includes(".."))) return error("Invalid extension", 400);
   const content = typeof body.content === "string" ? body.content : undefined;
-  const name = await resources.detachedFilesService.createFile(prefix, ext, content);
-  return json({ name, path: join(resources.detachedFilesService.dir, name) });
+  const name = await drafts.createFile(prefix, ext, content);
+  return json({ name, path: join(drafts.dir, name) });
 }
 
 // POST /api/detached-file-move
@@ -1568,6 +1685,7 @@ async function handleDetachedFileMove(req: Request, ctx: RouteContext): Promise<
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
+  if (wt === HOME_KEY) return error("Home's drafts belong to no project", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
@@ -1592,14 +1710,14 @@ async function handleDetachedFileDelete(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
   const path = typeof body.path === "string" ? body.path : undefined;
   const name = path?.startsWith("/") ? basename(path) : rawName;
   if (!name) return error("Missing name or path in body", 400);
   if (name.includes("/") || name.includes("..")) return error("Invalid file name", 400);
-  await resources.detachedFilesService.deleteFile(name);
+  await drafts.deleteFile(name);
   return json({ success: true });
 }
 
@@ -1608,8 +1726,8 @@ async function handleDetachedFileRename(req: Request, ctx: RouteContext): Promis
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return error("Worktree not active", 503);
+  const drafts = draftsFor(ctx, wt);
+  if (!drafts) return error("Worktree not active", 503);
   const rawOldName = typeof body.oldName === "string" ? body.oldName : undefined;
   const oldPath = typeof body.path === "string" ? body.path : undefined;
   const oldName = oldPath?.startsWith("/") ? basename(oldPath) : rawOldName;
@@ -1619,8 +1737,8 @@ async function handleDetachedFileRename(req: Request, ctx: RouteContext): Promis
   if (newName.includes("/") || newName.includes("..")) return error("Invalid new file name", 400);
 
   try {
-    await resources.detachedFilesService.renameFile(oldName, newName);
-    return json({ success: true, path: join(resources.detachedFilesService.dir, newName) });
+    await drafts.renameFile(oldName, newName);
+    return json({ success: true, path: join(drafts.dir, newName) });
   } catch (err) {
     return error(err instanceof Error ? err.message : "Rename failed", 500);
   }
@@ -1631,6 +1749,7 @@ async function handleDetachedFileCopyToProject(req: Request, ctx: RouteContext):
   const body = await parseBody(req);
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
+  if (wt === HOME_KEY) return error("Home's drafts belong to no project", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return error("Worktree not active", 503);
   const rawName = typeof body.name === "string" ? body.name : undefined;
@@ -1745,6 +1864,70 @@ async function createInitialCommit(bareRepoPath: string): Promise<void> {
   }
 }
 
+/**
+ * What `wt doctor` finds in an existing repository, without the checks that are ok, and the
+ * `wt init` fixes for the rest. Undefined when the repository cannot be inspected.
+ */
+async function repoSetupPlan(repoPath: string): Promise<RepoSetupPlan | undefined> {
+  try {
+    const plan = await planInit(repoPath);
+    const checks = plan.checks.filter((check) => check.status !== "ok");
+    const ids = new Set(checks.map((check) => check.id));
+    return { checks, actions: plan.actions.filter((action) => ids.has(action.check)) };
+  } catch (err) {
+    wtLog.warn("Failed to plan the repository's setup", { path: repoPath, error: err });
+    return undefined;
+  }
+}
+
+/** The optional `apply` list of a request body: known `wt init` action ids that can go together. */
+function parseInitActions(body: Record<string, unknown>): InitActionId[] {
+  if (body.apply === undefined) return [];
+  const apply = requireStringArray(body, "apply");
+  const known = new Set<string>(INIT_ACTION_ORDER);
+  const unknown = apply.find((id) => !known.has(id));
+  if (unknown !== undefined) throw new Error(`Unknown setup action '${unknown}'`);
+  const ids = apply.filter((id): id is InitActionId => known.has(id));
+  if (ids.includes("worktree-metadata-on") && ids.includes("worktree-metadata-off")) {
+    throw new Error("Cannot turn worktree metadata both on and off");
+  }
+  return ids;
+}
+
+/**
+ * A project set up with `wt init` fixes: the first worktree whose `init.wt.sh` was held back
+ * (`firstWorktree`, or one a fix added), and the fixes that failed. A repository a fix already changed is added anyway, so the user can
+ * work in it and see what is left, rather than finding it changed and not added.
+ */
+function withSetupOutcome(
+  project: Project,
+  results: InitResult[],
+  firstWorktree?: AddResult,
+): ProjectSetupResult {
+  const added = [
+    firstWorktree,
+    ...results.flatMap((result) => result.outcomes.map((o) => o.worktree)),
+  ];
+  const held = added.find((worktree) => worktree?.hookSkipped);
+  const setupFailures = failedInitActions(results);
+  if (setupFailures)
+    wtLog.warn("Repository setup partly failed", { path: project.path, setupFailures });
+  return {
+    ...project,
+    ...(held && { initHookSkippedAt: held.path }),
+    ...(setupFailures && { setupFailures }),
+  };
+}
+
+/** A message naming every applied `wt init` fix that failed, or null when none did. */
+function failedInitActions(results: InitResult[]): string | null {
+  const failed = results
+    .flatMap((result) => result.outcomes)
+    .filter((outcome) => outcome.status === "failed");
+  if (failed.length === 0) return null;
+  return failed.map((outcome) => `${outcome.id}: ${outcome.error ?? "failed"}`).join("; ");
+}
+
 // POST /api/projects/detect — detect what a path points to
 async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -1765,6 +1948,7 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         type: "git-repo-bare",
         path: dirPath,
         name: basename(dirPath).replace(/\.git$/, ""),
+        setup: await repoSetupPlan(dirPath),
       };
       return json(result);
     }
@@ -1789,6 +1973,9 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         name: basename(gitRoot),
         branch,
         hasUncommittedChanges: dirty,
+        // A linked worktree is added as a checkout of its own, while `wt init` fixes would apply
+        // to the repository it belongs to, so it gets none.
+        setup: repoType === "regular" ? await repoSetupPlan(gitRoot) : undefined,
       };
       return json(result);
     }
@@ -1841,20 +2028,24 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
+  const setupResults: InitResult[] = [];
+  // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
     );
     if (result.exitCode !== 0) return error("git init failed", 500);
+    setRepoTrusted(projectDir, true);
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
     await ensureWorktreesDir(projectDir);
     await writeInitHook(projectDir, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(projectDir));
 
     try {
-      await executeAdd(
-        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildSpawnEnv() },
+      await addFirstWorktreeOfNewRepo(
+        { name: "main", branch: "main", repoPath: projectDir },
         wtProgress,
       );
     } catch (err) {
@@ -1871,7 +2062,15 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   }
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setupResults));
+}
+
+/**
+ * Turn on worktree metadata in a multi-workspace project the wizard set up, so its worktrees can
+ * nest and have titles from the start. Before the first worktree is added, it gets its id then.
+ */
+async function turnOnWorktreeMetadata(repoPath: string): Promise<InitResult> {
+  return applyInitActions(repoPath, [METADATA_ON_ACTION], wtProgress);
 }
 
 // POST /api/projects/clone — clone a remote repo
@@ -1885,7 +2084,11 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const copyFilesError = copyFilesValidationResponse(copyFiles);
   if (copyFilesError) return copyFilesError;
 
-  validateCloneUrl(url);
+  try {
+    validateCloneUrl(url);
+  } catch (err) {
+    return error(describeError(err, "Invalid clone URL"), 400);
+  }
   const destDir = expandTilde(destination);
   mkdirSync(destDir, { recursive: true });
 
@@ -1910,32 +2113,26 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return json(project);
   }
 
-  // Multi-workspace: clone as bare
+  // Multi-workspace: a bare clone set up the way `wt init <url>` does it, with worktree metadata on.
+  // The default branch's worktree comes after the hook is written, so the hook runs in it (when
+  // trusted).
   const repoName = repoNameFromUrl(url);
-  const bareDir = join(destDir, `${repoName}.git`);
-
-  const result = measureSpawn("git clone", () =>
-    Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]),
-  );
-  if (result.exitCode !== 0) {
-    return error(`git clone --bare failed: ${result.stderr.toString()}`, 500);
-  }
-
-  // Determine default branch from the bare clone
-  let baseBranch = "main";
+  const bareDir = join(destDir, repoName);
+  let cloned: InitResult;
   try {
-    const headRef = await Bun.file(join(bareDir, "HEAD")).text();
-    const match = headRef.match(/ref: refs\/heads\/(.+)/);
-    if (match?.[1]) baseBranch = match[1].trim();
-  } catch {
-    // default to main
+    cloned = await cloneRepository(
+      { url, cwd: destDir, dir: repoName, apply: ["fetch-refspec"] },
+      wtProgress,
+    );
+  } catch (err) {
+    return error(describeError(err, "Failed to clone"), 500);
   }
 
   await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
-
-  await executeAdd(
-    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildSpawnEnv() },
+  const mainWorktree = await applyInitActions(
+    bareDir,
+    [METADATA_ON_ACTION, "main-worktree"],
     wtProgress,
   );
 
@@ -1947,7 +2144,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, [cloned, mainWorktree]));
 }
 
 // POST /api/projects/init — initialize git in an existing non-repo folder
@@ -1967,6 +2164,8 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error("Path does not exist", 400);
   }
 
+  let firstWorktree: AddResult | undefined;
+  const setupResults: InitResult[] = [];
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
@@ -2002,12 +2201,13 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     }
 
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    setupResults.push(await turnOnWorktreeMetadata(dirPath));
 
     const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
     if (!hasMain) {
       try {
-        await executeAdd(
-          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildSpawnEnv() },
+        firstWorktree = await addWorktree(
+          { name: "main", branch: "main", repoPath: dirPath },
           wtProgress,
         );
       } catch (err) {
@@ -2024,7 +2224,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setupResults, firstWorktree));
 }
 
 // POST /api/projects/convert — convert regular repo to bare+wt
@@ -2067,9 +2267,11 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   // Teardown only after every non-mutating conversion preflight has passed.
   ctx.teardownProject(dirPath);
 
+  let metadata: InitResult;
   try {
     await transformToBare(dirPath, currentBranch);
     await writeInitHook(dirPath, copyFiles, setupCommands);
+    metadata = await turnOnWorktreeMetadata(dirPath);
   } catch (err) {
     try {
       await ctx.initializeProject(dirPath);
@@ -2092,11 +2294,9 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, [metadata]));
 }
 
-/** Name of the wt add hook script, run in each new worktree. */
-const INIT_HOOK_NAME = "init.wt.sh";
 /** Repo-root directory holding local-only files copied into new worktrees. */
 const LOCAL_RES_DIR = ".wt-local-res";
 
@@ -2157,7 +2357,7 @@ export async function writeInitHook(
     lines.push(...commands);
   }
 
-  const hookPath = join(repoDir, INIT_HOOK_NAME);
+  const hookPath = join(repoDir, HOOK_INIT);
   await Bun.write(hookPath, `${lines.join("\n")}\n`);
   chmodSync(hookPath, 0o755);
 }
@@ -2181,15 +2381,36 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
       };
     }),
   );
-  const response: ProjectsResponse = { projects: enriched, homeDir: homedir() };
+  const response: ProjectsResponse = {
+    projects: enriched,
+    homeDir: homedir(),
+    homeDraftsDir: ctx.homeDrafts.dir,
+  };
   return json(response);
 }
 
 // POST /api/projects — add a new project and initialize its server state
 async function handleAddProject(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const path = requireString(body, "path");
+  const path = expandTilde(requireString(body, "path"));
   const name = typeof body.name === "string" ? body.name : undefined;
+  let apply: InitActionId[];
+  try {
+    apply = parseInitActions(body);
+  } catch (err) {
+    return error(describeError(err, "Invalid setup actions"), 400);
+  }
+
+  // The chosen `wt init` fixes run before the project is initialized, so it starts set up.
+  const setup: InitResult[] = [];
+  if (apply.length > 0) {
+    wtLog.info("Applying repository setup", { path, apply });
+    try {
+      setup.push(await applyInitActions(path, apply, wtProgress));
+    } catch (err) {
+      return error(describeError(err, "Failed to set up the repository"), 500);
+    }
+  }
 
   const project = await projectStore.addProject(path, name);
 
@@ -2209,7 +2430,7 @@ async function handleAddProject(req: Request, ctx: RouteContext): Promise<Respon
   // project has no wtResources entries yet, so broadcastToProject would be a
   // no-op and the UI would not refresh.
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(withSetupOutcome(project, setup));
 }
 
 // Project routes that require :id path parameter
@@ -2314,13 +2535,12 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   try {
     const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
     const meta = { ...child?.meta, ...titleMeta(title) };
-    const result = await executeAdd(
+    const result = await addWorktree(
       {
         name,
         branch,
         branchResolution,
         repoPath: project.cwd,
-        hookEnv: buildSpawnEnv(),
         ...(child ? { base: child.base } : {}),
         ...(Object.keys(meta).length > 0 ? { meta } : {}),
       },
@@ -2332,6 +2552,28 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   } catch (err) {
     wtLog.error(`Failed to create worktree '${name}'`, { error: err });
     return error(describeError(err, "Failed to create worktree"));
+  }
+}
+
+// POST /api/worktree/run-init-hook — run the init.wt.sh its creation held back, once trusted
+async function handleRunInitHook(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+  const wtPath = requireString(body, "path");
+  await git.validateWorktreePath(wtPath, project.cwd);
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+
+  wtLog.info(`Running ${HOOK_INIT} in '${name}'`);
+  try {
+    const hookRan = await runHeldInitHook(
+      { name, repoPath: project.cwd, worktreePath: wtPath },
+      wtProgress,
+    );
+    return json({ hookRan });
+  } catch (err) {
+    wtLog.error(`Failed to run ${HOOK_INIT} in '${name}'`, { error: err });
+    return error(describeError(err, `Failed to run ${HOOK_INIT}`));
   }
 }
 
@@ -2393,11 +2635,7 @@ async function handleEnableWorktreeMetadata(req: Request, ctx: RouteContext): Pr
 
   wtLog.info("Turning on worktree metadata", { project: project.cwd });
   try {
-    const result = await executeInit(
-      project.cwd,
-      { apply: [METADATA_ON_ACTION], hookEnv: buildSpawnEnv() },
-      wtProgress,
-    );
+    const result = await applyInitActions(project.cwd, [METADATA_ON_ACTION], wtProgress);
     const outcome = result.outcomes.find((candidate) => candidate.id === METADATA_ON_ACTION);
     if (outcome?.status === "failed") {
       return error(outcome.error ?? "Failed to turn on worktree metadata", 500);
@@ -2433,7 +2671,11 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
         dirty: (await planRemove({ name: wt.wtName, repoPath: project.cwd })).dirty,
       })),
     );
-    const response: WorktreeRemovePlan = { ...plan, nested };
+    const response: WorktreeRemovePlan = {
+      ...plan,
+      nested,
+      cleanHookHeld: isCleanHookHeld(plan.worktreePath, plan.hasHook),
+    };
     return json(response);
   } catch (err) {
     return error(describeError(err, "Failed to inspect worktree"));
@@ -2454,7 +2696,7 @@ async function removeOneWorktree(
   wtLog.info(`Removing worktree '${name}'`, options);
   const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
   try {
-    const result = await executeRemove(
+    const result = await removeWorktree(
       {
         name,
         deleteBranch: options.deleteBranch,
@@ -2467,18 +2709,12 @@ async function removeOneWorktree(
         force: options.force,
         repoPath: project.cwd,
         expectedPath: wtPath,
-        hookEnv: buildSpawnEnv(),
       },
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
+    // Only now: a removal that fails, or a clean hook still running, leaves the terminals alone.
     ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section and its own
-    // toolchain detection.
-    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    for (const { overrideStoreKey } of toolchainStatusModules) {
-      storeDb.deleteStore(overrideStoreKey(wtPath));
-    }
     return result;
   } catch (err) {
     try {
@@ -2626,20 +2862,51 @@ async function handleSchemaResolve(req: Request, ctx: RouteContext): Promise<Res
   if (!schemaUrl) return error("Missing url parameter");
 
   const baseDir = url.searchParams.get("baseDir") ?? undefined;
+  if (isRemoteSchemaUrl(schemaUrl) && ctx.schemaConsent.request(schemaUrl) !== "allowed") {
+    return json(null);
+  }
   const schema = await ctx.resolveSchema(schemaUrl, baseDir);
   if (schema === null) return error("Failed to resolve schema", 404);
   return json(schema);
 }
 
-// POST /api/schemas/sync — resolve configured schemas, update the YAML and TOML language servers
+// POST /api/schemas/ensure — download schemas that open files name or match, when allowed
+async function handleSchemaEnsure(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (!Array.isArray(body.urls)) return error("urls must be an array");
+  const urls = body.urls.filter((url): url is string => typeof url === "string");
+  void ctx.ensureSchemas(urls.filter(isRemoteSchemaUrl));
+  return json({ ok: true });
+}
+
+// POST /api/schemas/consent — record, change or forget the decision on one schema URL
+async function handleSchemaConsent(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const { url, decision } = body;
+  if (typeof url !== "string") return error("url must be a string");
+  if (decision !== "trust" && decision !== "deny" && decision !== null) {
+    return error('decision must be "trust", "deny" or null');
+  }
+  ctx.schemaConsent.decide(url, decision);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/never-fetch — the "Never ask" switch
+async function handleSchemaNeverFetch(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.neverFetch !== "boolean") return error("neverFetch must be a boolean");
+  ctx.schemaConsent.setNeverFetch(body.neverFetch);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/sync — take the configured schemas, update the YAML and TOML language servers
 async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const schemas = body.schemas;
   if (!Array.isArray(schemas)) return error("schemas must be an array");
 
-  // Monaco's JSON worker gets resolved schemas; the language servers get URLs and fetch them
-  // (and the `$ref`s inside them, often relative to the schema's URL) themselves.
-  const jsonToResolve: { glob: string; url: string }[] = [];
+  // Nothing is downloaded here: a schema is fetched when an open file first matches its glob.
+  const configuredUrls: string[] = [];
   const yamlMap: Record<string, string[]> = {};
   const tomlMap: Record<string, string[]> = {};
 
@@ -2649,77 +2916,38 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
     if (typeof glob !== "string" || typeof url !== "string") continue;
 
     const languages = classifySchemaGlob(glob);
-    if (languages.json) jsonToResolve.push({ glob, url });
+    configuredUrls.push(url);
     if (languages.yaml) addSchemaGlob(yamlMap, languageServerSchemaUrl(url), glob);
     if (languages.toml) addSchemaGlob(tomlMap, languageServerSchemaUrl(url), glob);
   }
 
-  // Resolve JSON schemas in parallel
-  const jsonResults = await Promise.all(
-    jsonToResolve.map(async ({ glob, url }) => {
-      const schema = await ctx.resolveSchema(url);
-      return { glob, url, schema };
-    }),
-  );
-
+  ctx.schemaConsent.setConfigured(configuredUrls);
   ctx.updateYamlSchemas(yamlMap);
   ctx.updateTomlSchemas(tomlMap);
-  return json({ json: jsonResults, yaml: { synced: true }, toml: { synced: true } });
+  return json({ synced: true });
 }
 
 // ---------------------------------------------------------------------------
-// Update routes
+// Version route
 // ---------------------------------------------------------------------------
 
 // GET /api/version
-function handleGetVersion(): Response {
-  return json({ version: getCurrentVersion(), isDev: config.isDev });
+function handleGetVersion(_req: Request, ctx: RouteContext): Response {
+  return json(versionInfo(ctx.isShuttingDown()));
 }
 
-// GET /api/update/status
-function handleGetUpdateStatus(): Response {
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/check
-async function handleUpdateCheck(_req: Request, ctx: RouteContext): Promise<Response> {
-  await checkForUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/download
-async function handleUpdateDownload(_req: Request, ctx: RouteContext): Promise<Response> {
-  await downloadUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/install
-function handleUpdateInstall(_req: Request, ctx: RouteContext): Response {
-  if (config.isDev) return error("Updates are not available in development mode");
-
-  const status = getUpdateStatus();
-  if (status.state !== "ready") return error("No update is ready to install");
-
-  const resourcesDir = process.env.LOXEL_RESOURCES_DIR;
-  if (!resourcesDir) return error("Cannot determine resources directory");
-
-  // Check write access before committing to exit
-  try {
-    mkdirSync(resourcesDir, { recursive: true });
-    accessSync(resourcesDir, constants.W_OK);
-  } catch {
-    return error("Resources directory is not writable");
-  }
-
-  if (!prepareInstall()) return error("Failed to prepare update");
-
-  // Broadcast installing state before shutdown
-  ctx.broadcastAll({ type: "update_status_changed", data: { state: "installing" } });
-
-  // Schedule shutdown after response is sent
-  setTimeout(() => ctx.shutdown(42), 100);
-
-  return json({ success: true });
+/**
+ * What `GET /api/version` answers. appOwned: started by the desktop app, so it exits with that
+ * app. shuttingDown: about to exit, so clients wait for its replacement instead of using it (see
+ * SHARED_SERVER.md).
+ */
+export function versionInfo(shuttingDown: boolean) {
+  return {
+    version: getCurrentVersion(),
+    isDev: config.isDev,
+    appOwned: config.parentPid !== null,
+    shuttingDown,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2733,6 +2961,15 @@ function handleUpdateInstall(_req: Request, ctx: RouteContext): Response {
 async function canonicalPath(rawPath: string): Promise<string | null> {
   const expanded = rawPath.startsWith("~/") ? join(homedir(), rawPath.slice(2)) : rawPath;
   return realpath(resolve(expanded)).catch(() => null);
+}
+
+// GET /api/terminals[?programs] — the running terminals, for the update warning, the confirmations
+// before an update install and a quit, and terminal tabs.
+// Foreground program names are private to the user: the request origin checks in server.ts keep
+// other sites from reading them, like every route here.
+async function handleListTerminals(req: Request, ctx: RouteContext): Promise<Response> {
+  const programs = new URL(req.url).searchParams.has("programs");
+  return json(await ctx.listTerminals({ programs }));
 }
 
 // GET /api/path-info?path= — whether a path exists and is a directory (e.g. for terminal links)
@@ -2864,14 +3101,11 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
     // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
-    // window shows.
+    // window shows, else to Home (null), which a window shows with no worktree.
     const owner = pinned ?? (await owningWorktree(ctx, cwd));
     const window = ctx.activeWindow(windowId);
     if (!window) return error("No Loxel window is open", 503);
     const worktreePath = owner ?? window.worktreePath;
-    // 503 like no window at all: a window that is still launching shows its worktree in a moment,
-    // and the CLI retries a 503 for a while.
-    if (!worktreePath) return error("Open a project in Loxel before opening terminals", 503);
 
     const terminalId = crypto.randomUUID();
     const sent = ctx.sendToActiveWindow(windowId, {
@@ -2886,7 +3120,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       await ctx.startTerminal({
         id: terminalId,
         cwd,
-        worktreePath,
+        ...(worktreePath ? { worktreePath } : {}),
         ...(window.windowId ? { windowId: window.windowId } : {}),
         ...(command ? { command } : {}),
       });
@@ -2901,6 +3135,17 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (typeof body.url === "string") {
     if (!isHttpUrl(body.url)) {
       return error("Invalid URL — only http and https URLs are supported", 400);
+    }
+
+    // A link opened with Loxel as the browser names no worktree: the window in use opens it in the
+    // worktree it shows, or in Home.
+    if (body.wtPath === undefined) {
+      const sent = ctx.sendToActiveWindow(windowId, {
+        type: "open_url",
+        wtPath: null,
+        data: { url: body.url, ...placed },
+      });
+      return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
     }
 
     const wtPath = await namedWorktree(ctx, body.wtPath);
@@ -3349,15 +3594,16 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-content": handleDetachedFileContent,
     "/api/external-files": handleExternalFiles,
     "/api/path-info": handlePathInfo,
+    "/api/terminals": handleListTerminals,
     "/api/search": handleSearch,
     "/api/search-scopes": handleSearchScopes,
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
     "/api/version": handleGetVersion,
-    "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
     "/api/repo-trust": handleGetRepoTrust,
+    "/api/repo-trust/list": handleListRepoTrust,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3385,6 +3631,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-write": handleFileWrite,
     "/api/worktree/plan-add": handlePlanAddWorktree,
     "/api/worktree/create": handleCreateWorktree,
+    "/api/worktree/run-init-hook": handleRunInitHook,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,
     "/api/worktree/remove": handleRemoveWorktree,
     "/api/worktree/meta": handleUpdateWorktreeMeta,
@@ -3405,9 +3652,9 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-rename": handleDetachedFileRename,
     "/api/detached-file-copy-to-project": handleDetachedFileCopyToProject,
     "/api/schemas/sync": handleSchemaSync,
-    "/api/update/check": handleUpdateCheck,
-    "/api/update/download": handleUpdateDownload,
-    "/api/update/install": handleUpdateInstall,
+    "/api/schemas/ensure": handleSchemaEnsure,
+    "/api/schemas/consent": handleSchemaConsent,
+    "/api/schemas/never-fetch": handleSchemaNeverFetch,
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
@@ -3510,6 +3757,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
         if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
+        if (isLayoutRowOfMissingWorktree(storeKey)) return json({ success: true });
         const stored = isSettings ? stripLegacyAgentSettings(body.value) : body.value;
         storeDb.putStore(storeKey, stored);
         // Broadcast to all clients for cross-tab sync

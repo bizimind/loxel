@@ -10,7 +10,7 @@ import { extendCFamilyConfiguration } from "./c-language-config";
 import { registerGoProjectFileLanguages } from "./go-monarch";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
-import { stepOverTripleQuotesIn } from "./python-language-config";
+import { stepOverTripleQuotesIn } from "./triple-quote-step-over";
 
 const TOML_CONFIGURATION: monaco.languages.LanguageConfiguration = {
   comments: { lineComment: "#" },
@@ -193,6 +193,7 @@ export function registerLoxelLanguages(): void {
     monaco.languages.setLanguageConfiguration(language.id, configuration);
   }
   stepOverTripleQuotesIn("groovy");
+  stepOverTripleQuotesIn("toml");
   // Shiki has no grammar for docker-bake, Go's project files or pip requirements, so they get
   // Monarch tokenizers.
   registerDockerBakeMonarch();

@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 
-// Optional: an in-app update ships a newer renderer with the older app bundle's preload, which
-// may not expose these.
-const isFullScreen = () => window.electronAPI?.isFullScreen?.() ?? false;
+const isFullScreen = () => window.electronAPI?.isFullScreen() ?? false;
 
 /**
  * Tracks whether the Electron BrowserWindow is in macOS native fullscreen, where the traffic
@@ -12,7 +10,7 @@ const isFullScreen = () => window.electronAPI?.isFullScreen?.() ?? false;
 export function useWindowFullScreen(): boolean {
   const [fullScreen, setFullScreen] = useState(isFullScreen);
   useEffect(() => {
-    const unsubscribe = window.electronAPI?.onWindowFullScreenChange?.(setFullScreen);
+    const unsubscribe = window.electronAPI?.onWindowFullScreenChange(setFullScreen);
     // Catch a change that landed between the initial read and subscribing.
     setFullScreen(isFullScreen());
     return unsubscribe;

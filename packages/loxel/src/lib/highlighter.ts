@@ -1,13 +1,13 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
 import { JAVA_PROPERTIES_GRAMMAR } from "./java-properties-grammar";
-import { loxelDark } from "./loxel-themes";
+import { loxelDark, loxelLight } from "./loxel-themes";
 
 // Singleton highlighter instance
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-// Common languages for code repositories
-const BUNDLED_LANGUAGES = [
+// Common languages for code repositories; also the languages markdown code blocks color.
+export const BUNDLED_LANGUAGES = [
   "javascript",
   "typescript",
   "tsx",
@@ -19,6 +19,7 @@ const BUNDLED_LANGUAGES = [
   "css",
   "scss",
   "markdown",
+  "mermaid",
   "yaml",
   "toml",
   "ini",
@@ -61,7 +62,7 @@ const BUNDLED_LANGUAGES = [
 export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: [loxelDark, "github-dark"],
+      themes: [loxelDark, loxelLight, "github-dark"],
       langs: [...BUNDLED_LANGUAGES, JAVA_PROPERTIES_GRAMMAR],
     });
   }
@@ -364,6 +365,9 @@ export function detectLanguage(filePath: string): string | null {
   return EXT_TO_LANG[ext] ?? null;
 }
 
+/** A theme `highlightCode` can paint with: one `getHighlighter` has loaded. */
+export type CodeTheme = string;
+
 export interface HighlightedLine {
   html: string;
 }
@@ -374,7 +378,7 @@ export interface HighlightedLine {
 export async function highlightCode(
   code: string,
   language: string,
-  theme: "github-dark" | "github-light",
+  theme: CodeTheme,
 ): Promise<HighlightedLine[]> {
   const highlighter = await getHighlighter();
 

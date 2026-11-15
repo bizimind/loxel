@@ -4,19 +4,18 @@
  * Writes NDJSON to a per-instance log file, keeps an in-memory ring buffer
  * for the REST history endpoint, and batches broadcasts to WebSocket clients.
  */
-import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ChildLogger, LogCategory, LogEntry, LogLevel } from "@/api/log-entry-model";
-import { LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
+import { LOG_LEVEL_PRIORITY, serializeLogContext } from "@/api/log-entry-model";
+import { LogFile } from "@/lib/log-file";
 
 import { config } from "./config";
 
 // --- Constants ---
 
 const MAX_RING_BUFFER = 5000;
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
-const FLUSH_INTERVAL_MS = 500;
 const BROADCAST_INTERVAL_MS = 100;
 const STALE_LOG_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const BROADCAST_MIN_LEVEL: LogLevel = "info";
@@ -30,58 +29,7 @@ const logFilePath = join(logsDir, `server-${instanceId}.log`);
 // Ensure logs directory exists
 mkdirSync(logsDir, { recursive: true });
 
-// --- File writer ---
-
-let fileWriter: ReturnType<ReturnType<typeof Bun.file>["writer"]> | null = null;
-let pendingFileBytes = 0;
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-function getWriter() {
-  if (!fileWriter) {
-    fileWriter = Bun.file(logFilePath).writer();
-  }
-  return fileWriter;
-}
-
-function scheduleFlush() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flushWriter();
-  }, FLUSH_INTERVAL_MS);
-}
-
-function flushWriter() {
-  if (!fileWriter) return;
-  try {
-    fileWriter.flush();
-    pendingFileBytes = 0;
-  } catch {
-    // File I/O error — non-fatal, logs are best-effort
-  }
-}
-
-function rotateIfNeeded() {
-  try {
-    const stat = statSync(logFilePath);
-    if (stat.size > MAX_FILE_BYTES) {
-      // Close current writer before rename
-      if (fileWriter) {
-        try {
-          fileWriter.flush();
-          fileWriter.end();
-        } catch {
-          // ignore
-        }
-        fileWriter = null;
-        pendingFileBytes = 0;
-      }
-      renameSync(logFilePath, `${logFilePath}.1`);
-    }
-  } catch {
-    // File doesn't exist yet or stat failed — nothing to rotate
-  }
-}
+const logFile = new LogFile(logFilePath);
 
 /** Remove stale log files from dead instances (older than 24h). */
 function cleanupStaleLogs() {
@@ -167,31 +115,6 @@ function flushBroadcast() {
   }
 }
 
-// --- Error serialization ---
-
-function serializeErrorValue(err: unknown): Record<string, unknown> {
-  if (err instanceof Error) {
-    const result: Record<string, unknown> = { message: err.message, stack: err.stack };
-    if (err.cause) {
-      result.cause = serializeErrorValue(err.cause);
-    }
-    return result;
-  }
-  return { message: String(err) };
-}
-
-function serializeContext(ctx: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(ctx)) {
-    if (key === "error" && value instanceof Error) {
-      result[key] = serializeErrorValue(value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
 // --- Core logging ---
 
 let nextId = 1;
@@ -200,23 +123,14 @@ function emit(level: LogLevel, cat: LogCategory, msg: string, ctx?: Record<strin
   const entry: LogEntry = { id: nextId++, ts: new Date().toISOString(), level, cat, msg };
 
   if (ctx && Object.keys(ctx).length > 0) {
-    entry.ctx = serializeContext(ctx);
+    entry.ctx = serializeLogContext(ctx);
   }
 
   // Ring buffer (all levels)
   addToRing(entry);
 
   // File write (all levels)
-  const line = JSON.stringify(entry) + "\n";
-  rotateIfNeeded();
-  const writer = getWriter();
-  writer.write(line);
-  pendingFileBytes += line.length;
-  if (pendingFileBytes >= 4096) {
-    flushWriter();
-  } else {
-    scheduleFlush();
-  }
+  logFile.write(JSON.stringify(entry) + "\n");
 
   // Broadcast (info+ only, batched)
   if (broadcastFn && LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[BROADCAST_MIN_LEVEL]) {
@@ -324,20 +238,7 @@ export const logger = {
     }
     flushBroadcast();
 
-    // Flush and close file writer
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    }
-    if (fileWriter) {
-      try {
-        fileWriter.flush();
-        fileWriter.end();
-      } catch {
-        // ignore
-      }
-      fileWriter = null;
-    }
+    logFile.close();
   },
 
   /** The instance ID for this server process. */

@@ -6,7 +6,7 @@ import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { getConnectedLspClients } from "@/lib/lsp-client";
-import { dispatchOpenFile } from "@/lib/open-file";
+import { dispatchOpenFile, dispatchOpenVirtualDocument } from "@/lib/open-file";
 import { isWithin } from "@/lib/project-file-helpers";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSymbolResult } from "@/lib/workspace-symbols";
@@ -97,9 +97,13 @@ export function SymbolSearchModal() {
   const openSymbol = useCallback(
     (result: WorkspaceSymbolResult) => {
       close();
-      void resolveWorkspaceSymbolLocation(result, RESOLVE_TIMEOUT_MS).then((location) =>
-        dispatchOpenFile(result.filePath, location),
-      );
+      void resolveWorkspaceSymbolLocation(result, RESOLVE_TIMEOUT_MS).then((location) => {
+        if (result.virtualDocumentUri) {
+          dispatchOpenVirtualDocument(result.virtualDocumentUri, location);
+        } else {
+          dispatchOpenFile(result.filePath, location);
+        }
+      });
     },
     [close],
   );

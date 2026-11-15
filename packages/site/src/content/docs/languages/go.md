@@ -1,7 +1,6 @@
 ---
 title: Go
 description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support, format on save and golangci-lint diagnostics with quick fixes.
-order: 13.5
 ---
 
 The Go server starts the first time you open a `.go`, `go.mod`, `go.sum` or `go.work` file, and stops when none remain open. Loxel uses your own [gopls](https://go.dev/gopls/) or bundles one, but Go itself must be installed and on your `PATH`, because gopls runs `go` to understand a project. If it is missing, the status bar shows gopls as stopped, and hovering it says why. Install Go, then click the Go item or the gopls item in the status bar.
@@ -62,7 +61,7 @@ Files in a Go module or workspace (a `go.mod` or `go.work` in the file's folder 
 
 Loxel leaves some files alone: those in `vendor/` and `testdata/`, those your config's `formatters.exclusions.paths` excludes, and `.go` files with no module or selecting config above them. If a pattern in `formatters.exclusions.paths` is too complex for Loxel to evaluate, files under that config are left alone too. To format those, or to use `goimports` or `gofumpt` on their own, add a manual override in **Settings > Editor**.
 
-If `golangci-lint` can't load the config, or your installed version is older than v2, the file is saved unformatted. Run `golangci-lint version` and `golangci-lint config verify` in a terminal to see why. A file with a syntax error is also saved as it is. Formatting never downloads anything.
+If the config has settings for custom formatters, which Loxel doesn't run, or uses YAML that Loxel can't read the same way `golangci-lint` does, such as tags, the file is saved unformatted and Loxel tells you why. If `golangci-lint` can't load the config, or your installed version is older than v2, the file is saved unformatted too. Run `golangci-lint version` and `golangci-lint config verify` in a terminal to see why. A file with a syntax error is also saved as it is. Formatting never downloads anything.
 
 ## golangci-lint diagnostics
 

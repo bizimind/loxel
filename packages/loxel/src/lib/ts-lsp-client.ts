@@ -5,7 +5,7 @@ import { reportDocumentIndentation } from "./lsp-document-indentation";
 
 const TS_LANGUAGE_IDS = ["typescript", "javascript", "tsx", "jsx", "json", "jsonc"];
 
-export const { connect: connectTsLsp } = createLspClient({
+export const { connect: connectTsLsp, disconnect: disconnectTsLsp } = createLspClient({
   route: "ws/ts-lsp",
   name: "TypeScript",
   languageId: TS_LANGUAGE_IDS,

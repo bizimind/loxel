@@ -1,4 +1,13 @@
-import { afterAll, afterEach, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  describe,
+  expect,
+  jest,
+  mock,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -28,10 +37,14 @@ const {
   rustAnalyzerEnv,
   rustAnalyzerSettings,
   rustManifestProblem,
+  withoutPullDiagnostics,
   withRustClientCapabilities,
 } = await import("./rust-analyzer-run");
 const { MAX_OPENED_RUST_PROJECTS, RustLspManager } = await import("./rust-lsp-manager");
+const { CHECK_QUIET_MS } = await import("./rust-check-on-change");
 const { refreshRustToolchain } = await import("./rust-toolchain");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { untrustedNestedRepo } = await import("./rust-project-lookup");
 
 const roots: string[] = [];
 let manager: InstanceType<typeof RustLspManager> | undefined;
@@ -81,6 +94,19 @@ process.stdin.on("data", (chunk) => {
     if (buffer.length < end + 4 + length) return;
     const msg = JSON.parse(buffer.slice(end + 4, end + 4 + length));
     buffer = buffer.slice(end + 4 + length);
+    if (msg.method === "textDocument/didSave") {
+      send({ jsonrpc: "2.0", method: "test/saved", params: { uri: msg.params.textDocument.uri } });
+      continue;
+    }
+    if (msg.method === "test/ping") {
+      send({ jsonrpc: "2.0", method: "test/pong", params: {} });
+      continue;
+    }
+    if (msg.method === "test/startChild") {
+      const child = Bun.spawn(["/bin/sleep", "1000"]);
+      send({ jsonrpc: "2.0", method: "test/childStarted", params: { pid: child.pid } });
+      continue;
+    }
     if (msg.method === "workspace/didChangeConfiguration") {
       const items = [{ section: "rust-analyzer" }];
       send({ jsonrpc: "2.0", id: "pull", method: "workspace/configuration", params: { items } });
@@ -103,6 +129,7 @@ process.stdin.on("data", (chunk) => {
           documentFormattingProvider: true,
           documentRangeFormattingProvider: true,
           hoverProvider: true,
+          diagnosticProvider: { identifier: "rust-analyzer" },
         },
       },
     });
@@ -150,7 +177,12 @@ async function installFakeRust(
 interface TestFrame {
   id?: number;
   method?: string;
-  params: { message: string; settings: Record<string, unknown> & { linkedProjects: unknown[] } };
+  params: {
+    message: string;
+    settings: Record<string, unknown> & { linkedProjects: unknown[] };
+    uri: string;
+    pid: number;
+  };
   error?: { code: number };
   result: {
     args: string[];
@@ -201,6 +233,18 @@ function fakeSocket() {
   };
 }
 
+/** A killed process lingers until its parent or init has collected it, which is why this waits. */
+function isRunning(pid: number): boolean {
+  const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)], {
+    env: { PATH: "/bin:/usr/bin" },
+  }).stdout.toString();
+  return state.trim() !== "" && !state.startsWith("Z");
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  while (!condition()) await Bun.sleep(20);
+}
+
 const frameOf = (message: Record<string, unknown>) =>
   JSON.stringify({ jsonrpc: "2.0", ...message });
 const INITIALIZE = frameOf({ id: 1, method: "initialize", params: { capabilities: {} } });
@@ -246,7 +290,7 @@ describe("rustAnalyzerDate", () => {
 
 describe("planRustAnalyzer", () => {
   const reasonFor = async (toolchain: RustToolchain) => {
-    const plan = await planRustAnalyzer("/wt", toolchain);
+    const plan = await planRustAnalyzer("/wt", toolchain, false);
     if (plan.kind !== "refuse") throw new Error("expected a refusal");
     return plan.reason;
   };
@@ -311,6 +355,7 @@ describe("planRustAnalyzer", () => {
         { rustcPath: join(bin, "rustc"), sysroot: root },
         { rustAnalyzer: join(bin, "rust-analyzer"), cargo: join(bin, "cargo") },
       ),
+      false,
     );
   }
 
@@ -324,6 +369,31 @@ describe("planRustAnalyzer", () => {
     });
   });
 
+  test("keeps the oldest supported version in a trusted repository", async () => {
+    const { bin, root } = await installFakeRust(fakeRustAnalyzer("rust-analyzer 1 (a 2020-01-01)"));
+    const toolchain = activeToolchain(
+      { rustcPath: join(bin, "rustc"), sysroot: root },
+      { rustAnalyzer: join(bin, "rust-analyzer"), cargo: join(bin, "cargo") },
+    );
+    expect((await planRustAnalyzer("/wt", toolchain, true)).kind).toBe("refuse");
+  });
+
+  test("checks with clippy where the toolchain has it, which a new install changes", async () => {
+    const { bin, root } = await installFakeRust();
+    const tools = { rustAnalyzer: join(bin, "rust-analyzer"), cargo: join(bin, "cargo") };
+    const paths = { rustcPath: join(bin, "rustc"), sysroot: root };
+    const without = await planRustAnalyzer("/wt", activeToolchain(paths, tools), true);
+    const withClippy = await planRustAnalyzer(
+      "/wt",
+      activeToolchain(paths, { ...tools, cargoClippy: join(bin, "cargo-clippy") }),
+      true,
+    );
+    if (without.kind !== "run" || withClippy.kind !== "run") throw new Error("expected to run");
+    expect(without.checkCommand).toBe("check");
+    expect(withClippy.checkCommand).toBe("clippy");
+    expect(withClippy.key).not.toBe(without.key);
+  });
+
   test("starts the oldest supported version", async () => {
     const plan = await planWithVersion(`rust-analyzer 1.0.0 (abc ${MIN_RUST_ANALYZER_DATE})`);
     expect(plan.kind).toBe("run");
@@ -331,35 +401,85 @@ describe("planRustAnalyzer", () => {
 });
 
 describe("rustAnalyzerEnv", () => {
-  test("pins the toolchain, and takes every tool setting away from cargo's config", () => {
-    expect(rustAnalyzerEnv(activeToolchain(), "/c/cargo", "/a:/wt/tools:/b", "/wt")).toEqual({
+  test("leaves cargo's config alone in a trusted repository, and stays on the toolchain, offline", () => {
+    expect(rustAnalyzerEnv(activeToolchain(), "/c/cargo", "/a:/wt/tools:/b", "/wt", true)).toEqual({
       RUSTUP_AUTO_INSTALL: "0",
       RUSTUP_TOOLCHAIN: "stable-host",
-      PATH: "/a:/b",
+      PATH: ["/a", "/b"].join(delimiter),
       CARGO: "/c/cargo",
-      RUSTC: "/toolchain/bin/rustc",
-      RUSTC_WRAPPER: "",
-      RUSTC_WORKSPACE_WRAPPER: "",
-      CARGO_ENCODED_RUSTFLAGS: "",
-      CARGO_ENCODED_RUSTDOCFLAGS: "",
-      CARGO_TARGET_APPLIES_TO_HOST: "true",
-      CARGO_UNSTABLE_HOST_CONFIG: "false",
       CARGO_NET_OFFLINE: "true",
       CARGO_NET_GIT_FETCH_WITH_CLI: "false",
     });
   });
 
+  test("names the compiler in a trusted repository only without a rustup toolchain", () => {
+    const env = rustAnalyzerEnv(activeToolchain({ name: null }), "/c", "/a", "/wt", true);
+    expect(env.RUSTC).toBe("/toolchain/bin/rustc");
+    expect(env.RUSTC_WRAPPER).toBeUndefined();
+  });
+
+  test("pins the toolchain, and takes every tool setting away from cargo's config", () => {
+    expect(rustAnalyzerEnv(activeToolchain(), "/c/cargo", "/a:/wt/tools:/b", "/wt", false)).toEqual(
+      {
+        RUSTUP_AUTO_INSTALL: "0",
+        RUSTUP_TOOLCHAIN: "stable-host",
+        PATH: "/a:/b",
+        CARGO: "/c/cargo",
+        RUSTC: "/toolchain/bin/rustc",
+        RUSTC_WRAPPER: "",
+        RUSTC_WORKSPACE_WRAPPER: "",
+        CARGO_ENCODED_RUSTFLAGS: "",
+        CARGO_ENCODED_RUSTDOCFLAGS: "",
+        CARGO_TARGET_APPLIES_TO_HOST: "true",
+        CARGO_UNSTABLE_HOST_CONFIG: "false",
+        CARGO_NET_OFFLINE: "true",
+        CARGO_NET_GIT_FETCH_WITH_CLI: "false",
+      },
+    );
+  });
+
   test("names no rustup toolchain for an install without rustup", () => {
-    const env = rustAnalyzerEnv(activeToolchain({ name: null }), "/c", "/a", "/wt");
+    const env = rustAnalyzerEnv(activeToolchain({ name: null }), "/c", "/a", "/wt", false);
     expect(env.RUSTUP_TOOLCHAIN).toBeUndefined();
   });
 });
 
 describe("rustAnalyzerSettings", () => {
-  test("turns off what runs project code, and lists the projects", () => {
+  const RESTRICTED = {
+    sysroot: "/sys",
+    host: "h",
+    repoTrusted: false,
+    checkCommand: "check",
+  } as const;
+  const TRUSTED = { ...RESTRICTED, repoTrusted: true, rustSrc: true } as const;
+
+  test("runs and checks everything in a trusted repository, in a build directory of its own", () => {
     expect(
-      rustAnalyzerSettings({ sysroot: "/sys", host: "h", rustSrc: true }, ["/wt/Cargo.toml"]),
+      rustAnalyzerSettings({ ...TRUSTED, checkCommand: "clippy" }, ["/wt/Cargo.toml"]),
     ).toEqual({
+      checkOnSave: true,
+      check: { command: "clippy" },
+      cargo: { buildScripts: { enable: true }, sysroot: "/sys", targetDir: true },
+      procMacro: { enable: true },
+      linkedProjects: ["/wt/Cargo.toml"],
+    });
+  });
+
+  test("checks with cargo check where the toolchain has no clippy", () => {
+    expect(rustAnalyzerSettings(TRUSTED, []).check).toEqual({ command: "check" });
+  });
+
+  test("names the proc macro server when no sysroot leads to it", () => {
+    const { cargo, procMacro } = rustAnalyzerSettings({ ...TRUSTED, rustSrc: false }, []);
+    expect(cargo).toMatchObject({ sysroot: null });
+    expect(procMacro).toEqual({
+      enable: true,
+      server: "/sys/libexec/rust-analyzer-proc-macro-srv",
+    });
+  });
+
+  test("turns off what runs project code, and lists the projects", () => {
+    expect(rustAnalyzerSettings({ ...RESTRICTED, rustSrc: true }, ["/wt/Cargo.toml"])).toEqual({
       checkOnSave: false,
       cargo: { buildScripts: { enable: false }, sysroot: "/sys", target: "h" },
       procMacro: { enable: false },
@@ -368,16 +488,13 @@ describe("rustAnalyzerSettings", () => {
   });
 
   test("lists an empty project without a manifest, so none is looked for", () => {
-    const { linkedProjects } = rustAnalyzerSettings(
-      { sysroot: "/sys", host: "h", rustSrc: true },
-      [],
-    );
+    const { linkedProjects } = rustAnalyzerSettings({ ...RESTRICTED, rustSrc: true }, []);
     expect(linkedProjects).toEqual([{ sysroot: null, crates: [] }]);
   });
 
   test("gives files outside any package one inline project next to the manifests", () => {
     const { linkedProjects } = rustAnalyzerSettings(
-      { sysroot: "/sys", host: "h", rustSrc: true },
+      { ...RESTRICTED, rustSrc: true },
       ["/wt/Cargo.toml"],
       ["/wt/a.rs", "/wt/b.rs"],
     );
@@ -396,7 +513,7 @@ describe("rustAnalyzerSettings", () => {
 
   test("names no sysroot for those files when the toolchain has no sources", () => {
     const { linkedProjects } = rustAnalyzerSettings(
-      { sysroot: "/sys", host: "h", rustSrc: false },
+      { ...RESTRICTED, rustSrc: false },
       [],
       ["/wt/a.rs"],
     );
@@ -406,13 +523,39 @@ describe("rustAnalyzerSettings", () => {
   });
 });
 
+describe("untrustedNestedRepo", () => {
+  test("finds a repository between the worktree and a manifest, unless it is trusted", async () => {
+    const wt = await makeDir("rust-wt-");
+    await mkdir(join(wt, "vendor/clone/inner/.git"), { recursive: true });
+    await mkdir(join(wt, ".git"));
+    const manifest = join(wt, "vendor/clone/inner/Cargo.toml");
+    expect(untrustedNestedRepo(manifest, wt)).toBe(join(wt, "vendor/clone/inner"));
+    setRepoTrusted(join(wt, "vendor/clone/inner"), true);
+    expect(untrustedNestedRepo(manifest, wt)).toBeNull();
+  });
+
+  test("takes a submodule's `.git` file for a repository", async () => {
+    const wt = await makeDir("rust-wt-");
+    await mkdir(join(wt, "sub"));
+    await writeFile(join(wt, "sub/.git"), "gitdir: ../.git/modules/sub\n");
+    expect(untrustedNestedRepo(join(wt, "sub/Cargo.toml"), wt)).toBe(join(wt, "sub"));
+  });
+
+  test("finds none for the worktree's own folders", async () => {
+    const wt = await makeDir("rust-wt-");
+    await mkdir(join(wt, ".git"));
+    expect(untrustedNestedRepo(join(wt, "Cargo.toml"), wt)).toBeNull();
+    expect(untrustedNestedRepo(join(wt, "a/b/Cargo.toml"), wt)).toBeNull();
+  });
+});
+
 describe("findRustManifests", () => {
   test("takes the worktree's own manifest alone", async () => {
     const wt = await makeDir("rust-wt-");
     await mkdir(join(wt, "a"));
     await writeFile(join(wt, "Cargo.toml"), "");
     await writeFile(join(wt, "a", "Cargo.toml"), "");
-    expect(findRustManifests(wt)).toEqual([join(wt, "Cargo.toml")]);
+    expect(findRustManifests(wt, false)).toEqual([join(wt, "Cargo.toml")]);
   });
 
   test("takes those one directory down, and no project files", async () => {
@@ -423,14 +566,14 @@ describe("findRustManifests", () => {
     await writeFile(join(wt, "a", "Cargo.toml"), "");
     await writeFile(join(wt, "a", "deep", "Cargo.toml"), "");
     await writeFile(join(wt, "rust-project.json"), "{}");
-    expect(findRustManifests(wt)).toEqual([
+    expect(findRustManifests(wt, false)).toEqual([
       join(wt, "a", "Cargo.toml"),
       join(wt, "b", "Cargo.toml"),
     ]);
   });
 
   test("finds nothing in a worktree without one", async () => {
-    expect(findRustManifests(await makeDir("rust-wt-"))).toEqual([]);
+    expect(findRustManifests(await makeDir("rust-wt-"), false)).toEqual([]);
   });
 
   test("knows which changed files can matter", () => {
@@ -457,6 +600,7 @@ describe("withRustClientCapabilities", () => {
           },
         },
       }),
+      false,
     );
     const { capabilities } = JSON.parse(frame).params;
     expect(capabilities.experimental.serverStatusNotification).toBe(true);
@@ -473,6 +617,7 @@ describe("withRustClientCapabilities", () => {
         method: "initialize",
         params: { capabilities: {}, initializationOptions: { checkOnSave: true } },
       }),
+      false,
     );
     expect(JSON.parse(frame).params.initializationOptions).toBeUndefined();
   });
@@ -480,14 +625,45 @@ describe("withRustClientCapabilities", () => {
   test("drops the client's own settings also without capabilities", () => {
     const frame = withRustClientCapabilities(
       frameOf({ id: 1, method: "initialize", params: { initializationOptions: { a: 1 } } }),
+      false,
     );
     expect(JSON.parse(frame).params.initializationOptions).toBeUndefined();
   });
 
   test("leaves other frames as they are", () => {
     const other = frameOf({ method: "initialized", params: {} });
-    expect(withRustClientCapabilities(other)).toBe(other);
-    expect(withRustClientCapabilities("not json initialize")).toBe("not json initialize");
+    expect(withRustClientCapabilities(other, false)).toBe(other);
+    expect(withRustClientCapabilities("not json initialize", true)).toBe("not json initialize");
+  });
+});
+
+describe("diagnostics in a trusted repository", () => {
+  const initialize = frameOf({
+    id: 1,
+    method: "initialize",
+    params: { capabilities: { textDocument: { diagnostic: { dynamicRegistration: true } } } },
+  });
+  const textDocumentOf = (trusted: boolean) =>
+    JSON.parse(withRustClientCapabilities(initialize, trusted)).params.capabilities.textDocument;
+
+  test("takes pull diagnostics away from a trusted server only", () => {
+    expect(textDocumentOf(true).diagnostic).toBeUndefined();
+    expect(textDocumentOf(false).diagnostic).toEqual({ dynamicRegistration: true });
+  });
+
+  test("takes them out of what the server offers", () => {
+    const response = frameOf({
+      id: 1,
+      result: { capabilities: { diagnosticProvider: { identifier: "x" }, hoverProvider: true } },
+    });
+    expect(JSON.parse(withoutPullDiagnostics(response)).result.capabilities).toEqual({
+      hoverProvider: true,
+    });
+  });
+
+  test("leaves other frames as they are", () => {
+    const other = frameOf({ method: "x", params: { text: '"diagnosticProvider"' } });
+    expect(withoutPullDiagnostics(other)).toBe(other);
   });
 });
 
@@ -1045,7 +1221,10 @@ fi
       procMacro: { enable: false },
       linkedProjects: [join(wt, "Cargo.toml")],
     });
-    expect(Object.keys(result.capabilities)).toEqual(["hoverProvider"]);
+    expect(Object.keys(result.capabilities).toSorted()).toEqual([
+      "diagnosticProvider",
+      "hoverProvider",
+    ]);
   });
 
   test("closes with what to do when rust-analyzer is missing", async () => {
@@ -1126,5 +1305,202 @@ fi
     refreshRustToolchain(wt);
     const closed = await socket.untilClosed();
     expect(closed.code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  describe("in a trusted repository", () => {
+    const stateOf = (socket: ReturnType<typeof fakeSocket>) => {
+      const session = manager?.["sessions"].get(socket.ws);
+      return session && manager?.["states"].get(session);
+    };
+
+    async function startedIn(wt: string) {
+      const socket = await start(wt);
+      await socket.untilFrame((message) => message.id === 1);
+      manager?.handleMessage(socket.ws, INITIALIZED);
+      return socket;
+    }
+
+    /** A folder of the worktree that is a repository of its own, holding a crate. */
+    async function makeNestedRepo(wt: string, dir: string) {
+      const file = await makeCrate(wt, dir);
+      await mkdir(join(wt, dir, ".git"));
+      return file;
+    }
+
+    test("runs everything, and takes pull diagnostics away", async () => {
+      const { root } = await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "");
+      setRepoTrusted(wt, true);
+      const socket = await start(wt);
+
+      const { result } = await socket.untilFrame((message) => message.id === 1);
+      expect(result.settings).toEqual({
+        checkOnSave: true,
+        check: { command: "check" },
+        cargo: { buildScripts: { enable: true }, sysroot: root, targetDir: true },
+        procMacro: { enable: true },
+        linkedProjects: [join(wt, "Cargo.toml")],
+      });
+      expect(result.env.RUSTC_WRAPPER).toBeUndefined();
+      expect(result.env.CARGO_NET_OFFLINE).toBe("true");
+      expect(Object.keys(result.capabilities)).toEqual(["hoverProvider"]);
+    });
+
+    test("restarts by itself when the answer changes", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "");
+      const socket = await startedIn(wt);
+      setRepoTrusted(wt, true);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("asks only once a Cargo project is linked, and not for a loose file", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "loose.rs"), "");
+      const socket = await startedIn(wt);
+      open(socket, join(wt, "loose.rs"));
+      await socket.untilPull(1);
+      expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+
+      open(socket, await makeCrate(wt, "crate"));
+      await socket.untilPull(2);
+      expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
+    });
+
+    test("saves a changed file that is not open, once per project", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const lib = await makeCrate(wt, "");
+      setRepoTrusted(wt, true);
+      const socket = await startedIn(wt);
+      await writeFile(join(wt, "src/other.rs"), "");
+      manager?.notifyWatchedFilesChanged(wt, [lib, join(wt, "src/other.rs")]);
+      const saved = await socket.untilFrame((message) => message.method === "test/saved");
+      expect(saved.params.uri).toBe(`file://${lib}`);
+      // In order behind any second save of that batch.
+      manager?.handleMessage(socket.ws, frameOf({ method: "test/ping", params: {} }));
+      await socket.untilFrame((message) => message.method === "test/pong");
+      expect(socket.frames.filter((message) => message.method === "test/saved")).toHaveLength(1);
+    });
+
+    test("saves nothing before the client's initialized", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const lib = await makeCrate(wt, "");
+      setRepoTrusted(wt, true);
+      const socket = await start(wt);
+      await socket.untilFrame((message) => message.id === 1);
+      const checks = stateOf(socket)?.checks;
+      jest.useFakeTimers();
+      manager?.notifyWatchedFilesChanged(wt, [lib]);
+      jest.advanceTimersByTime(CHECK_QUIET_MS);
+      jest.useRealTimers();
+      await checks?.idle();
+      manager?.handleMessage(socket.ws, frameOf({ method: "test/ping", params: {} }));
+      await socket.untilFrame((message) => message.method === "test/pong");
+      expect(socket.frames.some((message) => message.method === "test/saved")).toBe(false);
+    });
+
+    test("saves a crate that is not linked through the linked project above it", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await makeCrate(wt, "");
+      const dep = await makeCrate(wt, "dep");
+      setRepoTrusted(wt, true);
+      const socket = await startedIn(wt);
+      manager?.notifyWatchedFilesChanged(wt, [dep]);
+      const saved = await socket.untilFrame((message) => message.method === "test/saved");
+      expect(saved.params.uri).toBe(`file://${dep}`);
+    });
+
+    test("restarts when a linked folder has become an untrusted repository", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "");
+      const nested = await makeCrate(wt, "a/b");
+      setRepoTrusted(wt, true);
+      const socket = await startedIn(wt);
+      open(socket, nested);
+      await socket.untilPull(1);
+      await mkdir(join(wt, "a/b/.git"));
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "a/b/Cargo.toml")]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("starts no check in an untrusted repository, and still refuses the client's save", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await makeCrate(wt, "");
+      const socket = await startedIn(wt);
+      expect(stateOf(socket)?.checks).toBeNull();
+      expect(blockedClientMethod(frameOf({ method: "textDocument/didSave" }))).not.toBeNull();
+    });
+
+    test("leaves out an untrusted repository in the worktree, and tells when its file opens", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await makeNestedRepo(wt, "theirs");
+      const nested = await makeNestedRepo(wt, "vendor/clone");
+      await makeCrate(wt, "mine");
+      setRepoTrusted(wt, true);
+      const socket = await startedIn(wt);
+      expect(stateOf(socket)?.manifests).toEqual([join(wt, "mine/Cargo.toml")]);
+
+      open(socket, nested);
+      const notice = await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" && message.params.message.includes("repository"),
+      );
+      expect(notice.params.message).toContain(join("vendor", "clone"));
+      open(socket, await makeCrate(wt, "other"));
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "mine/Cargo.toml"),
+        join(wt, "other/Cargo.toml"),
+      ]);
+    });
+
+    test("loads a nested repository trusted on its own, and restarts when that ends", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "");
+      const nested = await makeNestedRepo(wt, "vendor/clone");
+      setRepoTrusted(wt, true);
+      setRepoTrusted(join(wt, "vendor/clone"), true);
+      const socket = await startedIn(wt);
+      open(socket, nested);
+      expect((await socket.untilPull(1)).settings.linkedProjects).toContain(
+        join(wt, "vendor/clone/Cargo.toml"),
+      );
+      setRepoTrusted(join(wt, "vendor/clone"), false);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("restricted, a nested repository's manifest links as before", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const nested = await makeNestedRepo(wt, "vendor/clone");
+      const socket = await startedIn(wt);
+      open(socket, nested);
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "vendor/clone/Cargo.toml"),
+      ]);
+    });
+
+    test("ends what the server started when it stops", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "");
+      setRepoTrusted(wt, true);
+      const socket = await startedIn(wt);
+      manager?.handleMessage(socket.ws, frameOf({ method: "test/startChild", params: {} }));
+      const started = await socket.untilFrame((message) => message.method === "test/childStarted");
+      const { pid } = started.params;
+      expect(isRunning(pid)).toBe(true);
+      manager?.destroySession(socket.ws);
+      await until(() => !isRunning(pid));
+    });
   });
 });

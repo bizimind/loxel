@@ -15,7 +15,8 @@ const toldRepositories = new Set<string>();
 /**
  * The active worktree's repository trust, shown while something runs restricted for lack of it
  * (the moment the question matters, with a toast the first time) and while it is trusted (the way
- * to revoke). An untrusted repository nothing is waiting on shows nothing. Clicking asks.
+ * to revoke). An untrusted repository nothing is waiting on, or one the user declined, shows
+ * nothing. Clicking asks.
  */
 export function RepoTrustStatus() {
   const wtPath = useWorktreeStore((s) => s.activeWorktreePath);
@@ -25,32 +26,34 @@ export function RepoTrustStatus() {
     queryFn: wtPath ? () => getRepoTrust(wtPath) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on repo_trust_changed
   });
-  const restricted = data && !data.trusted && data.restrictions.length > 0;
+  // A repository the user declined stays quiet: they answered, and the palette still asks.
+  const restricted = data?.decision === "undecided" && data.restrictions.length > 0;
+  const trusted = data?.decision === "trusted";
   const repository = data?.repository;
 
   useEffect(() => {
     if (!restricted || !repository || toldRepositories.has(repository)) return;
     toldRepositories.add(repository);
     showToast(
-      "Some language features are restricted until you trust this repository. Click Restricted in the status bar to choose.",
+      "Some features are restricted until you trust this repository. Click Restricted in the status bar to choose.",
       "info",
     );
   }, [restricted, repository]);
 
-  if (!wtPath || !data || (!data.trusted && !restricted)) return null;
+  if (!wtPath || !data || (!trusted && !restricted)) return null;
 
   return (
     <button
       type="button"
       onClick={() => void manageRepoTrust(wtPath)}
       title={
-        data.trusted
+        trusted
           ? `${data.repository} is trusted. Click to stop trusting it.`
           : [...data.restrictions, "Click to trust this repository"].join("\n")
       }
       className="hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
     >
-      {data.trusted ? (
+      {trusted ? (
         <ShieldCheckIcon className="size-3.5" />
       ) : (
         <>

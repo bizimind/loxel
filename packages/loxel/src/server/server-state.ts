@@ -12,6 +12,7 @@ import type { FileOperationsHistory, FileOperationsService } from "./file-operat
 import type { FileWatcher } from "./file-watcher";
 import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
+import type { RegisteredWorktrees } from "./registered-worktrees";
 import type { ReviewDb } from "./review-db";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
@@ -27,6 +28,8 @@ export interface ProjectState {
   worktreesDir: string;
   /** Cached dirty status of every worktree, pushed as `worktree_status_changed`. */
   worktreeStatuses: WorktreeStatusTracker;
+  /** The worktrees seen registered, to tell a removal from a move on a `worktrees` event. */
+  registeredWorktrees: RegisteredWorktrees;
 }
 
 /**
@@ -125,7 +128,8 @@ export type ResolvedFilePath =
       /** Relative to the tree root; empty only for an Others folder's root. */
       relativePath: string;
     }
-  | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
+  // A draft: of the worktree `wtPath` names, or of Home (`HOME_KEY`).
+  | { type: "detached"; wtPath: string; service: DetachedFilesService; name: string }
   | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string };
 
 /** Per-client tracking for cleanup on disconnect. */
@@ -149,6 +153,11 @@ export interface WorktreeLspServer {
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
   notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
+  /**
+   * The worktree at `wtPath` is gone: delete what the server keeps for it outside the worktree. It
+   * may run more than once for a path, and for one the server never served.
+   */
+  forgetWorktree?(wtPath: string): void;
   /** May settle once its processes have exited; server shutdown waits for that. */
   destroy(): void | Promise<void>;
 }

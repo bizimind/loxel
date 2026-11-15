@@ -59,6 +59,8 @@ mock.module("monaco-editor", () => ({
   editor: {
     EditorOption: {},
     getModel: () => null,
+    // Opening an editor looks for the schemas its open files need.
+    getModels: () => [],
     createModel: (content: string) => {
       createdWith.push(content);
       return new FakeModel(content);
@@ -89,6 +91,10 @@ mock.module("@/lib/editorconfig-save-actions", () => ({ applyEditorConfigOnSave:
 mock.module("@/lib/textmate-inspector", () => ({ inspectTokenAtPosition: async () => null }));
 mock.module("@/components/code-editor/TextMateScopeInspector", () => ({
   TextMateScopeInspector: () => {},
+}));
+mock.module("@/components/code-editor/caret-row", () => ({
+  caretOptionsFor: () => ({}),
+  trackCaretRow: () => ({ dispose() {} }),
 }));
 
 const { CodeEditorPanel } = await import("./CodeEditorPanel");

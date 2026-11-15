@@ -19,12 +19,16 @@ const stateDir = mkdtempSync(join(tmpdir(), "repo-trust-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 
 const {
+  forgetRepoTrust,
   getRepoTrustStatus,
+  isRepoTrustStoreKey,
   isRepoTrusted,
+  listRepoTrust,
   onRepoTrustChange,
   onRepoTrustStatusChange,
   repoTrustId,
   reportRepoRestriction,
+  setRepoTrustDecision,
   setRepoTrusted,
 } = await import("./repo-trust");
 const { WorktreeLspManager } = await import("./stdio-lsp-manager");
@@ -115,7 +119,7 @@ describe("a repository cannot claim trust", () => {
     expect(isRepoTrusted(repo)).toBe(false);
     expect(getRepoTrustStatus(repo)).toEqual({
       repository: repo,
-      trusted: false,
+      decision: "undecided",
       restrictions: [],
     });
   });
@@ -241,6 +245,160 @@ describe("trust changes and restrictions", () => {
     reportRepoRestriction(repo, "Build scripts don't run.");
     setRepoTrusted(repo, false);
     expect(getRepoTrustStatus(repo).restrictions).toEqual([]);
+  });
+});
+
+describe("declined", () => {
+  test("is untrusted, recorded, and replaced by either other answer", () => {
+    const repo = makeRepo("repo");
+    setRepoTrustDecision(repo, "declined");
+    expect(isRepoTrusted(repo)).toBe(false);
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+
+    setRepoTrustDecision(repo, "trusted");
+    expect(getRepoTrustStatus(repo).decision).toBe("trusted");
+
+    setRepoTrustDecision(repo, "declined");
+    expect(isRepoTrusted(repo)).toBe(false);
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+
+    forgetRepoTrust(repoTrustId(repo));
+    expect(getRepoTrustStatus(repo).decision).toBe("undecided");
+  });
+
+  test("a no to the trust question leaves trust given meanwhile alone", () => {
+    const repo = makeRepo("repo");
+    setRepoTrustDecision(repo, "declined", { unlessTrusted: true });
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+
+    setRepoTrusted(repo, true);
+    setRepoTrustDecision(repo, "declined", { unlessTrusted: true });
+    expect(isRepoTrusted(repo)).toBe(true);
+
+    // Stopping trust is not a no to the question: it declines a trusted repository.
+    setRepoTrustDecision(repo, "declined");
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+  });
+
+  test("keeps the restrictions, which only trust clears", () => {
+    const repo = makeRepo("repo");
+    reportRepoRestriction(repo, "Build scripts don't run.");
+    setRepoTrustDecision(repo, "declined");
+    expect(getRepoTrustStatus(repo).restrictions).toEqual(["Build scripts don't run."]);
+  });
+
+  test("tells status subscribers but does not restart what depends on trust", () => {
+    const repo = makeRepo("repo");
+    let trustChanges = 0;
+    let statusChanges = 0;
+    const unsubscribeTrust = onRepoTrustChange(() => (trustChanges += 1));
+    const unsubscribeStatus = onRepoTrustStatusChange(() => (statusChanges += 1));
+    setRepoTrustDecision(repo, "declined");
+    forgetRepoTrust(repoTrustId(repo));
+    unsubscribeTrust();
+    unsubscribeStatus();
+    expect(trustChanges).toBe(0);
+    expect(statusChanges).toBe(2);
+  });
+
+  test("does not carry over to another folder at the same path", () => {
+    const repo = makeRepo("repo");
+    setRepoTrustDecision(repo, "declined");
+    const before = statSync(join(repo, ".git"));
+    let after = before;
+    while (after.ino === before.ino && after.birthtimeMs === before.birthtimeMs) {
+      rmSync(repo, { recursive: true });
+      makeRepo("repo");
+      after = statSync(join(repo, ".git"));
+    }
+    expect(getRepoTrustStatus(repo).decision).toBe("undecided");
+  });
+
+  test("rows are refused by the generic store route, like trust rows", () => {
+    expect(isRepoTrustStoreKey(`repo-trust-declined:${repoTrustId(makeRepo("repo"))}`)).toBe(true);
+    expect(isRepoTrustStoreKey("repo-trusted")).toBe(false);
+  });
+});
+
+describe("listRepoTrust", () => {
+  // Other tests leave answers in the shared store; start each listing from none.
+  beforeEach(async () => {
+    const { listStoreKeys } = await import("./store-db");
+    for (const key of listStoreKeys()) {
+      if (isRepoTrustStoreKey(key)) forgetRepoTrust(key.slice(key.indexOf(":") + 1));
+    }
+  });
+
+  test("lists each project's repository once, with a worktree to answer through", () => {
+    const repo = makeRepo("repo");
+    const worktree = makeLinkedWorktree(join(repo, ".git"), "wt");
+    const other = makeRepo("other");
+    setRepoTrusted(other, true);
+    reportRepoRestriction(worktree, "Build scripts don't run.");
+
+    expect(listRepoTrust([worktree, repo, other])).toEqual([
+      {
+        id: repoTrustId(other),
+        repository: other,
+        worktreePath: other,
+        decision: "trusted",
+        stale: false,
+        restrictions: [],
+      },
+      {
+        id: repoTrustId(repo),
+        repository: repo,
+        worktreePath: worktree,
+        decision: "undecided",
+        stale: false,
+        restrictions: ["Build scripts don't run."],
+      },
+    ]);
+  });
+
+  test("keeps answers for folders no project uses, and marks those that no longer apply", () => {
+    const kept = makeRepo("kept");
+    const gone = makeRepo("gone");
+    const goneId = repoTrustId(gone);
+    setRepoTrusted(kept, true);
+    setRepoTrustDecision(gone, "declined");
+    rmSync(gone, { recursive: true });
+
+    expect(listRepoTrust([])).toEqual([
+      {
+        id: goneId,
+        repository: gone,
+        worktreePath: null,
+        decision: "declined",
+        stale: true,
+        restrictions: [],
+      },
+      {
+        id: repoTrustId(kept),
+        repository: kept,
+        worktreePath: null,
+        decision: "trusted",
+        stale: false,
+        restrictions: [],
+      },
+    ]);
+  });
+
+  test("a project whose folder was replaced shows its old answer as no longer applying", () => {
+    const repo = makeRepo("repo");
+    setRepoTrusted(repo, true);
+    const before = statSync(join(repo, ".git"));
+    let after = before;
+    while (after.ino === before.ino && after.birthtimeMs === before.birthtimeMs) {
+      rmSync(repo, { recursive: true });
+      makeRepo("repo");
+      after = statSync(join(repo, ".git"));
+    }
+    reportRepoRestriction(repo, "Build scripts don't run.");
+
+    const [entry] = listRepoTrust([repo]);
+    expect(entry).toMatchObject({ decision: "trusted", stale: true, worktreePath: repo });
+    expect(entry?.restrictions).toEqual(["Build scripts don't run."]);
   });
 });
 

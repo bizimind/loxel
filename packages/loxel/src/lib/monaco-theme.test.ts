@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
+import { loxelDark, loxelLight } from "./loxel-themes";
+import { getMonacoThemeName, SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
 
 describe("SEMANTIC_TOKEN_STYLING", () => {
   test.each(["function", "variable", "selfParameter", "string", "comment"])(
@@ -36,5 +37,13 @@ describe("SEMANTIC_TOKEN_STYLING", () => {
     expect(SEMANTIC_TOKEN_STYLING.modifiers.has("declaration")).toBe(false);
     expect(SEMANTIC_TOKEN_STYLING.modifiers.has("definition")).toBe(false);
     expect(SEMANTIC_TOKEN_STYLING.modifiers.has("static")).toBe(false);
+  });
+});
+
+describe("getMonacoThemeName", () => {
+  test("names the theme of the mode, which the Shiki theme of that name backs", () => {
+    expect(getMonacoThemeName(true)).toBe("loxel-dark");
+    expect(getMonacoThemeName(false)).toBe("loxel-light");
+    expect([loxelDark.name, loxelLight.name]).toEqual(["loxel-dark", "loxel-light"]);
   });
 });

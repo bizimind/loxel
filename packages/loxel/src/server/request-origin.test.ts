@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 
 const PORT = 7433;
-const prod: RequestOriginPolicy = { port: PORT, allowDevOrigins: false };
-const dev: RequestOriginPolicy = { port: 7434, allowDevOrigins: true };
+const prod: RequestOriginPolicy = { port: PORT, viteDevPort: null };
+const dev: RequestOriginPolicy = { port: 7434, viteDevPort: 5173 };
 
 // Built from headers rather than `new Request(...)`: the test DOM preload's Request strips the
 // `Host` and `Origin` headers these rules inspect.
@@ -168,5 +168,21 @@ describe("checkRequest: mutation bodies", () => {
       expect(status(request(method))).toBeNull();
       expect(status(request(method, { "Content-Type": "text/plain" }))).toBeNull();
     }
+  });
+});
+
+describe("checkRequest: GET /api/terminals", () => {
+  // It lists the user's terminals and the programs running in them. The checks are the same for
+  // every path, which is what keeps it from other sites.
+  test("refuses other sites, whether they send an Origin or only Sec-Fetch-Site", () => {
+    expect(status(request("GET", { Origin: "https://evil.example" }))).toBe(403);
+    expect(
+      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors" })),
+    ).toBe(403);
+  });
+
+  test("serves the app's own renderer and native clients", () => {
+    expect(status(request("GET", { Origin: `http://127.0.0.1:${PORT}` }))).toBeNull();
+    expect(status(request("GET"))).toBeNull();
   });
 });

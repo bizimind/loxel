@@ -1,7 +1,6 @@
 ---
 title: C#
 description: C# language features from your own csharp-ls, loaded once you trust the repository and restore its projects.
-order: 13.5
 ---
 
 Loxel highlights `.cs` and `.csx` files out of the box. Everything else comes from [csharp-ls](https://github.com/razzmatazz/csharp-language-server), which you install yourself and which runs on your own .NET. Loxel does not bundle or download either one.
@@ -22,10 +21,10 @@ A repository that lists csharp-ls in its `.config/dotnet-tools.json` manifest us
 Language features start for a repository when all of these are true:
 
 - You [trust the repository](/docs/repository-trust), because loading a C# project runs the repository's build files.
-- Its projects are restored: you have run `dotnet restore`, so `project.assets.json` exists. If you accepted the [setup suggestion](/docs/worktrees-and-projects) when adding the project, each new worktree runs it; you can remove that from the setup script.
+- Its projects are restored: you have run `dotnet restore`, so `project.assets.json` exists. If you accepted the [setup suggestion](/docs/worktrees-and-tasks#adding-a-project) when adding the project, each new worktree runs it; you can remove that from the setup script.
 - .NET and csharp-ls are installed, as above.
 
-A fresh clone therefore gets syntax highlighting only, and a notice tells you the next step: what to install or what to run, or the status bar's **Restricted** item asks about trust. You don't need to restart anything. Language features start by themselves after you trust the repository, install csharp-ls or run `dotnet restore`.
+A fresh clone therefore gets syntax highlighting only, and a notice tells you the next step: what to install or what to run, or the status bar's **Restricted** item asks about trust (unless you [declined](/docs/repository-trust#trusting-a-repository) the repository). You don't need to restart anything. Language features start by themselves after you trust the repository, install csharp-ls or run `dotnet restore`.
 
 Opening a C# file never restores packages, installs tools or downloads anything, including with a `nuget.config` that names a feed. Trusting a repository doesn't change that.
 
@@ -39,12 +38,12 @@ Completion lists what is already imported. For a type from a namespace you haven
 
 - One solution at the repository's root is what loads.
 - With several solutions and no single one at the root, csharp-ls loads the first by path and a notice names it. Files outside it get syntax highlighting only. [Choose another](#choosing-a-solution) to load it instead.
-- With no solution, every project in the repository loads.
+- With no solution, csharp-ls loads exactly the projects Loxel discovered, and the projects those reference. Loxel discovers the repository's own projects, tracked or not, and not those in git-ignored directories, submodules or other repositories inside it. `$(SolutionDir)` in these projects points at a directory of Loxel's.
 - A project in what loads that isn't restored still loads, and a notice names it: references to its packages show as errors until you run `dotnet restore`.
 - A project csharp-ls can't load gets a notice naming it, and its files may have fewer features.
 - A project using an MSBuild SDK delivered through NuGet, such as `MSTest.Sdk` or `Aspire.AppHost.Sdk`, loads without that SDK, since loading it could download it. A notice names it, and its files show errors.
 
-After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again.
+After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again. Stopping csharp-ls also stops its child processes.
 
 A `.cs` file outside any loaded project, or in a repository with no project at all, gets syntax highlighting only.
 

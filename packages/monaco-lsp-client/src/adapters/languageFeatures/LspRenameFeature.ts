@@ -4,7 +4,23 @@ import type { RenameRegistrationOptions } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
+import type { WorkspaceEditSummary } from "../WorkspaceEditApplier";
 import { toMonacoLanguageSelector } from "./common";
+
+/** What each empty edit a rename provider handed Monaco stands for: see `appliedRenameSummary`. */
+const appliedRenames = new WeakMap<monaco.languages.WorkspaceEdit, WorkspaceEditSummary | null>();
+
+/**
+ * For the empty edit a rename provider hands Monaco after applying the rename itself: what the
+ * rename changed, or null when it failed (the client already reported why). Undefined for any other
+ * edit. Monaco announces the rename with a summary of the edit it is handed ("Made 0 edits in 0
+ * files"); an app that wraps Monaco's bulk-edit service can announce this one instead.
+ */
+export function appliedRenameSummary(
+  edit: monaco.languages.WorkspaceEdit,
+): WorkspaceEditSummary | null | undefined {
+  return appliedRenames.get(edit);
+}
 
 export class LspRenameFeature extends Disposable {
   constructor(private readonly _connection: LspConnection) {
@@ -45,6 +61,7 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
    * service can only edit open models, and a rename usually touches files that are not open.
    * A failed edit is handed over empty too, not as a reject reason: the applier already reported
    * it (`onWorkspaceEditFailure`), and Monaco would ask the next rename provider on a rejection.
+   * `appliedRenameSummary` tells what the empty edit stands for.
    */
   async provideRenameEdits(
     model: monaco.editor.ITextModel,
@@ -66,8 +83,10 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
       return null;
     }
 
-    await this._client.edits.apply(result);
-    return { edits: [] };
+    const outcome = await this._client.edits.apply(result);
+    const handed: monaco.languages.WorkspaceEdit = { edits: [] };
+    appliedRenames.set(handed, outcome.summary ?? null);
+    return handed;
   }
 
   async resolveRenameLocation(

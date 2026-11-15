@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
+import { tombiCachePath } from "./schema-downloads";
 import { TomlLspManager, tombiSettings, toTombiPatterns } from "./toml-lsp-manager";
 
 describe("toTombiPatterns", () => {
@@ -179,6 +180,7 @@ class FakeClient {
 
 let wt: string | undefined;
 let manager: TomlLspManager | undefined;
+const cacheDir = join(tmpdir(), "toml-lsp-test-cache-unused");
 
 afterEach(async () => {
   manager?.destroy();
@@ -202,7 +204,7 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
     "applies the pushed schema mappings and follows their updates",
     async () => {
       const { root, appToml, schemaUrl } = await setup();
-      manager = new TomlLspManager({ [schemaUrl]: ["app.toml"] });
+      manager = new TomlLspManager({ [schemaUrl]: ["app.toml"] }, cacheDir);
       const client = new FakeClient(manager);
       const { capabilities } = await client.start(root);
       // Format on save owns formatting, and TextMate grammars own highlighting.
@@ -235,10 +237,40 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
   );
 
   test(
+    "reads a remote #:schema from the cache only",
+    async () => {
+      const { root } = await setup();
+      const cache = join(root, "cache");
+      const remote = "https://schemas.loxel.invalid/app.json";
+      const text = `#:schema ${remote}\nname = 5\n`;
+      const appToml = join(root, "remote.toml");
+
+      // Tombi answers without the schema: it is offline and the cache is empty.
+      manager = new TomlLspManager({}, cache);
+      const offline = new FakeClient(manager);
+      await offline.start(root);
+      const missing = offline.open(appToml, text);
+      await offline.refreshedAfter(0);
+      expect(await offline.diagnostics(missing)).toEqual([]);
+      manager.destroy();
+
+      // A session starting with the schema in its cache uses it.
+      await Bun.write(tombiCachePath(cache, remote)!, APP_SCHEMA);
+      manager = new TomlLspManager({}, cache);
+      const cached = new FakeClient(manager);
+      await cached.start(root);
+      const uri = cached.open(appToml, text);
+      await cached.refreshedAfter(0);
+      expect((await cached.diagnostics(uri)).join("\n")).toContain("String");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "keeps a file's #:schema directive working without any mapping",
     async () => {
       const { root } = await setup();
-      manager = new TomlLspManager({});
+      manager = new TomlLspManager({}, cacheDir);
       const client = new FakeClient(manager);
       await client.start(root);
       const directive = join(root, "directive.toml");

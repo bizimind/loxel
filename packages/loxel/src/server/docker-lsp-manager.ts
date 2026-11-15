@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { buildSpawnEnv, pathWithoutCommand } from "./shell-env";
 import {
   type SpawnOptions,
   type SuppressibleFeature,
@@ -26,12 +27,12 @@ const DOCKER_LSP_SETTINGS = {
   },
 };
 
+const DOCKER = process.platform === "win32" ? "docker.exe" : "docker";
+
 /**
  * Sends the server's HTTP clients to a closed loopback port. Nothing should reach it: this is the
  * failsafe for the moment before a document's configuration pull is answered, when the server's
  * defaults still have Scout on. Go reads `no_proxy` when `NO_PROXY` is empty, so both are cleared.
- * The server's `docker buildx` child inherits this, which only matters for a Docker daemon reached
- * over non-loopback TCP: its lint diagnostics stop. A local socket or `ssh://` is unaffected.
  */
 const NO_OUTBOUND_HTTP_ENV = {
   HTTP_PROXY: "http://127.0.0.1:9",
@@ -50,7 +51,9 @@ const NO_OUTBOUND_HTTP_ENV = {
  * The server itself sends nothing off the machine: scripts/build-docker-lsp.ts builds the binary
  * without Docker's telemetry and BugSnag keys, the settings above turn Scout off, and inlay hints
  * are suppressed because the server fetches their tag dates from Docker Hub, with no setting to
- * stop it. Its Dockerfile lint runs the user's own `docker buildx`, whose network use is theirs.
+ * stop it. Its Dockerfile lint would run `docker buildx build --call=check`, which contacts registries
+ * (for base image metadata and the frontend image a `syntax` directive names), so the server's `PATH`
+ * holds no `docker` and that lint never runs, in any repository.
  *
  * Compose support is disabled at init time so our YAML LSP stays
  * authoritative for compose files. `removeOverlappingIssues` stays off: it
@@ -83,7 +86,8 @@ export class DockerLspManager extends WorktreeLspManager {
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { ...super.spawnOptions(context), env: NO_OUTBOUND_HTTP_ENV };
+    const PATH = pathWithoutCommand(buildSpawnEnv().PATH ?? "", DOCKER);
+    return { ...super.spawnOptions(context), env: { ...NO_OUTBOUND_HTTP_ENV, PATH } };
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {

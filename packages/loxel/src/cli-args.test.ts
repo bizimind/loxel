@@ -234,6 +234,22 @@ describe("planOpens", () => {
     ]);
   });
 
+  test("a Home terminal's URL goes to the window, with no worktree", () => {
+    const planned = planOpens(
+      { targets: ["https://x.dev"] },
+      {
+        baseDir: BASE,
+        pinnedWorktree: null,
+        commandWorktree: null,
+        urlsToWindow: true,
+        options: { focus: true, windowId: "w1" },
+      },
+    );
+    expect(planned).toEqual([
+      { label: "", request: { url: "https://x.dev", focus: true, windowId: "w1" } },
+    ]);
+  });
+
   test("a URL with no worktree has no request, and the files still go", () => {
     const [file, url] = plan(["a.md", "https://x.dev"]);
     expect(file!.request).toEqual({ filePath: "/home/me/repo/a.md", focus: true });

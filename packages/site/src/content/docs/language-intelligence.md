@@ -1,7 +1,8 @@
 ---
 title: Language Intelligence
 description: Per-worktree language servers, the features they provide, and how they start and stop.
-order: 13
+section: "In the code"
+order: 2
 # Sections that moved to a language's own page; old links to them keep working.
 movedAnchors:
   typescript-server: /docs/languages/typescript
@@ -14,7 +15,7 @@ movedAnchors:
   toml: /docs/languages/toml
 ---
 
-Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
+Loxel runs language servers for TypeScript, JavaScript, Python, Go, Rust, C and C++, Java, C#, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
 
 ---
 
@@ -65,7 +66,7 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. When a symbol has several definitions, a peek lists them instead.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. Some servers hold these sources themselves, such as Java's for JDK classes, and they open read-only. When a symbol has several definitions, a peek lists them instead.
 
 Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
@@ -79,7 +80,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [TOML](/docs/languages/toml) and [Kotlin](/docs/languages/kotlin). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation: [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [Go](/docs/languages/go), [Rust](/docs/languages/rust), [C and C++](/docs/languages/c-cpp), [Java](/docs/languages/java), [Kotlin](/docs/languages/kotlin), [C#](/docs/languages/csharp) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
@@ -91,7 +92,23 @@ Each language server is independent of the others. A language with more to say h
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
-The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile lint warnings come from `docker buildx` when the Docker CLI is installed; it runs with your own Docker setup, which can contact the registry of a base image (Docker Hub for most images), as `docker build` does. If your active builder is remote, the Dockerfile and build context go to that builder, also as with any `docker build`. Lint warnings are not available with a Docker daemon reached over TCP on another machine.
+The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile checks are local only: Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries, so Dockerfiles keep the language server's other features but get no lint warnings. Run `docker build --check` in a terminal for those.
+
+Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed.
+
+---
+
+## Schemas a file names
+
+A file can name its own schema: `$schema` in a JSON file, a `# yaml-language-server: $schema=` comment in YAML, a `#:schema` comment in TOML, or a schema or DTD in XML. Before Loxel downloads a schema at an address a file names, it shows a notification with the full address, so opening a project you just cloned does not contact hosts that project chooses. Files work normally until you answer, without checks and completions from that schema.
+
+- **Allow** trusts this address. Loxel downloads the schema now and whenever it needs it again, along with files it references on the same site.
+- **Don't fetch** skips this address, and Loxel does not ask about it again.
+- **Never ask** stops downloading schemas named by files, including ones you trusted, with no further prompts.
+
+Your choices last across restarts and apply to every project. To review or change them, open **Settings > Security**: remove an address to be asked about it again, or use the **Never fetch schemas named by files** switch.
+
+Schemas in [**Settings > Schemas**](/docs/reference-env-files-cli-settings), including the built-in ones, are your own choice and do not ask. Loxel downloads one the first time you open a file that matches it. When Loxel does download a schema, the request goes from your machine to that address, which sees your IP address like any web request.
 
 ---
 

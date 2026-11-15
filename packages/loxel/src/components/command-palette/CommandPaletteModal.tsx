@@ -2,10 +2,11 @@ import { CheckIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
-import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
+import { KeyBindingDisplay, LIGHT_KEYCAP_CLASS } from "@/components/ui/key-binding-display";
 import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { useActionHandler } from "@/hooks/useActionHandler";
 import { fuzzyMatch } from "@/lib/fuzzy-match";
+import { cn } from "@/lib/utils";
 import {
   type CommandPaletteMode,
   type QuickPickItem,
@@ -48,10 +49,12 @@ function commandRows(
   enabled: ReadonlySet<ActionId>,
 ): PaletteRow[] {
   const visible = ACTIONS.filter((a) => !a.hidden && enabled.has(a.id));
+  const labelOf = (action: (typeof visible)[number]) => action.contextLabel?.() ?? action.label;
   const toRow = (action: (typeof visible)[number], indices: number[]): PaletteRow => ({
     key: action.id,
-    label: action.label,
+    label: labelOf(action),
     indices,
+    current: action.isCurrent?.(),
     bindings: getBindingsForAction(kbState, action.id),
   });
   const q = query.trim();
@@ -59,7 +62,7 @@ function commandRows(
 
   const results: Array<{ row: PaletteRow; score: number }> = [];
   for (const action of visible) {
-    const match = fuzzyMatch(q, action.label);
+    const match = fuzzyMatch(q, labelOf(action));
     if (match) results.push({ row: toRow(action, match.indices), score: match.score });
   }
   results.sort((a, b) => b.score - a.score);
@@ -202,7 +205,10 @@ export function CommandPaletteModal() {
           {row.bindings.length > 0 && (
             <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
               {row.bindings.map((binding) => (
-                <KeyBindingDisplay key={binding} binding={binding} />
+                // Light shows each binding as a keycap, so neighboring bindings read apart
+                <span key={binding} className={cn("inline-flex items-center", LIGHT_KEYCAP_CLASS)}>
+                  <KeyBindingDisplay binding={binding} />
+                </span>
               ))}
             </span>
           )}

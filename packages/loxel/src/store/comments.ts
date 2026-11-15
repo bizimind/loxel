@@ -46,6 +46,12 @@ interface CommentState {
   clearAll: () => void;
 }
 
+/**
+ * Sequence number of the latest placed-threads fetch. Fetches overlap (an edited working-tree file
+ * refetches after each save while the diff refetch does too), and only the latest may land.
+ */
+let placedThreadsFetchSeq = 0;
+
 export const useCommentStore = create<CommentState>((set, get) => ({
   placedThreadsByFile: new Map(),
   lostThreads: [],
@@ -54,6 +60,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   loading: false,
 
   fetchPlacedThreads: async (reviewIds, files) => {
+    const seq = ++placedThreadsFetchSeq;
     if (reviewIds.length === 0) {
       set({ placedThreadsByFile: new Map(), lostThreads: [], loading: false });
       return;
@@ -63,6 +70,8 @@ export const useCommentStore = create<CommentState>((set, get) => ({
       const scopeWt = getActiveWt();
       const placed = await api.postPlacedThreads(scopeWt, reviewIds, files);
 
+      // A newer fetch superseded this one, and owns the loading flag now.
+      if (seq !== placedThreadsFetchSeq) return;
       // Guard against stale responses after worktree switch
       if (getActiveWt() !== scopeWt) {
         set({ loading: false });
@@ -88,7 +97,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
       frontendLog
         .child("ui")
         .error("Failed to fetch placed threads", { error: err instanceof Error ? err : undefined });
-      set({ loading: false });
+      if (seq === placedThreadsFetchSeq) set({ loading: false });
     }
   },
 
@@ -179,13 +188,17 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   setActiveThread: (threadId) => set({ activeThreadId: threadId, pendingAnchor: null }),
   setPendingAnchor: (anchor) => set({ pendingAnchor: anchor, activeThreadId: null }),
 
-  clearAll: () =>
+  clearAll: () => {
+    // A fetch still in flight belongs to the placements being cleared.
+    placedThreadsFetchSeq++;
     set({
       placedThreadsByFile: new Map(),
       lostThreads: [],
       activeThreadId: null,
       pendingAnchor: null,
-    }),
+      loading: false,
+    });
+  },
 }));
 
 function updateThreadInState(state: CommentState, updated: CommentThread): Partial<CommentState> {

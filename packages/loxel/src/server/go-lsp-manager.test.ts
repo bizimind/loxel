@@ -121,6 +121,9 @@ class TestGoLspManager extends GoLspManager {
   protected override resolveBundledBinary(): string {
     return this.gopls;
   }
+  override stopsProcessTree(): boolean {
+    return super.stopsProcessTree();
+  }
 }
 
 /** Stands in for the WebSocket and the Monaco client behind it. */
@@ -193,6 +196,11 @@ describe("GoLspManager", () => {
     manager.createSession(found.ws, wt);
     manager.handleMessage(found.ws, INITIALIZE);
     await found.untilFrame((frame) => frame.id === 1);
+  });
+
+  test("ends what gopls has running when it stops", () => {
+    // The base ends a server's process tree for a manager that opts in; this shows Go does.
+    expect(new TestGoLspManager("gopls").stopsProcessTree()).toBe(true);
   });
 
   test("does not count a go inside the worktree, and keeps the worktree off gopls's PATH", async () => {
