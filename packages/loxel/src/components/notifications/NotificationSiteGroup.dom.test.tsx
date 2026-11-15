@@ -47,7 +47,7 @@ describe("a site's stacked notifications", () => {
     expect(screen.getByText("Build 3 finished")).toBeInTheDocument();
     expect(screen.queryByText("Build 2 finished")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Show all 3 from localhost:5173 · Home" }),
+      screen.getByRole("button", { name: "+2 more from localhost:5173 · Home" }),
     ).toHaveTextContent("+2");
   });
 
@@ -64,7 +64,7 @@ describe("a site's stacked notifications", () => {
   test("expand to each one, which opens on its own, and collapse again", () => {
     render(<NotificationSiteGroup notifications={SITE} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Show all 3/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^\+2 more/ }));
     expect(clickBrowserNotification).not.toHaveBeenCalled();
     for (const n of SITE) expect(screen.getByText(n.title ?? "")).toBeInTheDocument();
 
@@ -76,16 +76,16 @@ describe("a site's stacked notifications", () => {
   });
 
   test("dismiss one when expanded, or all of them collapsed or expanded", () => {
-    const { rerender } = render(<NotificationSiteGroup notifications={SITE} />);
+    render(<NotificationSiteGroup notifications={SITE} />);
     const allIds = SITE.map((n) => ({ type: "notification_dismiss" as const, id: n.id }));
 
     fireEvent.click(screen.getByRole("button", { name: /^Dismiss all 3/ }));
     expect(send.mock.calls.flat()).toEqual(allIds);
     expect(clickBrowserNotification).not.toHaveBeenCalled();
 
+    // The send is mocked, so the stack is still there to expand
     send.mockClear();
-    rerender(<NotificationSiteGroup notifications={SITE} />);
-    fireEvent.click(screen.getByRole("button", { name: /^Show all 3/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^\+2 more/ }));
     fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[1]!);
     expect(send.mock.calls.flat()).toEqual([{ type: "notification_dismiss", id: "build-2" }]);
 

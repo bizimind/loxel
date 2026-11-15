@@ -56,6 +56,7 @@ export function NotificationSiteGroup({
         </button>
         <button
           aria-label={`Collapse ${source}`}
+          aria-expanded
           title="Show less"
           className="text-muted-foreground hover:text-foreground shrink-0"
           onClick={() => setExpanded(false)}
@@ -63,7 +64,7 @@ export function NotificationSiteGroup({
           <ChevronUpIcon className="size-3" />
         </button>
       </div>
-      <div className="border-border ml-2 border-l">
+      <div className="border-border not-dark:divide-border/60 ml-2 border-l not-dark:divide-y">
         {notifications.map((n) => (
           <NotificationItem key={n.id} notification={n} onNavigate={onNavigate} inGroup />
         ))}

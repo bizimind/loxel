@@ -44,7 +44,7 @@ const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
 };
 
 /** A collapsed site group shown through its newest notification. */
-export interface NotificationStack {
+interface NotificationStack {
   /** How many notifications the group holds, this one included. */
   count: number;
   onExpand: () => void;
@@ -100,7 +100,8 @@ export function NotificationItem({
       {/* The rest of the site's notifications, behind this one */}
       {stack && (
         <button
-          aria-label={`Show all ${stack.count} from ${source}`}
+          aria-label={`+${stack.count - 1} more from ${source}`}
+          aria-expanded={false}
           title="Show all"
           className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary mt-0.5 h-4 shrink-0 rounded border px-1 text-[10px] leading-[14px] font-medium tabular-nums"
           onClick={(e) => {
@@ -116,7 +117,7 @@ export function NotificationItem({
       <button
         aria-label={stack ? `Dismiss all ${stack.count} from ${source}` : "Dismiss"}
         title={stack ? "Dismiss all" : "Dismiss"}
-        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
           if (stack) {

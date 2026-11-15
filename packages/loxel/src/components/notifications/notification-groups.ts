@@ -17,27 +17,19 @@ export type NotificationEntry =
 export function groupNotifications(
   notifications: readonly ServerNotification[],
 ): NotificationEntry[] {
-  const sites = new Map<string, NonEmpty<ServerNotification>>();
-  const rows: (ServerNotification | { key: string; site: NonEmpty<ServerNotification> })[] = [];
+  // Insertion-ordered: each row sits where its newest is. Other sources key by their own id, which
+  // a JSON array never equals.
+  const rows = new Map<string, NonEmpty<ServerNotification>>();
   for (const n of notifications) {
-    if (n.source.kind !== "browser") {
-      rows.push(n);
-      continue;
-    }
-    const key = JSON.stringify([n.source.origin, n.source.worktreePath]);
-    const site = sites.get(key);
-    if (site) {
-      site.push(n);
-      continue;
-    }
-    const created: NonEmpty<ServerNotification> = [n];
-    sites.set(key, created);
-    rows.push({ key, site: created });
+    const key =
+      n.source.kind === "browser" ? JSON.stringify([n.source.origin, n.source.worktreePath]) : n.id;
+    const row = rows.get(key);
+    if (row) row.push(n);
+    else rows.set(key, [n]);
   }
-
-  return rows.map((row): NotificationEntry => {
-    if (!("site" in row)) return { kind: "single", notification: row };
-    if (row.site.length === 1) return { kind: "single", notification: row.site[0] };
-    return { kind: "site", key: row.key, notifications: row.site };
-  });
+  return [...rows].map(([key, row]): NotificationEntry =>
+    row.length === 1
+      ? { kind: "single", notification: row[0] }
+      : { kind: "site", key, notifications: row },
+  );
 }
