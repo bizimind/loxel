@@ -25,11 +25,16 @@ export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
 
 /** The events a session sends on its own; its exit goes to `onExit`, for the host to announce. */
-export type TerminalSessionEvent = Exclude<TerminalHostEvent, { type: "exit" | "ended" | "lost" }>;
+export type TerminalSessionEvent = Exclude<
+  TerminalHostEvent,
+  { type: "exit" | "ended" | "lost" | "unresponsive" }
+>;
 
 /** What the process running the sessions provides them. */
 export interface TerminalSessionRuntime {
   log: ChildLogger;
+  /** Wraps each PTY spawn, a synchronous `Bun.spawn`, for the host's spawn accounting. */
+  measureSpawn?: <T>(spawn: () => T) => T;
   /** Overrides for tests. */
   resumeRingBytes?: number;
   flowControl?: { highWaterBytes: number; lowWaterBytes: number };
@@ -187,8 +192,8 @@ export class TerminalSession {
     this.emulator.loadAddon(this.serializer);
     this.registerOscHandlers();
 
-    try {
-      this.proc = Bun.spawn([...options.argv], {
+    const spawn = () =>
+      Bun.spawn([...options.argv], {
         cwd: options.cwd,
         env: options.env,
         terminal: {
@@ -197,6 +202,8 @@ export class TerminalSession {
           data: (_terminal, data) => this.onPtyData(data),
         },
       });
+    try {
+      this.proc = runtime.measureSpawn ? runtime.measureSpawn(spawn) : spawn();
     } catch (err) {
       this.emulator.dispose();
       throw err;
@@ -225,6 +232,11 @@ export class TerminalSession {
   /** Bytes of output the resume ring holds. */
   get retainedBytes(): number {
     return this.ring.end - this.ring.start;
+  }
+
+  /** Lines the emulator holds, scrollback and screen, for the host's perf summary. */
+  get bufferLines(): number {
+    return this.emulator.buffer.normal.length;
   }
 
   /**

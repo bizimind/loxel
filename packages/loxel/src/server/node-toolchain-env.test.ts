@@ -190,6 +190,7 @@ describe("nodeToolchainEnv", () => {
             output += decoder.decode(data);
           },
           sendExit: () => {},
+          sendNotice: () => {},
         },
         {
           cols: 80,

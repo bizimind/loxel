@@ -49,6 +49,14 @@ export const ENDED_SESSION_LIMITS: EndedSessionLimits = {
   outputBytes: 128 * 1024 * 1024,
 };
 
+/** See {@link InProcessTerminalHost.stats}. */
+export interface HostedSessionStats {
+  running: number;
+  ended: number;
+  ringBytes: number;
+  bufferLines: number;
+}
+
 export class InProcessTerminalHost implements TerminalHost {
   private readonly sessions = new Map<string, HostedSession>();
   /** Oldest first. */
@@ -181,6 +189,24 @@ export class InProcessTerminalHost implements TerminalHost {
   /** The IDs of the running sessions, for the host process's own bookkeeping. */
   sessionIds(): string[] {
     return [...this.sessions.keys()];
+  }
+
+  /**
+   * What the sessions hold, for the host's perf summary: how many run and how many ended ones are
+   * kept, the bytes of their resume rings, and the lines of their emulators.
+   */
+  stats(): HostedSessionStats {
+    let ringBytes = 0;
+    let bufferLines = 0;
+    const sessions = [
+      ...[...this.sessions.values()].map((hosted) => hosted.session),
+      ...[...this.ended.values()].flatMap((ended) => (ended.session ? [ended.session] : [])),
+    ];
+    for (const session of sessions) {
+      ringBytes += session.retainedBytes;
+      bufferLines += session.bufferLines;
+    }
+    return { running: this.sessions.size, ended: this.ended.size, ringBytes, bufferLines };
   }
 
   /** How many ended sessions are kept, until attached or destroyed. */

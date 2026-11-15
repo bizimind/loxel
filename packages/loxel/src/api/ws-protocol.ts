@@ -25,6 +25,15 @@ export type TerminalEnd =
   | { reason: "exited"; exitCode: number | null; outputLost: boolean }
   | { reason: "host_lost" };
 
+/**
+ * What a terminal panel is told about its session while it runs: its attach (or the spawn before
+ * it) failed, with why; or the terminal host running it stopped answering, so its output waits
+ * until the host answers again.
+ */
+export type TerminalNotice =
+  | { notice: "attach_failed"; message: string }
+  | { notice: "host_unresponsive" };
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // Worktree-scoped (sent to worktree subscribers only)
@@ -61,6 +70,7 @@ export type WsMessage =
   // Global (sent to all clients)
   | { type: "error"; message: string }
   | ({ type: "terminal_exit"; id: string } & TerminalEnd)
+  | ({ type: "terminal_notice"; id: string } & TerminalNotice)
   | ({ type: "terminal_state" } & TerminalState)
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
   | { type: "terminals_changed" }

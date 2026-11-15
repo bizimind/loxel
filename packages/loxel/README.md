@@ -36,7 +36,7 @@ Three processes:
 
 The `loxel` CLI (`src/cli.ts`) talks to a running server to open files, folders, URLs and terminals.
 
-Always-on performance monitors in all three processes (`src/lib/perf-monitor.ts`, `src/electron/main-perf-monitor.ts`, `src/server/server-perf-monitor.ts`) log summaries and anomalies with `cat: "perf"`; filter the Logs panel or the server log files by that category.
+Always-on performance monitors in the renderer, the Electron main process, the server and each terminal host (`src/lib/perf-monitor.ts`, `src/electron/main-perf-monitor.ts`, `src/server/server-perf-monitor.ts`, `src/terminal-host/host-perf-monitor.ts`, whose lines the server logs as its own) log summaries and anomalies with `cat: "perf"`; filter the Logs panel or the server log files by that category.
 
 ## Development
 

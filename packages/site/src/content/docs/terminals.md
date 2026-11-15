@@ -29,7 +29,7 @@ Terminal sessions survive task switches. When you switch to another task — or 
 
 A program that ends while Loxel is away, an agent finishing its task for example, loses nothing: when Loxel is back, its panel shows what it printed last and the code it exited with, and the [notifications](/docs/coding-agents#notifications) it raised meanwhile show up. Once no terminal is still running, the ended ones wait 10 minutes for Loxel to come back. A terminal whose panel isn't open yet, in a worktree you aren't looking at for example, shows them whenever you open it. If many terminals end while Loxel is away, the oldest may not keep their output; their panels then say so next to the exit code.
 
-In the rare case that the process keeping your terminals running stops unexpectedly, its terminals end with it, and each one's panel says **[Terminal ended: Loxel's terminal host stopped unexpectedly]** instead of an exit code.
+In the rare case that the process keeping your terminals running stops unexpectedly, its terminals end with it, and each one's panel says **[Terminal ended: Loxel's terminal host stopped unexpectedly]** instead of an exit code. If it only stops responding for a while, its terminals keep running: each panel says **[Loxel's terminal host is not responding; this terminal continues once it does]**, new terminals start fine meanwhile, and the output picks up where it left off once it answers again. A terminal that cannot be opened at all says why in its panel.
 
 ### Quitting without ending your terminals
 
