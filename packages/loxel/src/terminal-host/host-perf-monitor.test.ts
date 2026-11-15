@@ -16,7 +16,7 @@ function createMonitor(rssMB = 200) {
   const record = (level: string) => (msg: string, ctx?: Record<string, unknown>) => {
     lines.push({ level, msg, ctx });
   };
-  const clock = { now: 0 };
+  const clock = { now: 0, wall: 1_000_000 };
   const memory = { rss: rssMB * MB, heapUsed: 50 * MB };
   const monitor = new HostPerfMonitor({
     log: {
@@ -27,7 +27,7 @@ function createMonitor(rssMB = 200) {
       error: record("error"),
     },
     sessions: () => ({ running: 3, ended: 1, ringBytes: 2 * MB, bufferLines: 4200 }),
-    now: () => clock.now,
+    clocks: { awake: () => clock.now, wall: () => clock.wall + clock.now },
     memory: () => memory,
   });
   return { monitor, lines, clock, memory };
@@ -96,5 +96,27 @@ describe("HostPerfMonitor", () => {
       "high terminal host memory: past 1024 MB",
       "high terminal host memory: past 1536 MB",
     ]);
+  });
+
+  test("a tick the machine slept through is sleep, not lag", () => {
+    jest.useFakeTimers();
+    const { monitor, lines, clock } = createMonitor();
+    monitor.start();
+    clock.now += 100;
+    jest.advanceTimersByTime(100);
+    // Asleep for an hour: the wall clock moved on, the monotonic clock did not; the timer fires
+    // late on wake, as the event loop runs its due timers first.
+    clock.wall += 3_600_000;
+    clock.now += 100 + 400;
+    jest.advanceTimersByTime(100);
+    monitor.report();
+    monitor.dispose();
+    expect(lines.map((line) => [line.level, line.msg])).toEqual([
+      ["debug", "terminal host metrics"],
+    ]);
+    expect(lines[0]!.ctx).toMatchObject({
+      eventLoopLag: { max: 0, stalledMs: 0 },
+      sleptMs: 3_600_000,
+    });
   });
 });

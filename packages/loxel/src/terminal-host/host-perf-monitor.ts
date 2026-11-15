@@ -7,6 +7,13 @@
  * numbers, and the sessions are read once per summary. See docs/TERMINAL_HOST.md#logs.
  */
 import type { ChildLogger } from "@/api/log-entry-model";
+import {
+  type Clocks,
+  SLEEP_GAP_MS,
+  SYSTEM_CLOCKS,
+  readClocks,
+  sleptBetween,
+} from "@/lib/awake-timer";
 import { computeLagStats } from "@/lib/perf-lag-stats";
 
 import type { HostedSessionStats } from "./in-process-terminal-host";
@@ -14,7 +21,8 @@ import type { HostedSessionStats } from "./in-process-terminal-host";
 export const HOST_PERF_SUMMARY_INTERVAL_MS = 30_000;
 /**
  * The lag probe re-arms itself every tick, so a stall at any point in the window delays the timer
- * waiting through it, rather than only one that starts inside a short probe window.
+ * waiting through it, rather than only one that starts inside a short probe window. A tick the
+ * machine slept through is sleep, not lag, and counts as neither.
  */
 const LAG_PROBE_MS = 100;
 const LAG_RING_SIZE = Math.ceil(HOST_PERF_SUMMARY_INTERVAL_MS / LAG_PROBE_MS);
@@ -28,8 +36,8 @@ export interface HostPerfMonitorOptions {
   /** The host's logger of category `perf`. */
   log: ChildLogger;
   sessions: () => HostedSessionStats;
-  /** Replace the clock and the memory reading, for tests. */
-  now?: () => number;
+  /** Replace the clocks and the memory reading, for tests. */
+  clocks?: Clocks;
   memory?: () => { rss: number; heapUsed: number };
 }
 
@@ -43,11 +51,12 @@ function round(ms: number): number {
 
 export class HostPerfMonitor {
   private readonly log: ChildLogger;
-  private readonly now: () => number;
+  private readonly clocks: Clocks;
   private readonly memory: () => { rss: number; heapUsed: number };
   private readonly lagSamples = new Float64Array(LAG_RING_SIZE);
   private lagSampleCount = 0;
   private stalledMs = 0;
+  private sleptMs = 0;
   private spawns = 0;
   private spawnBlockTotalMs = 0;
   private spawnBlockMaxMs = 0;
@@ -58,7 +67,7 @@ export class HostPerfMonitor {
 
   constructor(private readonly options: HostPerfMonitorOptions) {
     this.log = options.log;
-    this.now = options.now ?? (() => performance.now());
+    this.clocks = options.clocks ?? SYSTEM_CLOCKS;
     this.memory = options.memory ?? (() => process.memoryUsage());
   }
 
@@ -81,11 +90,11 @@ export class HostPerfMonitor {
    * system-wide, so the time it blocks the host depends on what the rest of the machine spawns.
    */
   measureSpawn<T>(spawn: () => T): T {
-    const start = this.now();
+    const start = this.clocks.awake();
     try {
       return spawn();
     } finally {
-      const blockMs = this.now() - start;
+      const blockMs = this.clocks.awake() - start;
       this.spawns++;
       this.spawnBlockTotalMs += blockMs;
       this.spawnBlockMaxMs = Math.max(this.spawnBlockMaxMs, blockMs);
@@ -105,7 +114,14 @@ export class HostPerfMonitor {
     const { running, ended, ringBytes, bufferLines } = this.options.sessions();
     const sessions = { running, ended, ringMB: megabytes(ringBytes), bufferLines };
 
-    this.log.debug("terminal host metrics", { memory, eventLoopLag, ptySpawns, sessions });
+    const slept = this.sleptMs > 0 ? { sleptMs: Math.round(this.sleptMs) } : {};
+    this.log.debug("terminal host metrics", {
+      memory,
+      eventLoopLag,
+      ptySpawns,
+      sessions,
+      ...slept,
+    });
     if (eventLoopLag && eventLoopLag.max > HIGH_LAG_MS) {
       this.log.warn("terminal host event loop lag", { ...eventLoopLag, ptySpawns, sessions });
     }
@@ -117,15 +133,23 @@ export class HostPerfMonitor {
 
     this.lagSampleCount = 0;
     this.stalledMs = 0;
+    this.sleptMs = 0;
     this.spawns = 0;
     this.spawnBlockTotalMs = 0;
     this.spawnBlockMaxMs = 0;
   }
 
   private armProbe(): void {
-    const due = this.now() + LAG_PROBE_MS;
+    const start = readClocks(this.clocks);
     this.probe = setTimeout(() => {
-      const lag = Math.max(0, this.now() - due);
+      const end = readClocks(this.clocks);
+      const slept = sleptBetween(start, end);
+      if (slept > SLEEP_GAP_MS) {
+        this.sleptMs += slept;
+        this.armProbe();
+        return;
+      }
+      const lag = Math.max(0, end.awake - start.awake - LAG_PROBE_MS);
       this.lagSamples[this.lagSampleCount % LAG_RING_SIZE] = lag;
       this.lagSampleCount++;
       this.stalledMs += lag;

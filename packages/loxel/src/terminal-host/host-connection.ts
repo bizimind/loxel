@@ -4,6 +4,8 @@
  */
 import { type Socket, createConnection } from "node:net";
 
+import { awakeTimeout } from "@/lib/awake-timer";
+
 import type { InitializeMessage, InitializeResult } from "./protocol";
 import { InitializeResultSchema } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
@@ -126,14 +128,14 @@ export function sendAndClose(
 ): Promise<boolean> {
   connection.send(encodeJsonFrame(message));
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    const cancel = awakeTimeout(timeoutMs, () => {
       connection.destroy();
       resolve(false);
-    }, timeoutMs);
+    });
     connection.start({
       onBody: () => {},
       onClose: () => {
-        clearTimeout(timer);
+        cancel();
         resolve(true);
       },
     });
@@ -156,17 +158,17 @@ export function openHostConnection(
     const fail = (error: HostConnectError) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      cancelTimeout();
       socket.destroy();
       reject(error);
     };
-    const timer = setTimeout(() => {
+    const cancelTimeout = awakeTimeout(timeoutMs, () => {
       fail(
         new HostConnectError(`No answer from the terminal host at ${socketPath}`, {
           refused: false,
         }),
       );
-    }, timeoutMs);
+    });
 
     socket.on("connect", () => socket.write(encodeJsonFrame(initialize)));
     socket.on("error", (err: NodeJS.ErrnoException) => {
@@ -214,7 +216,7 @@ export function openHostConnection(
         return;
       }
       settled = true;
-      clearTimeout(timer);
+      cancelTimeout();
       socket.removeAllListeners("close");
       resolve(new HostConnection(socket, reader, result.data, rest));
     });

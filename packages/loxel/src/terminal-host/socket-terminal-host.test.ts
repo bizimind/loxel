@@ -588,6 +588,35 @@ describe("SocketTerminalHost and a host that stops answering", () => {
     expect(answering.connections[0]!.received.some((m) => m.request?.id === next.id)).toBe(true);
   });
 
+  test("a request whose answer is waiting when the machine wakes does not time out", async () => {
+    const host = await startScriptedHost();
+    const { client, events } = connect(host.socketPath);
+    await client.list();
+    const running = request("exec sleep 30");
+    await client.spawn(running);
+
+    jest.useFakeTimers();
+    host.script.holdAll = true;
+    const spawned = request("exec sleep 30");
+    const sent = host.whenReceived(() =>
+      host.connections[0]!.received.some((message) => message.request?.id === spawned.id),
+    );
+    const spawning = client.spawn(spawned);
+    await sent;
+    // The machine sleeps for an hour: the wall clock jumps, the monotonic clock stands still. On
+    // wake the host's answer is already on the socket, and the due timer runs before it is read.
+    const { requestId } = host.connections[0]!.received.at(-1)!;
+    const { id, epoch, cols, rows, meta } = spawned;
+    const value = { id, epoch, offset: 0, pid: process.pid, cols, rows, meta };
+    host.connections[0]!.socket.write(encodeJsonFrame({ type: "result", requestId, value }));
+    jest.setSystemTime(Date.now() + 3_600_000);
+    jest.advanceTimersByTime(REQUEST_TIMEOUTS_MS.spawn);
+
+    expect(await spawning).toMatchObject({ id: spawned.id });
+    expect(events).toEqual([]);
+    expect(client.acceptsNewSessions).toBe(true);
+  });
+
   test("answers again: takes new sessions again", async () => {
     const host = await startScriptedHost();
     const { client, events } = connect(host.socketPath);

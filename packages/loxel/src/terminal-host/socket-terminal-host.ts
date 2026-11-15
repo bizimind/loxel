@@ -18,6 +18,7 @@
  */
 import type { ChildLogger } from "@/api/log-entry-model";
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
+import { awakeTimeout } from "@/lib/awake-timer";
 
 import type { HostConnection } from "./host-connection";
 import {
@@ -93,8 +94,8 @@ interface PendingRequest {
   sent: boolean;
   /** The client's own request while restoring a connection; fails if that connection closes. */
   internal?: boolean;
-  /** Fails the request once it has waited its {@link REQUEST_TIMEOUTS_MS}; null until started. */
-  timer: ReturnType<typeof setTimeout> | null;
+  /** Cancels its {@link REQUEST_TIMEOUTS_MS} timeout; null until it is started. */
+  cancelTimeout: (() => void) | null;
 }
 
 /** What the client keeps about a session of this host. */
@@ -177,7 +178,7 @@ export class SocketTerminalHost implements TerminalHost {
       if (options.pid === undefined) throw new Error("A host found not answering needs its pid");
       // Unresponsive from the start, which whoever found it has logged.
       this.state = "reconnecting";
-      this.reconnectingSince = Date.now();
+      this.reconnectingSince = performance.now();
       this.unresponsiveSince = this.reconnectingSince;
       // Once the caller has its listeners on it, should the first attempt find the host gone.
       queueMicrotask(() => void this.reconnect());
@@ -226,7 +227,7 @@ export class SocketTerminalHost implements TerminalHost {
   get acceptsNewSessions(): boolean {
     if (this.state === "gone" || this.unresponsiveSince !== null) return false;
     if (this.reconnectingSince === null) return true;
-    return Date.now() - this.reconnectingSince < STALLED_AFTER_MS;
+    return performance.now() - this.reconnectingSince < STALLED_AFTER_MS;
   }
 
   spawn(request: TerminalSpawnRequest): Promise<TerminalSessionInfo> {
@@ -434,12 +435,12 @@ export class SocketTerminalHost implements TerminalHost {
       }
       await sendAndClose(connection, message);
     })();
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel = () => {};
     const timedOut = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), LEAVE_TIMEOUT_MS);
+      cancel = awakeTimeout(LEAVE_TIMEOUT_MS, () => resolve("timeout"));
     });
     const outcome = await Promise.race([kept, timedOut]);
-    clearTimeout(timer);
+    cancel();
     if (outcome === "timeout") {
       this.log.warn(
         `Could not reach the terminal host within ${LEAVE_TIMEOUT_MS} ms to keep its sessions; they get its grace period`,
@@ -476,7 +477,7 @@ export class SocketTerminalHost implements TerminalHost {
         reject,
         parse,
         sent: this.state === "connected",
-        timer: null,
+        cancelTimeout: null,
         ...extra,
       };
       this.pending.set(requestId, request);
@@ -487,9 +488,12 @@ export class SocketTerminalHost implements TerminalHost {
   }
 
   private startTimeout(requestId: number, request: PendingRequest): void {
-    if (request.timer) return;
+    if (request.cancelTimeout) return;
     const timeoutMs = REQUEST_TIMEOUTS_MS[request.type];
-    request.timer = setTimeout(() => this.onRequestTimeout(requestId, timeoutMs), timeoutMs);
+    // Awake time: an answer read as the machine wakes is not a host that stopped answering.
+    request.cancelTimeout = awakeTimeout(timeoutMs, () =>
+      this.onRequestTimeout(requestId, timeoutMs),
+    );
   }
 
   /** Take request `requestId` out of the pending ones, to answer it. */
@@ -497,7 +501,7 @@ export class SocketTerminalHost implements TerminalHost {
     const request = this.pending.get(requestId);
     if (!request) return undefined;
     this.pending.delete(requestId);
-    if (request.timer) clearTimeout(request.timer);
+    request.cancelTimeout?.();
     return request;
   }
 
@@ -510,7 +514,7 @@ export class SocketTerminalHost implements TerminalHost {
       : `could not be reached for its ${request.type.replace("_", " ")} request within ${seconds} s`;
     if (request.attach) {
       // Still bound to its panel, which gets the session once the host answers: only told.
-      request.timer = null;
+      request.cancelTimeout = null;
       this.markUnresponsive(`it ${failure}`);
       return;
     }
@@ -658,7 +662,7 @@ export class SocketTerminalHost implements TerminalHost {
     if (this.connection !== connection || this.state !== "connected") return;
     this.connection = null;
     this.state = "reconnecting";
-    this.reconnectingSince ??= Date.now();
+    this.reconnectingSince ??= performance.now();
     this.log.warn("The connection to the terminal host closed, reconnecting", { error });
     // Answered by the restored connection's list() (spawns) or not at all (attaches: the host
     // detached every session, and the attaches to restore are re-sent below).
@@ -686,7 +690,7 @@ export class SocketTerminalHost implements TerminalHost {
     let reportedAt = 0;
     const noteFailure = (err: unknown) => {
       failures++;
-      const now = Date.now();
+      const now = performance.now();
       if (failures === 1) {
         reportedAt = now;
         this.log.warn("Could not reconnect to the terminal host yet; retrying", {
@@ -789,7 +793,7 @@ export class SocketTerminalHost implements TerminalHost {
         parse: (value) => RESULT_SCHEMAS.list.parse(value),
         sent: true,
         internal: true,
-        timer: null,
+        cancelTimeout: null,
       };
       this.pending.set(requestId, request);
       // A host that answers the handshake but not the list is retried like one that does neither.
@@ -889,7 +893,7 @@ export class SocketTerminalHost implements TerminalHost {
    */
   private markUnresponsive(reason: string): void {
     if (this.unresponsiveSince !== null || this.state === "gone") return;
-    this.unresponsiveSince = Date.now();
+    this.unresponsiveSince = performance.now();
     const confirmed = [...this.sessions].filter(([, known]) => known.confirmed);
     this.log.error(`The terminal host is not responding: ${reason}; new terminals go to another`, {
       hostBuildId: this.hello?.hostBuildId,
@@ -903,7 +907,7 @@ export class SocketTerminalHost implements TerminalHost {
   /** The host answered: it is no longer unresponsive, if it was. */
   private markResponsive(): void {
     if (this.unresponsiveSince === null) return;
-    const seconds = Math.round((Date.now() - this.unresponsiveSince) / 1000);
+    const seconds = Math.round((performance.now() - this.unresponsiveSince) / 1000);
     this.unresponsiveSince = null;
     this.log.info(`The terminal host answers again, after ${seconds} s`);
   }

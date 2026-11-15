@@ -126,6 +126,8 @@ async function startQuietHost(runDir: string, hostId: string, sessions: Terminal
   const connected: (() => void)[] = [];
   const server: Server = createServer((socket) => {
     const reader = new FrameReader();
+    // A client that gave up on it closes its end, whatever it was being sent.
+    socket.on("error", () => {});
     for (const resolve of connected.splice(0)) resolve();
     socket.on("data", (chunk: Buffer) => {
       if (!state.answering) return;
@@ -496,13 +498,11 @@ describe("TerminalHostPool and a host found not answering", () => {
     const quiet = await startQuietHost(runDir, "79797979", [session]);
     const { pool } = createPool(stateDir, runDir);
     const adopted: TerminalSessionInfo[][] = [];
-    const lateAdopt = Promise.withResolvers<void>();
 
     jest.useFakeTimers();
     const connected = quiet.nextConnection();
     const started = pool.start((sessions) => {
       adopted.push(sessions);
-      if (adopted.length === 2) lateAdopt.resolve();
     });
     await connected;
     // The reconnect starts as soon as the handshake has timed out.
@@ -511,14 +511,13 @@ describe("TerminalHostPool and a host found not answering", () => {
     await started;
     await retried;
     quiet.answer();
-    const answered = quiet.nextConnection();
-    jest.advanceTimersByTime(INITIALIZE_TIMEOUT_MS);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
-    jest.advanceTimersByTime(250);
-    await answered;
-    await lateAdopt.promise;
+    // Whichever attempt first reaches it answering, the one under way or one a timer later.
+    while (adopted.length < 2) {
+      jest.advanceTimersByTime(250);
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    }
     expect(adopted).toEqual([[], [session]]);
     expect(await pool.list()).toEqual([session]);
   });
