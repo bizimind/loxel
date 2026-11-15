@@ -9,7 +9,7 @@ Loxel and its CLI tools (`wt`, `code-analysis`, and the others in this repositor
 | Latest release | Yes       |
 | Older releases | No        |
 
-The hosted services (bizimind.io, `loxel.bizimind.io`, and `channels.loxel.bizimind.io`) always run the current version.
+The hosted services (bizimind.io and `loxel.bizimind.io`) always run the current version.
 
 ## Reporting a Vulnerability
 
@@ -38,7 +38,7 @@ In scope:
 
 - The Loxel desktop app and its local server
 - The CLI tools and libraries in this repository
-- The services this repository deploys: bizimind.io, the release downloads at `loxel.bizimind.io`, and the channel relay at `channels.loxel.bizimind.io`
+- The services this repository deploys: bizimind.io and the release downloads at `loxel.bizimind.io`
 
 Out of scope:
 
