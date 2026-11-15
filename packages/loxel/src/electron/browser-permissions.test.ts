@@ -18,62 +18,95 @@ function installedHandlers(): {
 } {
   let check: CheckHandler = null;
   let request: RequestHandler = null;
-  const browserSession = {
-    setPermissionCheckHandler: (handler: CheckHandler) => {
+  installBrowserPermissions({
+    setPermissionCheckHandler: (handler) => {
       check = handler;
     },
-    setPermissionRequestHandler: (handler: RequestHandler) => {
+    setPermissionRequestHandler: (handler) => {
       request = handler;
     },
-  };
-  installBrowserPermissions(browserSession);
+  });
   if (!check || !request) throw new Error("installBrowserPermissions set no handler");
   return { check, request };
 }
 
-const ALLOWED: BrowserPermission[] = [
-  "clipboard-sanitized-write",
-  "fullscreen",
-  "pointerLock",
-  "fileSystem",
-  "openExternal",
-];
+/**
+ * What a page's own (main) frame gets, for every permission Electron names. A name a new Electron
+ * adds fails the typecheck here until it is decided.
+ */
+const MAIN_FRAME: Record<BrowserPermission, boolean> = {
+  "clipboard-sanitized-write": true,
+  fileSystem: true,
+  fullscreen: true,
+  keyboardLock: true,
+  openExternal: true,
+  pointerLock: true,
+  "screen-wake-lock": true,
 
-const REFUSED: BrowserPermission[] = [
-  "notifications",
-  "geolocation",
-  "geolocation-approximate",
-  "media",
-  "display-capture",
-  "midi",
-  "midiSysex",
-  "clipboard-read",
-  "deprecated-sync-clipboard-read",
-  "local-fonts",
-  "window-management",
-  "idle-detection",
-  "persistent-storage",
-  "screen-wake-lock",
-  "automatic-fullscreen",
-  "keyboardLock",
-  "storage-access",
-  "hid",
-  "serial",
-  "usb",
-  "unknown",
-];
+  ar: false,
+  "automatic-fullscreen": false,
+  "background-fetch": false,
+  "background-sync": false,
+  "captured-surface-control": false,
+  "clipboard-read": false,
+  "deprecated-sync-clipboard-read": false,
+  "display-capture": false,
+  geolocation: false,
+  "geolocation-approximate": false,
+  "hand-tracking": false,
+  hid: false,
+  "idle-detection": false,
+  "local-fonts": false,
+  "local-network": false,
+  "local-network-access": false,
+  "loopback-network": false,
+  media: false,
+  mediaKeySystem: false,
+  midi: false,
+  midiSysex: false,
+  nfc: false,
+  notifications: false,
+  "payment-handler": false,
+  "periodic-background-sync": false,
+  "persistent-storage": false,
+  sensors: false,
+  serial: false,
+  "smart-card": false,
+  "speaker-selection": false,
+  "storage-access": false,
+  "system-wake-lock": false,
+  "top-level-storage-access": false,
+  unknown: false,
+  usb: false,
+  vr: false,
+  "web-app-installation": false,
+  "web-printing": false,
+  "window-management": false,
+};
+
+const PERMISSIONS = Object.keys(MAIN_FRAME) as BrowserPermission[];
+
+/** Each permission with its decision, so a failure names the permission. */
+const decisions = (isMainFrame: boolean) =>
+  PERMISSIONS.map((permission) => [
+    permission,
+    browserPermissionGranted(permission, { isMainFrame }),
+  ]);
 
 describe("browserPermissionGranted", () => {
-  test("grants the allowlist", () => {
-    for (const permission of ALLOWED) expect(browserPermissionGranted(permission)).toBe(true);
+  test("decides every permission for a page's own frame", () => {
+    expect(decisions(true)).toEqual(PERMISSIONS.map((p) => [p, MAIN_FRAME[p]]));
   });
 
-  test("refuses everything else", () => {
-    for (const permission of REFUSED) expect(browserPermissionGranted(permission)).toBe(false);
+  test("embedded frames get the same, except links to other apps", () => {
+    expect(decisions(false)).toEqual(
+      PERMISSIONS.map((p) => [p, p === "openExternal" ? false : MAIN_FRAME[p]]),
+    );
   });
 
   test("refuses a permission name a newer Electron adds", () => {
-    expect(browserPermissionGranted("some-new-permission" as BrowserPermission)).toBe(false);
+    const added = "some-new-permission" as BrowserPermission;
+    expect(browserPermissionGranted(added, { isMainFrame: true })).toBe(false);
   });
 });
 
@@ -85,12 +118,15 @@ describe("installBrowserPermissions", () => {
     expect(check(null, "fullscreen", "https://example.com/", { isMainFrame: false })).toBe(true);
   });
 
-  test("requests are answered with the policy", () => {
+  test("requests are answered with the policy, for the frame that asked", () => {
     const webContents = {} as Parameters<typeof request>[0];
-    const details = { isMainFrame: true, requestingUrl: "https://example.com/" };
+    const page = { isMainFrame: true, requestingUrl: "https://example.com/" };
+    const ad = { isMainFrame: false, requestingUrl: "https://ads.example/" };
     const callback = mock((_granted: boolean) => {});
-    request(webContents, "geolocation", callback, details);
-    request(webContents, "clipboard-sanitized-write", callback, details);
-    expect(callback.mock.calls).toEqual([[false], [true]]);
+    request(webContents, "geolocation", callback, page);
+    request(webContents, "clipboard-sanitized-write", callback, page);
+    request(webContents, "openExternal", callback, page);
+    request(webContents, "openExternal", callback, ad);
+    expect(callback.mock.calls).toEqual([[false], [true], [true], [false]]);
   });
 });
