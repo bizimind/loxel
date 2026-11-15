@@ -85,6 +85,12 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ---
 
+## Site permissions
+
+Pages in browser panels get what a browser gives every site without asking: copying to the clipboard, fullscreen video, locking the pointer in games and 3D views, saving to files you pick, and opening links meant for other apps, such as `mailto:` links. Everything a browser would ask you about first is turned off, so sites can't use your camera, microphone or location, show notifications, or read your clipboard. A site that asks is told no, and can offer its usual fallback.
+
+---
+
 ## See also
 
 - [Panel Layout](/docs/panel-layout) — splitting, moving and maximizing browser panels like any other

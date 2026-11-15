@@ -17,7 +17,6 @@ function check(
 
 describe("localFontsCheckHandler", () => {
   const appWindow = localFontsCheckHandler((origin) => new URL(origin).origin === APP);
-  const browserPanels = localFontsCheckHandler(() => false);
 
   test("lets the app's own origin list fonts", () => {
     expect(check(appWindow, "local-fonts", `${APP}/`)).toBe(true);
@@ -34,13 +33,8 @@ describe("localFontsCheckHandler", () => {
     expect(check(appWindow, "local-fonts", `${APP}/`, framing)).toBe(false);
   });
 
-  test("browser panels never list fonts", () => {
-    expect(check(browserPanels, "local-fonts", `${APP}/`)).toBe(false);
-    expect(check(browserPanels, "local-fonts", "https://example.com")).toBe(false);
-  });
-
   test("answers other permissions as Electron does without a check handler", () => {
-    expect(check(browserPanels, "clipboard-sanitized-write", "https://example.com")).toBe(true);
+    expect(check(appWindow, "clipboard-sanitized-write", "https://example.com")).toBe(true);
     expect(check(appWindow, "deprecated-sync-clipboard-read", `${APP}/`)).toBe(false);
   });
 });

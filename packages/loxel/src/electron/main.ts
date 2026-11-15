@@ -80,6 +80,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { BROWSER_PARTITION } from "./browser-partition";
+import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
 import {
   APP_QUIT_KEEPING_TERMINALS,
@@ -1001,9 +1002,10 @@ app.whenReady().then(async () => {
     const browserSession = session.fromPartition(BROWSER_PARTITION);
     installAccountChooser(browserSession, promptForAccount);
     installHybridQrCode(browserSession, browserPanelFrame);
-    // Installed fonts are for Loxel's own window (the font pickers), never for browser panels.
+    // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
+    // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    browserSession.setPermissionCheckHandler(localFontsCheckHandler(() => false));
+    installBrowserPermissions(browserSession);
 
     buildAppMenu();
     await applyPersistedTheme(SERVER_URL);
