@@ -141,7 +141,18 @@ export type AgentRequest =
 
 /** One entry of the transcript. */
 export type TranscriptItem =
-  | { kind: "user"; id: string; text: string; imageCount: number; queued: boolean }
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      imageCount: number;
+      queued: boolean;
+      /**
+       * The conversation entry just before this message, where a rewind to it resumes; null when
+       * it opened the conversation (a rewind starts afresh); undefined until the agent has it.
+       */
+      resumeAt?: string | null;
+    }
   | { kind: "text"; id: string; text: string; streaming: boolean; parentToolUseId: string | null }
   | {
       kind: "thinking";
@@ -224,9 +235,18 @@ export type AgentEvent =
   | { type: "permission_mode"; mode: AgentPermissionMode }
   | { type: "model"; model: string }
   | { type: "effort"; effort: string }
-  | { type: "user_message"; id: string; text: string; imageCount: number; queued: boolean }
-  /** A queued user message the agent has taken into a turn. */
-  | { type: "user_message_delivered"; id: string }
+  | {
+      type: "user_message";
+      id: string;
+      text: string;
+      imageCount: number;
+      queued: boolean;
+      resumeAt?: string | null;
+    }
+  /** A queued user message the agent has taken into a turn, after the entry `resumeAt`. */
+  | { type: "user_message_delivered"; id: string; resumeAt?: string | null }
+  /** The conversation was rewound to before `messageId`, continuing as session `sessionId`. */
+  | { type: "rewound"; messageId: string; sessionId: string }
   /** Streamed text for a text or thinking item; creates the item on its first delta. */
   | {
       type: "delta";
@@ -307,6 +327,7 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
           text: event.text,
           imageCount: event.imageCount,
           queued: event.queued,
+          ...(event.resumeAt !== undefined ? { resumeAt: event.resumeAt } : {}),
         }),
       };
     case "user_message_delivered": {
@@ -317,9 +338,17 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
       if (index === -1) return state;
       return {
         ...state,
-        items: state.items.map((item, i) =>
-          i <= index && item.kind === "user" && item.queued ? { ...item, queued: false } : item,
-        ),
+        items: state.items.map((item, i) => {
+          if (item.kind !== "user") return item;
+          if (i === index) {
+            return {
+              ...item,
+              queued: false,
+              ...(event.resumeAt !== undefined ? { resumeAt: event.resumeAt } : {}),
+            };
+          }
+          return i < index && item.queued ? { ...item, queued: false } : item;
+        }),
       };
     }
     case "delta": {
@@ -390,6 +419,15 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
             : []),
         ],
       };
+    case "rewound": {
+      const index = state.items.findIndex((item) => item.id === event.messageId);
+      return {
+        ...state,
+        sessionId: event.sessionId,
+        items: index === -1 ? state.items : state.items.slice(0, index),
+        pending: [],
+      };
+    }
     case "context_usage":
       return { ...state, contextUsage: event.usage };
     case "handed_off":
@@ -496,6 +534,17 @@ const AgentClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("set_model"), model: z.string() }),
   z.object({ type: z.literal("set_effort"), effort: z.string() }),
   z.object({ type: z.literal("refresh_context_usage") }),
+  /** What restoring the code to before a message would change, without changing it. */
+  z.object({ type: z.literal("rewind_preview"), messageId: z.string() }),
+  /** Rewind to before a user message: its file edits since, the conversation, or both. */
+  z.object({
+    type: z.literal("rewind"),
+    messageId: z.string(),
+    code: z.boolean(),
+    conversation: z.boolean(),
+  }),
+  /** The prompts sent before in this worktree, for the composer's Up and Down. */
+  z.object({ type: z.literal("prompt_history") }),
   /** Stop the process so the session can continue in a terminal. */
   z.object({ type: z.literal("hand_off") }),
   /** Start the process again on the same session, after a hand-off or an exit. */
@@ -515,4 +564,15 @@ export type AgentServerMessage =
   /** `instanceId` names this server session's numbering; a restarted server has a new one. */
   | { type: "snapshot"; instanceId: string; seq: number; state: AgentState }
   | { type: "event"; seq: number; event: AgentEvent }
+  | { type: "rewind_preview"; messageId: string; preview: RewindPreview }
+  | { type: "prompt_history"; prompts: readonly string[] }
   | { type: "error"; message: string };
+
+/** What restoring the code to before a message changes; `available` false says why not. */
+export interface RewindPreview {
+  available: boolean;
+  error?: string;
+  files: readonly string[];
+  insertions: number;
+  deletions: number;
+}

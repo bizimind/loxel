@@ -4,6 +4,7 @@ import {
   type AgentServerMessage,
   type AgentState,
   applyAgentEvent,
+  type RewindPreview,
   INITIAL_AGENT_STATE,
 } from "@/api/agent-session-model";
 
@@ -45,7 +46,7 @@ export class AgentSession {
   private lifecycle: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly launch: AgentLaunch,
+    private launch: AgentLaunch,
     private readonly createTransport: AgentTransportFactory,
     /** Events that rebuild the conversation of a resumed session, applied before it starts. */
     history: readonly AgentEvent[] = [],
@@ -56,6 +57,10 @@ export class AgentSession {
 
   get sessionId(): string {
     return this.launch.sessionId;
+  }
+
+  get worktreePath(): string {
+    return this.launch.worktreePath;
   }
 
   attach(client: AgentClient, since?: { seq?: number; instanceId?: string }): void {
@@ -141,10 +146,63 @@ export class AgentSession {
         return this.running().setEffort(message.effort);
       case "refresh_context_usage":
         return this.running().refreshContextUsage();
+      case "rewind":
+        return this.serialize(() => this.rewindNow(message));
+      case "rewind_preview":
+      case "prompt_history":
+        // Answered to the asking client by the manager.
+        return;
       default: {
         const _unknown: never = message;
       }
     }
+  }
+
+  /** What restoring the code to before a message would change, or why it cannot. */
+  async previewRewind(messageId: string): Promise<RewindPreview> {
+    const transport = this.transport;
+    if (!transport || this.stopping) {
+      return {
+        available: false,
+        error: "The agent is not running",
+        files: [],
+        insertions: 0,
+        deletions: 0,
+      };
+    }
+    return transport.rewindFiles(messageId, true);
+  }
+
+  /**
+   * Rewinds to before a user message: the files it and later turns edited, through the CLI's
+   * checkpoints, then the conversation, as a fork of this session cut just before the message
+   * (or a new session, before the first one). The original session's transcript stays as it was.
+   */
+  private async rewindNow(rewind: { messageId: string; code: boolean; conversation: boolean }) {
+    const message = this.state.items.find(
+      (item) => item.kind === "user" && item.id === rewind.messageId,
+    );
+    if (message?.kind !== "user") throw new Error("That message is not in this conversation");
+    if (rewind.code) {
+      const result = await this.running().rewindFiles(rewind.messageId, false);
+      if (!result.available) throw new Error(result.error ?? "The files could not be restored");
+    }
+    if (!rewind.conversation) return;
+    if (message.resumeAt === undefined) throw new Error("Claude has not recorded that message yet");
+    await this.stopNow();
+    const from = this.launch.sessionId;
+    const sessionId = crypto.randomUUID();
+    const at = message.resumeAt;
+    this.launch = {
+      worktreePath: this.launch.worktreePath,
+      sessionId,
+      resume: false,
+      ...(at ? { forkFrom: { sessionId: from, at } } : {}),
+    };
+    this.emit([{ type: "rewound", messageId: rewind.messageId, sessionId }]);
+    // A fork is started from its source; afterwards the new session resumes as itself.
+    await this.startNow(false);
+    this.launch = { worktreePath: this.launch.worktreePath, sessionId, resume: true };
   }
 
   /** Stops the process for good; later starts do nothing. */
@@ -171,7 +229,7 @@ export class AgentSession {
   private async startNow(resume: boolean): Promise<void> {
     if (this.transport || this.destroyed) return;
     const transport = this.createTransport(
-      { ...this.launch, resume },
+      this.launch.forkFrom ? this.launch : { ...this.launch, resume },
       {
         onEvents: (events) => {
           if (this.transport !== transport) return;

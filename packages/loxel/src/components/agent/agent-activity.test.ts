@@ -8,7 +8,7 @@ import {
   editDiffLines,
   transcriptBlocks,
 } from "./agent-activity";
-import { nextHighlight } from "./AgentComposer";
+import { historyStep, nextHighlight } from "./AgentComposer";
 
 const tool = (id: string, name: string, done = true): TranscriptItem => ({
   kind: "tool",
@@ -56,5 +56,19 @@ describe("command list navigation", () => {
     expect(nextHighlight("PageDown", 2, 30)).toBe(10);
     expect(nextHighlight("PageUp", 3, 30)).toBe(0);
     expect(nextHighlight("a", 0, 5)).toBeNull();
+  });
+});
+
+describe("prompt history steps", () => {
+  const history = ["a", "b", "c"];
+
+  test("Up walks back from the draft, Down walks forward and back to the draft", () => {
+    expect(historyStep(history, null, -1)).toEqual({ index: 2 });
+    expect(historyStep(history, 2, -1)).toEqual({ index: 1 });
+    expect(historyStep(history, 0, -1)).toBeNull();
+    expect(historyStep(history, 1, 1)).toEqual({ index: 2 });
+    expect(historyStep(history, 2, 1)).toEqual({ index: null });
+    expect(historyStep(history, null, 1)).toBeNull();
+    expect(historyStep([], null, -1)).toBeNull();
   });
 });

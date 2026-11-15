@@ -5,7 +5,7 @@ import type { CanUseTool, Options, Query, SDKUserMessage } from "@anthropic-ai/c
 import type { AgentEvent, AgentRequest } from "@/api/agent-session-model";
 
 import type { AgentLaunch } from "./agent-transport";
-import { ClaudeSdkTransport, type QueryFunction } from "./claude-sdk-transport";
+import { ClaudeSdkTransport, launchOptions, type QueryFunction } from "./claude-sdk-transport";
 
 const launch: AgentLaunch = {
   worktreePath: "/work",
@@ -49,6 +49,10 @@ class FakeQuery {
       },
       setPermissionMode: async (mode: string) => {
         this.calls.push(`mode:${mode}`);
+      },
+      rewindFiles: async (id: string, opts?: { dryRun?: boolean }) => {
+        this.calls.push(`rewind:${id}:${opts?.dryRun === true}`);
+        return { canRewind: true, filesChanged: ["/work/a.ts"], insertions: 3, deletions: 1 };
       },
       close: () => {
         this.calls.push("close");
@@ -239,5 +243,35 @@ describe("ClaudeSdkTransport", () => {
     fake.end();
     await exit;
     expect(exits).toEqual(["Claude Code exited."]);
+  });
+
+  test("a rewind forks the session at the entry before the message, under the new id", () => {
+    expect(
+      launchOptions({
+        worktreePath: "/work",
+        sessionId: "new-id",
+        resume: false,
+        forkFrom: { sessionId: "old-id", at: "entry-uuid" },
+      }),
+    ).toEqual({
+      resume: "old-id",
+      resumeSessionAt: "entry-uuid",
+      forkSession: true,
+      sessionId: "new-id",
+    });
+    expect(launchOptions({ ...launch, resume: true })).toEqual({ resume: launch.sessionId });
+  });
+
+  test("files are checkpointed, and a rewind restores or previews them", async () => {
+    const { fake, transport } = setup();
+    await transport.start();
+    expect(fake.options?.enableFileCheckpointing).toBe(true);
+    expect(await transport.rewindFiles("m1", true)).toEqual({
+      available: true,
+      files: ["/work/a.ts"],
+      insertions: 3,
+      deletions: 1,
+    });
+    expect(fake.calls).toContain("rewind:m1:true");
   });
 });

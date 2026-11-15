@@ -7,6 +7,7 @@ import type { AgentEvent } from "@/api/agent-session-model";
 import { isRepoTrusted, reportRepoRestriction } from "../repo-trust";
 import { buildSpawnEnv } from "../shell-env";
 import { AgentManager } from "./agent-manager";
+import { appendPromptHistory, readPromptHistory } from "./claude-history";
 import { ClaudeSdkTransport } from "./claude-sdk-transport";
 import { readStartingSettings, startingEvents } from "./claude-settings";
 import { claudeConfigDir, findTranscript, transcriptEvents } from "./claude-transcript";
@@ -19,6 +20,9 @@ export function createClaudeAgentManager(loxelEnv: Record<string, string>): Agen
   // The catalog the last session reported, so the next one names its models from its first frame.
   let lastCatalog: Extract<AgentEvent, { type: "catalog" }> | null = null;
   return new AgentManager({
+    promptHistory: (worktreePath) =>
+      readPromptHistory(claudeConfigDir(buildSpawnEnv()), worktreePath),
+    recordPrompt: (prompt) => appendPromptHistory(claudeConfigDir(buildSpawnEnv()), prompt),
     startingEvents: async (worktreePath) => {
       const env = buildSpawnEnv();
       const settings = await readStartingSettings(claudeConfigDir(env), worktreePath, env);

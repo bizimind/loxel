@@ -12,6 +12,7 @@ import {
   type AgentState,
   applyAgentEvent,
   INITIAL_AGENT_STATE,
+  type RewindPreview,
 } from "@/api/agent-session-model";
 import { isRecord } from "@/lib/is-record";
 
@@ -47,6 +48,10 @@ export interface AgentSessionHandle {
   connected: boolean;
   /** The last error the server reported for a request, until the next one succeeds. */
   error: string | null;
+  /** The answer to the last `rewind_preview`. */
+  rewindPreview: { messageId: string; preview: RewindPreview } | null;
+  /** The worktree's earlier prompts (the TUI's history included), oldest first. */
+  promptHistory: readonly string[];
   /** Sends a message; false when the socket is not connected (the error says so). */
   send: (message: AgentClientMessage) => boolean;
   clearError: () => void;
@@ -56,6 +61,11 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
   const [state, setState] = useState<AgentState>(INITIAL_AGENT_STATE);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rewindPreview, setRewindPreview] = useState<{
+    messageId: string;
+    preview: RewindPreview;
+  } | null>(null);
+  const [promptHistory, setPromptHistory] = useState<readonly string[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef<number | undefined>(undefined);
   const instanceRef = useRef<string | undefined>(undefined);
@@ -86,6 +96,7 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
             : {}),
         };
         ws.send(JSON.stringify(attach));
+        ws.send(JSON.stringify({ type: "prompt_history" } satisfies AgentClientMessage));
       };
       ws.onmessage = (event) => {
         const message = parseServerMessage(event.data);
@@ -99,6 +110,14 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
           instanceRef.current = message.instanceId;
           sessionIdRef.current = message.state.sessionId ?? sessionIdRef.current;
           setState(message.state);
+          return;
+        }
+        if (message.type === "rewind_preview") {
+          setRewindPreview({ messageId: message.messageId, preview: message.preview });
+          return;
+        }
+        if (message.type === "prompt_history") {
+          setPromptHistory(message.prompts);
           return;
         }
         // An event at or below what was applied is a duplicate from a replay.
@@ -138,7 +157,7 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
 
   const clearError = useCallback(() => setError(null), []);
 
-  return { state, connected, error, send, clearError };
+  return { state, connected, error, rewindPreview, promptHistory, send, clearError };
 }
 
 /** Ends a closed panel's session on the server, which keeps it while no panel is attached. */

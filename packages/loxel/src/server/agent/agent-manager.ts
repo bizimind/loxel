@@ -15,6 +15,10 @@ export interface AgentManagerDeps {
   loadHistory(sessionId: string): Promise<readonly AgentEvent[] | null>;
   /** What a session in this worktree starts with (model, effort, mode), before its process answers. */
   startingEvents(worktreePath: string): Promise<readonly AgentEvent[]>;
+  /** The prompts sent before in a worktree, oldest first. */
+  promptHistory(worktreePath: string): Promise<readonly string[]>;
+  /** Records a prompt the panel sent, so the TUI's history has it too. */
+  recordPrompt(prompt: { display: string; project: string; sessionId: string }): Promise<void>;
 }
 
 /**
@@ -40,7 +44,30 @@ export class AgentManager {
         return;
       }
       if (message.type === "destroy") this.sessions.delete(agentId);
+      if (message.type === "rewind_preview") {
+        const preview = await session.previewRewind(message.messageId);
+        client.send({ type: "rewind_preview", messageId: message.messageId, preview });
+        return;
+      }
+      if (message.type === "prompt_history") {
+        client.send({
+          type: "prompt_history",
+          prompts: await this.deps.promptHistory(session.worktreePath),
+        });
+        return;
+      }
       await session.handle(message);
+      if (message.type === "send" && message.text.trim()) {
+        this.deps
+          .recordPrompt({
+            display: message.text.trim(),
+            project: session.worktreePath,
+            sessionId: session.sessionId,
+          })
+          .catch((err: unknown) =>
+            log.warn("Could not record the prompt in history", { error: err }),
+          );
+      }
     } catch (err) {
       log.warn("Agent request failed", { error: err, type: message.type });
       client.send({ type: "error", message: err instanceof Error ? err.message : String(err) });

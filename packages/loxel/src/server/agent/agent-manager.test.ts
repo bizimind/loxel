@@ -18,6 +18,8 @@ describe("AgentManager", () => {
     const started: string[] = [];
     const manager = new AgentManager({
       startingEvents: async () => [],
+      promptHistory: async () => [],
+      recordPrompt: async () => {},
       loadHistory: () =>
         new Promise((resolve) => {
           releaseHistory = resolve;
@@ -32,6 +34,7 @@ describe("AgentManager", () => {
           setModel: async () => {},
           setEffort: async () => {},
           refreshContextUsage: async () => {},
+          rewindFiles: async () => ({ available: false, files: [], insertions: 0, deletions: 0 }),
           stop: async () => void started.push("stop"),
         };
         return transport;
@@ -56,6 +59,8 @@ describe("AgentManager", () => {
   test("an attach that fails tells the client", async () => {
     const manager = new AgentManager({
       startingEvents: async () => [],
+      promptHistory: async () => [],
+      recordPrompt: async () => {},
       loadHistory: () => Promise.reject(new Error("EACCES")),
       createTransport: () => {
         throw new Error("unreachable");

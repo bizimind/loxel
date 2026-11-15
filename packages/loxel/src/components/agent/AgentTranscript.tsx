@@ -21,7 +21,7 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentRequest, TranscriptItem } from "@/api/agent-session-model";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
@@ -338,13 +338,26 @@ function InteractionRecord({ item }: { item: ToolItem }) {
   );
 }
 
-function UserMessage({ item }: { item: Extract<TranscriptItem, { kind: "user" }> }) {
+function UserMessage({
+  item,
+  selected,
+}: {
+  item: Extract<TranscriptItem, { kind: "user" }>;
+  selected: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
   return (
     <div className="flex justify-end">
       <div
+        ref={ref}
+        aria-current={selected || undefined}
         className={cn(
           "bg-foreground/[0.06] text-foreground max-w-[80%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap",
           item.queued && "opacity-60",
+          selected && "ring-ring bg-ring/10 ring-2",
         )}
       >
         {item.text}
@@ -383,11 +396,14 @@ const TranscriptBlocks = memo(function TranscriptBlocks({
   groups,
   compact,
   renderRequest,
+  selectedId = null,
 }: {
   items: readonly TranscriptItem[];
   groups: ItemsByParent;
   compact: boolean;
   renderRequest: RenderRequest;
+  /** The user message a rewind is pointing at. */
+  selectedId?: string | null;
 }) {
   const blocks = useMemo(() => transcriptBlocks(items), [items]);
   return (
@@ -397,7 +413,7 @@ const TranscriptBlocks = memo(function TranscriptBlocks({
           const { item } = block;
           switch (item.kind) {
             case "user":
-              return <UserMessage key={item.id} item={item} />;
+              return <UserMessage key={item.id} item={item} selected={item.id === selectedId} />;
             case "text":
               return <AgentMarkdown key={item.id} text={item.text} compact={compact} />;
             case "notice":
@@ -440,10 +456,12 @@ export function AgentTranscript({
   items,
   pending,
   renderRequest,
+  selectedId,
 }: {
   items: readonly TranscriptItem[];
   pending: readonly AgentRequest[];
   renderRequest: (request: AgentRequest) => React.ReactNode;
+  selectedId: string | null;
 }) {
   const groups = useMemo(() => groupByParent(items), [items]);
   const byTool = useMemo(() => new Map(pending.map((r) => [r.toolUseId, r])), [pending]);
@@ -470,6 +488,7 @@ export function AgentTranscript({
         groups={groups}
         compact={false}
         renderRequest={render}
+        selectedId={selectedId}
       />
       {unanchored.map((request) => (
         <div key={request.requestId}>{renderRequest(request)}</div>

@@ -135,7 +135,7 @@ function Choice({
   );
 }
 
-function Shortcut({ n }: { n: number }) {
+export function Shortcut({ n }: { n: number }) {
   return <kbd className="ml-1 font-mono text-[10px] opacity-60">{n}</kbd>;
 }
 

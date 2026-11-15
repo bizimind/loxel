@@ -18,6 +18,7 @@ import {
   type AgentPermissionMode,
   type AgentRequest,
   type AgentResponse,
+  type RewindPreview,
   isAgentPermissionMode,
 } from "@/api/agent-session-model";
 import { withoutAgentEnv } from "@/coding-agent-env";
@@ -85,6 +86,22 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
       },
     };
   }
+}
+
+/**
+ * Which session the query runs: a new one under the launch's id, an existing one resumed, or a
+ * fork of another kept up to an entry (a rewind), under the launch's id, the original untouched.
+ */
+export function launchOptions({ sessionId, resume, forkFrom }: AgentLaunch): Partial<Options> {
+  if (forkFrom) {
+    return {
+      resume: forkFrom.sessionId,
+      resumeSessionAt: forkFrom.at,
+      forkSession: true,
+      sessionId,
+    };
+  }
+  return resume ? { resume: sessionId } : { sessionId };
 }
 
 /** The permission result for the user's response to a pending request. */
@@ -197,9 +214,9 @@ export class ClaudeSdkTransport implements AgentTransport {
         includePartialMessages: true,
         // Echo each user message once the CLI takes it, which is when a queued one is delivered.
         extraArgs: { "replay-user-messages": null },
-        ...(this.launch.resume
-          ? { resume: this.launch.sessionId }
-          : { sessionId: this.launch.sessionId }),
+        // Checkpoints of the files the agent edits, which `rewindFiles` restores.
+        enableFileCheckpointing: true,
+        ...launchOptions(this.launch),
         stderr: (data) => log.debug("claude stderr", { data: data.slice(0, 2000) }),
       },
     });
@@ -298,6 +315,25 @@ export class ClaudeSdkTransport implements AgentTransport {
     this.handlers.onEvents([
       { type: "context_usage", usage: { percentage, totalTokens, maxTokens } },
     ]);
+  }
+
+  async rewindFiles(messageId: string, dryRun: boolean): Promise<RewindPreview> {
+    const result = await this.requireQuery()
+      .rewindFiles(messageId, { dryRun })
+      .catch((err: unknown) => ({
+        canRewind: false,
+        error: err instanceof Error ? err.message : String(err),
+        filesChanged: [],
+        insertions: 0,
+        deletions: 0,
+      }));
+    return {
+      available: result.canRewind,
+      ...(result.error ? { error: result.error } : {}),
+      files: result.filesChanged ?? [],
+      insertions: result.insertions ?? 0,
+      deletions: result.deletions ?? 0,
+    };
   }
 
   async stop(): Promise<void> {

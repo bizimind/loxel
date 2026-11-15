@@ -155,6 +155,8 @@ export class ClaudeStreamNormalizer {
   private readonly blocksSeen = new Map<string, number>();
   /** User messages this side sent, whose echo marks them delivered instead of adding them. */
   private readonly sentIds = new Set<string>();
+  /** The last conversation entry (assistant or user message) seen, where a rewind resumes. */
+  private lastEntry: string | null = null;
 
   noteSent(id: string): void {
     this.sentIds.add(id);
@@ -262,6 +264,9 @@ export class ClaudeStreamNormalizer {
   private assistant(frame: Record<string, unknown>): AgentEvent[] {
     const message = isRecord(frame.message) ? frame.message : null;
     if (!message) return [];
+    if (!frame.parent_tool_use_id && typeof frame.uuid === "string") {
+      this.lastEntry = frame.uuid;
+    }
     const messageId = str(message.id) ?? str(frame.uuid) ?? crypto.randomUUID();
     const parentToolUseId = str(frame.parent_tool_use_id) ?? null;
     const events: AgentEvent[] = [];
@@ -304,34 +309,53 @@ export class ClaudeStreamNormalizer {
 
   private user(frame: Record<string, unknown>): AgentEvent[] {
     const message = isRecord(frame.message) ? frame.message : null;
-    if (!message || frame.isSynthetic === true || frame.isMeta === true) return [];
+    if (!message || frame.parent_tool_use_id) return this.toolResults(message);
+    const before = this.lastEntry;
+    if (typeof frame.uuid === "string") this.lastEntry = frame.uuid;
+    if (frame.isSynthetic === true || frame.isMeta === true) return [];
+    return this.userMessage(frame, message, before);
+  }
+
+  /** Tool results a subagent got: they land on its tools, and are not main-thread entries. */
+  private toolResults(message: Record<string, unknown> | null): AgentEvent[] {
+    if (!message || typeof message.content === "string") return [];
+    return records(message.content).flatMap((block) => {
+      const toolUseId = str(block.tool_use_id);
+      if (block.type !== "tool_result" || !toolUseId) return [];
+      return [
+        {
+          type: "tool_result" as const,
+          toolUseId,
+          text: toolResultText(block.content),
+          isError: block.is_error === true,
+        },
+      ];
+    });
+  }
+
+  private userMessage(
+    frame: Record<string, unknown>,
+    message: Record<string, unknown>,
+    before: string | null,
+  ): AgentEvent[] {
     const content = message.content;
-    if (typeof content === "string") return this.userText(frame, content, 0);
+    if (typeof content === "string") return this.userText(frame, content, 0, before);
     const blocks = records(content);
-    const results = blocks.filter((block) => block.type === "tool_result");
-    if (results.length > 0) {
-      return results.flatMap((block) => {
-        const toolUseId = str(block.tool_use_id);
-        if (!toolUseId) return [];
-        return [
-          {
-            type: "tool_result" as const,
-            toolUseId,
-            text: toolResultText(block.content),
-            isError: block.is_error === true,
-          },
-        ];
-      });
-    }
+    if (blocks.some((block) => block.type === "tool_result")) return this.toolResults(message);
     const text = blocks
       .filter((block) => block.type === "text")
       .map((block) => str(block.text) ?? "")
       .join("\n");
     const imageCount = blocks.filter((block) => block.type === "image").length;
-    return this.userText(frame, text, imageCount);
+    return this.userText(frame, text, imageCount, before);
   }
 
-  private userText(frame: Record<string, unknown>, text: string, imageCount: number): AgentEvent[] {
+  private userText(
+    frame: Record<string, unknown>,
+    text: string,
+    imageCount: number,
+    resumeAt: string | null,
+  ): AgentEvent[] {
     const id = str(frame.uuid);
     if (!id || (!text && imageCount === 0)) return [];
     // Slash command bookkeeping the CLI writes as user messages (`<command-name>`,
@@ -341,8 +365,8 @@ export class ClaudeStreamNormalizer {
     if (text.startsWith("[Request interrupted by user")) {
       return [{ type: "item", item: { kind: "notice", id, level: "info", text: "Interrupted" } }];
     }
-    if (this.sentIds.has(id)) return [{ type: "user_message_delivered", id }];
-    return [{ type: "user_message", id, text, imageCount, queued: false }];
+    if (this.sentIds.has(id)) return [{ type: "user_message_delivered", id, resumeAt }];
+    return [{ type: "user_message", id, text, imageCount, queued: false, resumeAt }];
   }
 
   private result(frame: Record<string, unknown>): AgentEvent[] {
