@@ -148,13 +148,39 @@ interface NotificationClass {
   requestPermission: (callback?: (permission: string) => void) => Promise<string>;
 }
 
+/**
+ * A page's EventTarget as browsers have it: listeners only. The DOM test environment's (happy-dom)
+ * also calls `on<type>` properties, which a plain EventTarget subclass in a page never does.
+ */
+class PageEventTarget {
+  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
+  addEventListener(type: string, listener: (event: Event) => void, options?: { once?: boolean }) {
+    const wrapped = options?.once
+      ? (event: Event) => {
+          this.listeners.get(type)?.delete(wrapped);
+          listener(event);
+        }
+      : listener;
+    this.listeners.set(type, new Set([...(this.listeners.get(type) ?? []), wrapped]));
+  }
+  dispatchEvent(event: Event): boolean {
+    for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
+    return true;
+  }
+}
+
 /** Run the notification script against a stub page; returns the page's Notification. */
 function notificationPage(permission: string) {
   const page = {} as { Notification: NotificationClass };
-  Object.assign(globalThis, { window: page });
-  sendSync.mockImplementation(() => permission);
-  const install = notificationScript!.func as unknown as (bridge: unknown) => void;
-  install(notificationScript!.args[0]);
+  const environmentEventTarget = globalThis.EventTarget;
+  Object.assign(globalThis, { window: page, EventTarget: PageEventTarget });
+  try {
+    sendSync.mockImplementation(() => permission);
+    const install = notificationScript!.func as unknown as (bridge: unknown) => void;
+    install(notificationScript!.args[0]);
+  } finally {
+    globalThis.EventTarget = environmentEventTarget;
+  }
   return page.Notification;
 }
 
