@@ -5,7 +5,6 @@
 
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from "dockview-react";
 
-import { activatePanel } from "@/store/layout-actions";
 import { getCenterApi } from "@/store/tools-bar";
 
 /**
@@ -45,7 +44,7 @@ export function togglePanelMaximized(panel: IDockviewPanel): void {
     panel.group.api.exitMaximized();
     return;
   }
-  activatePanel(api, panel);
+  panel.api.setActive();
   panel.group.api.maximize();
 }
 

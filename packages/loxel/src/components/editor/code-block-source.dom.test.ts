@@ -27,6 +27,19 @@ class ImmediateIntersectionObserver {
 }
 globalThis.IntersectionObserver = ImmediateIntersectionObserver as never;
 
+/**
+ * Browsers ignore `focus()` on an element that is not rendered; happy-dom focuses it anyway. Crepe
+ * focuses a block's CodeMirror when the block handle selects it, so without this a collapsed
+ * (hidden) source would take focus here as it never can in Electron.
+ */
+const isRendered = (el: Element): boolean =>
+  getComputedStyle(el).display !== "none" && (!el.parentElement || isRendered(el.parentElement));
+const domFocus: unknown = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")?.value;
+if (typeof domFocus !== "function") throw new Error("happy-dom has no HTMLElement focus()");
+HTMLElement.prototype.focus = function focus(this: HTMLElement, options?: FocusOptions) {
+  if (isRendered(this)) Reflect.apply(domFocus, this, [options]);
+};
+
 /** Text ending in a dangling arrow fails to parse. */
 const isBroken = (source: string) => source.trimEnd().endsWith("-->");
 
@@ -319,10 +332,30 @@ describe("mermaid source visibility", () => {
   });
 
   test("selecting a whole block, as the block handle does, opens no source", () => {
-    view.dispatch(
-      view.state.tr.setSelection(NodeSelection.create(view.state.doc, codeStart(0) - 1)),
-    );
+    view.focus();
+    for (const index of [0, 1, LAST, 0]) {
+      const selection = NodeSelection.create(view.state.doc, codeStart(index) - 1);
+      view.dispatch(view.state.tr.setSelection(selection));
+      expect(view.state.selection.eq(selection)).toBe(true);
+      expect(collapsed()).toEqual(AT_REST);
+      expect(sourceShown(index)).toBe(false);
+    }
+  });
+
+  test("selecting a whole block while editing its source closes the source", () => {
+    // Edit focuses the block's CodeMirror, so the selection below starts from a focused source.
+    action(0, "edit").click();
+    expect(collapsed()).toEqual(openOnly(0));
+
+    const wholeBlock = NodeSelection.create(view.state.doc, codeStart(0) - 1);
+    view.dispatch(view.state.tr.setSelection(wholeBlock));
+    expect(view.state.selection.eq(wholeBlock)).toBe(true);
     expect(collapsed()).toEqual(AT_REST);
+    expect(sourceShown(0)).toBe(false);
+
+    // A caret in the text opens it again.
+    select(codeStart(0) + 2);
+    expect(collapsed()).toEqual(openOnly(0));
   });
 
   test("Edit shows the source with the caret at its start; Hide moves the caret out", () => {

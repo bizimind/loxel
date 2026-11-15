@@ -188,15 +188,25 @@ describe("GraphPanel", () => {
     expect(branchesWidth()).toBe(300);
   });
 
-  test("brings the column back at its last width after hiding and showing it", async () => {
-    await openGraphPanel();
+  test.each([BRANCHES_DEFAULT_WIDTH, 300])(
+    "brings the column back at its last width (%i) after hiding and showing it",
+    async (width) => {
+      await openGraphPanel();
+      setWorktreeInnerLayout("graph", layoutWithBranchesWidth(width));
+      cleanup();
+      await openGraphPanel();
 
-    act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
-    expect(branchesWidth()).toBe(COLLAPSED_WIDTH);
-    act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
-    // Showing it resizes the column on the next frame, once its constraints are relaxed.
-    await act(nextFrame);
+      for (let i = 0; i < 2; i++) {
+        act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
+        expect(branchesWidth()).toBe(COLLAPSED_WIDTH);
+        await act(nextFrame);
+        act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
+        expect(branchesWidth()).toBe(width);
+        // Let Dockview's layout notification record the settled width before toggling again.
+        await act(nextFrame);
 
-    expect(branchesWidth()).toBe(BRANCHES_DEFAULT_WIDTH);
-  });
+        expect(branchesWidth()).toBe(width);
+      }
+    },
+  );
 });
