@@ -1,8 +1,0 @@
-# Copy this file to .dev.vars for local development
-# .dev.vars is automatically loaded by wrangler dev
-
-# WorkOS Client ID - find it in WorkOS Dashboard → Configuration → API Keys
-WORKOS_CLIENT_ID=client_XXXXXXXXXXXXXXXX
-
-# Axiom API token used for worker logs (AXIOM_DATASET and LOG_LEVEL are set in wrangler.toml [vars])
-AXIOM_TOKEN=

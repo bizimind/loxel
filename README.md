@@ -2,15 +2,13 @@
 
 **Loxel** is the professional workspace for AI-powered development. Run Claude Code, Codex, or any terminal agent on as many parallel tasks as the work needs. Every task keeps its own worktree, terminals, browser tabs, editors, and layout; you orchestrate them from one window and open the code whenever you need to own what ships. [Download it and read the docs at bizimind.io](https://bizimind.io).
 
-This monorepo (pnpm + Bun) holds the app in [packages/loxel](packages/loxel), its site and docs, and the CLI tools, libraries, and services that support agent-driven development workflows.
+This monorepo (pnpm + Bun) holds the app in [packages/loxel](packages/loxel), its site and docs, and the CLI tools and libraries that support agent-driven development workflows.
 
 ## Packages
 
 | Package                                         | Description                                                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | [cc-git-editor](packages/cc-git-editor)         | Agent-friendly git commands that intercept `git rebase -i` and `git add -p` for non-blocking execution         |
-| [channel](packages/channel)                     | WebSocket client library and wire protocol for peer-to-peer messaging via relay                                |
-| [channel-worker](packages/channel-worker)       | Cloudflare Worker relay for WebSocket channels (Durable Objects, WorkOS JWT auth)                              |
 | [cli-common](packages/cli-common)               | Shared CLI utilities: output modes, formatters, logging, self-update                                           |
 | [code-analysis](packages/code-analysis)         | Code analysis CLI with live treemap and import-graph visualizations                                            |
 | [excalidraw](packages/excalidraw)               | CLI for agents to create, edit, query, and render Excalidraw diagrams                                          |

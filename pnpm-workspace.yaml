@@ -52,4 +52,3 @@ allowBuilds:
   electron-winstaller: true
   esbuild: true
   sharp: true
-  workerd: true

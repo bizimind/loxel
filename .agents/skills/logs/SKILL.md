@@ -14,18 +14,14 @@ All loxel logs are in the `loxel` dataset. Always start queries with `['loxel']`
 
 All logs use the same schema, written by `@bizimind/logger` (`packages/logger`) over Axiom's HTTP transport. Valid source IDs are the `LogSource` union in `packages/logger/src/types.ts`.
 
-Current emitters:
-
-- `channel-worker` — Cloudflare Worker; dataset set in `packages/channel-worker/wrangler.toml`
-
-The loxel IDE server does not send logs to Axiom (it writes local NDJSON files, see `packages/loxel/README.md`). Older data may contain sources from removed packages (e.g. `coding-agent`, `ccm-daemon`, `ccm-mobile`).
+No package currently sends logs to Axiom, so the dataset holds older data only. The loxel IDE server does not send logs to Axiom (it writes local NDJSON files, see `packages/loxel/README.md`). Older data may contain sources from removed packages (e.g. `channel-worker`, `coding-agent`, `ccm-daemon`, `ccm-mobile`).
 
 Key fields:
 
 - `message` - log message
 - `level` - log level: `"debug"`, `"info"`, `"warn"`, `"error"`
-- `fields.source` - source identifier (e.g. `"channel-worker"`)
-- `fields.*` - structured context passed at the call site (e.g. `fields.channelId`)
+- `fields.source` - source identifier (e.g. `"wt"`)
+- `fields.*` - structured context passed at the call site
 - `fields.error.name` - error class name (e.g. `"TypeError"`)
 - `fields.error.message` - error message text
 - `fields.error.cause.*` - recursive error cause chain
@@ -60,10 +56,10 @@ axiom query "<APL_QUERY>" --start-time="-<N>h" [-f table|json]
 ### Filtering
 
 ```apl
-['loxel'] | where ['fields.source'] == 'channel-worker'
+['loxel'] | where ['fields.source'] == 'wt'
 ['loxel'] | where level == 'error'
 ['loxel'] | where message contains 'hook'
-['loxel'] | where message startswith 'Channel'
+['loxel'] | where message startswith 'Failed'
 ['loxel'] | where isnotnull(['fields.error.name'])
 ```
 
@@ -93,7 +89,7 @@ axiom query "<APL_QUERY>" --start-time="-<N>h" [-f table|json]
 
 ### Field name escaping
 
-Fields containing dots must be quoted: `['fields.source']`, `['fields.channelId']`, `['service.name']`
+Fields containing dots must be quoted: `['fields.source']`, `['fields.error.name']`, `['service.name']`
 
 Simple fields without dots need no quoting: `message`, `level`, `severity`, `body`
 
@@ -103,7 +99,7 @@ The `!=` operator does not work with string literals in APL. Use `not()` instead
 
 ```apl
 | where not(body == 'message')
-| where not(['fields.source'] == 'channel-worker')
+| where not(['fields.source'] == 'wt')
 ```
 
 ### Checking for non-empty values
@@ -140,22 +136,9 @@ axiom query "['loxel'] | summarize count() by ['fields.source']" --start-time="-
 axiom query "['loxel'] | summarize count() by message | sort by count_ desc | take 20" --start-time="-24h" -f table
 ```
 
-### Channel worker activity
-
-```
-axiom query "['loxel'] | where ['fields.source'] == 'channel-worker' | project _time, message, level, ['fields.channelId'] | sort by _time desc | take 20" --start-time="-24h" -f table
-```
-
-### Logs for a specific channel
-
-```
-axiom query "['loxel'] | where ['fields.channelId'] == 'CHANNEL_ID_HERE' | project _time, message, level | sort by _time asc" --start-time="-168h" -f table
-```
-
 ## Guidelines
 
 - Start with a broad time range (`-24h`) and narrow down as needed
 - Use `-f table` for aggregations and overviews, `-f json` when you need full log details
 - When investigating an issue, start with error counts, then drill into specific errors
-- For channel-worker logs, `fields.channelId` identifies the WebSocket channel
 - Present results to the user in a clear, summarized format

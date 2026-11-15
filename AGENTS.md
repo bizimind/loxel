@@ -4,7 +4,7 @@ This file provides guidance to coding agents working in this repository (`CLAUDE
 
 ## Project Overview
 
-loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for logging, CLI output, and WebSocket channels.
+loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools and libraries that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for logging and CLI output.
 
 ## Environment Setup
 
@@ -76,8 +76,6 @@ Each package README is the authoritative doc for that package; this list only or
 
 #### Libraries
 
-- **channel**: WebSocket client library for peer-to-peer messaging through the channel-worker relay; owns the shared wire protocol. See `packages/channel/README.md`.
-
 - **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
 
 - **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
@@ -89,10 +87,6 @@ Each package README is the authoritative doc for that package; this list only or
 - **sandbox**: Provider-agnostic container SDK (Apple Containers, Podman, Docker) plus a reference agent sandbox image. See `packages/sandbox/README.md`.
 
 - **whisper-cpp**: Node addon wrapping whisper.cpp for local speech-to-text, built with cmake-js. See `packages/whisper-cpp/README.md`.
-
-#### Backend Services
-
-- **channel-worker**: Cloudflare Worker (Durable Objects) that relays channel WebSocket traffic, with WorkOS JWT auth and same-user channels. See `packages/channel-worker/README.md`.
 
 ### Skills
 
@@ -259,7 +253,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`)
 5. Creates a GitHub release with R2 download links (no binary attachments)
 
-**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
+**Deployments**: The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
 
 **Version checking**: When debugging CLI issues, verify the user has the latest version. Check the manifest at `https://loxel.bizimind.io/<pkg>/manifest.json` for current version and compare with local binary. Don't manually bump versions - releases are automated.
 

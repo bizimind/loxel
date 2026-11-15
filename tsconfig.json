@@ -2,8 +2,6 @@
   "files": [],
   "references": [
     { "path": "./packages/cc-git-editor" },
-    { "path": "./packages/channel" },
-    { "path": "./packages/channel-worker" },
     { "path": "./packages/cli-common" },
     { "path": "./packages/excalidraw" },
     { "path": "./packages/logger" },

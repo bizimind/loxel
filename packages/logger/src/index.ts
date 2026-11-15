@@ -101,9 +101,9 @@ function wrapLogger(logger: Logger, baseContext: Record<string, unknown> = {}): 
  *   axiomDataset: process.env.AXIOM_DATASET,
  * });
  *
- * // Console mode - logs written to console (for CF Workers, Convex)
+ * // Console mode - logs written to console (for hosts that collect console output)
  * const logger = createLogger({
- *   source: 'channel-worker',
+ *   source: 'wt',
  *   mode: 'console',
  * });
  *

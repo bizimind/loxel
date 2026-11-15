@@ -6,13 +6,7 @@ export type LogLevel = "error" | "warn" | "info" | "debug";
 /**
  * Log source identifiers for different packages/services.
  */
-export type LogSource =
-  | "channel-worker"
-  | "convex"
-  | "channel"
-  | "remote-terminal"
-  | "remote-claude"
-  | "wt";
+export type LogSource = "convex" | "remote-terminal" | "remote-claude" | "wt";
 
 /**
  * Serialized error structure for logging.
@@ -50,7 +44,7 @@ export interface LogEntry {
 /**
  * Logger transport mode.
  * - "http": Logs sent to Axiom via HTTP transport (requires axiomToken and axiomDataset)
- * - "console": Logs written to console (for CF Workers, Convex where console is auto-forwarded)
+ * - "console": Logs written to console (for hosts that collect console output)
  */
 export type LoggerMode = "http" | "console";
 
