@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isAutoCheckEnabled, persistedTheme } from "./persisted-settings";
+import { isAutoCheckEnabled, persistedTheme, persistedWhenQuitting } from "./persisted-settings";
 
 const persisted = (state: Record<string, unknown>) => JSON.stringify({ state, version: 12 });
 
@@ -34,5 +34,19 @@ describe("persistedTheme", () => {
     expect(persistedTheme(persisted({ terminal: {} }))).toBe("dark");
     expect(persistedTheme(persisted({ theme: "sepia" }))).toBe("dark");
     expect(persistedTheme("not json")).toBe("dark");
+  });
+});
+
+describe("persistedWhenQuitting", () => {
+  test("reads the terminal's choice", () => {
+    expect(persistedWhenQuitting(persisted({ terminal: { whenQuitting: "keep" } }))).toBe("keep");
+    expect(persistedWhenQuitting(persisted({ terminal: { whenQuitting: "end" } }))).toBe("end");
+  });
+
+  test("asks, the default, without a valid choice", () => {
+    expect(persistedWhenQuitting(null)).toBe("ask");
+    expect(persistedWhenQuitting(persisted({ terminal: {} }))).toBe("ask");
+    expect(persistedWhenQuitting(persisted({ terminal: { whenQuitting: "sleep" } }))).toBe("ask");
+    expect(persistedWhenQuitting("not json")).toBe("ask");
   });
 });

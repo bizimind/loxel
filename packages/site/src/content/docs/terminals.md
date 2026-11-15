@@ -25,7 +25,7 @@ To rename a terminal, double-click its tab title, right-click the tab and choose
 
 ## Session persistence
 
-Terminal sessions survive task switches. When you switch to another task — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-tasks#the-worktree-sidebar), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again. A crash doesn't end them either: if Loxel or its background server stops unexpectedly, your shells keep running, and reconnect with their scrollback when Loxel is back, as long as that is within 10 minutes.
+Terminal sessions survive task switches. When you switch to another task — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-tasks#the-worktree-sidebar), or when you quit Loxel and end them. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again. A crash doesn't end them either: if Loxel or its background server stops unexpectedly, your shells keep running, and reconnect with their scrollback when Loxel is back, as long as that is within 10 minutes.
 
 A program that ends while Loxel is away, an agent finishing its task for example, loses nothing: when Loxel is back, its panel shows what it printed last and the code it exited with, and the [notifications](/docs/coding-agents#notifications) it raised meanwhile show up. Once no terminal is still running, the ended ones wait 10 minutes for Loxel to come back. A terminal whose panel isn't open yet, in a worktree you aren't looking at for example, shows them whenever you open it. If many terminals end while Loxel is away, the oldest may not keep their output; their panels then say so next to the exit code.
 
@@ -33,9 +33,26 @@ In the rare case that the process keeping your terminals running stops unexpecte
 
 ### Quitting without ending your terminals
 
-To leave agents and long-running commands working while Loxel is closed, quit with one of these instead of **Quit Loxel** (`Cmd+Q`):
+Your terminals can keep running while Loxel is closed, so agents and long-running commands go on working. When you open Loxel again, each panel reconnects to its terminal, scrollback included.
 
-- **Quit and Keep Terminals** (`Cmd+Alt+Q`, in the Loxel menu and the command palette): Loxel quits, and every terminal keeps running, for as long as it takes you to open Loxel again. Each panel then reconnects to its terminal, scrollback included.
+When you choose **Quit Loxel** (`Cmd+Q`) while a program is running in a terminal, an agent, a dev server or a build, Loxel asks first. It lists the programs and the task each runs in, and offers:
+
+- **Quit and Keep Terminals** (the default): Loxel quits, and every terminal keeps running, for as long as it takes you to open Loxel again.
+- **Quit and End Terminals**: Loxel quits and ends every terminal, as closing them would.
+- **Cancel**: Loxel stays open.
+
+Check **Don't ask again** to make your choice the setting below. With every shell at its prompt, Quit Loxel quits at once and ends them, since nothing is running in them.
+
+**When Quitting Loxel** in **Settings > Terminal** sets what Quit Loxel does, and quitting from the Dock or by logging out or shutting down your Mac too:
+
+- **Ask when terminals are running** (the default): as above. When you log out or shut down, Loxel can't ask, and ends them.
+- **Keep terminals running**: Quit Loxel keeps them without asking.
+- **End terminals**: Quit Loxel ends them without asking.
+
+You can also say what to do as you quit, whatever the setting:
+
+- **Quit and Keep Terminals** (`Cmd+Alt+Q` in the Loxel menu, and the command palette) keeps them. With **Keep terminals running**, the Loxel menu offers **Quit and End Terminals** on `Cmd+Alt+Q` instead.
+- **Quit and End Terminals** (the command palette) ends them.
 - **Restart Loxel** (in the Loxel menu and the command palette): Loxel quits and opens again, and your terminals keep running through it.
 
 ### Updates and your terminals

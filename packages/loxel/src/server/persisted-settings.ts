@@ -1,10 +1,12 @@
 /**
  * Access to the settings the renderer persists in the `settings` store (zustand persist JSON:
  * `{ state: { ... }, version }`), for the few settings read outside the renderer: by the server,
- * and by Electron main for the automatic update check and the theme windows open in.
+ * and by Electron main for the automatic update check, the theme windows open in and what a quit
+ * does to the terminals.
  */
 // Relative, not `@/`: Electron main's build has no path aliases.
 import { isRecord } from "../lib/is-record";
+import { parseWhenQuitting, type WhenQuitting } from "../lib/quit-terminals";
 import { parseThemePreference, type ThemePreference } from "../lib/theme-preference";
 
 export const SETTINGS_STORE_KEY = "settings";
@@ -36,6 +38,12 @@ export function isAutoCheckEnabled(raw: string | null): boolean {
 /** The theme setting in the persisted settings JSON string; the default (dark) when unset. */
 export function persistedTheme(raw: string | null): ThemePreference {
   return parseThemePreference(persistedSettingsState(raw)?.theme);
+}
+
+/** The terminal's "When quitting Loxel" setting in the persisted settings JSON string. */
+export function persistedWhenQuitting(raw: string | null): WhenQuitting {
+  const terminal = persistedSettingsState(raw)?.terminal;
+  return parseWhenQuitting(isRecord(terminal) ? terminal.whenQuitting : undefined);
 }
 
 /**

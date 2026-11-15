@@ -68,7 +68,10 @@ export const REQUEST_TIMEOUTS_MS = {
   list: 10_000,
   /** Longer: a snapshot of a large scrollback is legitimately slow. */
   attach: 30_000,
-  /** Shorter: the update confirmation waits on it, and only counts the terminals without it. */
+  /**
+   * Shorter: the update and quit confirmations wait on it, and only count the terminals without
+   * it.
+   */
   foreground_processes: 5000,
 } as const satisfies Record<RequestType, number>;
 

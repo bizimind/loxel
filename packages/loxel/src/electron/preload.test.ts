@@ -5,9 +5,15 @@ import { stubElectronAPI } from "@/test/electron-api-stub";
 import {
   DEFAULT_BROWSER_GET,
   DEFAULT_BROWSER_SET,
+  APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
   APP_RESTART,
+  QUIT_ANSWER,
+  QUIT_QUESTION,
+  QUIT_QUESTION_SHOWN,
+  QUIT_QUESTION_WITHDRAWN,
   SET_THEME_SOURCE,
+  SET_WHEN_QUITTING,
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
   UPDATE_GET_STATUS,
@@ -75,11 +81,46 @@ describe("window preload", () => {
     expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(UPDATE_STATUS_CHANGED, listener);
   });
 
-  test("sends Quit and Keep Terminals and Restart Loxel on their channels", () => {
+  test("sends the quits and Restart Loxel on their channels", () => {
     api.quitKeepingTerminals();
     expect(ipcRenderer.send).toHaveBeenLastCalledWith(APP_QUIT_KEEPING_TERMINALS);
+    api.quitEndingTerminals();
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(APP_QUIT_ENDING_TERMINALS);
     api.restartApp();
     expect(ipcRenderer.send).toHaveBeenLastCalledWith(APP_RESTART);
+  });
+
+  test("sends the When quitting Loxel setting on its channel", () => {
+    api.setWhenQuitting("keep");
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(SET_WHEN_QUITTING, "keep");
+  });
+
+  test("delivers quit questions until unsubscribed, and sends their progress and answers", () => {
+    const callback = mock((_question: unknown) => {});
+    const unsubscribe = api.onQuitQuestion(callback);
+    const [channel, listener] = ipcRenderer.on.mock.lastCall ?? [];
+    expect(channel).toBe(QUIT_QUESTION);
+    listener?.({}, { id: 1 });
+    expect(callback).toHaveBeenCalledWith({ id: 1 });
+    unsubscribe();
+    expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(QUIT_QUESTION, listener);
+
+    const onWithdrawn = mock((_id: unknown) => {});
+    const stopWithdrawn = api.onQuitQuestionWithdrawn(onWithdrawn);
+    const [withdrawnChannel, withdrawnListener] = ipcRenderer.on.mock.lastCall ?? [];
+    expect(withdrawnChannel).toBe(QUIT_QUESTION_WITHDRAWN);
+    withdrawnListener?.({}, 1);
+    expect(onWithdrawn).toHaveBeenCalledWith(1);
+    stopWithdrawn();
+    expect(ipcRenderer.removeListener).toHaveBeenLastCalledWith(
+      QUIT_QUESTION_WITHDRAWN,
+      withdrawnListener,
+    );
+
+    api.quitQuestionShown(1);
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(QUIT_QUESTION_SHOWN, 1);
+    api.answerQuitQuestion({ id: 1, answer: "keep" });
+    expect(ipcRenderer.send).toHaveBeenLastCalledWith(QUIT_ANSWER, { id: 1, answer: "keep" });
   });
 
   test("sends the theme setting on its channel", () => {

@@ -65,14 +65,16 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 | Find in files                           | `Cmd+Shift+F`                 |
 | Command palette                         | `Cmd+Shift+P`                 |
 | Open settings                           | `Cmd+,`                       |
+| Quit Loxel                              | `Cmd+Q`                       |
 | Quit and Keep Terminals                 | `Cmd+Alt+Q`                   |
+| Quit and End Terminals                  | command palette               |
 | Restart Loxel                           | Loxel menu or command palette |
 | Theme: Dark / Light / System            | unbound — command palette     |
 | Reveal the active file in Project Files | `Cmd+Alt+E`                   |
 | Go to the most recent notification      | `` Ctrl+` ``                  |
 | Save                                    | `Cmd+S`                       |
 
-`Cmd+Alt+Q` (Quit and Keep Terminals) belongs to the Loxel menu, like `Cmd+Q`, so Settings > Keybindings can't remap it. See [Terminals](/docs/terminals#quitting-without-ending-your-terminals) for what it and Restart Loxel keep running.
+`Cmd+Q` and `Cmd+Alt+Q` belong to the Loxel menu, so Settings > Keybindings can't remap them. `Cmd+Q` asks before ending terminals that are running programs, or follows **When Quitting Loxel** in Settings > Terminal. With that set to **Keep terminals running**, `Cmd+Q` keeps them and `Cmd+Alt+Q` is **Quit and End Terminals** instead. See [Terminals](/docs/terminals#quitting-without-ending-your-terminals) for what each quit keeps running.
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
 

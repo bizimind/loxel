@@ -71,3 +71,21 @@ export const DEFAULT_BROWSER_SET = "default-browser:set";
 export const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 /** Renderer → main: Restart Loxel, from the command palette. */
 export const APP_RESTART = "app:restart";
+/** Renderer → main: Quit and End Terminals, from the command palette. */
+export const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
+/**
+ * Renderer → main: the "When quitting Loxel" setting (`WhenQuitting`), which decides what Quit Loxel
+ * does and which quit the app menu offers beside it.
+ */
+export const SET_WHEN_QUITTING = "quit:set-when-quitting";
+/** Main → renderer: ask before quitting (`QuitQuestion`), terminals being busy. */
+export const QUIT_QUESTION = "quit:question";
+/**
+ * Main → renderer: main no longer waits on the question with this ID (it asked natively instead, or
+ * the quit was decided another way); take it down.
+ */
+export const QUIT_QUESTION_WITHDRAWN = "quit:question-withdrawn";
+/** Renderer → main: the question with this ID is on screen. */
+export const QUIT_QUESTION_SHOWN = "quit:question-shown";
+/** Renderer → main: the user answered a question (`QuitReply`). */
+export const QUIT_ANSWER = "quit:answer";

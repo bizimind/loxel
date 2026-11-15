@@ -450,6 +450,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "app.quitKeepingTerminals":
         window.electronAPI?.quitKeepingTerminals();
         break;
+      case "app.quitEndingTerminals":
+        window.electronAPI?.quitEndingTerminals();
+        break;
       case "app.restart":
         window.electronAPI?.restartApp();
         break;

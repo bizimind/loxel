@@ -1,7 +1,8 @@
 /**
- * The terminals the server runs, as `GET /api/terminals` reports them: what the update warning, its
- * confirmation and the terminal tabs show about them. The server builds it and the client parses
- * it, so both use this schema.
+ * The terminals the server runs, as `GET /api/terminals` reports them: what the update warning, the
+ * confirmations before an update install and a quit, and the terminal tabs show about them. The
+ * server builds it and its clients (the renderer, and Electron main for the quit) parse it, so all
+ * use this schema.
  */
 import { z } from "zod";
 
