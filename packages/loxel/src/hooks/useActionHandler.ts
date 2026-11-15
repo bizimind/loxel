@@ -34,7 +34,7 @@ import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
 import { themeOfAction } from "@/store/keybindings/action-registry";
 import type { MoveDirection } from "@/store/layout-actions";
-import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
+import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -195,7 +195,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const dir = actionId === "panel.next" ? 1 : -1;
         const nextIdx = (activeIdx + dir + allPanels.length) % allPanels.length;
         const next = allPanels[nextIdx];
-        if (next) activatePanel(api, next);
+        if (next) next.api.setActive();
         break;
       }
 
@@ -213,7 +213,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         if (!api) break;
         const idx = Number(actionId.split(".").pop()) - 1;
         const target = api.panels[idx];
-        if (target) activatePanel(api, target);
+        if (target) target.api.setActive();
         break;
       }
 
@@ -246,7 +246,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         } else {
           splitOrPromote(active, position);
         }
-        requestAnimationFrame(() => activatePanel(api, active));
+        requestAnimationFrame(() => active.api.setActive());
         break;
       }
 
@@ -275,7 +275,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
           "panel.move.newDown": "bottom",
         } as const;
         splitOrPromote(active, posMap[actionId]);
-        requestAnimationFrame(() => activatePanel(api, active));
+        requestAnimationFrame(() => active.api.setActive());
         break;
       }
 

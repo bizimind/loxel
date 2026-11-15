@@ -30,8 +30,6 @@ Conventions:
 
 A panel takes focus through, in order: the function it passes to `usePanelActivationFocus` (`src/hooks/usePanelActivationFocus.ts`, registered in `src/lib/panel-focus.ts` so an already-active panel can be re-focused), its `panelAutofocusProps()` element (`src/lib/focus-targets.ts`), or its first tabbable element. New panels with a non-obvious focus target should use one of the first two.
 
-Activating a panel that is already its group's active tab must go through `activatePanel()` (`src/store/layout-actions.ts`), not `panel.api.setActive()`, which re-attaches the content and would reload a browser panel's page.
-
 ## Find in panel
 
 Panels opt in to `⌘F` / `⌘G` / `⇧⌘G` by registering their root element with `src/lib/find-targets.ts` (via `src/hooks/usePanelFind.ts`) and rendering the shared `FindBar` (`src/components/ui/find-bar.tsx`). The `find.*` actions are enabled only while focus is inside a registered target. Browser panels and terminals are the current targets.

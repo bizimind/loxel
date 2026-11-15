@@ -17,7 +17,6 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { forgetClosedTabGroup } from "@/store/closed-tabs";
-import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { getCenterApi, setCenterApi } from "@/store/tools-bar";
@@ -93,14 +92,6 @@ function CenterLayout({
 
     restoreLayoutWhenAnotherGroupActivates(api);
 
-    // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
-    // move. The move event fires once the move has settled; add events are suppressed during moves
-    // and fire before the active panel switches, so they can't be used here.
-    api.onDidMovePanel(({ from, to }) => {
-      reattachActiveContent(from);
-      reattachActiveContent(to);
-    });
-
     // A swap's groups come back with their ids when the layout is restored; these are gone for good.
     api.onDidRemoveGroup((group) => {
       if (!swappingRef.current && !isOuterSwapping()) {
@@ -158,7 +149,6 @@ function CenterLayout({
 
   const handleLayoutRestored = useCallback((api: DockviewApi) => {
     syncTerminals(api, layoutKeyRef.current);
-    for (const group of api.groups) reattachActiveContent(group);
   }, []);
 
   const handleClear = useCallback((api: DockviewApi) => {

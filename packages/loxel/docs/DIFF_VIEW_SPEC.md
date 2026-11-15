@@ -270,11 +270,12 @@ There is no fixed word or character granularity. Each modification block (a run 
 - An edit covering most of a word extends to the whole word, so `foo` to `bar` highlights the whole identifier.
 - Edits covering a small part of a word stay at character level, so `item` to `items` highlights only the `s` and `color` to `colour` only the `u`.
 - Edit boundaries slide to token boundaries where the text allows.
+- An insertion and a deletion around a short unchanged run are joined into one replacement when either edit repeats the text right beside it, because the run was then matched by coincidence: `8.3.1` to `8.8.3` highlights `3.1` and `8.3` instead of an inserted `8.` and a deleted `.1` around a shifted `8.3`. Other pairs are real moves and stay as they are, so `a/b/c` to `b/c/d` highlights the dropped `a/` and the appended `/d`.
 
 ### Limits
 
 - Blocks larger than 500 lines on either side are not refined.
-- If more than 70% of a block's characters changed on either side, the block gets no inline highlights and renders as a plain modification.
+- If more than 70% of a block's characters changed on either side, the block gets no inline highlights and renders as a plain modification. The share is measured on the character diff before shifted edits are joined, so a join never removes a block's highlights.
 - All blocks of a file share one 200 ms budget. Each block receives only the remaining time, and once the budget is exhausted the remaining blocks get no inline highlights, so a pathological file degrades to plain modifications instead of freezing the frame.
 - The hunk-based views compute the pass once per file from the raw hunks, so it does not run again when syntax highlighting resolves.
 

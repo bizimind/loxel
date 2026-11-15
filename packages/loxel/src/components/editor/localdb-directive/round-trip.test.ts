@@ -94,6 +94,13 @@ describe("localdb directive Milkdown round-trip", () => {
     );
   });
 
+  it("keeps a localdb block after prose in the same list item across serialization", async () => {
+    await expectFixedPoint(
+      "- item\n  ::::localdb\n  table: t\n\n  # not escaped\n  :::\n  ::::\n- next\n",
+      "* item\n\n  ::::localdb\n  table: t\n  view: table\n\n  # not escaped\n  :::\n  ::::\n* next\n",
+    );
+  });
+
   it("escapes a line-initial ::: typed as prose so it cannot become a directive on reload", async () => {
     const editor = await makeEditor("x\n");
     editor.action((ctx) => {

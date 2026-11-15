@@ -120,6 +120,25 @@ describe("patch source", () => {
     expect(container.querySelectorAll("table")).toHaveLength(1);
   });
 
+  test.each(["unified", "split"] as const)("highlights joined shifted edits in %s view", (mode) => {
+    useUIStore.getState().setDiffViewMode(mode);
+    const { container } = renderPatch(
+      [
+        "--- a/package.json",
+        "+++ b/package.json",
+        "@@ -1 +1 @@",
+        '-  "pkg": "^8.3.1",',
+        '+  "pkg": "^8.8.3",',
+      ].join("\n"),
+    );
+    expect([...container.querySelectorAll(".diff-inline-del")].map((el) => el.textContent)).toEqual(
+      ["3.1"],
+    );
+    expect([...container.querySelectorAll(".diff-inline-add")].map((el) => el.textContent)).toEqual(
+      ["8.3"],
+    );
+  });
+
   test("titles a headerless snippet, and shows no changes for text without a diff", () => {
     const { unmount } = renderPatch("-old line\n+new line\n");
     expect(screen.getByText("Patch")).toBeInTheDocument();
