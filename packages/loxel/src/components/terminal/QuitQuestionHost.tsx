@@ -72,7 +72,7 @@ export function QuitQuestionHost() {
 
   const confirmation = question?.confirmation;
   return (
-    <DialogShell open={question !== null} onCancel={() => answer("cancel")} className="w-[26rem]">
+    <DialogShell open={question !== null} onCancel={() => answer("cancel")} className="w-[30rem]">
       <div className="px-4 pt-4 pb-2">
         <h3 className="text-foreground text-sm font-medium">{confirmation?.title}</h3>
         <div className="text-muted-foreground mt-1 space-y-2 text-xs leading-relaxed">
