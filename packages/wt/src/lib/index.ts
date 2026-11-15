@@ -54,6 +54,7 @@ export {
   getCurrentBranch,
   hasUncommittedChanges,
   initBareRepo,
+  resolveRemoteDefault,
   transformToBare,
 } from "../git/index.ts";
 export type { RepoType, WorktreeMeta } from "../git/index.ts";

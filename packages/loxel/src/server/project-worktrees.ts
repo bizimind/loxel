@@ -105,15 +105,23 @@ async function parentId(projectPath: string, parent: ProjectWorktree): Promise<s
 }
 
 /**
- * What creating a child of the worktree at `parentPath` needs: the parent's current commit to
- * branch from, and the metadata that nests the new worktree under it.
+ * What creating a child of the worktree at `parentPath` needs: the metadata that nests the new
+ * worktree under it and, with `fromParent`, the parent's current commit to branch from. Without
+ * it the child starts where a top-level worktree does, from the remote default.
  */
 export async function childWorktreeOptions(
   projectPath: string,
   parentPath: string,
-): Promise<{ base: string; meta: WorktreeMeta }> {
+  { fromParent }: { fromParent: boolean },
+): Promise<{ base?: string; meta: WorktreeMeta }> {
   const parent = requireListed(await listProjectWorktrees(projectPath), parentPath);
-  return { base: parent.commit, meta: { [PARENT_KEY]: await parentId(projectPath, parent) } };
+  const meta = { [PARENT_KEY]: await parentId(projectPath, parent) };
+  return fromParent ? { base: parent.commit, meta } : { meta };
+}
+
+/** The listed worktree at `path`'s current commit, or an error naming the path. */
+export async function worktreeCommit(projectPath: string, path: string): Promise<string> {
+  return requireListed(await listProjectWorktrees(projectPath), path).commit;
 }
 
 /** The metadata that gives a new worktree `title`; none when it is empty. */
