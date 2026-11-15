@@ -1,5 +1,5 @@
 import { BellIcon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   DropdownMenu,
@@ -8,13 +8,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
+import { groupNotifications } from "./notification-groups";
 import { NotificationItem } from "./NotificationItem";
+import { NotificationSiteGroup } from "./NotificationSiteGroup";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
 export function NotificationBell() {
   const notifications = usePanelNotificationStore((s) => s.notifications);
   const hasNotifications = notifications.length > 0;
+  const entries = useMemo(() => groupNotifications(notifications), [notifications]);
   const [open, setOpen] = useState(false);
 
   const closeMenu = useCallback(() => setOpen(false), []);
@@ -50,9 +53,21 @@ export function NotificationBell() {
         {/* List */}
         {hasNotifications ? (
           <div className="not-dark:divide-border/60 max-h-96 overflow-y-auto not-dark:divide-y">
-            {notifications.map((n) => (
-              <NotificationItem key={n.id} notification={n} onNavigate={closeMenu} />
-            ))}
+            {entries.map((entry) =>
+              entry.kind === "single" ? (
+                <NotificationItem
+                  key={entry.notification.id}
+                  notification={entry.notification}
+                  onNavigate={closeMenu}
+                />
+              ) : (
+                <NotificationSiteGroup
+                  key={entry.key}
+                  notifications={entry.notifications}
+                  onNavigate={closeMenu}
+                />
+              ),
+            )}
           </div>
         ) : (
           <div className="text-muted-foreground px-2 py-6 text-center text-xs">

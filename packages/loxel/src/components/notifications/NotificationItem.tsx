@@ -22,7 +22,7 @@ function placeName(worktreePath: string | null): string {
 }
 
 /** Where the notification came from: the worktree or Home, and the site for a browser page. */
-function sourceLabel({ source }: ServerNotification): string {
+export function sourceLabel({ source }: ServerNotification): string {
   switch (source.kind) {
     case "terminal_host":
       return "Loxel";
@@ -43,14 +43,29 @@ const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
   terminal_host: "Terminal host notification",
 };
 
+/** A collapsed site group shown through its newest notification. */
+interface NotificationStack {
+  /** How many notifications the group holds, this one included. */
+  count: number;
+  onExpand: () => void;
+  onDismissAll: () => void;
+}
+
 export function NotificationItem({
   notification,
   onNavigate,
+  stack,
+  inGroup = false,
 }: {
   notification: ServerNotification;
   onNavigate?: () => void;
+  /** Show this notification as the face of its site's collapsed group. */
+  stack?: NotificationStack;
+  /** Listed under its expanded group's header, which already names the source. */
+  inGroup?: boolean;
 }) {
   const title = notification.title || DEFAULT_TITLES[notification.source.kind];
+  const source = sourceLabel(notification);
 
   return (
     <div
@@ -77,15 +92,38 @@ export function NotificationItem({
           </div>
         )}
         <div className="text-muted-foreground mt-0.5 text-[10px] not-dark:text-[11px]">
-          {sourceLabel(notification)} &middot; {dayjs(notification.timestamp).fromNow()}
+          {!inGroup && <>{source} &middot; </>}
+          {dayjs(notification.timestamp).fromNow()}
         </div>
       </div>
 
-      {/* Dismiss button */}
+      {/* The rest of the site's notifications, behind this one */}
+      {stack && (
+        <button
+          aria-label={`+${stack.count - 1} more from ${source}`}
+          aria-expanded={false}
+          title="Show all"
+          className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary mt-0.5 h-4 shrink-0 rounded border px-1 text-[10px] leading-[14px] font-medium tabular-nums"
+          onClick={(e) => {
+            e.stopPropagation();
+            stack.onExpand();
+          }}
+        >
+          +{stack.count - 1}
+        </button>
+      )}
+
+      {/* Dismiss button: this one, or the whole stack */}
       <button
-        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        aria-label={stack ? `Dismiss all ${stack.count} from ${source}` : "Dismiss"}
+        title={stack ? "Dismiss all" : "Dismiss"}
+        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
+          if (stack) {
+            stack.onDismissAll();
+            return;
+          }
           usePanelNotificationStore.getState().dismiss(notification.id);
         }}
       >

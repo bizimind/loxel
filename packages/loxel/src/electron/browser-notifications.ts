@@ -209,8 +209,9 @@ async function requestPermission(event: IpcMainInvokeEvent): Promise<Notificatio
   const guest = event.sender;
   if (!site) return "denied";
   await sitesLoadedPromise;
-  const host = listeningHost(guest);
-  if (!host || guest.isDestroyed() || guest.mainFrame.origin !== site) return "denied";
+  // The guest may have gone during the wait; its accessors throw once it has.
+  const host = guest.isDestroyed() ? null : listeningHost(guest);
+  if (!host || guest.mainFrame.origin !== site) return "denied";
   const state = permissionFor(site);
   if (state !== "default" || dismissedGuests.has(guest.id)) return state;
   return pendingRequestFor(guest.id, host, site).answer;
