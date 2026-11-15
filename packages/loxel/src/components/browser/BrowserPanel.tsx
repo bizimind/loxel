@@ -43,7 +43,9 @@ import {
 } from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
 import { JavaScriptDialog } from "./JavaScriptDialog";
+import { NotificationPermissionBar } from "./NotificationPermissionBar";
 import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
+import { useBrowserNotifications } from "./useBrowserNotifications";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
 import { addressBarUrl } from "./web-search";
 
@@ -104,6 +106,11 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     dismissAll: dismissDialogs,
   } = useJavaScriptDialogs(webContentsId);
   const dialogFocusRef = useRef<HTMLElement | null>(null);
+
+  // The page's web notifications go to the notification center; a site asking to show them gets
+  // a bar under the toolbar.
+  const { request: notificationRequest, answer: answerNotificationRequest } =
+    useBrowserNotifications(webContentsId, panelApi.id);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -476,6 +483,14 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           <BugIcon className={cn("size-3.5", devToolsOpen && "text-foreground")} />
         </NavButton>
       </div>
+
+      {notificationRequest && (
+        <NotificationPermissionBar
+          key={notificationRequest.id}
+          request={notificationRequest}
+          onAnswer={answerNotificationRequest}
+        />
+      )}
 
       {/* Error banner */}
       {loadError && (

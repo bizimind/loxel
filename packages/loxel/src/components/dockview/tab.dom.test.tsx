@@ -21,6 +21,8 @@ function fakePanelApi(initialTitle: string) {
     id: "panel-1",
     close: jest.fn(),
     isMaximized: () => false,
+    isActive: false,
+    onDidActiveChange: () => ({ dispose: () => {} }),
     group: { panels: [] },
     get title() {
       return title;

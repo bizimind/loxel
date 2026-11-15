@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   CodeIcon,
+  GlobeIcon,
   FileJson2Icon,
   FileTypeIcon,
   KeyboardIcon,
@@ -21,6 +22,7 @@ import type { SettingsState } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 
 import { AppearanceSection } from "./AppearanceSection";
+import { BrowserSection } from "./BrowserSection";
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
 import { GeneralSection } from "./GeneralSection";
@@ -42,6 +44,7 @@ const SECTIONS: SectionDef[] = [
   { key: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
+  { key: "browser", label: "Browser", icon: GlobeIcon },
   { key: "editor", label: "Editor", icon: CodeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
@@ -224,6 +227,10 @@ export function SettingsModal() {
 
               <div id="settings-terminal" className={SECTION_CLASS}>
                 <TerminalSection />
+              </div>
+
+              <div id="settings-browser" className={SECTION_CLASS}>
+                <BrowserSection />
               </div>
 
               <div id="settings-editor" className={SECTION_CLASS}>

@@ -87,7 +87,15 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ## Site permissions
 
-Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer or keyboard in games, remote desktops and 3D views, keeping the screen awake, and saving to files you pick. Links meant for other apps, such as `mailto:` links, open in that app. Everything else a browser would ask you about first is turned off, so sites can't use your camera, microphone or location, show notifications, or read your clipboard. A site that asks is told no and can offer its usual fallback; for a video call, use another browser.
+Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer or keyboard in games, remote desktops and 3D views, keeping the screen awake, and saving to files you pick. Links meant for other apps, such as `mailto:` links, open in that app. Everything else a browser would ask you about first is turned off, so sites can't use your camera, microphone or location, or read your clipboard. Notifications are the exception: a site that wants to send them asks you first (see [Notifications](#notifications)). A site that asks is told no and can offer its usual fallback; for a video call, use another browser.
+
+---
+
+## Notifications
+
+Pages can send notifications too, and they land in Loxel instead of on your desktop. The first time a site asks, a bar under its address bar offers **Allow** or **Block**; close the bar to decide later. An allowed site's notifications appear under the bell in the top bar, with a dot on its tab and on its task in the sidebar, so the dev server's build alert or a chat mention never pulls you out of Loxel. Click one to jump to its tab, and the page reacts as it would in a browser, opening the chat or build it was about.
+
+Notifications come from the open browser tabs of the task you're in, or of Home when you're there, and, as in other browsers, from sites on `https` or on your own machine (such as `http://localhost`). A notification the page takes back stays under the bell until you've seen it. Change a site's choice, or remove it so the site asks again, in **Settings > Browser**.
 
 ---
 

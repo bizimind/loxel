@@ -1,14 +1,13 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { HistoryIcon, SquareTerminalIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { confirmRestartTerminal } from "@/lib/restart-terminal";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
-import { hasPanelNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 
 import { Tab, usePanelTitle } from "./tab";
+import { usePanelNotificationDot } from "./use-panel-notification-dot";
 
 /** The tooltip of a terminal running in a terminal host of another Loxel version. */
 export const OTHER_HOST_TOOLTIP =
@@ -16,24 +15,10 @@ export const OTHER_HOST_TOOLTIP =
 
 export function TerminalTab(props: IDockviewPanelHeaderProps<{ terminalId: string }>) {
   const terminalId = props.params.terminalId;
-  const hasNotification = usePanelNotificationStore((s) => hasPanelNotification(s, terminalId));
-  const [isActive, setIsActive] = useState(props.api.isActive);
+  const showDot = usePanelNotificationDot(props.api, terminalId);
   const title = usePanelTitle(props.api);
   const otherHostBuild =
     useRunningTerminals()?.find((terminal) => terminal.id === terminalId)?.otherHostBuild ?? false;
-
-  useEffect(() => {
-    if (props.api.isActive) {
-      usePanelNotificationStore.getState().dismissPanel(terminalId);
-    }
-    const disposable = props.api.onDidActiveChange((e) => {
-      setIsActive(e.isActive);
-      if (e.isActive) {
-        usePanelNotificationStore.getState().dismissPanel(terminalId);
-      }
-    });
-    return () => disposable.dispose();
-  }, [props.api, terminalId]);
 
   return (
     <Tab
@@ -41,7 +26,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps<{ terminalId: strin
       icon={
         <span className="relative shrink-0">
           <SquareTerminalIcon className="size-3.5" />
-          {hasNotification && !isActive && <NotificationDot />}
+          {showDot && <NotificationDot />}
         </span>
       }
       title={title || "Terminal"}

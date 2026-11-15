@@ -84,6 +84,23 @@ interface Window {
     quitKeepingTerminals: () => void;
     /** Quit, leaving the terminals running, and open the app again. */
     restartApp: () => void;
+    /**
+     * Browser panel pages' web notifications: one was shown (payload: `BrowserNotification`), a
+     * site asks to show them (`NotificationPermissionRequest`), or such a request was withdrawn
+     * (`{ id, webContentsId }`). Subscribing tells main this
+     * document handles them.
+     */
+    onBrowserNotifications: (handlers: {
+      onOpened: (notification: unknown) => void;
+      onPermissionRequest: (request: unknown) => void;
+      onPermissionWithdrawn: (withdrawn: unknown) => void;
+    }) => () => void;
+    /** The per-site notification decisions from settings (payload: `NotificationSites`). */
+    setNotificationSites: (sites: unknown) => void;
+    /** Answer a permission request (payload: `NotificationPermissionResponse`). */
+    respondToNotificationPermission: (response: unknown) => void;
+    /** The user clicked a page's notification in the notification center (payload: `{ ref }`). */
+    clickBrowserNotification: (ref: unknown) => void;
     /** Quit, ending the terminals, without asking. */
     quitEndingTerminals: () => void;
     /** Tell main the "When quitting Loxel" setting, which Quit Loxel and the app menu follow. */
