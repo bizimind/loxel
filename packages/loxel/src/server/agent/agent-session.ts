@@ -129,6 +129,15 @@ export class AgentSession {
           images: message.images ?? [],
           delivery: message.delivery,
         });
+        // A fork exists on disk once it has a message of its own; from then on a restart resumes
+        // it as itself instead of forking its source again.
+        if (this.launch.forkFrom) {
+          this.launch = {
+            worktreePath: this.launch.worktreePath,
+            sessionId: this.launch.sessionId,
+            resume: true,
+          };
+        }
         return;
       }
       case "interrupt":
@@ -150,6 +159,8 @@ export class AgentSession {
         return this.serialize(() => this.rewindNow(message));
       case "rewind_preview":
       case "prompt_history":
+      case "list_sessions":
+      case "open_session":
         // Answered to the asking client by the manager.
         return;
       default: {
@@ -200,9 +211,20 @@ export class AgentSession {
       ...(at ? { forkFrom: { sessionId: from, at } } : {}),
     };
     this.emit([{ type: "rewound", messageId: rewind.messageId, sessionId }]);
-    // A fork is started from its source; afterwards the new session resumes as itself.
     await this.startNow(false);
-    this.launch = { worktreePath: this.launch.worktreePath, sessionId, resume: true };
+  }
+
+  /**
+   * Shows another session in this panel: the process stops, the conversation is replaced by
+   * `history`, and `launch` starts (a resume, or a fork of another session).
+   */
+  switchTo(launch: AgentLaunch, history: readonly AgentEvent[]): Promise<void> {
+    return this.serialize(async () => {
+      await this.stopNow();
+      this.launch = launch;
+      this.emit([{ type: "reset", sessionId: launch.sessionId }, ...history]);
+      await this.startNow(launch.resume);
+    });
   }
 
   /** Stops the process for good; later starts do nothing. */

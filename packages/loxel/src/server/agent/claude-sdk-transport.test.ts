@@ -260,6 +260,10 @@ describe("ClaudeSdkTransport", () => {
       sessionId: "new-id",
     });
     expect(launchOptions({ ...launch, resume: true })).toEqual({ resume: launch.sessionId });
+    // Forking a whole session: no entry to stop at.
+    expect(
+      launchOptions({ ...launch, sessionId: "new-id", forkFrom: { sessionId: "old-id" } }),
+    ).toEqual({ resume: "old-id", forkSession: true, sessionId: "new-id" });
   });
 
   test("files are checkpointed, and a rewind restores or previews them", async () => {

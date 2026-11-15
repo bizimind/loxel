@@ -16,9 +16,10 @@ export interface AgentLaunch {
   resume: boolean;
   /**
    * Start `sessionId` as a fork of another session, keeping its conversation up to and including
-   * the entry `at`: how a rewind continues from an earlier point without touching the original.
+   * the entry `at` (all of it when absent): how a rewind continues from an earlier point, and how
+   * a session is forked, without touching the original.
    */
-  forkFrom?: { sessionId: string; at: string };
+  forkFrom?: { sessionId: string; at?: string };
 }
 
 export interface AgentTransportHandlers {

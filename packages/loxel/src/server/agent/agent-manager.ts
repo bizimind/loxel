@@ -1,4 +1,8 @@
-import type { AgentClientMessage, AgentEvent } from "@/api/agent-session-model";
+import type {
+  AgentClientMessage,
+  AgentEvent,
+  AgentSessionSummary,
+} from "@/api/agent-session-model";
 import { isUuid } from "@/lib/uuid";
 
 import { logger } from "../logger";
@@ -12,7 +16,9 @@ export interface AgentManagerDeps {
    * The conversation so far of a session being resumed, for a panel that lost it, or null when
    * the agent has no such session (it never got a message, so there is nothing to resume).
    */
-  loadHistory(sessionId: string): Promise<readonly AgentEvent[] | null>;
+  loadHistory(sessionId: string, upTo?: string): Promise<readonly AgentEvent[] | null>;
+  /** The worktree's sessions, newest first, for the picker. */
+  listSessions(worktreePath: string): Promise<readonly AgentSessionSummary[]>;
   /** What a session in this worktree starts with (model, effort, mode), before its process answers. */
   startingEvents(worktreePath: string): Promise<readonly AgentEvent[]>;
   /** The prompts sent before in a worktree, oldest first. */
@@ -47,6 +53,17 @@ export class AgentManager {
       if (message.type === "rewind_preview") {
         const preview = await session.previewRewind(message.messageId);
         client.send({ type: "rewind_preview", messageId: message.messageId, preview });
+        return;
+      }
+      if (message.type === "list_sessions") {
+        client.send({
+          type: "sessions",
+          sessions: await this.deps.listSessions(session.worktreePath),
+        });
+        return;
+      }
+      if (message.type === "open_session") {
+        await this.openSession(session, message);
         return;
       }
       if (message.type === "prompt_history") {
@@ -109,7 +126,9 @@ export class AgentManager {
     if (resumeId !== undefined && !isUuid(resumeId)) {
       throw new Error("Invalid session id");
     }
-    const creation = this.create(message.worktreePath, resumeId);
+    const forkFrom = message.forkFrom;
+    if (forkFrom && !isUuid(forkFrom.sessionId)) throw new Error("Invalid session id");
+    const creation = this.create(message.worktreePath, resumeId, forkFrom);
     const entry = creation.then(({ session }) => session);
     // Its failure is reported below; others awaiting the entry see it too.
     entry.catch(() => {});
@@ -130,18 +149,53 @@ export class AgentManager {
   private async create(
     worktreePath: string,
     resumeId: string | undefined,
+    forkFrom: { sessionId: string; at?: string } | undefined,
   ): Promise<{ session: AgentSession; resume: boolean }> {
-    const [history, starting] = await Promise.all([
+    const [resumed, starting] = await Promise.all([
       resumeId ? this.deps.loadHistory(resumeId) : null,
       this.deps.startingEvents(worktreePath).catch(() => []),
     ]);
-    // A session that never got a message has no transcript; it starts afresh under its own id.
-    const resume = history !== null;
+    // A session that never got a message has no transcript: a fork starts from its source
+    // again, anything else afresh under its own id.
+    const forked =
+      resumed === null && forkFrom
+        ? await this.deps.loadHistory(forkFrom.sessionId, forkFrom.at)
+        : null;
+    const resume = resumed !== null;
+    const sessionId = resumeId ?? crypto.randomUUID();
     const session = new AgentSession(
-      { worktreePath, sessionId: resumeId ?? crypto.randomUUID(), resume },
+      { worktreePath, sessionId, resume, ...(forked !== null && forkFrom ? { forkFrom } : {}) },
       this.deps.createTransport,
-      [...starting, ...(history ?? [])],
+      [...starting, ...(resumed ?? forked ?? [])],
     );
     return { session, resume };
+  }
+
+  /** Resumes, forks or continues another session in a panel. */
+  private async openSession(
+    session: AgentSession,
+    message: Extract<AgentClientMessage, { type: "open_session" }>,
+  ): Promise<void> {
+    let target = message.sessionId;
+    if (message.action === "continue") {
+      const sessions = await this.deps.listSessions(session.worktreePath);
+      target = sessions.find((s) => s.id !== session.sessionId)?.id;
+      if (!target) throw new Error("There is no earlier session in this worktree to continue");
+    }
+    if (!target || !isUuid(target)) throw new Error("Invalid session id");
+    const history = await this.deps.loadHistory(target);
+    if (history === null) throw new Error("That session has no conversation to open");
+    const worktreePath = session.worktreePath;
+    await session.switchTo(
+      message.action === "fork"
+        ? {
+            worktreePath,
+            sessionId: crypto.randomUUID(),
+            resume: false,
+            forkFrom: { sessionId: target },
+          }
+        : { worktreePath, sessionId: target, resume: true },
+      history,
+    );
   }
 }

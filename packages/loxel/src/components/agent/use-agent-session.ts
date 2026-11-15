@@ -12,6 +12,7 @@ import {
   type AgentState,
   applyAgentEvent,
   INITIAL_AGENT_STATE,
+  type AgentSessionSummary,
   type RewindPreview,
 } from "@/api/agent-session-model";
 import { isRecord } from "@/lib/is-record";
@@ -41,6 +42,8 @@ export interface AgentSessionTarget {
   worktreePath: string;
   /** The agent session the panel showed before, kept in its params across restarts. */
   sessionId?: string;
+  /** For a panel forked from another session, until it has a session of its own. */
+  forkFrom?: { sessionId: string; at?: string };
 }
 
 export interface AgentSessionHandle {
@@ -52,6 +55,8 @@ export interface AgentSessionHandle {
   rewindPreview: { messageId: string; preview: RewindPreview } | null;
   /** The worktree's earlier prompts (the TUI's history included), oldest first. */
   promptHistory: readonly string[];
+  /** The worktree's sessions from the last `list_sessions`, or null before one. */
+  sessions: readonly AgentSessionSummary[] | null;
   /** Sends a message; false when the socket is not connected (the error says so). */
   send: (message: AgentClientMessage) => boolean;
   clearError: () => void;
@@ -66,10 +71,12 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
     preview: RewindPreview;
   } | null>(null);
   const [promptHistory, setPromptHistory] = useState<readonly string[]>([]);
+  const [sessions, setSessions] = useState<readonly AgentSessionSummary[] | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef<number | undefined>(undefined);
   const instanceRef = useRef<string | undefined>(undefined);
   const sessionIdRef = useRef(target.sessionId);
+  const forkFromRef = useRef(target.forkFrom);
   const { agentId, worktreePath } = target;
 
   useEffect(() => {
@@ -91,6 +98,7 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
           type: "attach",
           worktreePath,
           ...(sessionIdRef.current ? { resumeSessionId: sessionIdRef.current } : {}),
+          ...(forkFromRef.current ? { forkFrom: forkFromRef.current } : {}),
           ...(seqRef.current !== undefined && instanceRef.current
             ? { sinceSeq: seqRef.current, instanceId: instanceRef.current }
             : {}),
@@ -114,6 +122,10 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
         }
         if (message.type === "rewind_preview") {
           setRewindPreview({ messageId: message.messageId, preview: message.preview });
+          return;
+        }
+        if (message.type === "sessions") {
+          setSessions(message.sessions);
           return;
         }
         if (message.type === "prompt_history") {
@@ -157,7 +169,7 @@ export function useAgentSession(target: AgentSessionTarget): AgentSessionHandle 
 
   const clearError = useCallback(() => setError(null), []);
 
-  return { state, connected, error, rewindPreview, promptHistory, send, clearError };
+  return { state, connected, error, rewindPreview, promptHistory, sessions, send, clearError };
 }
 
 /** Ends a closed panel's session on the server, which keeps it while no panel is attached. */

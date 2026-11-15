@@ -4,7 +4,14 @@
  * is. Every value shown is the session's real one; a pill whose value is not known yet is left out
  * rather than showing "default".
  */
-import { ChevronDownIcon, CircleIcon, GaugeIcon, PlayIcon, SquareTerminalIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CircleIcon,
+  GaugeIcon,
+  HistoryIcon,
+  PlayIcon,
+  SquareTerminalIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -200,11 +207,13 @@ export function AgentStatusLine({
   send,
   onShowRequest,
   onContinueInTerminal,
+  onShowSessions,
 }: {
   state: AgentState;
   send: (message: AgentClientMessage) => boolean;
   onShowRequest: () => void;
   onContinueInTerminal: () => void;
+  onShowSessions: () => void;
 }) {
   const status = agentDisplayStatus(state);
   const elapsed = useElapsed(state.status === "working");
@@ -242,6 +251,14 @@ export function AgentStatusLine({
           <GaugeIcon className="size-3" /> {Math.round(state.contextUsage.percentage)}% context
         </button>
       )}
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={onShowSessions}
+        title="Resume or fork another session in this worktree (/resume)"
+      >
+        <HistoryIcon /> Sessions
+      </Button>
       {stopped ? (
         <Button size="xs" variant="ghost" onClick={() => send({ type: "resume" })}>
           <PlayIcon /> Resume here

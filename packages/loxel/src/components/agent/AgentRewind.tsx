@@ -2,6 +2,8 @@
  * Rewind, as in the terminal: Escape twice picks the last message, Up and Down pick another,
  * Enter asks what to restore (the code, the conversation, or both, as of just before that
  * message), and Escape leaves. A rewound conversation puts the message back in the composer.
+ * "Fork from here" instead opens a new panel whose session branches after that message's turn,
+ * leaving this one as it is.
  */
 import { HistoryIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -22,9 +24,15 @@ export function rewindableMessages(items: readonly TranscriptItem[]): UserItem[]
 /** How long two Escapes may be apart to count as one double Escape. */
 export const DOUBLE_ESCAPE_MS = 500;
 
-export interface RewindChoice {
-  code: boolean;
-  conversation: boolean;
+export type RewindChoice = { code: boolean; conversation: boolean } | "fork";
+
+/**
+ * Where "Fork from here" cuts the conversation: through the selected message's turn, so at the
+ * entry before the next message, or all of it after the last one (`undefined`).
+ */
+export function forkPoint(messages: readonly UserItem[], id: string): string | undefined {
+  const next = messages[messages.findIndex((m) => m.id === id) + 1];
+  return next?.resumeAt ?? undefined;
 }
 
 function previewText(preview: RewindPreview | undefined): string {
@@ -55,6 +63,7 @@ export function RewindCard({
       : []),
     { label: "Restore conversation", choice: { code: false, conversation: true } },
     ...(code ? [{ label: "Restore code", choice: { code: true, conversation: false } }] : []),
+    { label: "Fork from here", choice: "fork" },
     { label: "Never mind", choice: null },
   ];
   const pick = (index: number) => {
@@ -88,7 +97,7 @@ export function RewindCard({
         <HistoryIcon className="size-3" /> Rewind
       </div>
       <div className="text-foreground mb-1 text-[15px] font-semibold">
-        Go back to before this message?
+        Go back to before this message, or fork from it?
       </div>
       <p className="text-muted-foreground mb-1 line-clamp-2 text-[13px] italic">“{message.text}”</p>
       <p className="text-muted-foreground mb-3 text-[12px]">

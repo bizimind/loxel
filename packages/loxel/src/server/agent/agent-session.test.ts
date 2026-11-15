@@ -159,6 +159,30 @@ describe("AgentSession", () => {
     expect(fake.calls).toEqual(["start", "stop", "start"]);
   });
 
+  test("switching to another session replaces the conversation and resumes it", async () => {
+    const launches: unknown[] = [];
+    const fake = fakeTransport();
+    const session = new AgentSession(
+      LAUNCH,
+      (launch, handlers) => {
+        launches.push(launch);
+        return fake.factory(launch, handlers);
+      },
+      [{ type: "user_message", id: "u1", text: "old", imageCount: 0, queued: false }],
+    );
+    await session.start(false);
+    const other = "22222222-2222-4222-8222-222222222222";
+    await session.switchTo({ worktreePath: "/p", sessionId: other, resume: true }, [
+      { type: "user_message", id: "x1", text: "theirs", imageCount: 0, queued: false },
+    ]);
+    const c = client();
+    session.attach(c);
+    const snap = c.received[0];
+    expect(snap?.type === "snapshot" && snap.state.items.map((i) => i.id)).toEqual(["x1"]);
+    expect(snap?.type === "snapshot" && snap.state.sessionId).toBe(other);
+    expect(launches.at(-1)).toMatchObject({ sessionId: other, resume: true });
+  });
+
   test("an exit the user did not ask for fails the session", async () => {
     const fake = fakeTransport();
     const session = new AgentSession(LAUNCH, fake.factory);

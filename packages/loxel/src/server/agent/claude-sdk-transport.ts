@@ -90,13 +90,15 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
 
 /**
  * Which session the query runs: a new one under the launch's id, an existing one resumed, or a
- * fork of another kept up to an entry (a rewind), under the launch's id, the original untouched.
+ * fork of another (all of it, or up to an entry for a rewind), under the launch's id, the original
+ * untouched.
  */
 export function launchOptions({ sessionId, resume, forkFrom }: AgentLaunch): Partial<Options> {
   if (forkFrom) {
     return {
       resume: forkFrom.sessionId,
-      resumeSessionAt: forkFrom.at,
+      // Without `at`, the whole conversation: a fork of the session as it stands.
+      ...(forkFrom.at ? { resumeSessionAt: forkFrom.at } : {}),
       forkSession: true,
       sessionId,
     };

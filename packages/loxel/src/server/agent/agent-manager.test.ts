@@ -19,6 +19,7 @@ describe("AgentManager", () => {
     const manager = new AgentManager({
       startingEvents: async () => [],
       promptHistory: async () => [],
+      listSessions: async () => [],
       recordPrompt: async () => {},
       loadHistory: () =>
         new Promise((resolve) => {
@@ -56,10 +57,51 @@ describe("AgentManager", () => {
     expect(c.received.some((m) => m.type === "error")).toBe(false);
   });
 
+  test("a forked panel without a session of its own forks its source, cut at the point", async () => {
+    const launches: unknown[] = [];
+    const loaded: unknown[] = [];
+    const manager = new AgentManager({
+      startingEvents: async () => [],
+      promptHistory: async () => [],
+      recordPrompt: async () => {},
+      listSessions: async () => [],
+      loadHistory: async (id, upTo) => {
+        loaded.push([id, upTo]);
+        return id === "33333333-3333-4333-8333-333333333333" ? [] : null;
+      },
+      createTransport: (launch) => {
+        launches.push(launch);
+        return {
+          start: async () => {},
+          send: () => {},
+          interrupt: async () => {},
+          respond: () => {},
+          setPermissionMode: async () => {},
+          setModel: async () => {},
+          setEffort: async () => {},
+          refreshContextUsage: async () => {},
+          rewindFiles: async () => ({ available: false, files: [], insertions: 0, deletions: 0 }),
+          stop: async () => {},
+        };
+      },
+    });
+    await manager.handle(AGENT_ID, client(), {
+      type: "attach",
+      worktreePath: "/p",
+      forkFrom: { sessionId: "33333333-3333-4333-8333-333333333333", at: "a1" },
+    });
+    expect(loaded).toEqual([["33333333-3333-4333-8333-333333333333", "a1"]]);
+    expect(launches[0]).toMatchObject({
+      resume: false,
+      forkFrom: { sessionId: "33333333-3333-4333-8333-333333333333", at: "a1" },
+    });
+  });
+
   test("an attach that fails tells the client", async () => {
     const manager = new AgentManager({
       startingEvents: async () => [],
       promptHistory: async () => [],
+      listSessions: async () => [],
       recordPrompt: async () => {},
       loadHistory: () => Promise.reject(new Error("EACCES")),
       createTransport: () => {

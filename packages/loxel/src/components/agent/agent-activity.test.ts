@@ -72,3 +72,42 @@ describe("prompt history steps", () => {
     expect(historyStep([], null, -1)).toBeNull();
   });
 });
+
+describe("session search", () => {
+  test("every word must match the title, first prompt or branch", async () => {
+    const { filterSessions } = await import("./AgentSessionPicker");
+    const sessions = [
+      {
+        id: "1",
+        title: "Scroll fix",
+        firstPrompt: "Fix the scroll",
+        messageCount: 2,
+        branch: "feat/scroll",
+        updatedAt: 1,
+      },
+      {
+        id: "2",
+        title: null,
+        firstPrompt: "Add a shortcut",
+        messageCount: 1,
+        branch: "main",
+        updatedAt: 2,
+      },
+    ];
+    expect(filterSessions(sessions, "scroll feat").map((s) => s.id)).toEqual(["1"]);
+    expect(filterSessions(sessions, "main").map((s) => s.id)).toEqual(["2"]);
+    expect(filterSessions(sessions, "").length).toBe(2);
+  });
+});
+
+describe("fork point", () => {
+  test("through the selected message's turn: the entry before the next message", async () => {
+    const { forkPoint } = await import("./AgentRewind");
+    const messages = [
+      { kind: "user" as const, id: "u1", text: "a", imageCount: 0, queued: false, resumeAt: null },
+      { kind: "user" as const, id: "u2", text: "b", imageCount: 0, queued: false, resumeAt: "a1" },
+    ];
+    expect(forkPoint(messages, "u1")).toBe("a1");
+    expect(forkPoint(messages, "u2")).toBeUndefined();
+  });
+});

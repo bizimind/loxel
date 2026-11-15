@@ -10,7 +10,12 @@ import { AgentManager } from "./agent-manager";
 import { appendPromptHistory, readPromptHistory } from "./claude-history";
 import { ClaudeSdkTransport } from "./claude-sdk-transport";
 import { readStartingSettings, startingEvents } from "./claude-settings";
-import { claudeConfigDir, findTranscript, transcriptEvents } from "./claude-transcript";
+import {
+  claudeConfigDir,
+  findTranscript,
+  listSessions,
+  transcriptEvents,
+} from "./claude-transcript";
 
 export type { AgentClient } from "./agent-session";
 export { AgentManager };
@@ -61,10 +66,11 @@ export function createClaudeAgentManager(loxelEnv: Record<string, string>): Agen
         handlers,
       );
     },
-    loadHistory: async (sessionId) => {
+    loadHistory: async (sessionId, upTo) => {
       const path = await findTranscript(claudeConfigDir(buildSpawnEnv()), sessionId);
       if (!path) return null;
-      return transcriptEvents(await Bun.file(path).text());
+      return transcriptEvents(await Bun.file(path).text(), upTo);
     },
+    listSessions: (worktreePath) => listSessions(claudeConfigDir(buildSpawnEnv()), worktreePath),
   });
 }
