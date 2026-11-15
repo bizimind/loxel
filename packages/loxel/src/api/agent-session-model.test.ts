@@ -55,6 +55,29 @@ describe("applyAgentEvent", () => {
     expect(state.items[0]).toMatchObject({ result: { text: "ok", isError: false } });
   });
 
+  test("a steered message delivered first also clears the message it followed", () => {
+    const state = fold([
+      { type: "user_message", id: "u1", text: "run it", imageCount: 0, queued: true },
+      { type: "user_message", id: "u2", text: "and say banana", imageCount: 0, queued: true },
+      { type: "user_message_delivered", id: "u2", resumeAt: "a1" },
+    ]);
+    expect(state.items.map((item) => item.kind === "user" && item.queued)).toEqual([false, false]);
+    // Only the echoed message learns its resume point.
+    expect(state.items.map((item) => item.kind === "user" && item.resumeAt)).toEqual([
+      undefined,
+      "a1",
+    ]);
+  });
+
+  test("a delivery leaves later messages queued", () => {
+    const state = fold([
+      { type: "user_message", id: "u1", text: "first", imageCount: 0, queued: true },
+      { type: "user_message", id: "u2", text: "second", imageCount: 0, queued: true },
+      { type: "user_message_delivered", id: "u1" },
+    ]);
+    expect(state.items.map((item) => item.kind === "user" && item.queued)).toEqual([false, true]);
+  });
+
   test("a queued message stops being queued once delivered", () => {
     const state = fold([
       { type: "user_message", id: "u1", text: "next", imageCount: 0, queued: true },

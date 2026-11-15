@@ -5,12 +5,14 @@
  * terminal for anything the panel does not show. Escape twice rewinds, as in the terminal.
  */
 import type { DockviewPanelApi } from "dockview-react";
-import { HistoryIcon } from "lucide-react";
+import { HistoryIcon, PlayIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { type AgentRequest, type AgentState, agentDisplayStatus } from "@/api/agent-session-model";
 import { fetchJson } from "@/api/client";
+import { Button } from "@/components/ui/button";
 import { frontendLog } from "@/lib/frontend-logger";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { isUuid } from "@/lib/uuid";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useAgentStatusStore } from "@/store/agent-status";
@@ -18,7 +20,14 @@ import { useAgentStatusStore } from "@/store/agent-status";
 import { AgentComposer } from "./AgentComposer";
 import { AgentControls, AgentStatusLine } from "./AgentControls";
 import { AgentRequestCard, REQUEST_CARD_ATTR } from "./AgentRequestCard";
-import { DOUBLE_ESCAPE_MS, type RewindChoice, RewindCard, rewindableMessages } from "./AgentRewind";
+import {
+  DOUBLE_ESCAPE_MS,
+  forkPoint,
+  type RewindChoice,
+  RewindCard,
+  rewindableMessages,
+} from "./AgentRewind";
+import { AgentSessionPicker, type SessionAction } from "./AgentSessionPicker";
 import { AgentTranscript } from "./AgentTranscript";
 import { useAgentSession } from "./use-agent-session";
 
@@ -29,6 +38,8 @@ export interface AgentPanelParams {
   worktreePath: string;
   /** Claude Code's session id once the server has one, so a restart can resume it. */
   sessionId?: string;
+  /** A panel forked from another session ("Fork from here"), until its fork has a message. */
+  forkFrom?: { sessionId: string; at?: string };
 }
 
 function StoppedNote({ state }: { state: AgentState }) {
@@ -81,8 +92,9 @@ export function AgentPanel({
     agentId: params.agentId,
     worktreePath: params.worktreePath,
     sessionId: params.sessionId,
+    forkFrom: params.forkFrom,
   });
-  const { state, send, error, rewindPreview, promptHistory } = session;
+  const { state, send, error, rewindPreview, promptHistory, sessions } = session;
   const status = agentDisplayStatus(state);
   const scrollRef = useStickToBottom(state);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -161,10 +173,30 @@ export function AgentPanel({
   };
   const chooseRewind = (choice: RewindChoice) => {
     if (!selected) return;
+    setRewind(null);
+    if (choice === "fork") {
+      if (!state.sessionId) return;
+      const at = forkPoint(rewindable, selected.id);
+      dispatchLoxelEvent("loxel-create-agent", {
+        forkFrom: { sessionId: state.sessionId, ...(at ? { at } : {}) },
+      });
+      return;
+    }
     if (send({ type: "rewind", messageId: selected.id, ...choice }) && choice.conversation) {
       setRestore({ text: selected.text, key: Date.now() });
     }
-    setRewind(null);
+  };
+
+  // Sessions: the picker, `/resume` and "Continue latest".
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const openPicker = () => {
+    setPickerOpen(true);
+    send({ type: "list_sessions" });
+  };
+  const openSession = (sessionId: string, action: SessionAction) => {
+    setPickerOpen(false);
+    send({ type: "open_session", action, sessionId });
+    composerRef.current?.focus();
   };
 
   const onPanelKeyDown = (e: React.KeyboardEvent) => {
@@ -223,6 +255,20 @@ export function AgentPanel({
               <p className="text-muted-foreground mt-1.5 text-[13px]">
                 Type / for commands and skills. Enter sends, and queues while Claude works.
               </p>
+              {status !== "starting" && (
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => send({ type: "open_session", action: "continue" })}
+                  >
+                    <PlayIcon /> Continue latest
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={openPicker}>
+                    <HistoryIcon /> Resume a session…
+                  </Button>
+                </div>
+              )}
             </div>
           )}
           <AgentTranscript
@@ -256,6 +302,7 @@ export function AgentPanel({
             send={send}
             onShowRequest={showRequest}
             onContinueInTerminal={continueInTerminal}
+            onShowSessions={openPicker}
           />
         )}
         <AgentComposer
@@ -266,12 +313,24 @@ export function AgentPanel({
           disabled={!canSend}
           textareaRef={composerRef}
           controls={<AgentControls state={state} send={send} />}
-          onSend={(text, images, delivery) =>
-            send({ type: "send", id: crypto.randomUUID(), text, images, delivery })
-          }
+          onSend={(text, images, delivery) => {
+            // `/resume` lists sessions in the terminal; here it opens the picker.
+            if (/^\/resume\s*$/.test(text) && images.length === 0) {
+              openPicker();
+              return true;
+            }
+            return send({ type: "send", id: crypto.randomUUID(), text, images, delivery });
+          }}
           onInterrupt={() => send({ type: "interrupt" })}
         />
       </div>
+      <AgentSessionPicker
+        isOpen={pickerOpen}
+        sessions={sessions}
+        currentSessionId={state.sessionId}
+        onClose={() => setPickerOpen(false)}
+        onOpen={openSession}
+      />
     </div>
   );
 }

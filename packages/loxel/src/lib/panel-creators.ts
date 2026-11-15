@@ -295,8 +295,13 @@ export function createTerminal({
   );
 }
 
+export interface CreateAgentOptions extends PanelOpenOptions {
+  /** Start as a fork of another session, up to and including the entry `at` (all when absent). */
+  forkFrom?: { sessionId: string; at?: string };
+}
+
 /** A new Claude Code session in an agent panel, in the active worktree. */
-export function createAgent({ placement, focus }: PanelOpenOptions = {}): void {
+export function createAgent({ placement, focus, forkFrom }: CreateAgentOptions = {}): void {
   const cApi = getCenterApi();
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   if (!cApi || !worktreePath) return;
@@ -311,7 +316,7 @@ export function createAgent({ placement, focus }: PanelOpenOptions = {}): void {
       component: "agent",
       tabComponent: "agentTab",
       title: nextPanelTitle(cApi, "Claude"),
-      params: { agentId, worktreePath },
+      params: { agentId, worktreePath, ...(forkFrom ? { forkFrom } : {}) },
     },
     focus,
   );

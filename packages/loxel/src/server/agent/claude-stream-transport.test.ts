@@ -54,6 +54,14 @@ describe("ClaudeStreamTransport", () => {
     expect(claudeStreamArgs({ ...LAUNCH, resume: true })).toContain("--resume");
     // A rewind forks the old session at the entry before the message, under a new id.
     const fork = claudeStreamArgs({ ...LAUNCH, forkFrom: { sessionId: "old", at: "entry" } });
+    const whole = claudeStreamArgs({ ...LAUNCH, forkFrom: { sessionId: "old" } });
+    expect(whole.slice(whole.indexOf("--resume"))).toEqual([
+      "--resume",
+      "old",
+      "--fork-session",
+      "--session-id",
+      LAUNCH.sessionId,
+    ]);
     expect(fork.slice(fork.indexOf("--resume"))).toEqual([
       "--resume",
       "old",

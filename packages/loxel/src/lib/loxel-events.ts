@@ -5,7 +5,11 @@
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
 import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
-import type { CreateTerminalOptions, PatchDiffParams } from "@/lib/panel-creators";
+import type {
+  CreateAgentOptions,
+  CreateTerminalOptions,
+  PatchDiffParams,
+} from "@/lib/panel-creators";
 
 /** A file to open in its panel; `placement` moves an already open tab there too. */
 type OpenFileDetail = { filePath: string } & PanelOpenOptions;
@@ -13,7 +17,7 @@ type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
   "loxel-create-terminal": CreateTerminalOptions;
-  "loxel-create-agent": PanelOpenOptions | undefined;
+  "loxel-create-agent": CreateAgentOptions | undefined;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
   "loxel-create-browser": { url?: string } & PanelOpenOptions;

@@ -72,8 +72,7 @@ function launchArgs({ sessionId, resume, forkFrom }: AgentLaunch): string[] {
     return [
       "--resume",
       forkFrom.sessionId,
-      "--resume-session-at",
-      forkFrom.at,
+      ...(forkFrom.at ? ["--resume-session-at", forkFrom.at] : []),
       "--fork-session",
       "--session-id",
       sessionId,

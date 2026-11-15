@@ -245,6 +245,11 @@ export type AgentEvent =
     }
   /** A queued user message the agent has taken into a turn, after the entry `resumeAt`. */
   | { type: "user_message_delivered"; id: string; resumeAt?: string | null }
+  /**
+   * The panel switched to another session (resumed or forked from the picker): the conversation
+   * starts over, the session's catalog and settings stay.
+   */
+  | { type: "reset"; sessionId: string }
   /** The conversation was rewound to before `messageId`, continuing as session `sessionId`. */
   | { type: "rewound"; messageId: string; sessionId: string }
   /** Streamed text for a text or thinking item; creates the item on its first delta. */
@@ -330,19 +335,22 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
           ...(event.resumeAt !== undefined ? { resumeAt: event.resumeAt } : {}),
         }),
       };
-    case "user_message_delivered":
+    case "user_message_delivered": {
+      // The messages sent before it are taken in by then too. A steered message can even arrive
+      // before the one it followed is echoed: the CLI then restarts the turn with both and echoes
+      // only the steered one, so the earlier one would otherwise stay queued for good.
+      const index = state.items.findIndex((item) => item.id === event.id);
+      if (index === -1) return state;
       return {
         ...state,
-        items: updateItem(state.items, event.id, (item) =>
-          item.kind === "user"
-            ? {
-                ...item,
-                queued: false,
-                ...(event.resumeAt !== undefined ? { resumeAt: event.resumeAt } : {}),
-              }
-            : item,
-        ),
+        items: state.items.map((item, i) => {
+          if (i > index || item.kind !== "user") return item;
+          const resumeAt =
+            i === index && event.resumeAt !== undefined ? { resumeAt: event.resumeAt } : {};
+          return item.queued || i === index ? { ...item, queued: false, ...resumeAt } : item;
+        }),
       };
+    }
     case "delta": {
       const existing = state.items.find((item) => item.id === event.id);
       if (existing && (existing.kind === "text" || existing.kind === "thinking")) {
@@ -410,6 +418,18 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
               ]
             : []),
         ],
+      };
+    case "reset":
+      return {
+        ...INITIAL_AGENT_STATE,
+        sessionId: event.sessionId,
+        agentVersion: state.agentVersion,
+        model: state.model,
+        effort: state.effort,
+        permissionMode: state.permissionMode,
+        capabilities: state.capabilities,
+        commands: state.commands,
+        models: state.models,
       };
     case "rewound": {
       const index = state.items.findIndex((item) => item.id === event.messageId);
@@ -511,6 +531,11 @@ const AgentClientMessageSchema = z.discriminatedUnion("type", [
     sinceSeq: z.number().int().nonnegative().optional(),
     /** The session instance `sinceSeq` counts in; any other instance sends a snapshot. */
     instanceId: z.string().optional(),
+    /**
+     * A new panel forked from another session ("Fork from here"): its conversation up to and
+     * including the entry `at` (all of it when absent). Used when there is no session to resume.
+     */
+    forkFrom: z.object({ sessionId: z.string(), at: z.string().optional() }).optional(),
   }),
   z.object({
     type: z.literal("send"),
@@ -537,6 +562,17 @@ const AgentClientMessageSchema = z.discriminatedUnion("type", [
   }),
   /** The prompts sent before in this worktree, for the composer's Up and Down. */
   z.object({ type: z.literal("prompt_history") }),
+  /** The worktree's sessions, for the session picker. */
+  z.object({ type: z.literal("list_sessions") }),
+  /**
+   * Show another session in this panel: `resume` continues it, `fork` branches it under a new
+   * id, `continue` resumes the worktree's most recent other session.
+   */
+  z.object({
+    type: z.literal("open_session"),
+    action: z.enum(["resume", "fork", "continue"]),
+    sessionId: z.string().optional(),
+  }),
   /** Stop the process so the session can continue in a terminal. */
   z.object({ type: z.literal("hand_off") }),
   /** Start the process again on the same session, after a hand-off or an exit. */
@@ -558,7 +594,22 @@ export type AgentServerMessage =
   | { type: "event"; seq: number; event: AgentEvent }
   | { type: "rewind_preview"; messageId: string; preview: RewindPreview }
   | { type: "prompt_history"; prompts: readonly string[] }
+  | { type: "sessions"; sessions: readonly AgentSessionSummary[] }
   | { type: "error"; message: string };
+
+/** A session in the picker, newest first. */
+export interface AgentSessionSummary {
+  id: string;
+  /** The agent's title for it (or the user's, after a rename), if it has one. */
+  title: string | null;
+  firstPrompt: string | null;
+  /** Prompts the user sent in its current conversation. */
+  messageCount: number;
+  /** The git branch it last ran on. */
+  branch: string | null;
+  /** Last written, epoch ms. */
+  updatedAt: number;
+}
 
 /** What restoring the code to before a message changes; `available` false says why not. */
 export interface RewindPreview {
