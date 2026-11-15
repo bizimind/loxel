@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, jest, test } from "bun:test";
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
@@ -35,6 +35,11 @@ function askQuestion(question: unknown = QUESTION): void {
   const deliver = ask;
   act(() => deliver(question));
 }
+
+// The host reports the setting only once the settings have loaded.
+beforeAll(async () => {
+  await useSettingsStore.persist.rehydrate();
+});
 
 beforeEach(() => {
   quitQuestionShown.mockClear();

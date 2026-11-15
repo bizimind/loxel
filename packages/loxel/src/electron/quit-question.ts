@@ -84,6 +84,28 @@ async function listTerminalsForQuit(serverUrl: string): Promise<RunningTerminal[
 
 let nextQuestionId = 1;
 
+/** The window showing the question, while main waits on its answer. */
+let askedIn: BrowserWindow | null = null;
+
+/** Bring `win` in front of the app's other windows and of other apps, restored if minimized. */
+function surfaceWindow(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  app.focus({ steal: true });
+}
+
+/**
+ * Bring the question being asked to the front again (a second ⌘Q): the window showing it, even
+ * minimized or behind another of the app's windows, or else the app, for the native dialog.
+ */
+export function bringQuitQuestionToFront(): void {
+  if (askedIn && !askedIn.isDestroyed()) {
+    surfaceWindow(askedIn);
+    return;
+  }
+  app.focus({ steal: true });
+}
+
 /**
  * Ask in `win`'s renderer (`QuitQuestionHost`). `unshown` when the renderer does not report the
  * question on screen in time, or loses it: hung, crashed, still loading, or reloading. A window
@@ -121,6 +143,7 @@ function askInWindow(
       if (!shown) finish("unshown");
     });
     function finish(answer: QuitAnswer | "unshown", answered = false): void {
+      if (askedIn === win) askedIn = null;
       cancelShowTimeout();
       ipcMain.removeListener(QUIT_QUESTION_SHOWN, onShown);
       ipcMain.removeListener(QUIT_ANSWER, onAnswer);
@@ -141,9 +164,8 @@ function askInWindow(
     contents.on("did-start-navigation", onNavigation);
     signal.addEventListener("abort", onAbort, { once: true });
     // A quit from the Dock may come while another app is in front.
-    if (win.isMinimized()) win.restore();
-    win.show();
-    app.focus({ steal: true });
+    askedIn = win;
+    surfaceWindow(win);
     contents.send(QUIT_QUESTION, question);
   });
 }

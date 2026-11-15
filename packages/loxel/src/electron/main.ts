@@ -122,7 +122,7 @@ import {
   planAtWillQuit,
   unplannedQuit,
 } from "./quit-plan";
-import { askBeforeQuitting } from "./quit-question";
+import { askBeforeQuitting, bringQuitQuestionToFront } from "./quit-question";
 import { readLaunchSettings } from "./settings-row";
 import {
   type BrowserPanelFrame,
@@ -558,7 +558,7 @@ function unplannedQuitPlan(): QuitPlan | typeof ASK {
  */
 function askThenQuit(): void {
   if (quitQuestion) {
-    app.focus({ steal: true });
+    bringQuitQuestionToFront();
     return;
   }
   const controller = new AbortController();
