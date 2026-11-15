@@ -120,24 +120,22 @@ describe("patch source", () => {
     expect(container.querySelectorAll("table")).toHaveLength(1);
   });
 
-  test.each(["unified", "split"] as const)("aligns version highlights in %s view", (mode) => {
+  test.each(["unified", "split"] as const)("highlights joined shifted edits in %s view", (mode) => {
     useUIStore.getState().setDiffViewMode(mode);
     const { container } = renderPatch(
       [
         "--- a/package.json",
         "+++ b/package.json",
-        "@@ -73,2 +73,2 @@",
-        '-    "dockview": "^8.3.1",',
-        '-    "dockview-react": "^8.3.1",',
-        '+    "dockview": "^8.8.3",',
-        '+    "dockview-react": "^8.8.3",',
+        "@@ -1 +1 @@",
+        '-  "pkg": "^8.3.1",',
+        '+  "pkg": "^8.8.3",',
       ].join("\n"),
     );
     expect([...container.querySelectorAll(".diff-inline-del")].map((el) => el.textContent)).toEqual(
-      ["3.1", "3.1"],
+      ["3.1"],
     );
     expect([...container.querySelectorAll(".diff-inline-add")].map((el) => el.textContent)).toEqual(
-      ["8.3", "8.3"],
+      ["8.3"],
     );
   });
 

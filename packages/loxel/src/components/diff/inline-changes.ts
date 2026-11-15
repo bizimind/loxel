@@ -71,12 +71,30 @@ function changedRatio(ranges: InlineRange[], lines: string[]): number {
   return changed / total;
 }
 
+/** Whether an edit spanning 0-based [start, end) of `line` could shift by one character */
+function isAmbiguousEdit(line: string, start: number, end: number): boolean {
+  const slidesRight = end < line.length && line[start] === line[end];
+  const slidesLeft = start > 0 && line[start - 1] === line[end - 1];
+  return slidesRight || slidesLeft;
+}
+
+function isLowSurrogate(text: string, index: number): boolean {
+  const code = text.charCodeAt(index);
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
 /**
- * Monaco can align repeated digits across numeric components: 8.3.1 -> 8.8.3 becomes an
- * insertion of "8." followed by a deletion of ".1", matching "8.3" across different positions.
- * Join adjacent edits within a dotted number, then keep their common prefix/suffix unmarked.
+ * Monaco's minimal character diff can match a run of text at different offsets on each side,
+ * reporting a pure insertion and a pure deletion around it: `8.3.1` -> `8.8.3` becomes "insert
+ * `8.`" and "delete `.1`" around a shifted `8.3`. When one of the two edits is ambiguous (its
+ * text repeats next to it, like the inserted `8.` beside the original `8.`), the run between
+ * them was anchored by that repetition rather than by shared content, so join the pair into one
+ * replacement and leave the common prefix and suffix unmarked. Unambiguous pairs are genuine
+ * moves and keep Monaco's ranges: `a/b/c` -> `b/c/d` still drops `a/` and appends `/d`.
+ * Only pairs separated by a short whitespace-free run are considered; Monaco itself already
+ * merges edits separated by at most two characters.
  */
-function joinDottedNumberChange(
+function joinShiftedEdit(
   previous: InnerRangeMapping,
   change: InnerRangeMapping,
   oldLines: string[],
@@ -97,20 +115,36 @@ function joinDottedNumberChange(
   )
     return;
 
-  const oldText = oldLines[oldRange.startLineNumber - 1]!.slice(
-    oldRange.startColumn - 1,
-    oldRange.endColumn - 1,
+  const oldLine = oldLines[oldRange.startLineNumber - 1]!;
+  const between = oldLine.slice(
+    previous.originalRange.endColumn - 1,
+    change.originalRange.startColumn - 1,
   );
-  const newText = newLines[newRange.startLineNumber - 1]!.slice(
-    newRange.startColumn - 1,
-    newRange.endColumn - 1,
-  );
-  if (!/^\d+(?:\.\d+)+$/.test(oldText) || !/^\d+(?:\.\d+)+$/.test(newText)) return;
+  // The unchanged run sits inside both joined ranges; what remains is the two edits.
+  const joinedLength =
+    oldRange.endColumn - oldRange.startColumn + (newRange.endColumn - newRange.startColumn);
+  const editLength = joinedLength - 2 * between.length;
+  if (/\s/.test(between) || between.length > editLength) return;
+
+  const newLine = newLines[newRange.startLineNumber - 1]!;
+  const [insertion, deletion] = insertionThenDeletion
+    ? [previous.modifiedRange, change.originalRange]
+    : [change.modifiedRange, previous.originalRange];
+  if (
+    !isAmbiguousEdit(newLine, insertion.startColumn - 1, insertion.endColumn - 1) &&
+    !isAmbiguousEdit(oldLine, deletion.startColumn - 1, deletion.endColumn - 1)
+  )
+    return;
+
+  const oldText = oldLine.slice(oldRange.startColumn - 1, oldRange.endColumn - 1);
+  const newText = newLine.slice(newRange.startColumn - 1, newRange.endColumn - 1);
 
   let prefix = 0;
   while (prefix < Math.min(oldText.length, newText.length) && oldText[prefix] === newText[prefix]) {
     prefix++;
   }
+  // Never split a surrogate pair: back off to the start of a shared astral character.
+  if (prefix > 0 && (isLowSurrogate(oldText, prefix) || isLowSurrogate(newText, prefix))) prefix--;
   let oldLength = oldText.length;
   let newLength = newText.length;
   while (
@@ -120,6 +154,10 @@ function joinDottedNumberChange(
   ) {
     oldLength--;
     newLength--;
+  }
+  if (isLowSurrogate(oldText, oldLength) || isLowSurrogate(newText, newLength)) {
+    oldLength++;
+    newLength++;
   }
   return {
     originalRange: {
@@ -135,7 +173,7 @@ function joinDottedNumberChange(
   };
 }
 
-function joinDottedNumberChanges(
+function joinShiftedEdits(
   changes: InnerRangeMapping[],
   oldLines: string[],
   newLines: string[],
@@ -143,7 +181,7 @@ function joinDottedNumberChanges(
   const result: InnerRangeMapping[] = [];
   for (const change of changes) {
     const previous = result.at(-1);
-    const joined = previous && joinDottedNumberChange(previous, change, oldLines, newLines);
+    const joined = previous && joinShiftedEdit(previous, change, oldLines, newLines);
     if (joined) result[result.length - 1] = joined;
     else result.push(change);
   }
@@ -155,7 +193,8 @@ function joinDottedNumberChanges(
  *
  * Delegates to the diff computer Monaco bundles from VS Code: a character-level diff refined
  * by VS Code's heuristics (short matches between edits are merged, edits covering most of a
- * word extend to the whole word, boundaries slide to token edges). Single-character edits such
+ * word extend to the whole word, boundaries slide to token edges), plus `joinShiftedEdits`
+ * for matches Monaco aligns at different offsets on each side. Single-character edits such
  * as a fixed typo stay single-character; rewritten identifiers highlight as whole words.
  *
  * Returns empty ranges when the block is too large, the budget is exhausted or the diff timed
@@ -185,7 +224,7 @@ export function computeInlineChanges(
   const old: InlineRange[] = [];
   const updated: InlineRange[] = [];
   for (const change of result.changes) {
-    for (const inner of joinDottedNumberChanges(change.innerChanges ?? [], oldLines, newLines)) {
+    for (const inner of joinShiftedEdits(change.innerChanges ?? [], oldLines, newLines)) {
       if (!isEmptyRange(inner.originalRange)) old.push({ ...inner.originalRange });
       if (!isEmptyRange(inner.modifiedRange)) updated.push({ ...inner.modifiedRange });
     }

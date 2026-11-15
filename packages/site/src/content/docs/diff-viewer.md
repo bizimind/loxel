@@ -43,8 +43,6 @@ Unchanged regions between hunks are collapsed by default, with 3 lines of contex
 
 Within a modified line, the characters that actually changed are highlighted: red on the old side, green on the new side. Granularity adapts to the edit, as in VS Code's diff editor — a fixed typo highlights a single character, a renamed identifier highlights the whole word. This works in both split and unified views.
 
-Version bumps keep repeated digits aligned: `8.3.1` to `8.8.3` highlights `3.1` in red and `8.3` in green, leaving the shared `8.` unmarked.
-
 ---
 
 ## Syntax highlighting

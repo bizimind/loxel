@@ -61,50 +61,62 @@ describe("computeInlineChanges", () => {
     expect(spelling.new.map((r) => slice("let colour = 1", r))).toEqual(["u"]);
   });
 
-  it.each(["dockview", "dockview-react"])(
-    "keeps repeated digits aligned in a %s version bump",
-    (name) => {
-      const oldLine = `    "${name}": "^8.3.1",`;
-      const newLine = `    "${name}": "^8.8.3",`;
-      const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
-      expect(old.map((r) => slice(oldLine, r))).toEqual(["3.1"]);
-      expect(updated.map((r) => slice(newLine, r))).toEqual(["8.3"]);
-    },
-  );
-
-  it("keeps repeated digits aligned when reversing a version bump", () => {
-    const oldLine = '"dockview": "^8.8.3",';
-    const newLine = '"dockview": "^8.3.1",';
+  // Monaco alone reports these as an insertion and a deletion around text it matched at a
+  // different offset on each side (`+8.` and `-.1` around a shifted `8.3`).
+  it.each([
+    ['"pkg": "^8.3.1",', '"pkg": "^8.8.3",', "3.1", "8.3"],
+    ['"pkg": "^8.3.10-beta",', '"pkg": "^8.8.30-beta",', "3.1", "8.3"],
+    ["at 1:3:1", "at 1:1:3", "3:1", "1:3"],
+    ["a.b.c", "a.a.b", "b.c", "a.b"],
+  ])("joins edits around a shifted match: %s -> %s", (oldLine, newLine, removed, added) => {
     const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
-    expect(old.map((r) => slice(oldLine, r))).toEqual(["8.3"]);
-    expect(updated.map((r) => slice(newLine, r))).toEqual(["3.1"]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual([removed]);
+    expect(updated.map((r) => slice(newLine, r))).toEqual([added]);
   });
 
-  it("leaves a common suffix outside a joined numeric edit", () => {
-    const oldLine = '"pkg": "^8.3.10-beta",';
-    const newLine = '"pkg": "^8.8.30-beta",';
+  it("does not split a surrogate pair when trimming a joined edit", () => {
+    const oldLine = "s = '😀a😁' + rest";
+    const newLine = "s = '😁😀a' + rest";
     const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
-    expect(old.map((r) => slice(oldLine, r))).toEqual(["3.1"]);
-    expect(updated.map((r) => slice(newLine, r))).toEqual(["8.3"]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual(["😀a😁"]);
+    expect(updated.map((r) => slice(newLine, r))).toEqual(["😁😀a"]);
   });
 
-  it("keeps independent numeric replacements separate", () => {
-    const oldLine = '"pkg": "^1.2.3333.4",';
-    const newLine = '"pkg": "^1.5.3333.6",';
-    const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
-    expect(old.map((r) => slice(oldLine, r))).toEqual(["2", "4"]);
-    expect(updated.map((r) => slice(newLine, r))).toEqual(["5", "6"]);
+  it("joins shifted edits on every line of a multi-line block", () => {
+    const oldLines = ['"a": "^8.3.1",', '"b": "^8.3.1",'];
+    const newLines = ['"a": "^8.8.3",', '"b": "^8.8.3",'];
+    const { old, new: updated } = computeInlineChanges(oldLines, newLines);
+    expect(old.map((r) => [r.startLineNumber, slice(oldLines[r.startLineNumber - 1]!, r)])).toEqual(
+      [
+        [1, "3.1"],
+        [2, "3.1"],
+      ],
+    );
+    expect(
+      updated.map((r) => [r.startLineNumber, slice(newLines[r.startLineNumber - 1]!, r)]),
+    ).toEqual([
+      [1, "8.3"],
+      [2, "8.3"],
+    ]);
   });
 
-  it("preserves a numeric component insertion or deletion", () => {
-    const before = '"pkg": "^8.3.1",';
-    const after = '"pkg": "^8.3.1.0",';
-    const added = computeInlineChanges([before], [after]);
-    expect(added.old).toEqual([]);
-    expect(added.new.map((r) => slice(after, r))).toEqual([".0"]);
-    const removed = computeInlineChanges([after], [before]);
-    expect(removed.old.map((r) => slice(after, r))).toEqual([".0"]);
-    expect(removed.new).toEqual([]);
+  it.each([
+    // Whitespace between the edits: a token moved, not a shifted match.
+    ["abc ab", "ab abc", ["c"], ["c"]],
+    // The unchanged run is longer than the edits around it.
+    ["abcdef", "xabcde", ["f"], ["x"]],
+    // Genuine moves: neither edit repeats its neighbour, so the shared run really moved.
+    ["path: a/b/c", "path: b/c/d", ["a/"], ["/d"]],
+    ["call(foo.bar.baz)", "call(bar.baz.qux)", ["foo."], [".qux"]],
+    ["const ids = [1,2,3];", "const ids = [2,3,4];", ["1,"], [",4"]],
+    // Replacements, not an insertion/deletion pair.
+    ["1.2.3333.4", "1.5.3333.6", ["2", "4"], ["5", "6"]],
+    // A single insertion.
+    ["8.3.1", "8.3.1.0", [], [".0"]],
+  ])("keeps edits Monaco aligned correctly: %s -> %s", (oldLine, newLine, removed, added) => {
+    const { old, new: updated } = computeInlineChanges([oldLine], [newLine]);
+    expect(old.map((r) => slice(oldLine, r))).toEqual(removed);
+    expect(updated.map((r) => slice(newLine, r))).toEqual(added);
   });
 
   it("handles blocks with unequal line counts", () => {
@@ -158,34 +170,6 @@ describe("inline change budget", () => {
 });
 
 describe("buildInlineChangesForPairs", () => {
-  it("aligns version bumps on consecutive lines at each side's file offset", () => {
-    const oldLines = ["{", '  "dockview": "^8.3.1",', '  "dockview-react": "^8.3.1",', "}"];
-    const newLines = [
-      "{",
-      '  "other": "1.0.0",',
-      '  "dockview": "^8.8.3",',
-      '  "dockview-react": "^8.8.3",',
-      "}",
-    ];
-    const { old, new: updated } = buildInlineChangesForPairs(
-      [{ type: "modify", oldStart: 2, oldEnd: 3, newStart: 3, newEnd: 4 }],
-      oldLines,
-      newLines,
-    );
-    expect(old.map((r) => [r.startLineNumber, slice(oldLines[r.startLineNumber - 1]!, r)])).toEqual(
-      [
-        [2, "3.1"],
-        [3, "3.1"],
-      ],
-    );
-    expect(
-      updated.map((r) => [r.startLineNumber, slice(newLines[r.startLineNumber - 1]!, r)]),
-    ).toEqual([
-      [3, "8.3"],
-      [4, "8.3"],
-    ]);
-  });
-
   it("offsets ranges to absolute file lines and skips non-modify pairs", () => {
     const oldLines = ["a", "b", "const foo = 5;", "d"];
     const newLines = ["a", "b", "const bar = 5;", "d", "added"];
