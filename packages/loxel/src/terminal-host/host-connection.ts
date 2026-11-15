@@ -4,6 +4,8 @@
  */
 import { type Socket, createConnection } from "node:net";
 
+import { awakeTimeout } from "@/lib/awake-timer";
+
 import type { InitializeMessage, InitializeResult } from "./protocol";
 import { InitializeResultSchema } from "./protocol";
 import type { FrameBody } from "./protocol-framing";
@@ -11,6 +13,13 @@ import { FrameReader, encodeJsonFrame } from "./protocol-framing";
 
 /** How long a host has to answer `initialize`. */
 export const INITIALIZE_TIMEOUT_MS = 5000;
+
+/**
+ * How long a host has to close its socket once the server leaves it (`disconnect` or `terminate`),
+ * and the most a server waits to leave one at all: well within the time a shutting-down server
+ * gives the hosts (`SHUTDOWN_LSP_WAIT_MS` in server.ts), so every host gets a defined outcome.
+ */
+export const LEAVE_TIMEOUT_MS = 2000;
 
 /** Could not connect, or the host did not answer the handshake. */
 export class HostConnectError extends Error {
@@ -108,6 +117,32 @@ export class HostConnection {
   }
 }
 
+/**
+ * Send `message` as the last thing on `connection` and wait for the host to close it, at most
+ * `timeoutMs`. True when it did; a connection still open then is destroyed, and false says so.
+ */
+export function sendAndClose(
+  connection: HostConnection,
+  message: object,
+  timeoutMs = LEAVE_TIMEOUT_MS,
+): Promise<boolean> {
+  connection.send(encodeJsonFrame(message));
+  return new Promise((resolve) => {
+    const cancel = awakeTimeout(timeoutMs, () => {
+      connection.destroy();
+      resolve(false);
+    });
+    connection.start({
+      onBody: () => {},
+      onClose: () => {
+        cancel();
+        resolve(true);
+      },
+    });
+    connection.end();
+  });
+}
+
 const REFUSED_CODES = new Set(["ECONNREFUSED", "ENOENT"]);
 
 /** Connect to the host at `socketPath` and do the handshake. */
@@ -123,17 +158,17 @@ export function openHostConnection(
     const fail = (error: HostConnectError) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      cancelTimeout();
       socket.destroy();
       reject(error);
     };
-    const timer = setTimeout(() => {
+    const cancelTimeout = awakeTimeout(timeoutMs, () => {
       fail(
         new HostConnectError(`No answer from the terminal host at ${socketPath}`, {
           refused: false,
         }),
       );
-    }, timeoutMs);
+    });
 
     socket.on("connect", () => socket.write(encodeJsonFrame(initialize)));
     socket.on("error", (err: NodeJS.ErrnoException) => {
@@ -181,7 +216,7 @@ export function openHostConnection(
         return;
       }
       settled = true;
-      clearTimeout(timer);
+      cancelTimeout();
       socket.removeAllListeners("close");
       resolve(new HostConnection(socket, reader, result.data, rest));
     });

@@ -200,6 +200,11 @@ const LogSchema = z.object({
   level: HostLogLevelSchema,
   msg: z.string(),
   ctx: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * The line's log category, when not `terminal`: `perf` for the host's perf monitor (1.3.0). A
+   * server logs a category it does not know, or a line from a host without it, under `terminal`.
+   */
+  cat: z.string().optional(),
 });
 export type HostLogMessage = z.infer<typeof LogSchema>;
 

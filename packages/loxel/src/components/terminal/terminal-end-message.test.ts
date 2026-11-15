@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { terminalEndMessage } from "./terminal-end-message";
+import { terminalEndMessage, terminalNoticeMessage } from "./terminal-end-message";
 
 describe("terminalEndMessage", () => {
   test("names the exit code, or says it exited when the code was lost", () => {
@@ -24,6 +24,25 @@ describe("terminalEndMessage", () => {
   test("says a lost terminal host ended the terminal, with no exit code", () => {
     expect(terminalEndMessage({ reason: "host_lost" })).toBe(
       "Terminal ended: Loxel's terminal host stopped unexpectedly",
+    );
+  });
+});
+
+describe("terminalNoticeMessage", () => {
+  test("says why the terminal could not be opened", () => {
+    expect(
+      terminalNoticeMessage({
+        notice: "attach_failed",
+        message: "Terminal host 0a1b2c3d did not answer its spawn request within 10 s",
+      }),
+    ).toBe(
+      "Could not open the terminal: Terminal host 0a1b2c3d did not answer its spawn request within 10 s",
+    );
+  });
+
+  test("says the terminal waits for a terminal host that stopped answering", () => {
+    expect(terminalNoticeMessage({ notice: "host_unresponsive" })).toBe(
+      "Loxel's terminal host is not responding; this terminal continues once it does",
     );
   });
 });

@@ -4,7 +4,7 @@ import { createNoopLogger } from "@bizimind/logger";
 
 import type { TerminalState } from "@/api/terminal-stream";
 import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
-import type { TerminalEnd } from "@/api/ws-protocol";
+import type { TerminalEnd, TerminalNotice } from "@/api/ws-protocol";
 import type {
   ForegroundProcesses,
   TerminalAttachRequest,
@@ -26,15 +26,18 @@ function createRecordingSink() {
   const states: TerminalState[] = [];
   const output: Uint8Array[] = [];
   const exits: TerminalEnd[] = [];
+  const notices: TerminalNotice[] = [];
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: ({ data }) => output.push(data),
     sendExit: (end) => exits.push(end),
+    sendNotice: (notice) => notices.push(notice),
   };
   return {
     sink,
     states,
     exits,
+    notices,
     outputText: () => output.map((o) => textDecoder.decode(o)).join(""),
   };
 }
@@ -666,6 +669,21 @@ describe("TerminalManager with events in flight", () => {
       { reason: "exited", exitCode: null, outputLost: true },
     ]);
     expect(manager.running()).toEqual([]);
+  });
+
+  test("a session whose host stopped answering tells its panel, and keeps running", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const client = createRecordingSink();
+    await manager.attach(id, client.sink, attachOptions);
+    const { epoch } = host.spawns[0]!;
+
+    host.emit({ type: "unresponsive", id, epoch: crypto.randomUUID() });
+    host.emit({ type: "unresponsive", id, epoch });
+    expect(client.notices).toEqual([{ notice: "host_unresponsive" }]);
+    expect(client.exits).toEqual([]);
+    expect(manager.running().map((session) => session.id)).toEqual([id]);
   });
 
   test("a session found ended on a reconnect is recorded at once, and drained when its panel mounts", async () => {

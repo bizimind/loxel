@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import type { TerminalState } from "@/api/terminal-stream";
-import type { NotificationSequence, TerminalEnd } from "@/api/ws-protocol";
+import type { NotificationSequence, TerminalEnd, TerminalNotice } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
@@ -46,6 +46,7 @@ export interface TerminalSink {
   /** Output from the host, with the renderer frame to forward as is. */
   sendOutput(output: TerminalOutput): void;
   sendExit(end: TerminalEnd): void;
+  sendNotice(notice: TerminalNotice): void;
 }
 
 /** What the server keeps in a session's host meta, read back from the host after a restart. */
@@ -478,6 +479,12 @@ export class TerminalManager {
         if (!this.hooks.isSequenceEnabled(sequence)) return;
         const payload = parse(event.data);
         if (payload) this.hooks.onNotification(event.id, session.meta, payload);
+        return;
+      }
+      case "unresponsive": {
+        const session = this.sessions.get(event.id);
+        if (session?.epoch !== event.epoch) return;
+        session.sink?.sendNotice({ notice: "host_unresponsive" });
         return;
       }
       default: {

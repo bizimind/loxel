@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -59,5 +59,31 @@ describe("HostLog", () => {
       ),
       "next second",
     ]);
+  });
+
+  test("a logger of another category forwards from its own level, saying its category", () => {
+    const { hostLog, forwarded } = createLog();
+    const perf = hostLog.logger({ hostId: "abcdef01" }, { cat: "perf", forwardFrom: "debug" });
+    perf.debug("terminal host metrics", { sessions: 2 });
+    hostLog.close();
+    expect(forwarded).toEqual([
+      {
+        type: "log",
+        level: "debug",
+        msg: "terminal host metrics",
+        ctx: { hostId: "abcdef01", sessions: 2 },
+        cat: "perf",
+      },
+    ]);
+    const lines = readFileSync(hostLog.path, "utf8").trim().split("\n");
+    expect(JSON.parse(lines.at(-1)!)).toMatchObject({ cat: "perf", msg: "terminal host metrics" });
+  });
+
+  test("forwards nothing while no server is connected", () => {
+    const { hostLog, forwarded } = createLog();
+    hostLog.setForward(null);
+    hostLog.logger({}, { cat: "perf", forwardFrom: "debug" }).debug("terminal host metrics");
+    hostLog.close();
+    expect(forwarded).toEqual([]);
   });
 });

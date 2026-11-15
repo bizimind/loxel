@@ -197,7 +197,8 @@ describe("terminals across server restarts", () => {
     panel.attach(id);
     await until(() => panel.states.length > 0, TEST_TIMEOUT_MS);
     const pidFile = path.join(stateDir, `${id}.pid`);
-    panel.type(id, `echo $$ > ${pidFile}; echo started`);
+    // Quoted apart, so the echo of the typed line itself never reads as the output.
+    panel.type(id, `echo $$ > ${pidFile}; echo st""arted`);
     await until(() => panel.text().includes("started\r\n"), TEST_TIMEOUT_MS);
     const shellPid = Number(readFileSync(pidFile, "utf8"));
     return { id, panel, shellPid, epoch: panel.states[0]!.epoch };

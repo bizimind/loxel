@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { type Server, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -6,8 +6,10 @@ import { join } from "node:path";
 
 import { createNoopLogger } from "@bizimind/logger";
 
+import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 
+import { INITIALIZE_TIMEOUT_MS } from "./host-connection";
 import { hostBinDir, hostEntryPath, hostLogPath, hostSocketPath } from "./host-files";
 import type { HostLaunch } from "./host-launcher";
 import { TerminalHostService } from "./host-service";
@@ -18,6 +20,7 @@ import { TerminalHostPool } from "./terminal-host-pool";
 
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
+  jest.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -111,6 +114,69 @@ async function startSilentSocket(path: string): Promise<void> {
   });
 }
 
+/**
+ * A host at `<runDir>/<hostId>.sock` whose entry names a process of its own, which runs but does
+ * not answer until `answer()`: then it answers `initialize`, and `list` with `sessions`.
+ */
+async function startQuietHost(runDir: string, hostId: string, sessions: TerminalSessionInfo[]) {
+  const process = Bun.spawn(["sleep", "30"]);
+  cleanups.push(() => process.kill());
+  const socketPath = hostSocketPath(runDir, hostId);
+  const state = { answering: false };
+  const connected: (() => void)[] = [];
+  const server: Server = createServer((socket) => {
+    const reader = new FrameReader();
+    // A client that gave up on it closes its end, whatever it was being sent.
+    socket.on("error", () => {});
+    for (const resolve of connected.splice(0)) resolve();
+    socket.on("data", (chunk: Buffer) => {
+      if (!state.answering) return;
+      for (const body of reader.push(chunk)) {
+        if (body.kind !== "json") continue;
+        const message = body.value as { type: string; requestId?: number };
+        if (message.type === "initialize") {
+          socket.write(
+            encodeJsonFrame({
+              type: "initialize_result",
+              protocol: TERMINAL_HOST_PROTOCOL,
+              hostBuildId: "current",
+              pid: process.pid,
+              capabilities: [],
+            }),
+          );
+        }
+        if (message.type === "list") {
+          socket.write(
+            encodeJsonFrame({ type: "result", requestId: message.requestId, value: sessions }),
+          );
+        }
+        if (message.type === "disconnect") socket.end();
+      }
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(socketPath, resolve);
+  });
+  cleanups.push(() => {
+    server.close();
+  });
+  writeFileSync(
+    hostEntryPath(runDir, hostId),
+    JSON.stringify({ pid: process.pid, build: "current", protocol: "1.0.0", socket: socketPath }),
+  );
+  return {
+    process,
+    answer: () => {
+      state.answering = true;
+    },
+    /** Resolves at the next connection to it. */
+    nextConnection: () =>
+      new Promise<void>((resolve) => {
+        connected.push(resolve);
+      }),
+  };
+}
+
 function spawnRequest(script: string): TerminalSpawnRequest {
   return {
     id: crypto.randomUUID(),
@@ -130,6 +196,7 @@ function createPool(
   runDir: string,
   launch: (launch: HostLaunch) => Promise<{ pid: number; socketPath: string }> = () =>
     Promise.reject(new Error("no launch expected")),
+  log = createNoopLogger(),
 ) {
   const pool = new TerminalHostPool({
     stateDir,
@@ -137,7 +204,8 @@ function createPool(
     socketDir: runDir,
     serverBuild: "test",
     hostBuildId: "current",
-    log: createNoopLogger(),
+    log,
+    perfLog: createNoopLogger(),
     launch,
   });
   const events: TerminalHostEvent[] = [];
@@ -275,6 +343,7 @@ describe("TerminalHostPool", () => {
       socketDir: runDir,
       serverBuild: "test",
       hostBuildId: "current",
+      perfLog: createNoopLogger(),
       // A failure discovery did not foresee, here in logging what it found.
       log: {
         ...createNoopLogger(),
@@ -344,6 +413,7 @@ describe("TerminalHostPool", () => {
       serverBuild: "test",
       hostBuildId: "current",
       log: { ...createNoopLogger(), error: (msg: string) => errors.push(msg) },
+      perfLog: createNoopLogger(),
     });
     cleanups.push(() => pool.dropAll());
 
@@ -385,5 +455,70 @@ describe("TerminalHostPool", () => {
 
     pool.destroy(replacement.id);
     await until(() => running.host.sessionIds().length === 0);
+  });
+});
+
+describe("TerminalHostPool and a host found not answering", () => {
+  const session: TerminalSessionInfo = {
+    id: crypto.randomUUID(),
+    epoch: crypto.randomUUID(),
+    offset: 0,
+    pid: 1,
+    cols: 80,
+    rows: 24,
+    meta: { worktreePath: "/wt" },
+  };
+
+  test("is logged with its pid, and a quit that ends the terminals reaches it by SIGTERM", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const quiet = await startQuietHost(runDir, "78787878", [session]);
+    const errors: string[] = [];
+    const { pool } = createPool(stateDir, runDir, undefined, {
+      ...createNoopLogger(),
+      error: (msg: string) => errors.push(msg),
+    });
+
+    jest.useFakeTimers();
+    const connected = quiet.nextConnection();
+    const started = pool.start(() => {});
+    await connected;
+    jest.advanceTimersByTime(INITIALIZE_TIMEOUT_MS);
+    await started;
+    expect(errors).toEqual([
+      `Terminal host 78787878 (pid ${quiet.process.pid}) did not answer the handshake; its terminals are unreachable until it answers`,
+    ]);
+
+    await pool.disconnectAll("end");
+    await quiet.process.exited;
+    expect(quiet.process.signalCode).toBe("SIGTERM");
+  });
+
+  test("has its sessions adopted once it answers", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const quiet = await startQuietHost(runDir, "79797979", [session]);
+    const { pool } = createPool(stateDir, runDir);
+    const adopted: TerminalSessionInfo[][] = [];
+
+    jest.useFakeTimers();
+    const connected = quiet.nextConnection();
+    const started = pool.start((sessions) => {
+      adopted.push(sessions);
+    });
+    await connected;
+    // The reconnect starts as soon as the handshake has timed out.
+    const retried = quiet.nextConnection();
+    jest.advanceTimersByTime(INITIALIZE_TIMEOUT_MS);
+    await started;
+    await retried;
+    quiet.answer();
+    // Whichever attempt first reaches it answering, the one under way or one a timer later.
+    while (adopted.length < 2) {
+      jest.advanceTimersByTime(250);
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+    expect(adopted).toEqual([[], [session]]);
+    expect(await pool.list()).toEqual([session]);
   });
 });

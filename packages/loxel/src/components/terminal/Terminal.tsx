@@ -35,7 +35,7 @@ import {
   createFilePathLinkProvider,
 } from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
-import { terminalEndMessage } from "./terminal-end-message";
+import { terminalEndMessage, terminalNoticeMessage } from "./terminal-end-message";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
@@ -501,6 +501,11 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
             rows: terminal.rows,
           });
         }
+        return;
+      }
+      if (msg.type === "terminal_notice" && msg.id === terminalId) {
+        terminal.write(`\r\n\x1b[90m[${terminalNoticeMessage(msg)}]\x1b[0m\r\n`);
+        termLog.warn("Terminal notice", { terminalId, notice: msg.notice });
         return;
       }
       if (msg.type === "terminal_exit" && msg.id === terminalId) {

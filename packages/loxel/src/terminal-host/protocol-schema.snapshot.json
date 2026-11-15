@@ -1,5 +1,5 @@
 {
-  "protocol": "1.2.0",
+  "protocol": "1.3.0",
   "capabilities": ["foregroundProcess", "endedSessions"],
   "bootstrap": {
     "initialize": {
@@ -348,7 +348,8 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": {}
-        }
+        },
+        "cat": { "type": "string" }
       },
       "required": ["type", "level", "msg"]
     }
