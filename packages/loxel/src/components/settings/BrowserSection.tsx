@@ -1,12 +1,15 @@
 import { XIcon } from "lucide-react";
 
 import { hostOf } from "@/components/browser/BrowserBookmarks";
+import { muteLabel, useActiveNotificationMutes } from "@/components/notifications/site-mute";
 import { notificationSiteDecisionSchema } from "@/electron/browser-notification-protocol";
 import { useSettingsStore } from "@/store/settings-store";
 
 export function BrowserSection() {
   const sites = useSettingsStore((s) => s.browser.notificationSites);
   const setNotificationSite = useSettingsStore((s) => s.setNotificationSite);
+  const setNotificationMute = useSettingsStore((s) => s.setNotificationMute);
+  const mutes = useActiveNotificationMutes();
   const origins = Object.keys(sites).toSorted((a, b) => hostOf(a).localeCompare(hostOf(b)));
 
   return (
@@ -20,7 +23,8 @@ export function BrowserSection() {
         <label className="text-muted-foreground text-xs">Notifications</label>
         <p className="text-muted-foreground text-[10px]">
           Sites you allowed show their notifications in the notification center, with a badge on
-          their tab and worktree. Remove a site to have it ask again.
+          their tab and worktree. Right-click a site's notification to mute or snooze it. Remove a
+          site to have it ask again.
         </p>
         {origins.length === 0 ? (
           <p className="text-muted-foreground pt-1 text-xs">No sites have asked yet.</p>
@@ -31,6 +35,20 @@ export function BrowserSection() {
                 <span className="text-foreground min-w-0 flex-1 truncate text-xs" title={origin}>
                   {hostOf(origin)}
                 </span>
+                {mutes[origin] && (
+                  <>
+                    <span className="text-muted-foreground shrink-0 text-[10px]">
+                      {muteLabel(mutes[origin], Date.now())}
+                    </span>
+                    <button
+                      aria-label={`Unmute ${hostOf(origin)}`}
+                      className="text-muted-foreground hover:text-foreground shrink-0 rounded px-1 text-[10px] underline-offset-2 hover:underline"
+                      onClick={() => setNotificationMute(origin, null)}
+                    >
+                      Unmute
+                    </button>
+                  </>
+                )}
                 <select
                   aria-label={`Notifications from ${hostOf(origin)}`}
                   value={sites[origin]}

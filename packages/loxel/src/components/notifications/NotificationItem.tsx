@@ -1,11 +1,14 @@
 import { XIcon } from "lucide-react";
+import { useState } from "react";
 
 import type { NotificationSource, ServerNotification } from "@/api/notification-model";
 import { hostOf } from "@/components/browser/BrowserBookmarks";
+import { NotificationSiteMenu } from "@/components/menus/NotificationSiteMenu";
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { cn } from "@/lib/utils";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
+import { useSettingsStore } from "@/store/settings-store";
 
 const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
   low: "bg-muted-foreground/40",
@@ -66,69 +69,97 @@ export function NotificationItem({
 }) {
   const title = notification.title || DEFAULT_TITLES[notification.source.kind];
   const source = sourceLabel(notification);
+  // The site whose notifications the context menu mutes. Only a site the user decided for can be
+  // muted: a forgotten one asks again before it notifies.
+  const site = useSettingsStore((s) => {
+    const { source: from } = notification;
+    return from.kind === "browser" && from.origin in s.browser.notificationSites
+      ? from.origin
+      : null;
+  });
+  // Where the site menu opened; it is mounted only while open.
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
 
   return (
-    <div
-      className="hover:bg-primary/50 group flex cursor-pointer gap-2 rounded-md px-2 py-1.5"
-      onClick={() => {
-        navigateToNotification(notification);
-        onNavigate?.();
-      }}
-    >
-      {/* Urgency bar */}
+    <>
       <div
-        className={cn(
-          "mt-1 h-4 w-0.5 shrink-0 rounded-full not-dark:my-0.5 not-dark:h-auto not-dark:w-[3px]",
-          URGENCY_COLORS[notification.urgency],
-        )}
-      />
+        className="hover:bg-primary/50 group flex cursor-pointer gap-2 rounded-md px-2 py-1.5"
+        onClick={() => {
+          navigateToNotification(notification);
+          onNavigate?.();
+        }}
+        onContextMenu={
+          site
+            ? (e) => {
+                e.preventDefault();
+                setMenuPosition({ x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+      >
+        {/* Urgency bar */}
+        <div
+          className={cn(
+            "mt-1 h-4 w-0.5 shrink-0 rounded-full not-dark:my-0.5 not-dark:h-auto not-dark:w-[3px]",
+            URGENCY_COLORS[notification.urgency],
+          )}
+        />
 
-      {/* Content */}
-      <div className="min-w-0 flex-1">
-        <div className="text-foreground truncate text-xs font-medium">{title}</div>
-        {notification.body && (
-          <div className="text-muted-foreground not-dark:text-foreground/85 line-clamp-2 text-[11px] leading-tight">
-            {notification.body}
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="text-foreground truncate text-xs font-medium">{title}</div>
+          {notification.body && (
+            <div className="text-muted-foreground not-dark:text-foreground/85 line-clamp-2 text-[11px] leading-tight">
+              {notification.body}
+            </div>
+          )}
+          <div className="text-muted-foreground mt-0.5 text-[10px] not-dark:text-[11px]">
+            {!inGroup && <>{source} &middot; </>}
+            {dayjs(notification.timestamp).fromNow()}
           </div>
-        )}
-        <div className="text-muted-foreground mt-0.5 text-[10px] not-dark:text-[11px]">
-          {!inGroup && <>{source} &middot; </>}
-          {dayjs(notification.timestamp).fromNow()}
         </div>
-      </div>
 
-      {/* The rest of the site's notifications, behind this one */}
-      {stack && (
+        {/* The rest of the site's notifications, behind this one */}
+        {stack && (
+          <button
+            aria-label={`+${stack.count - 1} more from ${source}`}
+            aria-expanded={false}
+            title="Show all"
+            className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary mt-0.5 h-4 shrink-0 rounded border px-1 text-[10px] leading-[14px] font-medium tabular-nums"
+            onClick={(e) => {
+              e.stopPropagation();
+              stack.onExpand();
+            }}
+          >
+            +{stack.count - 1}
+          </button>
+        )}
+
+        {/* Dismiss button: this one, or the whole stack */}
         <button
-          aria-label={`+${stack.count - 1} more from ${source}`}
-          aria-expanded={false}
-          title="Show all"
-          className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary mt-0.5 h-4 shrink-0 rounded border px-1 text-[10px] leading-[14px] font-medium tabular-nums"
+          aria-label={stack ? `Dismiss all ${stack.count} from ${source}` : "Dismiss"}
+          title={stack ? "Dismiss all" : "Dismiss"}
+          className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
-            stack.onExpand();
+            if (stack) {
+              stack.onDismissAll();
+              return;
+            }
+            usePanelNotificationStore.getState().dismiss(notification.id);
           }}
         >
-          +{stack.count - 1}
+          <XIcon className="size-3" />
         </button>
+      </div>
+      {/* Outside the row: the menu's clicks bubble through React to its parent, not to the row. */}
+      {site && menuPosition && (
+        <NotificationSiteMenu
+          origin={site}
+          position={menuPosition}
+          onClose={() => setMenuPosition(null)}
+        />
       )}
-
-      {/* Dismiss button: this one, or the whole stack */}
-      <button
-        aria-label={stack ? `Dismiss all ${stack.count} from ${source}` : "Dismiss"}
-        title={stack ? "Dismiss all" : "Dismiss"}
-        className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (stack) {
-            stack.onDismissAll();
-            return;
-          }
-          usePanelNotificationStore.getState().dismiss(notification.id);
-        }}
-      >
-        <XIcon className="size-3" />
-      </button>
-    </div>
+    </>
   );
 }

@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 
 import type { IpcMainEvent, WebContents, WebFrameMain } from "electron";
 
 import {
+  type NotificationMutes,
   type NotificationPermissionRequest,
   type NotificationPermissionState,
   type NotificationSites,
@@ -20,6 +21,7 @@ import {
   BROWSER_NOTIFICATION_PERMISSION_RESPOND,
   BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN,
   BROWSER_NOTIFICATION_REQUEST_PERMISSION,
+  BROWSER_NOTIFICATION_SET_MUTES,
   BROWSER_NOTIFICATION_SET_SITES,
   BROWSER_NOTIFICATION_SHOW,
 } from "./ipc-channels";
@@ -145,6 +147,8 @@ const show = (guest: WebContents, pageId: number, senderFrame?: WebFrameMain) =>
 const windowSender = { sender: { getType: () => "window" } } as unknown as IpcMainEvent;
 const setSites = (sites: NotificationSites) =>
   handler(BROWSER_NOTIFICATION_SET_SITES)(windowSender, sites);
+const setMutes = (mutes: NotificationMutes) =>
+  handler(BROWSER_NOTIFICATION_SET_MUTES)(windowSender, mutes);
 
 function respond(host: WebContents, id: number, decision: string) {
   handler(BROWSER_NOTIFICATION_PERMISSION_RESPOND)({ sender: host } as unknown as IpcMainEvent, {
@@ -192,6 +196,7 @@ let host: ReturnType<typeof fakeHost>;
 function withSettings() {
   beforeEach(() => {
     setSites({});
+    setMutes({});
     host = fakeHost();
   });
 }
@@ -356,6 +361,50 @@ describe("notifications", () => {
     emit("did-navigate");
     show(guest, 99);
     expect(host.opened()).toHaveLength(10);
+  });
+
+  describe("of a muted site", () => {
+    afterEach(() => setSystemTime());
+
+    test("are dropped while the site keeps its permission", () => {
+      const { guest } = fakeGuest(host.host);
+      setMutes({ "http://localhost:5173": {} });
+      show(guest, 1);
+      expect(host.opened()).toEqual([]);
+      expect(permission(guest)).toBe("granted");
+      setMutes({});
+      show(guest, 2);
+      expect(host.opened()).toHaveLength(1);
+    });
+
+    test("come back when the snooze ends", () => {
+      const { guest } = fakeGuest(host.host);
+      setSystemTime(new Date(1_000));
+      setMutes({ "http://localhost:5173": { until: 2_000 } });
+      show(guest, 1);
+      expect(host.opened()).toEqual([]);
+      setSystemTime(new Date(2_000));
+      show(guest, 2);
+      expect(host.opened()).toHaveLength(1);
+    });
+
+    test("are dropped before counting toward the rate limit", () => {
+      const { guest } = fakeGuest(host.host);
+      setMutes({ "http://localhost:5173": {} });
+      for (let i = 0; i < 15; i++) show(guest, i);
+      setMutes({});
+      show(guest, 99);
+      expect(host.opened()).toHaveLength(1);
+    });
+
+    test("ignores mutes sent by anything but Loxel's windows", () => {
+      const { guest } = fakeGuest(host.host);
+      handler(BROWSER_NOTIFICATION_SET_MUTES)({ sender: guest } as unknown as IpcMainEvent, {
+        "http://localhost:5173": {},
+      });
+      show(guest, 1);
+      expect(host.opened()).toHaveLength(1);
+    });
   });
 
   test("clicks reach the page from its window only, until the page closes the notification", () => {

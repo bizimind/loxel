@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, mock, setSystemTime, test } from "b
 import type { IpcMainEvent, ServiceWorkerMain, Session, WebContents } from "electron";
 
 import {
+  type NotificationMutes,
   type NotificationSites,
   type RegistrationNotificationInfo,
   browserNotificationSchema,
@@ -12,6 +13,7 @@ import {
   BROWSER_NOTIFICATION_LISTEN,
   BROWSER_NOTIFICATION_OPENED,
   BROWSER_NOTIFICATION_PERMISSION,
+  BROWSER_NOTIFICATION_SET_MUTES,
   BROWSER_NOTIFICATION_SET_SITES,
   OPEN_IN_NEW_BROWSER_TAB,
   REGISTRATION_NOTIFICATION_CLICK,
@@ -157,6 +159,8 @@ function fakeGuest(host: WebContents, origin = SITE) {
 
 const setSites = (sites: NotificationSites) =>
   ipc(BROWSER_NOTIFICATION_SET_SITES, { sender: { getType: () => "window" } }, sites);
+const setMutes = (mutes: NotificationMutes) =>
+  ipc(BROWSER_NOTIFICATION_SET_MUTES, { sender: { getType: () => "window" } }, mutes);
 
 const notification = (fields: Record<string, unknown> = {}) => ({
   title: "Build",
@@ -227,6 +231,19 @@ describe("service worker notifications", () => {
       [first.guest.id, SITE, "Build"],
       [second.guest.id, SITE, "Deploy"],
     ]);
+  });
+
+  test("of a muted site are dropped quietly, the site keeping its permission", async () => {
+    const { host, opened } = fakeHost();
+    fakeGuest(host);
+    const worker = startWorker(SCOPE);
+    setMutes({ [SITE]: {} });
+    expect(await worker.ask(REGISTRATION_NOTIFICATION_SHOW, notification())).toBe("shown");
+    expect(await worker.ask(REGISTRATION_NOTIFICATION_LIST, {})).toEqual([]);
+    expect(worker.call(BROWSER_NOTIFICATION_PERMISSION).event.returnValue).toBe("granted");
+    setMutes({});
+    await worker.ask(REGISTRATION_NOTIFICATION_SHOW, notification());
+    expect(opened()).toHaveLength(1);
   });
 
   test("are refused without permission or with too much data, and dropped with no panel", async () => {
