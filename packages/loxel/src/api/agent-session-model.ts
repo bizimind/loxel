@@ -309,13 +309,19 @@ export function applyAgentEvent(state: AgentState, event: AgentEvent): AgentStat
           queued: event.queued,
         }),
       };
-    case "user_message_delivered":
+    case "user_message_delivered": {
+      // The messages sent before it are taken in by then too. A steered message can even arrive
+      // before the one it followed is echoed: the CLI then restarts the turn with both and echoes
+      // only the steered one, so the earlier one would otherwise stay queued for good.
+      const index = state.items.findIndex((item) => item.id === event.id);
+      if (index === -1) return state;
       return {
         ...state,
-        items: updateItem(state.items, event.id, (item) =>
-          item.kind === "user" ? { ...item, queued: false } : item,
+        items: state.items.map((item, i) =>
+          i <= index && item.kind === "user" && item.queued ? { ...item, queued: false } : item,
         ),
       };
+    }
     case "delta": {
       const existing = state.items.find((item) => item.id === event.id);
       if (existing && (existing.kind === "text" || existing.kind === "thinking")) {

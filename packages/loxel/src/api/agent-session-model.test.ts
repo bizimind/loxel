@@ -63,6 +63,24 @@ describe("applyAgentEvent", () => {
     expect(state.items[0]).toMatchObject({ queued: false });
   });
 
+  test("a steered message delivered first also clears the message it followed", () => {
+    const state = fold([
+      { type: "user_message", id: "u1", text: "run it", imageCount: 0, queued: true },
+      { type: "user_message", id: "u2", text: "and say banana", imageCount: 0, queued: true },
+      { type: "user_message_delivered", id: "u2" },
+    ]);
+    expect(state.items.map((item) => item.kind === "user" && item.queued)).toEqual([false, false]);
+  });
+
+  test("a delivery leaves later messages queued", () => {
+    const state = fold([
+      { type: "user_message", id: "u1", text: "first", imageCount: 0, queued: true },
+      { type: "user_message", id: "u2", text: "second", imageCount: 0, queued: true },
+      { type: "user_message_delivered", id: "u1" },
+    ]);
+    expect(state.items.map((item) => item.kind === "user" && item.queued)).toEqual([false, true]);
+  });
+
   test("a pending request shows as needs input until answered, whatever the turn does", () => {
     const request = {
       kind: "plan" as const,
