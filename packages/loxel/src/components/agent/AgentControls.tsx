@@ -103,7 +103,7 @@ export function AgentControls({
               }}
             >
               {pickableModels(state.models).map((m) => (
-                <DropdownMenuRadioItem key={m.value} value={m.value}>
+                <DropdownMenuRadioItem closeOnClick key={m.value} value={m.value}>
                   <span className="flex flex-col">
                     <span>{modelName(m)}</span>
                     <span className="text-muted-foreground text-[11px]">
@@ -127,7 +127,7 @@ export function AgentControls({
               }}
             >
               {effortLevels.map((level) => (
-                <DropdownMenuRadioItem key={level} value={level}>
+                <DropdownMenuRadioItem closeOnClick key={level} value={level}>
                   {level}
                 </DropdownMenuRadioItem>
               ))}
@@ -147,7 +147,7 @@ export function AgentControls({
               }}
             >
               {AGENT_PERMISSION_MODES.map((m) => (
-                <DropdownMenuRadioItem key={m} value={m}>
+                <DropdownMenuRadioItem closeOnClick key={m} value={m}>
                   <span className="flex flex-col">
                     <span>{MODE_LABELS[m]}</span>
                     <span className="text-muted-foreground text-[11px]">{MODE_HINTS[m]}</span>

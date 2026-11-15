@@ -49,6 +49,25 @@ export function matchingCommands(text: string, commands: readonly AgentCommand[]
     });
 }
 
+/**
+ * One step through the prompt history with Up (`-1`) or Down (`1`): the entry to show, or the
+ * draft back again past the newest one. `index` null means the draft is showing. Null when the
+ * step goes nowhere (Up past the oldest, Down from the draft).
+ */
+export function historyStep(
+  history: readonly string[],
+  index: number | null,
+  direction: -1 | 1,
+): { index: number | null } | null {
+  if (history.length === 0) return null;
+  if (direction === -1) {
+    if (index === 0) return null;
+    return { index: index === null ? history.length - 1 : index - 1 };
+  }
+  if (index === null) return null;
+  return { index: index + 1 >= history.length ? null : index + 1 };
+}
+
 /** Rows a Page Up or Page Down moves in the command list. */
 const PAGE_ROWS = 8;
 
@@ -129,6 +148,8 @@ function CommandMenu({
 
 export function AgentComposer({
   commands,
+  history,
+  restore,
   working,
   disabled,
   controls,
@@ -137,6 +158,10 @@ export function AgentComposer({
   textareaRef,
 }: {
   commands: readonly AgentCommand[];
+  /** Earlier prompts, oldest first, walked with Up and Down from the first or last line. */
+  history: readonly string[];
+  /** Text to put back in the box (a rewound message); a new `key` puts it back again. */
+  restore: { text: string; key: number } | null;
   working: boolean;
   disabled: boolean;
   /** The session's controls (model, effort, mode), in the footer. */
@@ -150,16 +175,37 @@ export function AgentComposer({
   const [images, setImages] = useState<AgentImage[]>([]);
   const [highlight, setHighlight] = useState(0);
   const [tooLarge, setTooLarge] = useState(false);
+  // Prompts sent from this panel since the history was read, so they can be recalled at once.
+  const [sent, setSent] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const allHistory = useMemo(() => {
+    const merged = [...history];
+    for (const prompt of sent) if (merged.at(-1) !== prompt) merged.push(prompt);
+    return merged;
+  }, [history, sent]);
+
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = textareaRef ?? ownRef;
+
+  useEffect(() => {
+    if (!restore) return;
+    setText(restore.text);
+    setHistoryIndex(null);
+    inputRef.current?.focus();
+  }, [restore, inputRef]);
   const matches = useMemo(() => matchingCommands(text, commands), [text, commands]);
   const menuOpen = matches.length > 0;
   const canSend = !disabled && (text.trim() !== "" || images.length > 0);
 
   const submit = (delivery: "queue" | "steer") => {
-    if (!canSend || !onSend(text.trim(), images, delivery)) return;
+    const prompt = text.trim();
+    if (!canSend || !onSend(prompt, images, delivery)) return;
+    if (prompt) setSent((prev) => [...prev, prompt]);
     setText("");
     setImages([]);
+    setHistoryIndex(null);
+    setDraft("");
   };
 
   const complete = (command: AgentCommand) => {
@@ -189,6 +235,27 @@ export function AgentComposer({
           complete(command);
           return;
         }
+      }
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.metaKey) {
+      const field = e.currentTarget;
+      const caret = field.selectionStart;
+      const collapsed = caret === field.selectionEnd;
+      const onEdge =
+        e.key === "ArrowUp"
+          ? !text.slice(0, caret).includes("\n")
+          : !text.slice(caret).includes("\n");
+      const step =
+        collapsed && onEdge
+          ? historyStep(allHistory, historyIndex, e.key === "ArrowUp" ? -1 : 1)
+          : null;
+      if (step) {
+        e.preventDefault();
+        // The draft is kept while walking away from it, and comes back past the newest prompt.
+        if (historyIndex === null) setDraft(text);
+        setHistoryIndex(step.index);
+        setText(step.index === null ? draft : (allHistory[step.index] ?? ""));
+        return;
       }
     }
     if (e.key === "Escape" && working) {

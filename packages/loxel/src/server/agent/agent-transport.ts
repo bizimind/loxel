@@ -4,6 +4,7 @@ import type {
   AgentPermissionMode,
   AgentRequest,
   AgentResponse,
+  RewindPreview,
 } from "@/api/agent-session-model";
 
 /** Where and how a transport starts its agent. */
@@ -13,6 +14,11 @@ export interface AgentLaunch {
   /** The agent's session id: a new session takes it, an existing one is resumed. */
   sessionId: string;
   resume: boolean;
+  /**
+   * Start `sessionId` as a fork of another session, keeping its conversation up to and including
+   * the entry `at`: how a rewind continues from an earlier point without touching the original.
+   */
+  forkFrom?: { sessionId: string; at: string };
 }
 
 export interface AgentTransportHandlers {
@@ -41,6 +47,8 @@ export interface AgentTransport {
   setModel(model: string): Promise<void>;
   setEffort(effort: string): Promise<void>;
   refreshContextUsage(): Promise<void>;
+  /** Restores (or with `dryRun` previews restoring) the files edited since a user message. */
+  rewindFiles(messageId: string, dryRun: boolean): Promise<RewindPreview>;
   /** Ends the process; resolves once it has exited. No `onExit` error follows. */
   stop(): Promise<void>;
 }

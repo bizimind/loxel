@@ -8,6 +8,7 @@ import {
   type AgentRequest,
   type AgentResponse,
   isAgentPermissionMode,
+  type RewindPreview,
 } from "@/api/agent-session-model";
 import { withoutAgentEnv } from "@/coding-agent-env";
 import { isRecord } from "@/lib/is-record";
@@ -62,8 +63,23 @@ export function claudeStreamArgs(launch: AgentLaunch): string[] {
     "--include-partial-messages",
     // Echo each user message once the CLI takes it, which is when a queued one is delivered.
     "--replay-user-messages",
-    ...(launch.resume ? ["--resume", launch.sessionId] : ["--session-id", launch.sessionId]),
+    ...launchArgs(launch),
   ];
+}
+
+function launchArgs({ sessionId, resume, forkFrom }: AgentLaunch): string[] {
+  if (forkFrom) {
+    return [
+      "--resume",
+      forkFrom.sessionId,
+      "--resume-session-at",
+      forkFrom.at,
+      "--fork-session",
+      "--session-id",
+      sessionId,
+    ];
+  }
+  return resume ? ["--resume", sessionId] : ["--session-id", sessionId];
 }
 
 async function* splitLines(stream: ReadableStream<Uint8Array>): AsyncIterable<string> {
@@ -90,7 +106,13 @@ export function spawnClaudeProcess(
   return (args, launch) => {
     const proc = Bun.spawn([binary, ...args], {
       cwd: launch.worktreePath,
-      env: { ...withoutAgentEnv(env), ...loxelEnv, LOXEL_WORKTREE: launch.worktreePath },
+      env: {
+        ...withoutAgentEnv(env),
+        ...loxelEnv,
+        LOXEL_WORKTREE: launch.worktreePath,
+        // Checkpoints of the files the agent edits, which rewind_files restores.
+        CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: "true",
+      },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -286,6 +308,27 @@ export class ClaudeStreamTransport implements AgentTransport {
     this.handlers.onEvents([
       { type: "context_usage", usage: { percentage, totalTokens, maxTokens } },
     ]);
+  }
+
+  async rewindFiles(messageId: string, dryRun: boolean): Promise<RewindPreview> {
+    const result = await this.request({
+      subtype: "rewind_files",
+      user_message_id: messageId,
+      dry_run: dryRun,
+    }).catch((err: unknown): Record<string, unknown> => ({
+      canRewind: false,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    const files = Array.isArray(result.filesChanged)
+      ? result.filesChanged.filter((f: unknown): f is string => typeof f === "string")
+      : [];
+    return {
+      available: result.canRewind === true,
+      ...(typeof result.error === "string" ? { error: result.error } : {}),
+      files,
+      insertions: typeof result.insertions === "number" ? result.insertions : 0,
+      deletions: typeof result.deletions === "number" ? result.deletions : 0,
+    };
   }
 
   async stop(): Promise<void> {

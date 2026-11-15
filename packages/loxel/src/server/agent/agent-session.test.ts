@@ -26,6 +26,7 @@ function fakeTransport() {
     setModel: async () => {},
     setEffort: async () => {},
     refreshContextUsage: async () => {},
+    rewindFiles: async () => ({ available: true, files: ["/p/a.ts"], insertions: 1, deletions: 0 }),
     stop: async () => void calls.push("stop"),
   };
   return {
@@ -117,6 +118,44 @@ describe("AgentSession", () => {
     ).rejects.toThrow("not running");
 
     await session.handle({ type: "resume" });
+    expect(fake.calls).toEqual(["start", "stop", "start"]);
+  });
+
+  test("a rewind restores the files, then forks the conversation before the message", async () => {
+    const launches: unknown[] = [];
+    const fake = fakeTransport();
+    const session = new AgentSession(
+      LAUNCH,
+      (launch, handlers) => {
+        launches.push(launch);
+        return fake.factory(launch, handlers);
+      },
+      [
+        {
+          type: "user_message",
+          id: "u1",
+          text: "one",
+          imageCount: 0,
+          queued: false,
+          resumeAt: null,
+        },
+        {
+          type: "user_message",
+          id: "u2",
+          text: "two",
+          imageCount: 0,
+          queued: false,
+          resumeAt: "a1",
+        },
+      ],
+    );
+    await session.start(true);
+    await session.handle({ type: "rewind", messageId: "u2", code: true, conversation: true });
+    const c = client();
+    session.attach(c);
+    const snapshot = c.received[0];
+    expect(snapshot?.type === "snapshot" && snapshot.state.items.map((i) => i.id)).toEqual(["u1"]);
+    expect(launches.at(-1)).toMatchObject({ forkFrom: { sessionId: LAUNCH.sessionId, at: "a1" } });
     expect(fake.calls).toEqual(["start", "stop", "start"]);
   });
 

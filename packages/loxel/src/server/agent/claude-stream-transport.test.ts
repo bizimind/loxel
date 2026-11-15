@@ -52,6 +52,17 @@ describe("ClaudeStreamTransport", () => {
     expect(args).toContain("--permission-prompt-tool");
     expect(args.slice(args.indexOf("--session-id"))[1]).toBe(LAUNCH.sessionId);
     expect(claudeStreamArgs({ ...LAUNCH, resume: true })).toContain("--resume");
+    // A rewind forks the old session at the entry before the message, under a new id.
+    const fork = claudeStreamArgs({ ...LAUNCH, forkFrom: { sessionId: "old", at: "entry" } });
+    expect(fork.slice(fork.indexOf("--resume"))).toEqual([
+      "--resume",
+      "old",
+      "--resume-session-at",
+      "entry",
+      "--fork-session",
+      "--session-id",
+      LAUNCH.sessionId,
+    ]);
   });
 
   test("answers AskUserQuestion with the chosen label", async () => {
