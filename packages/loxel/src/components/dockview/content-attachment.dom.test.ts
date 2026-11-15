@@ -1,57 +1,12 @@
-import { describe, expect, mock, test } from "bun:test";
+/**
+ * Dockview keeps a group's shown content attached through the operations Loxel relies on. Browser
+ * panels hold an Electron `<webview>`, which reloads its page whenever its element is re-attached,
+ * so these pin the dockview behavior that lets Loxel call `panel.api.setActive()` and add, move or
+ * restore `renderer: "always"` tabs without workarounds.
+ */
+import { describe, expect, test } from "bun:test";
 
-import { DockviewComponent, Orientation, DockviewApi, type IDockviewPanel } from "dockview-react";
-
-import { activatePanel } from "./layout-actions";
-
-function setup({ isGroupActiveTab = true, maximized = "none" as "none" | "self" | "other" } = {}) {
-  const panelSetActive = mock();
-  const groupSetActive = mock();
-  const exitMaximizedGroup = mock();
-  const group = {
-    activePanel: undefined as unknown,
-    api: { setActive: groupSetActive, isMaximized: () => maximized === "self" },
-  };
-  const panel = { group, api: { setActive: panelSetActive } };
-  group.activePanel = isGroupActiveTab ? panel : {};
-  const api = { hasMaximizedGroup: () => maximized !== "none", exitMaximizedGroup };
-  return {
-    run: () => activatePanel(api as unknown as DockviewApi, panel as unknown as IDockviewPanel),
-    panelSetActive,
-    groupSetActive,
-    exitMaximizedGroup,
-  };
-}
-
-describe("activatePanel", () => {
-  test("activates the group (no content re-render) when the panel is already its group's active tab", () => {
-    const s = setup();
-    s.run();
-    expect(s.groupSetActive).toHaveBeenCalledTimes(1);
-    expect(s.panelSetActive).not.toHaveBeenCalled();
-  });
-
-  test("activates the panel when it is a background tab", () => {
-    const s = setup({ isGroupActiveTab: false });
-    s.run();
-    expect(s.panelSetActive).toHaveBeenCalledTimes(1);
-    expect(s.groupSetActive).not.toHaveBeenCalled();
-  });
-
-  test("exits another group's maximized state before activating the group", () => {
-    const s = setup({ maximized: "other" });
-    s.run();
-    expect(s.exitMaximizedGroup).toHaveBeenCalledTimes(1);
-    expect(s.groupSetActive).toHaveBeenCalledTimes(1);
-  });
-
-  test("keeps the panel's own group maximized", () => {
-    const s = setup({ maximized: "self" });
-    s.run();
-    expect(s.exitMaximizedGroup).not.toHaveBeenCalled();
-    expect(s.groupSetActive).toHaveBeenCalledTimes(1);
-  });
-});
+import { DockviewApi, DockviewComponent, Orientation } from "dockview-react";
 
 describe("dockview content attachment", () => {
   function createDockview() {
@@ -80,7 +35,7 @@ describe("dockview content attachment", () => {
       const observer = new MutationObserver(() => {});
       observer.observe(dockview.element, { childList: true, subtree: true });
 
-      activatePanel(api, browser);
+      browser.api.setActive();
 
       expect(api.activePanel).toBe(browser);
       expect(content.isConnected).toBe(true);
@@ -96,6 +51,32 @@ describe("dockview content attachment", () => {
       dockview.element.remove();
     },
   );
+
+  test("activating a visible tab hidden behind another maximized group un-maximizes it in place", () => {
+    const dockview = createDockview();
+    const api = new DockviewApi(dockview);
+    const browser = api.addPanel({ id: "browser", component: "c", renderer: "always" });
+    const editor = api.addPanel({ id: "editor", component: "c", position: { direction: "right" } });
+    editor.api.maximize();
+    const content = browser.view.content.element;
+    const observer = new MutationObserver(() => {});
+    observer.observe(dockview.element, { childList: true, subtree: true });
+
+    browser.api.setActive();
+
+    expect(api.hasMaximizedGroup()).toBe(false);
+    expect(api.activePanel).toBe(browser);
+    expect(
+      observer
+        .takeRecords()
+        .some((record) =>
+          [...record.removedNodes].some((node) => node === content || node.contains(content)),
+        ),
+    ).toBe(false);
+    observer.disconnect();
+    dockview.dispose();
+    dockview.element.remove();
+  });
 
   test("keeps active content attached when restoring a background always-rendered tab", () => {
     const dockview = createDockview();

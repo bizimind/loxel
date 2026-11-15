@@ -19,7 +19,7 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview-react";
 
-import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
+import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import type { MoveDirection } from "@/store/layout-actions";
 import type { PanelId } from "@/store/panel-config";
 import { useProjectStore } from "@/store/projects";
@@ -127,7 +127,7 @@ function currentArea(): FocusArea {
 // ---------------------------------------------------------------------------
 
 function focusCenterPanel(api: DockviewApi, panel: IDockviewPanel): void {
-  activatePanel(api, panel);
+  panel.api.setActive();
   // Activation moves DOM focus via usePanelActivationFocus, but re-activating the already active
   // panel fires no event — focus it explicitly once the activation settles.
   afterLayout(() => focusPanelContent(panel.id, panel.view.content.element));

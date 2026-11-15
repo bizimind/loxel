@@ -2,7 +2,7 @@
 
 How the renderer's window is divided into dockview zones, how panels are registered, created, identified, focused and persisted per worktree.
 
-For keyboard focus navigation, `activatePanel()` and find-in-panel, see [KEYBINDINGS.md](KEYBINDINGS.md). For the storage layer behind persisted layouts, see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md). For the overall process model, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For keyboard focus navigation and find-in-panel, see [KEYBINDINGS.md](KEYBINDINGS.md). For the storage layer behind persisted layouts, see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md). For the overall process model, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Two nested dockviews
 
@@ -21,7 +21,7 @@ Where to look:
 
 - [outer-dockview-setup.ts](../src/components/dockview/outer-dockview-setup.ts): one-time outer setup, drop constraints, restore and resize callbacks.
 - [default-layout.ts](../src/components/dockview/default-layout.ts): default outer layout, zone constraint re-application, layout-derived state, `nextPanelTitle`.
-- [layout-actions.ts](../src/store/layout-actions.ts): `getGroupZone`, `collapseZone` / `expandZone`, `activatePanel`, `findAdjacentCenterGroup`.
+- [layout-actions.ts](../src/store/layout-actions.ts): `getGroupZone`, `collapseZone` / `expandZone`, `findAdjacentCenterGroup`.
 
 ## Home
 
@@ -57,7 +57,7 @@ Drop rules are enforced in `setupOuterDockview` (`onWillShowOverlay`): no edge d
 | `patchDiff`       | `patchdiff-<uuid>`       | `patch`, `sourcePath`                        | Reuse by patch text and source file; a split duplicates the patch                                                                                                          |
 | `localDb`         | `localdb-main`           | none                                         | Singleton                                                                                                                                                                  |
 
-File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse always goes through `activatePanel()`, never `panel.api.setActive()` (see [KEYBINDINGS.md](KEYBINDINGS.md#focus-navigation) and the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).
+File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse activates the existing tab with `panel.api.setActive()`, which leaves an already-shown tab's content in place, so a browser panel does not reload (see the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).
 
 ## Creating and opening panels
 
@@ -153,7 +153,7 @@ Center (content) panel:
 1. Add a `CENTER_PANELS` entry in [panel-config.ts](../src/store/panel-config.ts). For a singleton, the dockview id must equal `idPrefix` exactly or `getCenterPanelDef` will not recognize it.
 2. Register the component in `centerComponents` in [panels.tsx](../src/components/dockview/panels.tsx). Read params, pass `props.api` down, and wrap in `PanelContext.Provider` if descendants need the worktree.
 3. Add a tab in `src/components/dockview/<type>-tab.tsx` built on `Tab` (or `EditorTab` for files) and register it in `centerTabComponents`.
-4. Add events to `LoxelEventMap`, a creator/opener in [panel-creators.ts](../src/lib/panel-creators.ts) (decide the reuse rule; reuse via `activatePanel`), and a listener in [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts).
+4. Add events to `LoxelEventMap`, a creator/opener in [panel-creators.ts](../src/lib/panel-creators.ts) (decide the reuse rule), and a listener in [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts).
 5. If it opens files, extend `FilePanelType` / `filePanelType` / `dispatchOpenFile` in [open-file.ts](../src/lib/open-file.ts).
 6. For a keybinding or palette entry, add the `ActionId` and `ACTIONS` entry in [action-registry.ts](../src/store/keybindings/action-registry.ts), a default in [keybinding-schema.ts](../src/store/keybindings/keybinding-schema.ts) if any, set `actionId` in the registry entry, and add the id to the `panel.new.*` no-op cases in `useActionHandler`. Add it to `SPLIT_PANEL_TYPES` for split actions.
 7. Add close-side cleanup (server resources, store entries) to `onDidRemovePanel` in [CenterHost.tsx](../src/components/dockview/CenterHost.tsx).

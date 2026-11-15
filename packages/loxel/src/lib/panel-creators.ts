@@ -43,7 +43,6 @@ import { queryClient } from "@/query-client";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
-import { activatePanel } from "@/store/layout-actions";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -135,7 +134,7 @@ function keepingUserFocus<T>(dv: DockviewApi, focus: boolean, change: () => T): 
   const focused = document.activeElement;
   const result = change();
   if (active && dv.activePanel !== active && dv.getPanel(active.id) === active) {
-    activatePanel(dv, active);
+    active.api.setActive();
   }
   if (focused instanceof HTMLElement && focused.isConnected && document.activeElement !== focused) {
     focused.focus({ preventScroll: true });
@@ -256,7 +255,7 @@ function movePlacedPanel(
     }
   });
   if (!joined) rememberBatch(dv, placement, panel.group);
-  if (focus) activatePanel(dv, panel);
+  if (focus) panel.api.setActive();
 }
 
 // -- Panel creators --
@@ -570,7 +569,7 @@ export function openFileBacked(
   const existing = cApi.getPanel(panelId);
   if (existing) {
     if (placement) movePlacedPanel(cApi, existing, placement, focus);
-    else if (focus) activatePanel(cApi, existing);
+    else if (focus) existing.api.setActive();
     if (params?.line) {
       existing.api.updateParameters({ line: params.line, column: params.column });
     }
@@ -602,7 +601,7 @@ export function openVirtualDocument(
   const panelId = `virtual-document-${uri}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     if (line) existing.api.updateParameters({ line, column });
     return;
   }
@@ -760,7 +759,7 @@ function replaceMovedPanel(
   });
   if (newPanel && wasVisible) {
     if (dv.activeGroup === group) {
-      activatePanel(dv, newPanel);
+      newPanel.api.setActive();
     } else {
       group.model.openPanel(newPanel, { skipSetGroupActive: true });
     }
@@ -803,7 +802,7 @@ export function openDiff(): void {
 
   const existing = cApi.getPanel("diff");
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     return;
   }
 
@@ -850,7 +849,7 @@ export function openPatchDiff(params: PatchDiffParams): void {
     );
   });
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     return;
   }
   addPatchDiffPanel(cApi, params);
@@ -929,7 +928,7 @@ export function openLocalDb(): void {
 
   const existing = cApi.getPanel("localdb-main");
   if (existing) {
-    activatePanel(cApi, existing);
+    existing.api.setActive();
     return;
   }
 

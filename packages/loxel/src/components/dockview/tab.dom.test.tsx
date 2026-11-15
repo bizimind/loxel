@@ -187,6 +187,7 @@ describe("Rename Tab action", () => {
     const panel = {
       id: panelId,
       group,
+      api: { setActive() {} },
       view: { content: { element: document.createElement("div") } },
     };
     group.activePanel = panel;

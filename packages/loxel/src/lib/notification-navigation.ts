@@ -5,7 +5,6 @@
  * click-to-navigate in the notification center overlay.
  */
 import type { ServerNotification } from "@/api/notification-model";
-import { activatePanel } from "@/store/layout-actions";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -14,7 +13,7 @@ function activatePanelById(panelId: string, retries = 1): void {
   const api = getCenterApi();
   const panel = api?.panels.find((p) => p.id === panelId);
   if (api && panel) {
-    activatePanel(api, panel);
+    panel.api.setActive();
     return;
   }
   // Panel may not be mounted yet after worktree switch — retry after layout settles
