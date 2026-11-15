@@ -170,9 +170,19 @@ describe("before settings arrive", () => {
     const { guest } = fakeGuest(host.host);
     expect(permission(guest)).toBe("default");
     const request = requestPermission(guest);
+    // A page whose webview goes away during the wait: Electron's accessors throw once it has.
+    const gone = fakeGuest(host.host).guest;
+    const goneRequest = requestPermission(gone);
+    Object.defineProperty(gone, "isDestroyed", { value: () => true });
+    Object.defineProperty(gone, "hostWebContents", {
+      get: () => {
+        throw new TypeError("Object has been destroyed");
+      },
+    });
     expect(await state(request)).toBe("pending");
     setSites({ "http://localhost:5173": "allow" });
     expect(await request).toBe("granted");
+    expect(await goneRequest).toBe("denied");
     expect(host.requests()).toEqual([]);
   });
 });
