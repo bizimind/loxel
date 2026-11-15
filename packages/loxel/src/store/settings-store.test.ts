@@ -279,6 +279,13 @@ describe("settings migration", () => {
     const migrated = (await migrate?.({ autoCheckForUpdates: false }, 11)) as SettingsState;
     expect(migrated.autoCheckForUpdates).toBe(false);
   });
+
+  test("v14 adds bidirectional text to terminal settings, off", async () => {
+    const migrated = (await migrate?.({ terminal: { scrollbackLines: 123 } }, 14)) as SettingsState;
+    expect(migrated.terminal).toEqual(
+      expect.objectContaining({ scrollbackLines: 123, bidiText: false }),
+    );
+  });
 });
 
 describe("settings migration v13: the built-in coding agent is gone", () => {
@@ -297,7 +304,7 @@ describe("settings migration v13: the built-in coding agent is gone", () => {
     expect(migrated).not.toHaveProperty("models");
     expect(migrated).not.toHaveProperty("codingAgent");
     expect(migrated.autoCheckForUpdates).toBe(false);
-    expect(migrated.terminal).toEqual({ scrollbackLines: 123 });
+    expect(migrated.terminal).toEqual({ scrollbackLines: 123, bidiText: false });
   });
 
   test("takes the Fork Tree out of every zone", async () => {
