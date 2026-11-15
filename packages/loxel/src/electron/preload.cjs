@@ -28,6 +28,11 @@ const DEFAULT_BROWSER_GET = "default-browser:get";
 const DEFAULT_BROWSER_SET = "default-browser:set";
 const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 const APP_RESTART = "app:restart";
+const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
+const SET_WHEN_QUITTING = "quit:set-when-quitting";
+const QUIT_QUESTION = "quit:question";
+const QUIT_QUESTION_SHOWN = "quit:question-shown";
+const QUIT_ANSWER = "quit:answer";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -116,4 +121,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setAsDefaultBrowser: () => ipcRenderer.invoke(DEFAULT_BROWSER_SET),
   quitKeepingTerminals: () => ipcRenderer.send(APP_QUIT_KEEPING_TERMINALS),
   restartApp: () => ipcRenderer.send(APP_RESTART),
+  quitEndingTerminals: () => ipcRenderer.send(APP_QUIT_ENDING_TERMINALS),
+  setWhenQuitting: (setting) => ipcRenderer.send(SET_WHEN_QUITTING, setting),
+  onQuitQuestion: (callback) => {
+    const handler = (_event, question) => callback(question);
+    ipcRenderer.on(QUIT_QUESTION, handler);
+    return () => ipcRenderer.removeListener(QUIT_QUESTION, handler);
+  },
+  quitQuestionShown: (id) => ipcRenderer.send(QUIT_QUESTION_SHOWN, id),
+  answerQuitQuestion: (reply) => ipcRenderer.send(QUIT_ANSWER, reply),
 });

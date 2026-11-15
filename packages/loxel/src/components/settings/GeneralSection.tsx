@@ -13,6 +13,7 @@ import * as api from "@/api/client";
 import type { DefaultBrowserStatus } from "@/api/default-browser-model";
 import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
+import { BusyTerminalList } from "@/components/terminal/BusyTerminalList";
 import { Button } from "@/components/ui/button";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { Switch } from "@/components/ui/switch";
@@ -274,15 +275,10 @@ function TerminalRestartDescription({
       <p>{message}</p>
       {busy.length > 0 && (
         <div>
-          <p>{busy.length === 1 ? "A program is running in:" : "Programs are running in:"}</p>
-          <ul className="mt-1 space-y-0.5">
-            {busy.map((terminal) => (
-              <li key={terminal.id} className="text-foreground">
-                <span className="font-mono">{terminal.program}</span>
-                <span className="text-muted-foreground"> in {terminal.worktree}</span>
-              </li>
-            ))}
-          </ul>
+          <p className="mb-1">
+            {busy.length === 1 ? "A program is running in:" : "Programs are running in:"}
+          </p>
+          <BusyTerminalList busy={busy} />
         </div>
       )}
     </div>

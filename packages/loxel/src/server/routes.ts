@@ -2963,7 +2963,8 @@ async function canonicalPath(rawPath: string): Promise<string | null> {
   return realpath(resolve(expanded)).catch(() => null);
 }
 
-// GET /api/terminals[?programs] — the running terminals, for the update warning and terminal tabs.
+// GET /api/terminals[?programs] — the running terminals, for the update warning, the confirmations
+// before an update install and a quit, and terminal tabs.
 // Foreground program names are private to the user: the request origin checks in server.ts keep
 // other sites from reading them, like every route here.
 async function handleListTerminals(req: Request, ctx: RouteContext): Promise<Response> {

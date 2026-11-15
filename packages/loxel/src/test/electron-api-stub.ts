@@ -28,6 +28,11 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     setAsDefaultBrowser: async () => ({ isDefault: false, canSet: false }),
     quitKeepingTerminals: () => {},
     restartApp: () => {},
+    quitEndingTerminals: () => {},
+    setWhenQuitting: () => {},
+    onQuitQuestion: () => () => {},
+    quitQuestionShown: () => {},
+    answerQuitQuestion: () => {},
     ...overrides,
   };
 }

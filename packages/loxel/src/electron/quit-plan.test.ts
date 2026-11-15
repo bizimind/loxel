@@ -1,36 +1,67 @@
 import { describe, expect, test } from "bun:test";
 
-import { QUIT, QUIT_KEEPING_TERMINALS, QuitPlans, RESTART, planAtWillQuit } from "./quit-plan";
+import {
+  ASK,
+  QUIT,
+  QUIT_KEEPING_TERMINALS,
+  QuitPlans,
+  RESTART,
+  planAtWillQuit,
+  unplannedQuit,
+} from "./quit-plan";
+
+describe("unplannedQuit", () => {
+  test("follows the When quitting Loxel setting", () => {
+    expect(unplannedQuit("keep", true)).toBe(QUIT_KEEPING_TERMINALS);
+    expect(unplannedQuit("end", true)).toBe(QUIT);
+    expect(unplannedQuit("ask", true)).toBe(ASK);
+  });
+
+  test("ends the terminals, as Quit did, where it cannot ask", () => {
+    expect(unplannedQuit("ask", false)).toBe(QUIT);
+    expect(unplannedQuit("keep", false)).toBe(QUIT_KEEPING_TERMINALS);
+  });
+});
 
 describe("QuitPlans", () => {
-  test("a quit nothing requested is a plain Quit, ending the terminals", () => {
+  test("a quit nothing requested follows the unplanned quit's plan", () => {
     const plans = new QuitPlans();
-    plans.begin();
+    expect(plans.begin(QUIT_KEEPING_TERMINALS)).toBe(QUIT_KEEPING_TERMINALS);
+    expect(plans.current()).toEqual({ terminals: "keep", relaunch: false });
+    plans.begin(QUIT);
     expect(plans.current()).toEqual({ terminals: "end", relaunch: false });
+  });
+
+  test("a quit that asks first keeps no plan, and the answer's plan is requested for the next", () => {
+    const plans = new QuitPlans();
+    expect(plans.begin(ASK)).toBe(ASK);
+    plans.request(QUIT_KEEPING_TERMINALS);
+    expect(plans.begin(ASK)).toBe(QUIT_KEEPING_TERMINALS);
+    expect(plans.current()).toBe(QUIT_KEEPING_TERMINALS);
   });
 
   test("a quit follows the plan requested for it", () => {
     const plans = new QuitPlans();
     plans.request(QUIT_KEEPING_TERMINALS);
-    plans.begin();
+    expect(plans.begin(ASK)).toBe(QUIT_KEEPING_TERMINALS);
     expect(plans.current()).toEqual({ terminals: "keep", relaunch: false });
     plans.request(RESTART);
-    plans.begin();
+    plans.begin(ASK);
     expect(plans.current()).toEqual({ terminals: "keep", relaunch: true });
   });
 
   test("a cancelled quit's plan does not carry over to the next quit", () => {
     const plans = new QuitPlans();
     plans.request(RESTART);
-    plans.begin();
+    plans.begin(ASK);
     // A window refused to close; the user later quits from the Dock.
-    plans.begin();
+    plans.begin(QUIT);
     expect(plans.current()).toBe(QUIT);
   });
 
   test("a plan requested while a quit is under way applies to it", () => {
     const plans = new QuitPlans();
-    plans.begin();
+    plans.begin(QUIT);
     // ⌥⌘Q while ⌘Q's windows are still closing: Electron fires no second before-quit.
     plans.request(QUIT_KEEPING_TERMINALS);
     expect(plans.current()).toBe(QUIT_KEEPING_TERMINALS);
@@ -39,9 +70,9 @@ describe("QuitPlans", () => {
   test("a quit started again after waiting for layout promotes keeps its plan", () => {
     const plans = new QuitPlans();
     plans.request(QUIT_KEEPING_TERMINALS);
-    plans.begin();
+    plans.begin(ASK);
     plans.request(plans.current());
-    plans.begin();
+    plans.begin(ASK);
     expect(plans.current()).toBe(QUIT_KEEPING_TERMINALS);
   });
 });

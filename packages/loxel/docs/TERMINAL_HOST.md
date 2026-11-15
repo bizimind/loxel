@@ -162,13 +162,13 @@ A capability is an optional feature of the versioned layer, named in `TERMINAL_H
 
 - **Name it.** Add the name to `TERMINAL_HOST_CAPABILITIES` with the version it came in, and bump the minor version.
 - **Add its messages** to the versioned layer, saying which capability they belong to. The host implements them and, by listing the name, advertises them.
-- **Gate the server's use.** `SocketTerminalHost` keeps, per connection, the capabilities both sides advertise (`sharedCapabilities()`), and `supports(name)` checks one. A method of the capability returns a fallback without it and never sends the message: `foregroundProcesses()` answers `{}`, also while the connection is being restored, since the caller is waiting, and its callers fall back to what they know without it (the update confirmation then only counts the terminals).
+- **Gate the server's use.** `SocketTerminalHost` keeps, per connection, the capabilities both sides advertise (`sharedCapabilities()`), and `supports(name)` checks one. A method of the capability returns a fallback without it and never sends the message: `foregroundProcesses()` answers `{}`, also while the connection is being restored, since the caller is waiting, and its callers fall back to what they know without it (the update and quit confirmations then only count the terminals).
 - **The other direction.** A capability the host uses on its own, an event for example, is checked the same way against the capabilities in the server's `initialize`.
 - **Test both skews**, as [capabilities.test.ts](../src/terminal-host/capabilities.test.ts) does: a host without the capability is never sent its messages, and a host with a capability the server does not know is used for the ones it does.
 
 `endedSessions` is one the host uses on its own: see [Ended sessions](#ended-sessions). The server sends nothing new for it, and reads `ended` wherever a host gives it; the host checks the server's `initialize` for it, and a server without it gets no ended sessions, as from a host before it.
 
-`foregroundProcess` reports each session's foreground program for the update confirmation: the PTY's foreground process group (`ps -o tpgid`) named by its leader (`ps -o comm`), or null when that group is the session's own program as it was spawned, a shell at its prompt; a session whose program `exec`'d another reports that one. A terminal whose program cannot be named (its terminal or the group's leader gone) is left out. The pool takes each session's answer from the host it routes the session to.
+`foregroundProcess` reports each session's foreground program for the confirmations before an update install and a quit: the PTY's foreground process group (`ps -o tpgid`) named by its leader (`ps -o comm`), or null when that group is the session's own program as it was spawned, a shell at its prompt; a session whose program `exec`'d another reports that one. A terminal whose program cannot be named (its terminal or the group's leader gone) is left out. The pool takes each session's answer from the host it routes the session to.
 
 ## Lifetime
 

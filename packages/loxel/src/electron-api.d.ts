@@ -84,6 +84,19 @@ interface Window {
     quitKeepingTerminals: () => void;
     /** Quit, leaving the terminals running, and open the app again. */
     restartApp: () => void;
+    /** Quit, ending the terminals, without asking. */
+    quitEndingTerminals: () => void;
+    /** Tell main the "When quitting Loxel" setting, which Quit Loxel and the app menu follow. */
+    setWhenQuitting: (setting: import("@/lib/quit-terminals").WhenQuitting) => void;
+    /**
+     * Main asks before quitting, terminals being busy: `question` is a `QuitQuestion`, unparsed.
+     * The renderer reports it shown with `quitQuestionShown`, then the answer.
+     */
+    onQuitQuestion: (callback: (question: unknown) => void) => () => void;
+    /** The quit question with this ID is on screen. */
+    quitQuestionShown: (id: number) => void;
+    /** The user's answer to a quit question. */
+    answerQuitQuestion: (reply: import("@/lib/quit-terminals").QuitReply) => void;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */
