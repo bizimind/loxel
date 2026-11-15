@@ -71,11 +71,10 @@ function changedRatio(ranges: InlineRange[], lines: string[]): number {
   return changed / total;
 }
 
-/** Whether an edit spanning 0-based [start, end) of `line` could shift by one character */
-function isAmbiguousEdit(line: string, start: number, end: number): boolean {
-  const slidesRight = end < line.length && line[start] === line[end];
-  const slidesLeft = start > 0 && line[start - 1] === line[end - 1];
-  return slidesRight || slidesLeft;
+/** Whether the edit spanning 0-based [start, end) of `line` repeats the text right beside it */
+function repeatsNeighbor(line: string, start: number, end: number): boolean {
+  const text = line.slice(start, end);
+  return line.startsWith(text, end) || (start >= text.length && line.endsWith(text, start));
 }
 
 function isLowSurrogate(text: string, index: number): boolean {
@@ -86,11 +85,12 @@ function isLowSurrogate(text: string, index: number): boolean {
 /**
  * Monaco's minimal character diff can match a run of text at different offsets on each side,
  * reporting a pure insertion and a pure deletion around it: `8.3.1` -> `8.8.3` becomes "insert
- * `8.`" and "delete `.1`" around a shifted `8.3`. When one of the two edits is ambiguous (its
- * text repeats next to it, like the inserted `8.` beside the original `8.`), the run between
- * them was anchored by that repetition rather than by shared content, so join the pair into one
- * replacement and leave the common prefix and suffix unmarked. Unambiguous pairs are genuine
- * moves and keep Monaco's ranges: `a/b/c` -> `b/c/d` still drops `a/` and appends `/d`.
+ * `8.`" and "delete `.1`" around a shifted `8.3`. When one of the two edits repeats the text
+ * right beside it (the inserted `8.` next to the original `8.`), the run between them was
+ * anchored by that repetition rather than by shared content, so join the pair into one
+ * replacement and leave the common prefix and suffix unmarked. Other pairs are genuine moves and
+ * keep Monaco's ranges: `a/b/c` -> `b/c/d` still drops `a/` and appends `/d`, and swapped
+ * tokens such as `f(g(x), h(y))` -> `f(h(y), g(x))` stay precise.
  * Only pairs separated by a short whitespace-free run are considered; Monaco itself already
  * merges edits separated by at most two characters.
  */
@@ -131,8 +131,8 @@ function joinShiftedEdit(
     ? [previous.modifiedRange, change.originalRange]
     : [change.modifiedRange, previous.originalRange];
   if (
-    !isAmbiguousEdit(newLine, insertion.startColumn - 1, insertion.endColumn - 1) &&
-    !isAmbiguousEdit(oldLine, deletion.startColumn - 1, deletion.endColumn - 1)
+    !repeatsNeighbor(newLine, insertion.startColumn - 1, insertion.endColumn - 1) &&
+    !repeatsNeighbor(oldLine, deletion.startColumn - 1, deletion.endColumn - 1)
   )
     return;
 
@@ -143,8 +143,6 @@ function joinShiftedEdit(
   while (prefix < Math.min(oldText.length, newText.length) && oldText[prefix] === newText[prefix]) {
     prefix++;
   }
-  // Never split a surrogate pair: back off to the start of a shared astral character.
-  if (prefix > 0 && (isLowSurrogate(oldText, prefix) || isLowSurrogate(newText, prefix))) prefix--;
   let oldLength = oldText.length;
   let newLength = newText.length;
   while (
@@ -154,10 +152,6 @@ function joinShiftedEdit(
   ) {
     oldLength--;
     newLength--;
-  }
-  if (isLowSurrogate(oldText, oldLength) || isLowSurrogate(newText, newLength)) {
-    oldLength++;
-    newLength++;
   }
   return {
     originalRange: {
@@ -224,7 +218,7 @@ export function computeInlineChanges(
   const monacoChanges = result.changes.flatMap((change) => change.innerChanges ?? []);
   // Gate on Monaco's own ranges: a joined edit absorbs the unchanged run between its two
   // halves, and that presentation choice must not tip a block into having no highlights.
-  const monaco = splitSides(monacoChanges);
+  const monaco = splitSides(monacoChanges, oldLines, newLines);
   const ratio = Math.max(changedRatio(monaco.old, oldLines), changedRatio(monaco.new, newLines));
   if (ratio > MAX_CHANGED_RATIO) return EMPTY;
 
@@ -232,15 +226,42 @@ export function computeInlineChanges(
     result.changes.flatMap((change) =>
       joinShiftedEdits(change.innerChanges ?? [], oldLines, newLines),
     ),
+    oldLines,
+    newLines,
   );
 }
 
-function splitSides(changes: InnerRangeMapping[]): InlineChanges {
+/**
+ * Widen a range to whole characters. The diff runs on UTF-16 code units, so a range can start
+ * or end between the two halves of a surrogate pair (an emoji, say), which would render as two
+ * broken glyphs once the line is sliced at that column.
+ */
+function snapToCharacters(range: InlineRange, lines: string[]): InlineRange {
+  const startLine = lines[range.startLineNumber - 1] ?? "";
+  const endLine = lines[range.endLineNumber - 1] ?? "";
+  return {
+    ...range,
+    startColumn: isLowSurrogate(startLine, range.startColumn - 1)
+      ? range.startColumn - 1
+      : range.startColumn,
+    endColumn: isLowSurrogate(endLine, range.endColumn - 1) ? range.endColumn + 1 : range.endColumn,
+  };
+}
+
+function splitSides(
+  changes: InnerRangeMapping[],
+  oldLines: string[],
+  newLines: string[],
+): InlineChanges {
   const old: InlineRange[] = [];
   const updated: InlineRange[] = [];
   for (const inner of changes) {
-    if (!isEmptyRange(inner.originalRange)) old.push({ ...inner.originalRange });
-    if (!isEmptyRange(inner.modifiedRange)) updated.push({ ...inner.modifiedRange });
+    if (!isEmptyRange(inner.originalRange)) {
+      old.push(snapToCharacters(inner.originalRange, oldLines));
+    }
+    if (!isEmptyRange(inner.modifiedRange)) {
+      updated.push(snapToCharacters(inner.modifiedRange, newLines));
+    }
   }
   return { old, new: updated };
 }
