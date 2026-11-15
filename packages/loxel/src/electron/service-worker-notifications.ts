@@ -70,6 +70,14 @@ const MAX_DATA_BYTES = 64 * 1024;
  * site, not per registration: a page can name any scope of its own site.
  */
 const MAX_PER_ORIGIN = 100;
+/** Longest registration scope a page may name; real ones are short URLs. */
+const MAX_SCOPE_LENGTH = 2048;
+/**
+ * How long a worker found not to be its scope's first-party registration stays refused before
+ * main checks again: long enough that a partitioned worker can't make main start the site's own
+ * worker on every call.
+ */
+const FIRST_PARTY_RECHECK_MS = 10_000;
 /** Longest a click keeps its worker running for the `waitUntil()` promises of its handler. */
 const CLICK_TASK_MS = 60_000;
 
@@ -140,7 +148,7 @@ function focusedPanel(origin: string): Panel | null {
 /** A page calling about its registration of `scope`, which must be of the page's own origin. */
 function pageCaller(event: IpcMainEvent | IpcMainInvokeEvent, scope?: string): Caller | null {
   const site = siteOf(event);
-  if (!site || !scope || originOf(scope) !== site) return null;
+  if (!site || !scope || scope.length > MAX_SCOPE_LENGTH || originOf(scope) !== site) return null;
   const guest = event.sender;
   return {
     scope,
@@ -157,27 +165,41 @@ function workerOrigin(worker: ServiceWorkerMain): string | null {
   return origin && isSecureWebOrigin(origin) ? origin : null;
 }
 
-/** Whether each worker is its scope's first-party registration, settled once per worker. */
-const firstPartyWorkers = new WeakMap<ServiceWorkerMain, Promise<boolean>>();
+interface FirstPartyCheck {
+  answer: Promise<boolean>;
+  checkedAt: number;
+  /** A yes is final for the worker; a no is checked again after `FIRST_PARTY_RECHECK_MS`. */
+  confirmed: boolean;
+}
+const firstPartyChecks = new WeakMap<ServiceWorkerMain, FirstPartyCheck>();
 
 /**
  * Whether the worker belongs to the registration the site made as the top-level page. A site
  * embedded in another one can register a worker from its frame, which Chromium keeps apart
  * (partitioned by the top-level site) though its scope reads the same; it must neither see nor
- * show the site's own notifications. `startWorkerForScope` finds the first-party registration
- * only. A version still installing doesn't match either, so it gets no notifications until it is
- * active.
+ * show the site's own notifications. `startWorkerForScope` finds the first-party registration's
+ * active version only, so a version still installing doesn't match either: it gets no
+ * notifications until it is active and main checks again.
  */
 function isFirstParty(session: Session, worker: ServiceWorkerMain): Promise<boolean> {
-  let known = firstPartyWorkers.get(worker);
-  if (!known) {
-    known = session.serviceWorkers.startWorkerForScope(worker.scope).then(
-      (active) => active.versionId === worker.versionId,
-      () => false,
-    );
-    firstPartyWorkers.set(worker, known);
+  const known = firstPartyChecks.get(worker);
+  if (known && (known.confirmed || Date.now() - known.checkedAt < FIRST_PARTY_RECHECK_MS)) {
+    return known.answer;
   }
-  return known;
+  const check: FirstPartyCheck = {
+    answer: Promise.resolve(false),
+    checkedAt: Date.now(),
+    confirmed: false,
+  };
+  check.answer = session.serviceWorkers.startWorkerForScope(worker.scope).then(
+    (active) => {
+      check.confirmed = active.versionId === worker.versionId;
+      return check.confirmed;
+    },
+    () => false,
+  );
+  firstPartyChecks.set(worker, check);
+  return check.answer;
 }
 
 async function workerCaller(session: Session, worker: ServiceWorkerMain): Promise<Caller | null> {

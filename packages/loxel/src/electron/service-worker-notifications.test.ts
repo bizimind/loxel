@@ -257,6 +257,26 @@ describe("service worker notifications", () => {
     expect(opened()).toHaveLength(1);
   });
 
+  test("an updated worker refused before it was active gets them once it is", async () => {
+    const { host, opened } = fakeHost();
+    fakeGuest(host);
+    const active = startWorker(SCOPE);
+    const updated = startWorker(SCOPE);
+    const now = Date.now();
+    setSystemTime(now);
+    try {
+      expect(await updated.ask(REGISTRATION_NOTIFICATION_SHOW, notification())).toBe("denied");
+      // The update activates: the scope's first-party worker is now this version.
+      workersByVersion.delete(active.worker.versionId);
+      expect(await updated.ask(REGISTRATION_NOTIFICATION_SHOW, notification())).toBe("denied");
+      setSystemTime(now + 10_000);
+      expect(await updated.ask(REGISTRATION_NOTIFICATION_SHOW, notification())).toBe("shown");
+      expect(opened()).toHaveLength(1);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test("getNotifications lists the registration's live ones; a tag replaces, close removes", async () => {
     const { host } = fakeHost();
     fakeGuest(host);
@@ -322,6 +342,8 @@ describe("service worker notifications", () => {
     });
     expect(shown).toBe("shown");
     expect(opened().map((n) => n.webContentsId)).toEqual([page.guest.id]);
+    const long = { ...notification(), scope: `${SCOPE}${"a".repeat(3000)}` };
+    expect(fromPage(page.guest, REGISTRATION_NOTIFICATION_SHOW, long)).toBe("denied");
     const foreign = "https://other.example/";
     const foreignShow = { ...notification(), scope: foreign };
     expect(fromPage(page.guest, REGISTRATION_NOTIFICATION_SHOW, foreignShow)).toBe("denied");
