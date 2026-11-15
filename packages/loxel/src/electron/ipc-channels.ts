@@ -71,6 +71,34 @@ export const DEFAULT_BROWSER_SET = "default-browser:set";
 export const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 /** Renderer → main: Restart Loxel, from the command palette. */
 export const APP_RESTART = "app:restart";
+/**
+ * Webview preload → main, synchronous: the page read `Notification.permission`. See
+ * `browser-notifications.ts`.
+ */
+export const BROWSER_NOTIFICATION_PERMISSION = "browser-notification:permission";
+/** Webview preload → main (invoke): the page called `Notification.requestPermission()`. */
+export const BROWSER_NOTIFICATION_REQUEST_PERMISSION = "browser-notification:request-permission";
+/** Webview preload → main: the page constructed a `Notification`. */
+export const BROWSER_NOTIFICATION_SHOW = "browser-notification:show";
+/** Webview preload → main: the page called `close()` on one of its notifications. */
+export const BROWSER_NOTIFICATION_CLOSE = "browser-notification:close";
+/** Main → webview preload: fire an event (`click`) on one of the page's notifications. */
+export const BROWSER_NOTIFICATION_EVENT = "browser-notification:event";
+/** Renderer → main: this document shows its webviews' notifications and permission requests. */
+export const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
+/** Renderer → main: the per-site decisions from Loxel's settings, on load and on every change. */
+export const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
+/** Main → renderer: show a page's notification in the notification center. */
+export const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
+/** Main → renderer: ask whether a site may show notifications, in the panel hosting the page. */
+export const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission-request";
+/** Renderer → main: the user answered a permission request. */
+export const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
+/** Main → renderer: a permission request was withdrawn (decided elsewhere, or the page left). */
+export const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN =
+  "browser-notification:permission-withdrawn";
+/** Renderer → main: the user clicked a page's notification in the notification center. */
+export const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
 /** Renderer → main: Quit and End Terminals, from the command palette. */
 export const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
 /**

@@ -120,6 +120,10 @@ function CenterLayout({
         }
       }
 
+      if (removedDef?.type === "browser") {
+        usePanelNotificationStore.getState().unregisterPanel(event.id);
+      }
+
       // Notify server when the last panel showing an external file closes, so its watcher can
       // be cleaned up. Only files outside the worktree are sent; a file still shown by another
       // panel (an editor tab and a compare panel can show the same one) stays watched.

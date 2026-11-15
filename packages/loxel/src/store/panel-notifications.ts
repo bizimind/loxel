@@ -1,9 +1,9 @@
 /**
  * Panel notification state.
  *
- * Server is the source of truth — notifications are detected server-side from terminal output
- * and this store mirrors WS broadcasts. Multiple loxel instances stay in sync via the
- * server-side NotificationStore.
+ * Server is the source of truth — notifications come from terminal output (detected server-side)
+ * and from browser panel pages, and this store mirrors WS broadcasts. Multiple loxel instances
+ * stay in sync via the server-side NotificationStore.
  *
  * Tracks which panels have unread notifications so that:
  * - Panel tabs show a badge dot when the tab is not active
@@ -13,17 +13,15 @@
 import { create } from "zustand";
 
 import { wsClient } from "@/api/client";
-import type { ServerNotification } from "@/api/notification-model";
+import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 
 function extractPanelId(n: ServerNotification): string | undefined {
-  if (n.source.kind === "terminal") return n.source.panelId;
-  return undefined;
+  return isPanelSource(n.source) ? n.source.panelId : undefined;
 }
 
 function extractWorktreePath(n: ServerNotification): string | undefined {
-  // A Home terminal's (null) marks no worktree.
-  if (n.source.kind === "terminal") return n.source.worktreePath ?? undefined;
-  return undefined;
+  // A Home panel's (null) marks no worktree.
+  return isPanelSource(n.source) ? (n.source.worktreePath ?? undefined) : undefined;
 }
 
 function buildIndexes(notifications: readonly ServerNotification[]): {
