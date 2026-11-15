@@ -1,4 +1,5 @@
 import { DefaultLinesDiffComputer } from "monaco-editor/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer";
+import type { InnerRangeMapping } from "monaco-editor/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer";
 
 import type { ChangePair } from "./change-regions";
 
@@ -71,6 +72,85 @@ function changedRatio(ranges: InlineRange[], lines: string[]): number {
 }
 
 /**
+ * Monaco can align repeated digits across numeric components: 8.3.1 -> 8.8.3 becomes an
+ * insertion of "8." followed by a deletion of ".1", matching "8.3" across different positions.
+ * Join adjacent edits within a dotted number, then keep their common prefix/suffix unmarked.
+ */
+function joinDottedNumberChange(
+  previous: InnerRangeMapping,
+  change: InnerRangeMapping,
+  oldLines: string[],
+  newLines: string[],
+): InnerRangeMapping | undefined {
+  const insertionThenDeletion =
+    isEmptyRange(previous.originalRange) && isEmptyRange(change.modifiedRange);
+  const deletionThenInsertion =
+    isEmptyRange(previous.modifiedRange) && isEmptyRange(change.originalRange);
+  if (!insertionThenDeletion && !deletionThenInsertion) return;
+
+  const oldRange = { ...previous.originalRange, endColumn: change.originalRange.endColumn };
+  const newRange = { ...previous.modifiedRange, endColumn: change.modifiedRange.endColumn };
+  // Mappings are ordered, so matching the outer line numbers also excludes multi-line edits.
+  if (
+    oldRange.startLineNumber !== change.originalRange.endLineNumber ||
+    newRange.startLineNumber !== change.modifiedRange.endLineNumber
+  )
+    return;
+
+  const oldText = oldLines[oldRange.startLineNumber - 1]!.slice(
+    oldRange.startColumn - 1,
+    oldRange.endColumn - 1,
+  );
+  const newText = newLines[newRange.startLineNumber - 1]!.slice(
+    newRange.startColumn - 1,
+    newRange.endColumn - 1,
+  );
+  if (!/^\d+(?:\.\d+)+$/.test(oldText) || !/^\d+(?:\.\d+)+$/.test(newText)) return;
+
+  let prefix = 0;
+  while (prefix < Math.min(oldText.length, newText.length) && oldText[prefix] === newText[prefix]) {
+    prefix++;
+  }
+  let oldLength = oldText.length;
+  let newLength = newText.length;
+  while (
+    oldLength > prefix &&
+    newLength > prefix &&
+    oldText[oldLength - 1] === newText[newLength - 1]
+  ) {
+    oldLength--;
+    newLength--;
+  }
+  return {
+    originalRange: {
+      ...oldRange,
+      startColumn: oldRange.startColumn + prefix,
+      endColumn: oldRange.startColumn + oldLength,
+    },
+    modifiedRange: {
+      ...newRange,
+      startColumn: newRange.startColumn + prefix,
+      endColumn: newRange.startColumn + newLength,
+    },
+  };
+}
+
+function joinDottedNumberChanges(
+  changes: InnerRangeMapping[],
+  oldLines: string[],
+  newLines: string[],
+): InnerRangeMapping[] {
+  const result: InnerRangeMapping[] = [];
+  for (const change of changes) {
+    const previous = result.at(-1);
+    const joined = previous && joinDottedNumberChange(previous, change, oldLines, newLines);
+    if (joined) result[result.length - 1] = joined;
+    else result.push(change);
+  }
+  return result;
+}
+
+/**
  * Compute intra-line changes between the old and new lines of one modification block.
  *
  * Delegates to the diff computer Monaco bundles from VS Code: a character-level diff refined
@@ -105,7 +185,7 @@ export function computeInlineChanges(
   const old: InlineRange[] = [];
   const updated: InlineRange[] = [];
   for (const change of result.changes) {
-    for (const inner of change.innerChanges ?? []) {
+    for (const inner of joinDottedNumberChanges(change.innerChanges ?? [], oldLines, newLines)) {
       if (!isEmptyRange(inner.originalRange)) old.push({ ...inner.originalRange });
       if (!isEmptyRange(inner.modifiedRange)) updated.push({ ...inner.modifiedRange });
     }

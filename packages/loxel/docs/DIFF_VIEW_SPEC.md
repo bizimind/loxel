@@ -271,6 +271,8 @@ There is no fixed word or character granularity. Each modification block (a run 
 - Edits covering a small part of a word stay at character level, so `item` to `items` highlights only the `s` and `color` to `colour` only the `u`.
 - Edit boundaries slide to token boundaries where the text allows.
 
+The adapter joins an adjacent insertion/deletion pair confined to a dotted number into a replacement, trimming its common prefix and suffix. This prevents repeated digits from matching across numeric components: `8.3.1` to `8.8.3` highlights `3.1` and `8.3`, leaving the shared `8.` unmarked. Independent numeric replacements and component insertions/deletions retain Monaco's ranges.
+
 ### Limits
 
 - Blocks larger than 500 lines on either side are not refined.
