@@ -7,6 +7,7 @@ import {
 } from "@bizimind/cli-common";
 import { Option } from "commander";
 
+import { MERMAID_DIAGRAM_TYPES } from "./commands/mermaid-diagram-types.ts";
 import { getCurrentVersion } from "./version.ts";
 
 function requireFile(): string {
@@ -524,23 +525,34 @@ EXAMPLES:
 imp
   .command("mermaid")
   .description(
-    `Import a Mermaid flowchart diagram from stdin.
+    `Import a Mermaid diagram from stdin.
 
-Converts mermaid syntax to native excalidraw elements with automatic layout.
-Node IDs from the mermaid definition become element IDs in the diagram.
+Converts mermaid syntax to native excalidraw elements with automatic layout,
+arrows bound to the shapes they connect. Node IDs from the mermaid definition
+(flowchart nodes, states, classes) become element IDs in the diagram.
 
-Only flowchart/graph diagrams produce editable elements. Other types
-(sequence, class, ER) are not supported.
+SUPPORTED TYPES:
+${MERMAID_DIAGRAM_TYPES.map((t) => `  ${t}`).join("\n")}
+Other types (pie, mindmap, gitGraph, ...) only convert to an image and are
+rejected. Syntax errors exit non-zero with the line and column.
+
+Flowchart edges and state transitions are drawn as elbow (orthogonal) arrows;
+pass --curved for curved ones.
 
 EXAMPLES:
   echo 'flowchart TD
     A[API Server] --> B[Database]
     A --> C[Cache]' | excalidraw -f d.excalidraw import mermaid
 
-  cat flow.mmd | excalidraw -f d.excalidraw import mermaid -x 100 -y 100`,
+  echo 'sequenceDiagram
+    Client->>API: GET /users
+    API-->>Client: 200 OK' | excalidraw -f d.excalidraw import mermaid
+
+  cat flow.mmd | excalidraw -f d.excalidraw import mermaid -x 100 -y 100 --curved`,
   )
   .option("-x, --x <n>", "X offset for imported elements", parseFloat, 0)
   .option("-y, --y <n>", "Y offset for imported elements", parseFloat, 0)
+  .option("--curved", "Draw flowchart edges and state transitions curved, not as elbow arrows")
   .option("-j, --json", "Output as JSON")
   .action(async (opts) => {
     const { importMermaidCommand } = await import("./commands/import-mermaid.ts");
@@ -581,7 +593,9 @@ program.addCommand(createUpdateCommand(updateConfig));
 
 program
   .parseAsync()
-  .then(() => process.exit(0))
+  // Exit explicitly (something in the DOM shim or canvas keeps the event loop
+  // alive), with the exit code the command set.
+  .then(() => process.exit())
   .catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Error: ${message}\n`);

@@ -1,5 +1,6 @@
-import { createCanvas } from "@napi-rs/canvas";
+import { updateElbowArrowPoints } from "@excalidraw/element";
 
+import { createCanvas } from "../canvas-loader.ts";
 import { FONT_FAMILIES, type FontFamilyName } from "./element-defaults.ts";
 import { generateElementId } from "./element-id.ts";
 import type { ExcalidrawElement } from "./excalidraw-types.ts";
@@ -113,7 +114,8 @@ export function buildArrowSkeleton(opts: ArrowOptions): Record<string, unknown> 
   if (opts.from) skeleton.start = { id: opts.from };
   if (opts.to) skeleton.end = { id: opts.to };
   skeleton.startArrowhead = normalizeArrowhead(opts.startHead);
-  skeleton.endArrowhead = normalizeArrowhead(opts.endHead) ?? "arrow";
+  // Arrows point at their end unless told otherwise; "none" removes the head.
+  skeleton.endArrowhead = opts.endHead === undefined ? "arrow" : normalizeArrowhead(opts.endHead);
   if (opts.text) skeleton.label = textProp(opts.text);
   return skeleton;
 }
@@ -278,7 +280,11 @@ export function globalToFixedPoint(
   ];
 }
 
-/** Update arrow points to span between bound shapes using fixedPoint binding data */
+/**
+ * Update arrow points to span between bound shapes using fixedPoint binding data.
+ * Elbow arrows are re-routed between their bindings the way Excalidraw routes
+ * them when a bound shape moves; other arrows become a straight line.
+ */
 export function repositionBoundArrow(
   arrow: ExcalidrawElement,
   allElements: readonly ExcalidrawElement[],
@@ -287,6 +293,11 @@ export function repositionBoundArrow(
   const startBinding = arrow.startBinding as Binding;
   const endBinding = arrow.endBinding as Binding;
   if (!startBinding && !endBinding) return;
+
+  if (arrow.elbowed === true) {
+    rerouteElbowArrow(arrow, allElements);
+    return;
+  }
 
   const startEl = startBinding ? allElements.find((e) => e.id === startBinding.elementId) : null;
   const endEl = endBinding ? allElements.find((e) => e.id === endBinding.elementId) : null;
@@ -335,6 +346,23 @@ export function repositionBoundArrow(
     arrow.width = Math.abs(dx);
     arrow.height = Math.abs(dy);
   }
+}
+
+function rerouteElbowArrow(
+  arrow: ExcalidrawElement,
+  allElements: readonly ExcalidrawElement[],
+): void {
+  type ElbowArrow = Parameters<typeof updateElbowArrowPoints>[0];
+  type ElementsMap = Parameters<typeof updateElbowArrowPoints>[1];
+  const elementsMap = new Map(allElements.map((el) => [el.id, el])) as unknown as ElementsMap;
+  const points = arrow.points as ElbowArrow["points"];
+  // Given only its two ends and no fixed segments, the arrow is routed afresh
+  // from its bindings' fixed points.
+  const updates = updateElbowArrowPoints(arrow as unknown as ElbowArrow, elementsMap, {
+    points: [points[0]!, points[points.length - 1]!],
+    fixedSegments: null,
+  });
+  Object.assign(arrow, updates);
 }
 
 /**

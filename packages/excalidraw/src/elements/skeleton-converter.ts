@@ -1,5 +1,8 @@
 import type { ElementConstructorOpts } from "@excalidraw/element";
 import {
+  computeContainerDimensionForBoundText,
+  getBoundTextMaxHeight,
+  getBoundTextMaxWidth,
   newArrowElement,
   newElement,
   newFreeDrawElement,
@@ -61,19 +64,28 @@ export function skeletonsToElements(skeletons: Record<string, unknown>[]): Excal
       }
 
       case "arrow": {
+        const elbowed = skel.elbowed === true;
         const el = newArrowElement({
           ...opts,
           type: "arrow" as const,
+          // A `null` arrowhead means none: only a missing end arrowhead gets the default.
           startArrowhead: (skel.startArrowhead ?? null) as Parameters<
             typeof newArrowElement
           >[0]["startArrowhead"],
-          endArrowhead: (skel.endArrowhead ?? "arrow") as Parameters<
-            typeof newArrowElement
-          >[0]["endArrowhead"],
+          endArrowhead: (skel.endArrowhead === undefined
+            ? "arrow"
+            : skel.endArrowhead) as Parameters<typeof newArrowElement>[0]["endArrowhead"],
           points: skel.points as Parameters<typeof newArrowElement>[0]["points"],
-        });
-        results.push(el as unknown as ExcalidrawElement);
-        maybeCreateBoundText(skel, el as unknown as ExcalidrawElement, results);
+          elbowed,
+          fixedSegments: elbowed
+            ? ((skel.fixedSegments ?? null) as Parameters<
+                typeof newArrowElement
+              >[0]["fixedSegments"])
+            : null,
+        }) as unknown as ExcalidrawElement;
+        sizeToPoints(el);
+        results.push(el);
+        maybeCreateBoundText(skel, el, results);
         break;
       }
 
@@ -82,8 +94,9 @@ export function skeletonsToElements(skeletons: Record<string, unknown>[]): Excal
           ...opts,
           type: "line" as const,
           points: skel.points as Parameters<typeof newLinearElement>[0]["points"],
-        });
-        results.push(el as unknown as ExcalidrawElement);
+        }) as unknown as ExcalidrawElement;
+        sizeToPoints(el);
+        results.push(el);
         break;
       }
 
@@ -182,8 +195,25 @@ function buildOpts(skel: Record<string, unknown>): ElementConstructorOpts & { id
 }
 
 /**
+ * Set a linear element's width/height to its points' extent. The factories keep
+ * whatever width/height they are given (0 by default), and Excalidraw sizes
+ * and renders linear elements by these.
+ */
+function sizeToPoints(el: ExcalidrawElement): void {
+  const points = el.points as [number, number][] | undefined;
+  if (!points || points.length === 0) return;
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  el.width = Math.max(...xs) - Math.min(...xs);
+  el.height = Math.max(...ys) - Math.min(...ys);
+}
+
+/**
  * If the skeleton has a `label` property, create a bound text element
  * and set up the bidirectional binding between container and text.
+ *
+ * As in Excalidraw's own skeleton conversion, a container given no width or
+ * height is sized to its label, and the label is drawn at the container's angle.
  */
 function maybeCreateBoundText(
   skel: Record<string, unknown>,
@@ -197,6 +227,7 @@ function maybeCreateBoundText(
         fontFamily?: number;
         textAlign?: string;
         verticalAlign?: string;
+        strokeColor?: string;
       }
     | undefined;
   if (!label?.text) return;
@@ -214,6 +245,8 @@ function maybeCreateBoundText(
     >[0]["verticalAlign"],
     containerId: container.id,
     id: textId,
+    strokeColor: label.strokeColor,
+    angle: container.angle,
   } as Parameters<typeof newTextElement>[0]);
 
   // Link container to its bound text element
@@ -224,8 +257,47 @@ function maybeCreateBoundText(
   ];
 
   const text = textEl as unknown as ExcalidrawElement;
+  const containerType = container.type as Parameters<
+    typeof computeContainerDimensionForBoundText
+  >[1];
+  if (container.type !== "arrow") {
+    if (skel.width === undefined || skel.width === null) {
+      container.width = computeContainerDimensionForBoundText(text.width, containerType);
+    }
+    if (skel.height === undefined || skel.height === null) {
+      container.height = computeContainerDimensionForBoundText(text.height, containerType);
+    }
+  }
   centerBoundText(text, container);
   results.push(text);
+}
+
+/**
+ * Grow a container around its center until its bound text fits the space
+ * Excalidraw gives a label (for a diamond or an ellipse, less than its size),
+ * then re-center the text. Excalidraw would wrap the label instead.
+ */
+export function fitContainerToBoundText(
+  container: ExcalidrawElement,
+  text: ExcalidrawElement,
+): void {
+  const excalidrawContainer = container as unknown as Parameters<typeof getBoundTextMaxWidth>[0];
+  const boundText = text as unknown as Parameters<typeof getBoundTextMaxHeight>[1];
+  const containerType = container.type as Parameters<
+    typeof computeContainerDimensionForBoundText
+  >[1];
+
+  if (text.width > getBoundTextMaxWidth(excalidrawContainer, boundText)) {
+    const width = computeContainerDimensionForBoundText(text.width, containerType);
+    container.x -= (width - container.width) / 2;
+    container.width = width;
+  }
+  if (text.height > getBoundTextMaxHeight(excalidrawContainer, boundText)) {
+    const height = computeContainerDimensionForBoundText(text.height, containerType);
+    container.y -= (height - container.height) / 2;
+    container.height = height;
+  }
+  centerBoundText(text, container);
 }
 
 const BOUND_TEXT_PADDING = 5;

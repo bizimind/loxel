@@ -86,7 +86,9 @@ type NativeBinding = Record<string, any>;
 
 async function loadNativeBinding(): Promise<NativeBinding> {
   if (!isCompiled) {
-    // Dev mode — use dynamic import for native binding resolution
+    // Dev mode — resolve the native binding from node_modules at runtime.
+    // build.ts marks it external, so the compiled binary doesn't embed a second
+    // copy of the ~30 MB skia binary next to the one above.
     // @ts-expect-error — native binding has no type declarations
     return (await import("@napi-rs/canvas/js-binding")) as NativeBinding;
   }

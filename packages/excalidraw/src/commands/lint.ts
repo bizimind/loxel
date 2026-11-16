@@ -172,7 +172,7 @@ function checkArrows(elements: ExcalidrawElement[]): Warning[] {
           message: `Arrow has ${points.length} points but is not marked elbowed — may render as curved instead of 90-degree bends`,
         });
       }
-      if (arrow.roundness !== undefined && arrow.roundness !== null) {
+      if (arrow.elbowed === true && arrow.roundness !== undefined && arrow.roundness !== null) {
         warnings.push({
           check: "arrow",
           elementId: arrow.id,

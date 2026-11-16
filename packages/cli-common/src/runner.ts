@@ -9,8 +9,7 @@ import {
   type OutputContext,
   type OutputMode,
 } from "./output.ts";
-import type { CommandResult } from "./result.ts";
-import { errorResult } from "./result.ts";
+import { errorResult, type CommandResult, type ErrorData } from "./result.ts";
 
 export interface RunOptions {
   json?: boolean;
@@ -42,11 +41,9 @@ export async function runAction<T>(
     printResult(mode, result);
     process.exitCode = result.exitCode;
   } catch (err) {
-    // Convert thrown errors to error result (backward compat during migration)
-    const message = err instanceof Error ? err.message : String(err);
-    const exitCode = (err as { code?: number }).code ?? 1;
-    printResult(mode, errorResult(message, exitCode));
-    process.exitCode = exitCode;
+    const result = thrownErrorResult(err);
+    printResult(mode, result);
+    process.exitCode = result.exitCode;
   }
 }
 
@@ -65,11 +62,24 @@ export function runActionSync<T>(
     printResult(mode, result);
     process.exitCode = result.exitCode;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const exitCode = (err as { code?: number }).code ?? 1;
-    printResult(mode, errorResult(message, exitCode));
-    process.exitCode = exitCode;
+    const result = thrownErrorResult(err);
+    printResult(mode, result);
+    process.exitCode = result.exitCode;
   }
+}
+
+/**
+ * Convert an error thrown by a command action into an error result.
+ *
+ * The error's `code` becomes the exit code only when it is a positive integer:
+ * errors from Node APIs and libraries carry string codes ("ENOENT", "syntax"),
+ * which are not exit statuses, and a 0 would report a failure as success.
+ */
+function thrownErrorResult(err: unknown): CommandResult<ErrorData> {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+  const exitCode = typeof code === "number" && Number.isInteger(code) && code > 0 ? code : 1;
+  return errorResult(message, exitCode);
 }
 
 /**

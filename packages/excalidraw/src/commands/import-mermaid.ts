@@ -2,18 +2,25 @@ import path from "node:path";
 
 import { createResult, runAction } from "@bizimind/cli-common";
 
-import { createCanvas } from "../canvas-loader.ts";
 import { withDom } from "../dom-shim.ts";
-import { FONT_FAMILIES } from "../elements/element-defaults.ts";
 import { globalToFixedPoint } from "../elements/element-factory.ts";
 import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
-import { skeletonsToElements } from "../elements/skeleton-converter.ts";
+import { fitContainerToBoundText, skeletonsToElements } from "../elements/skeleton-converter.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
+import { MERMAID_DIAGRAM_TYPES } from "./mermaid-diagram-types.ts";
 import { readStdinText } from "./stdin-ids.ts";
 
 interface ImportMermaidResult {
   elementCount: number;
   elements: { id: string; type: string; text?: string }[];
+}
+
+export interface ImportMermaidOptions {
+  x?: number;
+  y?: number;
+  /** Draw flowchart edges and state transitions curved instead of as elbow arrows. */
+  curved?: boolean;
+  json?: boolean;
 }
 
 function formatResult(r: ImportMermaidResult): string {
@@ -25,9 +32,11 @@ function formatResult(r: ImportMermaidResult): string {
   return lines.join("\n");
 }
 
+const SUPPORTED_TYPES = `Supported diagram types: ${MERMAID_DIAGRAM_TYPES.join(", ")}.`;
+
 export async function importMermaidCommand(
   filePath: string,
-  opts: { x?: number; y?: number; json?: boolean },
+  opts: ImportMermaidOptions,
 ): Promise<void> {
   await runAction<ImportMermaidResult>(opts, async () => {
     const definition = await readStdinText();
@@ -37,63 +46,16 @@ export async function importMermaidCommand(
 
     const resolved = path.resolve(filePath);
     const file = await loadFile(resolved);
+    const { elements, files } = await convertMermaid(definition, { curved: opts.curved });
 
-    const elements = await withDom(async () => {
-      const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
+    // Merge binary files (images) if any
+    if (files) Object.assign(file.files, files);
 
-      const { elements: skeletons, files } = await parseMermaidToExcalidraw(definition);
-
-      // Check if the result contains image fallbacks (non-flowchart diagram types).
-      // The library renders unsupported types (sequence, class, ER, etc.) as rasterized
-      // images rather than native elements — these aren't useful for editing.
-      const hasImageFallback = skeletons.some(
-        (s: Record<string, unknown>) => s.type === "image" || (s as Record<string, unknown>).fileId,
-      );
-      if (hasImageFallback && skeletons.length <= 2) {
-        throw new Error(
-          "This diagram type was converted to an image, not editable elements. " +
-            "Only flowchart/graph diagrams produce native elements. " +
-            "Use 'flowchart TD' or 'graph TD' syntax.",
-        );
-      }
-
-      // Merge binary files (images) if any
-      if (files && Object.keys(files).length > 0) {
-        Object.assign(file.files, files);
-      }
-
-      // Mermaid sizes containers based on its own font (16px sans-serif), but
-      // excalidraw renders bound text in Virgil/Excalifont at the label's fontSize
-      // (default 20px) with ~50px internal padding. Widen containers so text doesn't wrap.
-      ensureContainersFitText(skeletons as Record<string, unknown>[]);
-
-      // Save arrow binding refs before conversion — skeletonsToElements dispatches
-      // to individual factory functions that don't resolve cross-element start/end refs.
-      const arrowRefs = new Map<string, { startId?: string; endId?: string }>();
-      for (const skel of skeletons as Record<string, unknown>[]) {
-        if (skel.type !== "arrow") continue;
-        const startRef = skel.start as { id: string } | undefined;
-        const endRef = skel.end as { id: string } | undefined;
-        if (startRef || endRef) {
-          arrowRefs.set(skel.id as string, { startId: startRef?.id, endId: endRef?.id });
-        }
-      }
-
-      const converted = skeletonsToElements(skeletons as Record<string, unknown>[]);
-
-      // Create bindings from saved refs, then snap fixedPoints to exact edges.
-      createArrowBindings(converted, arrowRefs);
-      fixArrowBindings(converted);
-      return converted;
-    });
-
-    // Apply offset
     const dx = opts.x ?? 0;
     const dy = opts.y ?? 0;
-    if (dx !== 0 || dy !== 0) {
-      for (let i = 0; i < elements.length; i++) {
-        elements[i] = { ...elements[i]!, x: elements[i]!.x + dx, y: elements[i]!.y + dy };
-      }
+    for (const el of elements) {
+      el.x += dx;
+      el.y += dy;
     }
 
     file.elements.push(...elements);
@@ -101,20 +63,12 @@ export async function importMermaidCommand(
 
     // Build summary — show containers/shapes but not bound text elements
     const summary = elements
-      .filter((el) => {
-        if (el.type === "text") {
-          // Filter out bound text (attached to containers) — only show standalone text
-          const containerId = (el as Record<string, unknown>).containerId;
-          return !containerId;
-        }
-        return true;
-      })
+      .filter((el) => el.type !== "text" || !el.containerId)
       .map((el) => {
         const text =
           el.type === "text"
-            ? ((el as Record<string, unknown>).text as string)
-            : (((el as Record<string, unknown>).originalText as string | undefined) ??
-              findBoundText(elements, el.id));
+            ? (el.text as string)
+            : ((el.originalText as string | undefined) ?? findBoundText(elements, el.id));
         return { id: el.id, type: el.type, text: text || undefined };
       });
 
@@ -125,205 +79,127 @@ export async function importMermaidCommand(
   });
 }
 
-function findBoundText(elements: ExcalidrawElement[], containerId: string): string | undefined {
-  const textEl = elements.find(
-    (el) => el.type === "text" && (el as Record<string, unknown>).containerId === containerId,
-  );
-  return textEl ? ((textEl as Record<string, unknown>).text as string) : undefined;
+/**
+ * Convert a Mermaid definition to Excalidraw elements laid out by
+ * mermaid-to-excalidraw (which lays diagrams out with Pele), with arrows bound
+ * to the shapes they connect. Node IDs from the definition become element IDs.
+ */
+export async function convertMermaid(
+  definition: string,
+  opts: { curved?: boolean } = {},
+): Promise<{ elements: ExcalidrawElement[]; files: Record<string, unknown> | undefined }> {
+  return withDom(async () => {
+    const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
+
+    let parsed: Awaited<ReturnType<typeof parseMermaidToExcalidraw>>;
+    try {
+      parsed = await parseMermaidToExcalidraw(definition, { elbow: !opts.curved });
+    } catch (err) {
+      throw parseError(err);
+    }
+    const skeletons = parsed.elements as unknown as Record<string, unknown>[];
+
+    // Diagram types the library can't convert come back as a single rasterized
+    // image, which isn't editable.
+    if (skeletons.every((s) => s.type === "image")) {
+      throw new Error(
+        `This mermaid diagram type converts to an image, not editable elements. ${SUPPORTED_TYPES}`,
+      );
+    }
+
+    const elements = skeletonsToElements(skeletons);
+    fitContainersToLabels(elements);
+    await bindArrows(elements, skeletons);
+    return { elements, files: parsed.files };
+  });
+}
+
+/** Describe a mermaid-to-excalidraw parse error (a `PeleError`, coded "syntax", "semantic", ...). */
+function parseError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+  const hint = code === "unsupported-diagram" ? ` ${SUPPORTED_TYPES}` : "";
+  return new Error(`Invalid mermaid definition: ${message}${hint}`, { cause: err });
 }
 
 /**
- * Create startBinding/endBinding on arrows from saved skeleton start/end refs.
- * Also updates target shapes' boundElements for bidirectional binding.
+ * Grow containers whose label doesn't fit the space Excalidraw gives it. Pele
+ * sizes nodes for their labels in Excalifont, but a diamond's or an ellipse's
+ * label gets less room in Excalidraw than in Pele's shapes, so Excalidraw
+ * would wrap it.
  */
-function createArrowBindings(
+function fitContainersToLabels(elements: ExcalidrawElement[]): void {
+  const byId = new Map(elements.map((el) => [el.id, el]));
+  for (const text of elements) {
+    if (text.type !== "text" || typeof text.containerId !== "string") continue;
+    const container = byId.get(text.containerId);
+    if (container && container.type !== "arrow") fitContainerToBoundText(container, text);
+  }
+}
+
+/**
+ * Bind arrows to the shapes their skeletons start and end at, the way Excalidraw
+ * binds a dropped arrow end (its own skeleton conversion does the same): focus
+ * and gap from where the arrow touches the shape, and, for elbow arrows, the
+ * fixed point they're routed from when a shape moves. Arrows keep the points
+ * Pele routed them along.
+ */
+async function bindArrows(
   elements: ExcalidrawElement[],
-  arrowRefs: Map<string, { startId?: string; endId?: string }>,
-): void {
-  const byId = new Map(elements.map((el) => [el.id, el]));
+  skeletons: Record<string, unknown>[],
+): Promise<void> {
+  const { Scene, bindLinearElement } = await import("@excalidraw/element");
+  type SceneElement = Parameters<typeof bindLinearElement>[1];
+  type SceneArrow = Parameters<typeof bindLinearElement>[0];
 
-  for (const el of elements) {
-    if (el.type !== "arrow") continue;
-    const refs = arrowRefs.get(el.id);
-    if (!refs) continue;
-    const arrow = el as Record<string, unknown>;
-
-    if (!arrow.startBinding && refs.startId) {
-      const target = byId.get(refs.startId);
-      if (target) {
-        arrow.startBinding = {
-          elementId: refs.startId,
-          fixedPoint: globalToFixedPoint(el.x, el.y, target),
-          focus: 0,
-          gap: 1,
-        };
-        appendBoundElement(target, el.id);
-      }
-    }
-
-    if (!arrow.endBinding && refs.endId) {
-      const target = byId.get(refs.endId);
-      if (target) {
-        const points = arrow.points as [number, number][];
-        const last = points[points.length - 1]!;
-        arrow.endBinding = {
-          elementId: refs.endId,
-          fixedPoint: globalToFixedPoint(el.x + last[0], el.y + last[1], target),
-          focus: 0,
-          gap: 1,
-        };
-        appendBoundElement(target, el.id);
-      }
-    }
-  }
-}
-
-function appendBoundElement(target: ExcalidrawElement, arrowId: string): void {
-  const bound =
-    ((target as Record<string, unknown>).boundElements as Array<{
-      id: string;
-      type: string;
-    }> | null) ?? [];
-  if (!bound.some((b) => b.id === arrowId)) {
-    bound.push({ id: arrowId, type: "arrow" });
-    (target as Record<string, unknown>).boundElements = bound;
-  }
-}
-
-/**
- * Fix arrow bindings so arrows physically connect to shape edges.
- *
- * skeletonsToElements creates binding metadata but with imprecise
- * fixedPoints (e.g., 0.89 instead of 1.0) because mermaid's arrow positions
- * don't align with shape edges. Excalidraw requires arrow endpoints to
- * physically touch the shape at the fixedPoint position.
- *
- * This function:
- * 1. Snaps fixedPoint values to exact edge values (0 or 1) based on which
- *    edge the arrow approaches from
- * 2. Repositions arrow start/end points to the snapped edge position
- * 3. Preserves intermediate waypoints for mermaid's curved arrow paths
- */
-function fixArrowBindings(elements: ExcalidrawElement[]): void {
-  const byId = new Map(elements.map((el) => [el.id, el]));
-
-  for (const el of elements) {
-    if (el.type !== "arrow") continue;
-    const arrow = el as Record<string, unknown>;
-    const points = arrow.points as [number, number][];
-    if (!points || points.length < 2) continue;
-
-    for (const [bindingKey, pointIdx] of [
-      ["startBinding", 0],
-      ["endBinding", points.length - 1],
-    ] as const) {
-      const binding = arrow[bindingKey] as
-        | { elementId?: string; fixedPoint?: [number, number] }
-        | null
-        | undefined;
-      if (!binding?.fixedPoint || !binding.elementId) continue;
-
-      const target = byId.get(binding.elementId);
-      if (!target) continue;
-
-      // Snap fixedPoint to nearest edge. The arrow should connect at a shape
-      // border, not at some interior point. Determine which edge based on
-      // which fixedPoint axis is closest to 0 or 1.
-      const [fpx, fpy] = binding.fixedPoint;
-      const distToLeft = fpx;
-      const distToRight = 1 - fpx;
-      const distToTop = fpy;
-      const distToBottom = 1 - fpy;
-      const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
-
-      let snappedX: number;
-      let snappedY: number;
-      if (minDist === distToRight) {
-        snappedX = 1;
-        snappedY = Math.max(0, Math.min(1, fpy));
-      } else if (minDist === distToLeft) {
-        snappedX = 0;
-        snappedY = Math.max(0, Math.min(1, fpy));
-      } else if (minDist === distToBottom) {
-        snappedX = Math.max(0, Math.min(1, fpx));
-        snappedY = 1;
-      } else {
-        snappedX = Math.max(0, Math.min(1, fpx));
-        snappedY = 0;
-      }
-      binding.fixedPoint = [snappedX, snappedY];
-
-      // Compute global position from snapped fixedPoint
-      const globalX = target.x + snappedX * target.width;
-      const globalY = target.y + snappedY * target.height;
-
-      if (pointIdx === 0) {
-        // Move arrow origin to the start binding point; shift all other points
-        const dx = globalX - (arrow.x as number);
-        const dy = globalY - (arrow.y as number);
-        arrow.x = globalX;
-        arrow.y = globalY;
-        for (let i = 1; i < points.length; i++) {
-          points[i] = [points[i]![0] - dx, points[i]![1] - dy];
-        }
-      } else {
-        // Move last point to the end binding point (relative to arrow origin)
-        points[pointIdx] = [globalX - (arrow.x as number), globalY - (arrow.y as number)];
-      }
-    }
-
-    // Recompute width/height from points
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [px, py] of points) {
-      if (px < minX) minX = px;
-      if (py < minY) minY = py;
-      if (px > maxX) maxX = px;
-      if (py > maxY) maxY = py;
-    }
-    arrow.width = maxX - minX;
-    arrow.height = maxY - minY;
-  }
-}
-
-// Excalidraw font name map: family ID → canvas font name
-const FONT_NAMES: Record<number, string> = {
-  [FONT_FAMILIES.hand]: "Virgil",
-  [FONT_FAMILIES.normal]: "Helvetica",
-  [FONT_FAMILIES.code]: "Cascadia",
-};
-/** Horizontal padding excalidraw reserves inside containers for bound text. */
-const CONTAINER_TEXT_PADDING = 50;
-
-/**
- * Widen mermaid skeleton containers so their label text fits after excalidraw conversion.
- *
- * Mermaid measures text at ~16px sans-serif, but excalidraw renders bound text
- * in Virgil at the label's fontSize (default 20px) which is significantly wider.
- * Without this adjustment, long labels wrap their last few characters.
- */
-function ensureContainersFitText(skeletons: Record<string, unknown>[]): void {
-  const ctx = createCanvas(1, 1).getContext("2d");
-
+  const scene = new Scene(elements as unknown as SceneElement[]);
+  const byId = scene.getNonDeletedElementsMap();
   for (const skel of skeletons) {
-    const label = skel.label as
-      | { text?: string; fontSize?: number; fontFamily?: number }
-      | undefined;
-    if (!label?.text || skel.width === undefined || skel.width === null) continue;
-
-    const fontSize = label.fontSize ?? 20;
-    const fontFamily = label.fontFamily ?? FONT_FAMILIES.hand;
-    const fontName = FONT_NAMES[fontFamily] ?? "Virgil";
-    ctx.font = `${fontSize}px ${fontName}`;
-
-    const lines = label.text.split("\n");
-    const maxLineWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
-    const minWidth = Math.ceil(maxLineWidth) + CONTAINER_TEXT_PADDING;
-
-    if ((skel.width as number) < minWidth) {
-      skel.width = minWidth;
+    if (skel.type !== "arrow" || typeof skel.id !== "string") continue;
+    const arrow = byId.get(skel.id) as SceneArrow | undefined;
+    if (!arrow) continue;
+    for (const end of ["start", "end"] as const) {
+      const shape = byId.get(skeletonRefId(skel[end]) ?? "");
+      if (shape) bindLinearElement(arrow, shape as SceneElement, end, scene);
     }
   }
+
+  for (const el of elements) {
+    // The Scene numbers elements with fractional indices. Files written by this
+    // CLI carry none (Excalidraw assigns them on load), so drop them again.
+    el.index = null;
+    if (el.type === "arrow" && el.elbowed !== true) addStraightArrowFixedPoints(el, elements);
+  }
+}
+
+function skeletonRefId(ref: unknown): string | undefined {
+  if (typeof ref !== "object" || ref === null || !("id" in ref)) return undefined;
+  return typeof ref.id === "string" ? ref.id : undefined;
+}
+
+/**
+ * Excalidraw binds non-elbow arrows by focus and gap only. This CLI's `move`
+ * re-attaches bound arrows by `fixedPoint` (as arrows drawn with `draw arrow
+ * --from/--to` carry), so record where each end touches its shape.
+ */
+function addStraightArrowFixedPoints(
+  arrow: ExcalidrawElement,
+  elements: ExcalidrawElement[],
+): void {
+  const points = arrow.points as [number, number][];
+  const last = points[points.length - 1]!;
+  const ends = [
+    ["startBinding", arrow.x, arrow.y],
+    ["endBinding", arrow.x + last[0], arrow.y + last[1]],
+  ] as const;
+  for (const [key, x, y] of ends) {
+    const binding = arrow[key] as { elementId: string; fixedPoint?: unknown } | null;
+    const shape = binding && elements.find((el) => el.id === binding.elementId);
+    if (binding && shape) binding.fixedPoint = globalToFixedPoint(x, y, shape);
+  }
+}
+
+function findBoundText(elements: ExcalidrawElement[], containerId: string): string | undefined {
+  const textEl = elements.find((el) => el.type === "text" && el.containerId === containerId);
+  return textEl ? (textEl.text as string) : undefined;
 }
