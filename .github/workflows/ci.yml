@@ -221,6 +221,20 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
+      # loxel's ESLint language server test runs the real bundle under Node, and fails in CI
+      # when it is not built. The build fetches the server's source, which the cache keeps.
+      - if: matrix.package.name == 'loxel'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - if: matrix.package.name == 'loxel'
+        uses: actions/cache@v6
+        with:
+          path: packages/loxel/build/eslint-language-server-source
+          key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts') }}
+      - if: matrix.package.name == 'loxel'
+        name: Build the ESLint language server
+        run: pnpm -C packages/loxel run build:language-servers eslint-language-server
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
 
