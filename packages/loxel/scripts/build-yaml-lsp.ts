@@ -31,6 +31,25 @@ const result = await Bun.build({
           contents: "export async function setupl10nBundle() {}",
           loader: "js",
         }));
+
+        // 2.0 matches `yaml.schemas` globs with picomatch's defaults (1.24 passed `bash: true`), so
+        // `**` and `*` skip dot segments: `**/*.yaml` would miss every file in a worktree under
+        // `.worktrees/`, in `.github/`, or named `.something.yaml`. `dot: true` matches them, as
+        // Loxel's own `schemaGlobMatches` does for JSON and TOML.
+        build.onLoad(
+          { filter: /languageservice\/services\/yamlSchemaService\.js$/ },
+          async (args) => {
+            const source = await Bun.file(args.path).text();
+            const options = "noglobstar: false,";
+            const matchers = source.split(options).length - 1;
+            if (matchers !== 2) {
+              throw new Error(
+                `Expected 2 picomatch calls with "${options}" in ${args.path}, found ${matchers}: update the dot-segment patch`,
+              );
+            }
+            return { contents: source.replaceAll(options, `${options} dot: true,`), loader: "js" };
+          },
+        );
       },
     },
   ],

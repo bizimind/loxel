@@ -194,6 +194,35 @@ describe.skipIf(!(await builtBinaryExists(join(BUILD, "yaml-language-server"))))
     );
 
     test(
+      "matches files under dot directories and dotfiles, as worktrees under .worktrees/ are",
+      async () => {
+        const dir = await tempDir();
+        const schemaPath = join(dir, "mapped.json");
+        await Bun.write(schemaPath, SCHEMA);
+        const client = start(async () => "{}");
+        manager?.updateSchemas({
+          [pathToFileURL(schemaPath).href]: ["**/*.yaml", "!**/.skipped/**"],
+        });
+        await client.start();
+        const inDotDir = pathToFileURL(join(dir, ".worktrees/w/conf/app.yaml")).href;
+        const dotfile = pathToFileURL(join(dir, "conf/.hidden.yaml")).href;
+        const excluded = pathToFileURL(join(dir, ".skipped/app.yaml")).href;
+        const named = (uri: string) =>
+          client.diagnosticsFor(uri, (messages) => messages.length > 0);
+        const fromDotDir = named(inDotDir);
+        const fromDotfile = named(dotfile);
+        const fromExcluded = client.diagnosticsFor(excluded, () => true);
+        client.open(excluded, "yaml", "other: 1\n");
+        client.open(inDotDir, "yaml", "other: 1\n");
+        client.open(dotfile, "yaml", "other: 1\n");
+        expect((await fromDotDir).join("\n")).toContain("name");
+        expect((await fromDotfile).join("\n")).toContain("name");
+        expect(await fromExcluded).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
       "names each YAML document's schema in a lens that runs nothing",
       async () => {
         const dir = await tempDir();

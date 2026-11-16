@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import { isRecord } from "@/lib/is-record";
@@ -87,7 +89,12 @@ export class YamlLspManager extends StdioLspManager<BaseLspSession> {
   // ---------------------------------------------------------------------------
 
   protected resolveBinary(): string | null {
-    return this.resolveBundledBinary("yaml-language-server");
+    // The compiled bundle, also in development: the npm package's own bin lacks what the build
+    // script patches in (see scripts/build-yaml-lsp.ts).
+    return this.resolveBundledBinary(
+      "yaml-language-server",
+      path.resolve(import.meta.dir, "../../build/yaml-language-server"),
+    );
   }
 
   protected buildSession(ws: ServerWebSocket<unknown>, proc: Subprocess): BaseLspSession {
