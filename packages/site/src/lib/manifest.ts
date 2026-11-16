@@ -1,6 +1,6 @@
 const MANIFEST_URL = "https://loxel.bizimind.io/loxel/manifest.json";
 // Only used by `astro dev` when the manifest is unreachable (e.g. offline)
-const DEV_FALLBACK: ManifestData = { version: "0.0.0-dev", downloads: {} };
+const DEV_FALLBACK: ManifestData = { version: "0.0.0-dev", downloads: {}, sboms: {} };
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return v !== null && v !== undefined && typeof v === "object";
@@ -9,8 +9,8 @@ function isObj(v: unknown): v is Record<string, unknown> {
 export interface ManifestData {
   version: string;
   downloads: Record<string, string>;
-  /** The release's CycloneDX SBOM; releases from before SBOMs have none. */
-  sbom?: string;
+  /** Each architecture's CycloneDX SBOM; releases from before SBOMs have none. */
+  sboms: Record<string, string>;
 }
 
 async function loadManifest(): Promise<ManifestData> {
@@ -26,8 +26,13 @@ async function loadManifest(): Promise<ManifestData> {
       if (isObj(info) && typeof info.url === "string") downloads[platform] = info.url;
     }
   }
-  const sbom = typeof manifest.sbom === "string" ? manifest.sbom : undefined;
-  return { version: manifest.version, downloads, sbom };
+  const sboms: Record<string, string> = {};
+  if (isObj(manifest.sbom)) {
+    for (const [platform, url] of Object.entries(manifest.sbom)) {
+      if (typeof url === "string") sboms[platform] = url;
+    }
+  }
+  return { version: manifest.version, downloads, sboms };
 }
 
 /**

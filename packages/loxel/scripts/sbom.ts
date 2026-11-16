@@ -131,17 +131,23 @@ export function checkNpmDependencies(manifests: Manifest[], packageJson: unknown
   }
 }
 
-/** The SBOM of the app built on this platform. */
+/**
+ * The SBOM of the app built on this machine. pnpm installs, and so lists, only this machine's
+ * platform packages (TypeScript's compiler is one), so each architecture's app gets its own.
+ */
 export async function generateSbom(): Promise<Bom> {
   const packageJson: unknown = await Bun.file(path.join(LOXEL, "package.json")).json();
   checkNpmDependencies(await readAllManifests(), packageJson);
 
   const pnpmSbom: unknown =
-    await $`pnpm --filter loxel sbom --sbom-format cyclonedx --sbom-type application --prod`
+    await $`pnpm --filter @bizimind/loxel sbom --sbom-format cyclonedx --sbom-type application --prod`
       .cwd(LOXEL)
       .quiet()
       .json();
   const bom = BomSchema.parse(pnpmSbom);
+  const { version } = bom.metadata.component;
+  // pnpm names the root as an npm package, which Loxel is not.
+  bom.metadata.component.purl = `pkg:github/bizimind/loxel@loxel-v${version}`;
 
   const bunVersion = (await Bun.file(path.join(REPO_ROOT, ".bun-version")).text()).trim();
   const languageServers = (await readManifests())
@@ -149,7 +155,7 @@ export async function generateSbom(): Promise<Bom> {
     .filter((shipped) => shipped !== undefined)
     .map(languageServerComponent);
   return withComponents(bom, [
-    electronComponent(electronVersion(packageJson), readPatches(), bom.metadata.component.version),
+    electronComponent(electronVersion(packageJson), readPatches(), version),
     bunComponent(bunVersion),
     ...languageServers,
   ]);

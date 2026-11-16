@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@typescript/native':
+      specifier: npm:typescript@7.1.0-dev.20261117.1
+      version: 7.1.0-dev.20261117.1
+
 overrides:
   '@excalidraw/excalidraw>sass': '-'
   '@excalidraw/excalidraw>@excalidraw/mermaid-to-excalidraw': ^3.6.0
@@ -43,7 +49,7 @@ importers:
         specifier: ^24.19.2
         version: 24.19.2
       '@typescript/native':
-        specifier: npm:typescript@7.1.0-dev.20261117.1
+        specifier: 'catalog:'
         version: typescript@7.1.0-dev.20261117.1
       oxfmt:
         specifier: ^0.78.0
@@ -220,8 +226,8 @@ importers:
         specifier: ^4.0.4
         version: 4.0.4
       '@typescript/native':
-        specifier: npm:typescript@7.0.2
-        version: typescript@7.0.2
+        specifier: 'catalog:'
+        version: typescript@7.1.0-dev.20261117.1
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0

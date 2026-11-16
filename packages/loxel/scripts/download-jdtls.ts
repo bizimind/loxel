@@ -11,6 +11,7 @@ import { BUILD_DIR } from "./download-release-binary";
 import { manifestVersion } from "./language-server-manifest";
 
 const VERSION = await manifestVersion("jdtls");
+// The build timestamp of the manifest version's release; an upgrade changes it and SHA256 here.
 const ARCHIVE = `jdt-language-server-${VERSION}-202610191322.tar.gz`;
 const SHA256 = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4";
 

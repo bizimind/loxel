@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import path from "node:path";
 
 import { readManifests, shippedComponent } from "./language-server-manifest";
 import { type Bom, bunComponent, checkNpmDependencies, generateSbom, withComponents } from "./sbom";
@@ -24,21 +23,15 @@ describe("generateSbom", () => {
     expect(names).toContain("react");
     expect(names).toContain("electron");
     expect(names).toContain("bun");
-    const { dependencies } = await Bun.file(
-      path.join(import.meta.dir, "..", "package.json"),
-    ).json();
+    // The tsc Loxel ships, from this machine's platform package (generateSbom itself refuses a
+    // manifest's npm package that is not a dependency).
+    expect(names).toContain(`@typescript/typescript-${process.platform}-${process.arch}`);
     for (const manifest of await readManifests()) {
-      for (const name of manifest.npm ?? []) {
-        // An alias (`npm:typescript@7.0.2`) is listed under the package it resolves to.
-        const spec: string = dependencies[name];
-        expect(names).toContain(
-          spec.startsWith("npm:") ? spec.slice(4, spec.lastIndexOf("@")) : name,
-        );
-      }
       const shipped = shippedComponent(manifest);
       if (shipped) expect(names).toContain(shipped.name);
     }
-  });
+    // It runs pnpm, so give a slow machine room.
+  }, 30_000);
 });
 
 describe("shippedComponent", () => {

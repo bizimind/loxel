@@ -55,7 +55,10 @@ export interface ShippedComponent {
 export async function readManifest(name: string): Promise<Manifest> {
   const file = path.join(MANIFEST_DIR, `${name}.json`);
   const parsed = ManifestSchema.safeParse(await Bun.file(file).json());
-  if (!parsed.success) throw new Error(`${file}: ${z.prettifyError(parsed.error)}`);
+  if (!parsed.success) {
+    const hint = 'it needs "npm", or "version", "purl" and "license"';
+    throw new Error(`${file}: ${hint}\n${z.prettifyError(parsed.error)}`);
+  }
   return { ...parsed.data, name };
 }
 
