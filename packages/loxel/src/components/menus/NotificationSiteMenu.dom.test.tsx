@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { NotificationSource, ServerNotification } from "@/api/notification-model";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
-import { useSettingsStore } from "@/store/settings-store";
+import { DEFAULT_BROWSER_BACKGROUND_PAGES, useSettingsStore } from "@/store/settings-store";
 
 const navigateToNotification = mock((_notification: ServerNotification) => {});
 void mock.module("@/lib/notification-navigation", () => ({ navigateToNotification }));
@@ -40,7 +40,11 @@ const item = (label: string) => screen.findByText(label);
 beforeEach(() => {
   navigateToNotification.mockClear();
   useSettingsStore.setState({
-    browser: { notificationSites: { [site]: "allow" }, notificationMutes: {} },
+    browser: {
+      notificationSites: { [site]: "allow" },
+      notificationMutes: {},
+      backgroundPages: DEFAULT_BROWSER_BACKGROUND_PAGES,
+    },
   });
 });
 

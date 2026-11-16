@@ -14,7 +14,8 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
+import { BrowserPageSlot } from "@/components/browser/BrowserPagePool";
+import type { BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
 import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
@@ -229,9 +230,9 @@ function VirtualDocumentPanelComponent(
   );
 }
 
-/** Browser panel in the center group. */
+/** Browser panel in the center group: a slot that the window's page pool shows its page over. */
 function BrowserPanelComponent(props: IDockviewPanelProps<BrowserPanelParams>) {
-  return <BrowserPanel url={props.params.url} panelApi={props.api} />;
+  return <BrowserPageSlot url={props.params.url} panelApi={props.api} />;
 }
 
 /** Media viewer panel in the center group. */

@@ -7,6 +7,7 @@ import { classifySchemaGlob } from "@/lib/schema-glob";
 
 import {
   BUILTIN_SCHEMA_DEFAULTS,
+  DEFAULT_BROWSER_BACKGROUND_PAGES,
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type IndentationInputs,
@@ -531,8 +532,11 @@ describe("color themes", () => {
 
 describe("browser notification mutes", () => {
   const site = "https://chat.example";
+  const backgroundPages = DEFAULT_BROWSER_BACKGROUND_PAGES;
   const reset = () =>
-    useSettingsStore.setState({ browser: { notificationSites: {}, notificationMutes: {} } });
+    useSettingsStore.setState({
+      browser: { notificationSites: {}, notificationMutes: {}, backgroundPages },
+    });
   const browser = () => useSettingsStore.getState().browser;
 
   test("muting keeps the site's decision, and unmuting removes the mute", () => {
@@ -543,6 +547,7 @@ describe("browser notification mutes", () => {
     expect(browser()).toEqual({
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: {} },
+      backgroundPages,
     });
     store.setNotificationMute(site, null);
     expect(browser().notificationMutes).toEqual({});
@@ -557,7 +562,7 @@ describe("browser notification mutes", () => {
     store.setNotificationSite(site, "block");
     expect(browser().notificationMutes).toEqual({ [site]: {} });
     store.setNotificationSite(site, null);
-    expect(browser()).toEqual({ notificationSites: {}, notificationMutes: {} });
+    expect(browser()).toEqual({ notificationSites: {}, notificationMutes: {}, backgroundPages });
     reset();
   });
 
@@ -573,6 +578,7 @@ describe("browser notification mutes", () => {
       browser: {
         notificationSites: { [site]: "allow" },
         notificationMutes: { "https://old.example": { until: 1 } },
+        backgroundPages,
       },
     });
     useSettingsStore.getState().setNotificationMute(site, { until: Date.now() + 60_000 });
@@ -590,10 +596,12 @@ describe("browser notification mutes", () => {
     expect(merge({ browser: stored }, current).browser).toEqual({
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: { until: 5 } },
+      backgroundPages,
     });
     expect(merge({ browser: { notificationSites: {} } }, current).browser).toEqual({
       notificationSites: {},
       notificationMutes: {},
+      backgroundPages,
     });
   });
 });

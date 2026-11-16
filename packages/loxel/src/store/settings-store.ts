@@ -45,8 +45,9 @@ export type SidebarZone = "left" | "bottom" | "right";
  * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
  * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The browser's
  * per-site decisions and mutes keep only valid entries, since the Electron main process enforces
- * them. The terminal's "When quitting Loxel" falls back to its default when it is missing (a row
- * from before it) or unknown, as main does with the value it is sent.
+ * them, and its background page count falls back to its default when missing or out of range. The
+ * terminal's "When quitting Loxel" falls back to its default when it is missing (a row from before
+ * it) or unknown, as main does with the value it is sent.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
@@ -87,13 +88,33 @@ export interface BrowserSettings {
    * main drops their notifications. Expired snoozes are pruned when a mute changes.
    */
   notificationMutes: NotificationMutes;
+  /**
+   * How many browser pages of layouts not shown (other worktrees, or Home) stay loaded; past it,
+   * the least recently shown are unloaded and load again when shown (see store/browser-pages.ts).
+   */
+  backgroundPages: number;
+}
+
+export const DEFAULT_BROWSER_BACKGROUND_PAGES = 10;
+export const MAX_BROWSER_BACKGROUND_PAGES = 50;
+
+/** A whole number of background pages in range, or null. */
+export function parseBackgroundPages(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_BROWSER_BACKGROUND_PAGES
+    ? value
+    : null;
 }
 
 function parseBrowserSettings(value: unknown): BrowserSettings {
-  const browser = isRecord(value) ? value : {};
+  const fields = isRecord(value) ? value : {};
   return {
-    notificationSites: parseNotificationSites(browser.notificationSites),
-    notificationMutes: parseNotificationMutes(browser.notificationMutes),
+    notificationSites: parseNotificationSites(fields.notificationSites),
+    notificationMutes: parseNotificationMutes(fields.notificationMutes),
+    backgroundPages:
+      parseBackgroundPages(fields.backgroundPages) ?? DEFAULT_BROWSER_BACKGROUND_PAGES,
   };
 }
 
@@ -673,6 +694,8 @@ export interface SettingsState {
    * be muted, so every mute shows in Settings > Browser and goes when the site is forgotten.
    */
   setNotificationMute: (origin: string, mute: NotificationMute | null) => void;
+  /** Set how many background browser pages stay loaded. */
+  setBrowserBackgroundPages: (count: number) => void;
 
   // Wt config actions
 
@@ -770,7 +793,11 @@ export const useSettingsStore = create<SettingsState>()(
       fileAssociations: [],
       autoRevealInExplorer: false,
       autoCheckForUpdates: true,
-      browser: { notificationSites: {}, notificationMutes: {} },
+      browser: {
+        notificationSites: {},
+        notificationMutes: {},
+        backgroundPages: DEFAULT_BROWSER_BACKGROUND_PAGES,
+      },
 
       isOpen: false,
       activeSection: "general",
@@ -1081,6 +1108,9 @@ export const useSettingsStore = create<SettingsState>()(
           if (mute) notificationMutes[origin] = mute;
           return { browser: { ...s.browser, notificationMutes } };
         }),
+
+      setBrowserBackgroundPages: (count) =>
+        set((s) => ({ browser: { ...s.browser, backgroundPages: count } })),
 
       // -- UI --
 

@@ -16,6 +16,7 @@ import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { closeBrowserPage } from "@/store/browser-pages";
 import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -122,6 +123,7 @@ function CenterLayout({
 
       if (removedDef?.type === "browser") {
         usePanelNotificationStore.getState().unregisterPanel(event.id);
+        closeBrowserPage(event.id);
       }
 
       // Notify server when the last panel showing an external file closes, so its watcher can
