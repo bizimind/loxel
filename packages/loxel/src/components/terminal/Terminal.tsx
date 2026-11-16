@@ -432,6 +432,10 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         fitAndSendResize(terminalId, terminal, fitAddon);
       }
     });
+    webglRenderer.setBidiText(useSettingsStore.getState().terminal.bidiText);
+    const unsubBidiText = useSettingsStore.subscribe((s) =>
+      webglRenderer.setBidiText(s.terminal.bidiText),
+    );
     // Deferred to act on where the state settles: saving a layout while a group is maximized shows
     // and re-hides the other groups synchronously, which must not cost a WebGL context each time.
     const visibility = panelApi.onDidVisibilityChange(() => {
@@ -539,6 +543,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       unsubOutput();
       unsubscribe();
       unsubReconnect();
+      unsubBidiText();
       visibility.dispose();
       webglRenderer.detach();
       terminal.dispose();

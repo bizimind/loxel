@@ -107,6 +107,7 @@ export type ActionId =
   | "tree.open"
   | "tree.rename"
   | "editor.changeIndentation"
+  | "terminal.toggleBidiText"
   | ToolchainSelectActionId
   | EditorCodeActionId
   | "language.restartServers"
@@ -154,6 +155,7 @@ export type ActionCategory =
   | "worktree"
   | "tree"
   | "editor"
+  | "terminal"
   | "language"
   | "app";
 
@@ -412,6 +414,13 @@ export const ACTIONS: readonly ActionDef[] = [
     label: "Editor: Change Indentation",
     category: "editor",
     isEnabled: isCodeEditorActive,
+  },
+
+  // Terminal
+  {
+    id: "terminal.toggleBidiText",
+    label: "Terminal: Toggle Bidirectional Text",
+    category: "terminal",
   },
 
   // Languages

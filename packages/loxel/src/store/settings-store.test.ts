@@ -15,6 +15,7 @@ import {
   resolveIndentation,
   type SettingsState,
   useSettingsStore,
+  withValidSettings,
 } from "./settings-store";
 
 function settings(overrides: EditorSettings["overrides"] = []): EditorSettings {
@@ -527,6 +528,21 @@ describe("color themes", () => {
       dark: "custom:1",
       custom: [{ id: "custom:1", ...harbor, colors: {} }],
     });
+  });
+});
+
+describe("withValidSettings: terminal bidirectional text", () => {
+  const bidiText = (terminal: Record<string, unknown>) =>
+    withValidSettings({ terminal }).terminal.bidiText;
+
+  test("is off for a row from before the setting, or a value that is not true", () => {
+    expect(bidiText({ scrollbackLines: 123 })).toBe(false);
+    expect(bidiText({ bidiText: "yes" })).toBe(false);
+  });
+
+  test("keeps a stored choice", () => {
+    expect(bidiText({ bidiText: true })).toBe(true);
+    expect(bidiText({ bidiText: false })).toBe(false);
   });
 });
 

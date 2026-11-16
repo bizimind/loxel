@@ -7,6 +7,7 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { showToast } from "@/components/ui/toast";
 import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
@@ -433,6 +434,15 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "codeAction.refactor":
         runEditorCodeAction(actionId);
         break;
+      // -- Terminal --
+      case "terminal.toggleBidiText": {
+        const settings = useSettingsStore.getState();
+        const bidiText = !settings.terminal.bidiText;
+        settings.updateTerminal({ bidiText });
+        showToast(`Terminal bidirectional text ${bidiText ? "on" : "off"}`, "info");
+        break;
+      }
+
       case "language.restartServers":
         restartLanguageServers();
         break;

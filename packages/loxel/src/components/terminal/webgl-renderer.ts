@@ -9,12 +9,28 @@
  * Chromium allows ~16 live WebGL contexts per window and force-loses the oldest beyond that, so a
  * terminal only holds one while its panel is visible: hidden tabs fall back to the DOM renderer and
  * re-acquire WebGL when shown again (which also retries after a context loss).
+ *
+ * Bidirectional text is drawn by the WebGL renderer only: a row transform (see bidi-row.ts) tells
+ * it which cell to draw in each column.
  */
 
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { Terminal } from "@xterm/xterm";
 
 import { frontendLog } from "@/lib/frontend-logger";
+
+import { type RowTransform, computeRowTransform } from "./bidi-row";
+
+declare module "@xterm/addon-webgl" {
+  interface WebglAddon {
+    /**
+     * Added by the `xtermWebglPatches` Vite plugin. The renderer calls `transform` for every row it
+     * draws, with the row's index in the active buffer, and draws the row as it says (as is when it
+     * returns undefined). Refresh the terminal after changing it.
+     */
+    setRowTransform(transform: ((row: number) => RowTransform | undefined) | undefined): void;
+  }
+}
 
 const log = frontendLog.child("terminal");
 
@@ -23,6 +39,8 @@ export interface WebglRenderer {
   attach(): void;
   /** Switch back to the DOM renderer and release the WebGL context. */
   detach(): void;
+  /** Draw right-to-left text in display order (or not), redrawing the screen on a change. */
+  setBidiText(enabled: boolean): void;
 }
 
 /**
@@ -35,6 +53,12 @@ export function createWebglRenderer(
   onContextLoss: () => void,
 ): WebglRenderer {
   let addon: WebglAddon | null = null;
+  let bidiText = false;
+
+  const rowTransform = (row: number) =>
+    computeRowTransform(terminal.buffer.active, row, terminal.cols);
+  const applyBidiText = (target: WebglAddon) =>
+    target.setRowTransform(bidiText ? rowTransform : undefined);
 
   const dispose = ({ releaseContext }: { releaseContext: boolean }) => {
     if (!addon) return;
@@ -59,6 +83,8 @@ export function createWebglRenderer(
           dispose({ releaseContext: false });
           onContextLoss();
         });
+        // Before loading, so the first frame already uses it.
+        applyBidiText(next);
         terminal.loadAddon(next);
         addon = next;
       } catch (error) {
@@ -67,6 +93,13 @@ export function createWebglRenderer(
     },
     detach() {
       dispose({ releaseContext: true });
+    },
+    setBidiText(enabled) {
+      if (enabled === bidiText) return;
+      bidiText = enabled;
+      if (!addon) return;
+      applyBidiText(addon);
+      terminal.refresh(0, terminal.rows - 1);
     },
   };
 }

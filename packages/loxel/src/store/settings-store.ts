@@ -47,7 +47,8 @@ export type SidebarZone = "left" | "bottom" | "right";
  * per-site decisions and mutes keep only valid entries, since the Electron main process enforces
  * them, and its background page count falls back to its default when missing or out of range. The
  * terminal's "When quitting Loxel" falls back to its default when it is missing (a row from before
- * it) or unknown, as main does with the value it is sent.
+ * it) or unknown, as main does with the value it is sent, and bidirectional text is on only when
+ * stored as true.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
@@ -57,6 +58,7 @@ export function withValidSettings<T extends object>(slice: T): T {
     valid.terminal = {
       ...valid.terminal,
       whenQuitting: parseWhenQuitting(valid.terminal.whenQuitting),
+      bidiText: valid.terminal.bidiText === true,
     };
   }
   if ("browser" in valid) valid.browser = parseBrowserSettings(valid.browser);
@@ -73,6 +75,8 @@ export interface TerminalSettings {
   activatePythonEnv: boolean;
   /** What Quit Loxel does to the terminals ("When quitting Loxel"). */
   whenQuitting: WhenQuitting;
+  /** Draw right-to-left text (Hebrew, Arabic, ...) in display order. */
+  bidiText: boolean;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -785,6 +789,7 @@ export const useSettingsStore = create<SettingsState>()(
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
         activatePythonEnv: true,
         whenQuitting: DEFAULT_WHEN_QUITTING,
+        bidiText: false,
       },
       themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),

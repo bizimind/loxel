@@ -26,6 +26,7 @@ const CATEGORY_LABELS: Record<ActionCategory, string> = {
   worktree: "Worktrees",
   tree: "Trees",
   editor: "Editor",
+  terminal: "Terminal",
   language: "Languages",
   app: "Application",
 };
@@ -38,6 +39,7 @@ const CATEGORY_ORDER: ActionCategory[] = [
   "worktree",
   "tree",
   "editor",
+  "terminal",
   "language",
   "app",
 ];

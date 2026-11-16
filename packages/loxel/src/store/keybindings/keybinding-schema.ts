@@ -185,6 +185,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "codeAction.organizeImports": ["Alt+Shift+O"],
   "codeAction.sourceAction": ["Ctrl+Alt+S"],
   "codeAction.refactor": ["Ctrl+Alt+R"],
+  "terminal.toggleBidiText": [],
   "language.restartServers": [],
   "worktree.manageRepoTrust": [],
   "project.add": [],
