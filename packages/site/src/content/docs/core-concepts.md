@@ -14,7 +14,7 @@ Before diving into specific features, it helps to understand the four ideas that
 
 ## Tasks and their context
 
-Your unit of focus in Loxel is a **task**: a worktree of one of your projects, plus everything you have open in it. All of that is the task's context: its editors and open files, its terminals and the agents running in them, its browser tabs, the panel layout, search filters and commit graph selection. When you switch tasks, Loxel puts the one you're going to back the way you left it: same files, same layout, terminals still running, browser tabs reopened on their pages.
+Your unit of focus in Loxel is a **task**: a worktree of one of your projects, plus everything you have open in it. All of that is the task's context: its editors and open files, its terminals and the agents running in them, its browser tabs, the panel layout, search filters and commit graph selection. When you switch tasks, Loxel puts the one you're going to back the way you left it: same files, same layout, terminals still running, browser tabs still on the page and scroll position you left them at.
 
 Task context is saved by Loxel, so it survives reloads, restarts, and multiple windows. Terminals keep running while you're in another task, until you quit Loxel, so an agent you started an hour ago is still at it when you come back. Quitting asks first when an agent or another program is running, and [Quit and Keep Terminals](/docs/terminals#quitting-without-ending-your-terminals) keeps them running even while Loxel is closed.
 

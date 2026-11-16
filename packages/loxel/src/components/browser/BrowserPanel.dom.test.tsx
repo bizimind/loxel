@@ -78,7 +78,7 @@ function renderPanel({ ready = true, url = "about:blank" } = {}) {
   render(
     <>
       <button type="button">Elsewhere</button>
-      <BrowserPanel url={url} panelApi={panelApi} />
+      <BrowserPanel url={url} panelId="browser-test" panelApi={panelApi} worktreePath={null} />
     </>,
   );
   const webview = document.querySelector<HTMLElement>("webview")!;

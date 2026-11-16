@@ -29,13 +29,15 @@ export function isActivatedPanel(api: DockviewPanelApi): boolean {
  * The focus function is also registered for keyboard focus navigation, which re-focuses an
  * already-active panel without any activation event (see `lib/panel-focus.ts`).
  *
- * @param api    The dockview panel API from `IDockviewPanelProps`.
+ * @param api    The dockview panel API from `IDockviewPanelProps`, or null while the panel's
+ *               content runs without one (a browser page in the background); nothing happens then.
  * @param focus  Called when the panel becomes the active-and-focused panel.
  *               Use a stable reference (e.g. `useCallback`) — the hook
  *               resubscribes when it changes.
  */
-export function usePanelActivationFocus(api: DockviewPanelApi, focus: () => void): void {
+export function usePanelActivationFocus(api: DockviewPanelApi | null, focus: () => void): void {
   useEffect(() => {
+    if (!api) return;
     const tryFocus = () => {
       if (!isActivatedPanel(api)) return;
       requestAnimationFrame(() => {

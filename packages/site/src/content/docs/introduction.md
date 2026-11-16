@@ -42,7 +42,7 @@ Loxel doesn't ship an agent of its own. It runs yours: Claude Code, Codex, OpenC
 
 ## A browser and terminals in every task
 
-Each task has its own terminals and its own browser tabs. The dev server for this branch, the PR the agent just opened, the logs of a test run: they live with the task, not in a pile of windows you have to sort through later. Terminals keep running when you switch away, scrollback and all, and browser panels are a full browser with DevTools, bookmarks, and logins shared across every task.
+Each task has its own terminals and its own browser tabs. The dev server for this branch, the PR the agent just opened, the logs of a test run: they live with the task, not in a pile of windows you have to sort through later. Terminals and browser tabs keep running when you switch away, scrollback and page state and all, and browser panels are a full browser with DevTools, bookmarks, and logins shared across every task.
 
 ---
 

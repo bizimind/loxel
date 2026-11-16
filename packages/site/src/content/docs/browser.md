@@ -5,7 +5,7 @@ section: "In the code"
 order: 5
 ---
 
-Every task gets its own browser tabs. The dev server for this branch, the PR the agent just opened, the API docs you keep checking: they sit in the task's layout next to its code and terminals, and they stay with that task when you switch to another. Come back and they reopen on the pages they were showing.
+Every task gets its own browser tabs. The dev server for this branch, the PR the agent just opened, the API docs you keep checking: they sit in the task's layout next to its code and terminals, and they keep running when you switch to another task. Come back and each page is exactly as you left it, down to the scroll position, the half-typed form and the sign-in in progress.
 
 Press `Cmd+Shift+B` to open a browser panel. Like any panel, it can go next to an agent's terminal, under your editor, or in a group of its own (see [Panel Layout](/docs/panel-layout)). From a terminal, `loxel <url>` opens a page in the task that terminal belongs to, and an agent with the [`loxel` skill](/docs/coding-agents#teach-your-agent-about-loxel) does the same to show you what it started.
 
@@ -16,6 +16,14 @@ An empty editor area lists what you can open, with a field next to **New Browser
 ## Home
 
 **Home**, at the top of the worktree sidebar, is where you browse outside any task. It's where Loxel opens when no worktree is selected, and it has its own browser tabs, kept across restarts, with the same address field when none is open. Terminals and plans can go there too; see [Worktrees & Tasks](/docs/worktrees-and-tasks#home).
+
+---
+
+## Tabs in other tasks
+
+Browser tabs of the tasks you're not looking at, and of Home, keep running in the background. A CI run you left open keeps updating, a preview keeps its hot-reload state, and a page in another task can still [notify](#notifications) you when the build finishes or the deploy fails.
+
+With dozens of tasks open, that adds up, so Loxel keeps the 10 background tabs you saw most recently running. Past that, the tab you saw longest ago is unloaded, and it reloads on the page it was on when you come back to it. Tabs of sites you allowed to notify, and tabs with a notification waiting under the bell, are unloaded last. Change the number in **Settings > Browser > Background Tabs**; 0 reloads every tab you come back to.
 
 ---
 
@@ -95,7 +103,7 @@ Pages in browser panels get what a browser gives every site without asking: copy
 
 Pages can send notifications too, and they land in Loxel instead of on your desktop. The first time a site asks, a bar under its address bar offers **Allow** or **Block**; close the bar to decide later. An allowed site's notifications appear under the bell in the top bar with the site's icon, and a dot on its tab and on its task in the sidebar, so the dev server's build alert or a chat mention never pulls you out of Loxel. Click one to jump to its tab, and the page reacts as it would in a browser, opening the chat or build it was about. When a site sends several, they stack into one entry that shows the newest and how many more there are, kept apart per task, so a busy dev server never buries your agents' notifications. Click the stack to open the newest, click the count to see each one, or dismiss the whole stack at once.
 
-Notifications come from the open browser tabs of the task you're in, or of Home when you're there, and, as in other browsers, from sites on `https` or on your own machine (such as `http://localhost`). A notification the page takes back stays under the bell until you've seen it. Change a site's choice, or remove it so the site asks again, in **Settings > Browser**.
+Notifications come from every browser tab that is running, in any task or in Home (see [Tabs in other tasks](#tabs-in-other-tasks)), and, as in other browsers, from sites on `https` or on your own machine (such as `http://localhost`). Clicking one from another task takes you to that task first. A notification the page takes back stays under the bell until you've seen it. Change a site's choice, or remove it so the site asks again, in **Settings > Browser**.
 
 Sites that notify from their service worker, as many web apps and PWAs do, work the same way while one of their tabs is open: the notification shows on the site's tab you used last, and clicking it lets the site do what it would in a browser, such as opening the page it was about in a new tab. Push messages, which reach a site while none of its tabs are open, aren't supported.
 

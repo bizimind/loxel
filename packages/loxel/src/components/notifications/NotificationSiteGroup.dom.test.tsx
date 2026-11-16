@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test";
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { DockviewPanelApi } from "dockview-react";
 
 import { wsClient } from "@/api/client";
 import type { ServerNotification } from "@/api/notification-model";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { attachBrowserPage, closeBrowserPage } from "@/store/browser-pages";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import { NotificationSiteGroup } from "./NotificationSiteGroup";
@@ -33,12 +36,22 @@ beforeEach(() => {
   clickBrowserNotification.mockClear();
   window.electronAPI = stubElectronAPI({ clickBrowserNotification });
   send = spyOn(wsClient, "send").mockImplementation(() => {});
+  // The site's page, shown in Home's layout: a click reaches it at once.
+  attachBrowserPage("panel-1", {
+    layoutKey: HOME_LAYOUT_KEY,
+    url: "http://localhost:5173/",
+    slot: {
+      element: document.createElement("div"),
+      api: { setActive: () => {} } as DockviewPanelApi,
+    },
+  });
 });
 
 afterEach(() => {
   cleanup();
   send.mockRestore();
   window.electronAPI = undefined;
+  closeBrowserPage("panel-1");
 });
 
 describe("a site's stacked notifications", () => {
