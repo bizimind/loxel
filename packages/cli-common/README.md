@@ -6,7 +6,7 @@ Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bi
 
 ## Command results and output modes
 
-Commands return a `CommandResult<T>` (data, a human formatter, and an exit code) and run through `runAction()` / `runActionSync()`, which pick `json`, `human`, or `quiet` mode from the `--json` / `--quiet` flags, print the result, and set `process.exitCode`. Progress output goes through the `OutputContext` passed to the action, so JSON stdout stays clean (progress is sent to stderr in JSON mode and suppressed in quiet mode).
+Commands return a `CommandResult<T>` (data, a human formatter, and an exit code) and run through `runAction()` / `runActionSync()`, which pick `json`, `human`, or `quiet` mode from the `--json` / `--quiet` flags, print the result, and set `process.exitCode`. An action that throws prints an error result (`{ error: true, message }` in JSON mode) and exits with the error's `code` when that is a positive integer, otherwise 1. Progress output goes through the `OutputContext` passed to the action, so JSON stdout stays clean (progress is sent to stderr in JSON mode and suppressed in quiet mode).
 
 ```typescript
 program
@@ -34,4 +34,5 @@ Formatters: `formatTable`, `formatKeyValue`, `formatList`, `formatSection(s)`, `
 
 ```bash
 pnpm -C packages/cli-common run typecheck
+pnpm -C packages/cli-common run test
 ```

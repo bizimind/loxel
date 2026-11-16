@@ -14,6 +14,7 @@
     "build": "bun build.ts",
     "install-global": "bun install.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test --timeout 30000",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
     "fmt": "pnpm -w run fmt",
@@ -22,7 +23,7 @@
   "dependencies": {
     "@bizimind/cli-common": "workspace:*",
     "@excalidraw/element": "0.18.0-9036812b6",
-    "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
+    "@excalidraw/mermaid-to-excalidraw": "^3.6.0",
     "@excalidraw/utils": "^0.1.8",
     "@napi-rs/canvas": "^1.1.0",
     "commander": "^15.1.0",

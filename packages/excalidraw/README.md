@@ -15,9 +15,10 @@ pnpm -C packages/excalidraw run install-global
 
 This compiles a standalone binary (`dist/excalidraw`, via `bun build --compile`), copies it to `~/.local/bin/excalidraw`, and ad-hoc signs it on macOS. The binary embeds the `@napi-rs/canvas` native module and fonts, which are extracted to `~/.cache/excalidraw-cli/` on first run.
 
-For development, run directly from source without installing:
+For development, run directly from source without installing (the first command puts the native canvas binary in place, see [Development](#development)):
 
 ```bash
+bun packages/excalidraw/native-binary.ts
 bun packages/excalidraw/src/cli.ts -f diagram.excalidraw query
 ```
 
@@ -121,11 +122,11 @@ Bootstrap diagrams from other formats. Creates elements from stdin content.
 
 | Command          | Description                                                         |
 | ---------------- | ------------------------------------------------------------------- |
-| `import mermaid` | Import mermaid flowchart with auto layout and arrow bindings        |
+| `import mermaid` | Import a Mermaid diagram with auto layout and arrow bindings        |
 | `import table`   | Import CSV or markdown table as a rectangle grid with styled header |
 
 ```bash
-# Mermaid flowchart — node IDs become element IDs for subsequent edit/move
+# Mermaid diagram — node IDs become element IDs for subsequent edit/move
 echo 'flowchart TD
   A[API Server] --> B[Database]
   A --> C[Cache]' | excalidraw -f d.excalidraw import mermaid
@@ -134,7 +135,7 @@ echo 'flowchart TD
 printf 'Service,Port\nAPI,8080\nDB,5432' | excalidraw -f d.excalidraw import table
 ```
 
-Options for `import mermaid`: `-x`/`-y` (offset). Only flowchart/graph diagrams produce editable elements; other mermaid types are rejected.
+`import mermaid` converts flowcharts (`flowchart`/`graph`, with subgraphs), `swimlane-beta`, `sequenceDiagram`, `classDiagram`, `erDiagram`, `stateDiagram-v2`, `gantt`, `quadrantChart` and `timeline` diagrams to editable elements. Other types (pie, mindmap, gitGraph, ...) would only become an image and are rejected; so is invalid syntax, with the line and column, and a non-zero exit. Flowchart edges and state transitions are drawn as elbow (orthogonal) arrows. Options: `-x`/`-y` (offset), `--curved` (curved edges instead of elbow arrows).
 
 Options for `import table`: `-x`/`-y` (offset), `--cell-width`, `--cell-height`, `--header-bg`. Markdown is detected by `|` characters; otherwise input is parsed as CSV.
 
@@ -144,6 +145,9 @@ Options for `import table`: `-x`/`-y` (offset), `--cell-width`, `--cell-height`,
 pnpm -C packages/excalidraw run build            # Compile to dist/excalidraw
 pnpm -C packages/excalidraw run install-global   # Build + install to ~/.local/bin/
 pnpm -C packages/excalidraw run typecheck
+pnpm -C packages/excalidraw run test             # bun test
 ```
+
+Running from source, testing and building need the `@napi-rs/canvas` native binary at `native/skia.darwin-arm64.bin` (gitignored), which `native-binary.ts` copies from `node_modules` when run; the build and the test preload run it automatically.
 
 Elements are created through `@excalidraw/element` factory functions inside a `linkedom` DOM shim, with `@napi-rs/canvas` providing text measurement and PNG rendering. Shared CLI output handling comes from `@bizimind/cli-common`.

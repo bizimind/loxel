@@ -60,7 +60,7 @@ The `excalidraw` CLI handles all diagram creation and editing. It manages elemen
 | `ungroup <groupId>`     | Dissolve a group                                               |
 | `query [ids...]`        | List, filter, and traverse elements                            |
 | `batch`                 | Execute multiple commands atomically from JSON stdin           |
-| `import mermaid`        | Import mermaid flowchart from stdin                            |
+| `import mermaid`        | Import a mermaid diagram (flowchart, sequence, class, ...)     |
 | `import table`          | Import CSV/markdown table as rectangle grid                    |
 | `view`                  | Render to PNG for visual inspection                            |
 | `lint`                  | Check for structural issues                                    |
@@ -136,7 +136,7 @@ excalidraw -f d.excalidraw query --type arrow --ids | excalidraw -f d.excalidraw
 
 **Start with** **`import mermaid`** **whenever possible.** It is 5-10x more token-efficient than batch JSON and produces a complete diagram with automatic layout, arrow bindings, and node labels in a single command. Use `batch` and individual CLI commands for refinement after import.
 
-### Mermaid flowcharts
+### Mermaid diagrams
 
 ```bash
 echo 'flowchart TD
@@ -145,7 +145,9 @@ echo 'flowchart TD
   B --> D[Backup]' | excalidraw -f d.excalidraw import mermaid
 ```
 
-Only flowcharts (`graph`/`flowchart` with `TD`/`LR`/`RL`/`BT`) are supported. Node IDs from the mermaid definition become excalidraw element IDs, so `A`, `B`, `C`, `D` are immediately usable in `edit`/`move`/`resize` commands. Subgraphs become labeled rectangles. Edge labels (`-->|text|`) become arrow text.
+Supported types: `flowchart`/`graph` (any direction, with subgraphs), `swimlane-beta`, `sequenceDiagram`, `classDiagram`, `erDiagram`, `stateDiagram-v2`, `gantt`, `quadrantChart` and `timeline`. Other types (pie, mindmap, gitGraph, ...) are rejected, and a syntax error exits non-zero with its line and column. Node IDs from the mermaid definition become excalidraw element IDs (flowchart nodes, states, classes), so `A`, `B`, `C`, `D` are immediately usable in `edit`/`move`/`resize` commands; edges get IDs like `A_B`. Subgraphs become labeled rectangles. Edge labels (`-->|text|`) become arrow text.
+
+Flowchart edges and state transitions are elbow (orthogonal) arrows that re-route when you `move` a shape; pass `--curved` for curved ones. Sequence messages are unbound arrows between lifelines, so `lint` flags their ends as not near a shape: that's expected.
 
 **Token comparison**: A 5-node flowchart in mermaid is \~100 tokens vs \~500+ tokens as batch JSON.
 
@@ -161,7 +163,7 @@ Mermaid's auto-layout is a **starting point**, not a final product. After import
 
 - **Add elements** that don't exist in the mermaid syntax: legends, annotations, grouping rectangles, standalone text
 
-Mermaid only supports rectangles, diamonds, and basic flowchart shapes. For ellipses, frames, or custom styling, add those after import.
+Flowchart node shapes map to rectangles, diamonds (`{}`), ellipses (`(())`) and rounded rectangles. For frames or custom styling, add those after import.
 
 ### Combining multiple imports
 
@@ -252,9 +254,9 @@ excalidraw -f diagram.excalidraw view --scale 2
 
 ### Choosing a starting method
 
-**Use** **`import mermaid`** when the diagram is a node-and-edge flowchart and you know the structure upfront. This is 5-10x more token-efficient than batch JSON and produces automatic layout with arrow bindings. Good for: architecture overviews, data flows, dependency graphs.
+**Use** **`import mermaid`** when the diagram fits a mermaid type and you know the structure upfront. This is 5-10x more token-efficient than batch JSON and produces automatic layout with arrow bindings. Good for: architecture overviews, data flows, dependency graphs, request sequences, class and ER models, state machines, timelines and schedules.
 
-**Use** **`batch`** when you need precise positioning, custom shapes (ellipses, frames), mixed element types, or when the diagram doesn't fit a flowchart structure. Good for: free-form layouts, sequence-like diagrams, annotated designs.
+**Use** **`batch`** when you need precise positioning, frames, mixed element types, or when the diagram doesn't fit a mermaid type. Good for: free-form layouts, annotated designs.
 
 **Use individual commands** for incremental additions to an existing diagram.
 
