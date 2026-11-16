@@ -1,6 +1,6 @@
 # cli-common
 
-Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, Axiom logging setup, and the self-update system for compiled binaries. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis).
+Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, and the self-update system for compiled binaries. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis).
 
 Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
 
@@ -29,10 +29,6 @@ Formatters: `formatTable`, `formatKeyValue`, `formatList`, `formatSection(s)`, `
 
 - `createVersionCommand(config)` / `createUpdateCommand(config)` — ready-made `version` and `update` subcommands
 - `maybeAutoUpdate(config, argv)` — update before running a command and re-execute it with the new binary
-
-## Logging
-
-`createCliLogger({ source, ... }, context)` returns an [`@bizimind/logger`](../logger) instance that ships to Axiom when an `AXIOM_TOKEN` is available (environment variable or build-time default) and is a no-op otherwise; `logCliError` records failures with CLI context.
 
 ## Development
 

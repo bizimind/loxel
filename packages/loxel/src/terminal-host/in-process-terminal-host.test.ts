@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { createNoopLogger } from "@bizimind/logger";
-
+import { createNoopLogger } from "@/api/log-entry-model";
 import { until } from "@/test/until";
 
 import type { EndedSessionLimits } from "./in-process-terminal-host";

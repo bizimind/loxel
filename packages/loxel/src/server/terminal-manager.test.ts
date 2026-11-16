@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { createNoopLogger } from "@bizimind/logger";
-
+import { createNoopLogger } from "@/api/log-entry-model";
 import type { TerminalState } from "@/api/terminal-stream";
 import { BIN_OUTPUT_HEADER_SIZE, encodeOutputFrame } from "@/api/terminal-stream";
 import type { TerminalEnd, TerminalNotice } from "@/api/ws-protocol";

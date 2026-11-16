@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, jest, test } from "bun:test";
 
-import { createNoopLogger } from "@bizimind/logger";
+import { createNoopLogger } from "@/api/log-entry-model";
 
 import { HOST_PERF_SUMMARY_INTERVAL_MS, HostPerfMonitor } from "./host-perf-monitor";
 

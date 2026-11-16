@@ -4,9 +4,7 @@ import { type Socket, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createNoopLogger } from "@bizimind/logger";
-
-import type { ChildLogger } from "@/api/log-entry-model";
+import { createNoopLogger, type ChildLogger } from "@/api/log-entry-model";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 
