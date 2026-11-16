@@ -43,6 +43,8 @@ void mock.module("mermaid", () => ({
       renderCalls.push({ id, source, config: currentConfig });
       return renderImpl(id, source);
     },
+    detectType: (source: string) =>
+      source.trimStart().startsWith("flowchart-elk") ? "flowchart-elk" : "flowchart-v2",
   },
 }));
 
@@ -97,16 +99,27 @@ describe("renderCodeBlockPreview routing", () => {
 });
 
 describe("mermaid rendering", () => {
+  test("the flowchart-elk keyword gets ELK instead of the dagre default", async () => {
+    await renderAsync("mermaid", "flowchart-elk LR; A-->B");
+    await renderAsync("mermaid", "flowchart LR; A-->B");
+    const withLayout = (layout: string) =>
+      expect.objectContaining({ flowchart: expect.objectContaining({ layout }) });
+    expect(renderCalls.map((c) => c.config)).toEqual([
+      withLayout("elk"),
+      withLayout("elk"),
+      withLayout("dagre"),
+      withLayout("dagre"),
+    ]);
+  });
+
   test("renders a light and a dark variant with strict security and unique ids", async () => {
     const preview = await renderAsync("mermaid", "graph TD; A-->B");
+    // Mermaid 11's appearance by default: the classic look and dagre, which a diagram can override.
+    const base = { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true };
+    const classic = { look: "classic", flowchart: expect.objectContaining({ layout: "dagre" }) };
     expect(renderCalls.map((c) => c.config)).toEqual([
-      {
-        startOnLoad: false,
-        securityLevel: "strict",
-        suppressErrorRendering: true,
-        theme: "default",
-      },
-      { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: "dark" },
+      expect.objectContaining({ ...base, ...classic, theme: "default" }),
+      expect.objectContaining({ ...base, ...classic, theme: "dark" }),
     ]);
     if (typeof preview !== "string") throw new Error("expected an SVG preview");
     const host = document.createElement("div");

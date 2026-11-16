@@ -179,6 +179,32 @@ Markdown files open in a live-preview markdown editor. Saving rewrites only the 
 
 Code blocks fenced as ` ```mermaid ` show the rendered [Mermaid](https://mermaid.js.org) diagram on its own. To change it, hover the diagram and click **Edit**, or move the caret into the block with the arrow keys: the code appears above the diagram, with Mermaid syntax colors, and the diagram updates as you type. The code stays open while the caret is in it and closes when you move the caret out of the block or click **Hide**. A new mermaid block keeps its code open while you write it, and a diagram with a syntax error or an empty block always shows its code. A wide diagram fits the editor's width but never shrinks below a readable size; drag it or scroll sideways to see the rest. Pinch or `Cmd`+scroll over a diagram to zoom, and hover it for buttons to zoom, reset, **Copy as SVG**, **Copy as PNG** (at 2x) and **Open**. Clicking a diagram, or **Open**, shows it full size over the window, with the same zoom and pan as the media viewer: pinch or `Cmd`+scroll to zoom at the pointer, drag or scroll to pan, `=` / `-` to zoom in and out, `0` or **Fit** to fit, **1:1** for actual size, and double-click to switch between the two; `Esc` closes it. Diagrams follow the light or dark theme, a diagram with a syntax error shows the error below its code (with no viewer or copy), and the block is saved exactly as written unless you edit it. Diagrams render in Mermaid's strict mode: labels are sanitized and a diagram can't run scripts.
 
+Mermaid 12's diagram types render, among them flowcharts, sequence, class, state, entity relationship, Gantt, mindmap and packet diagrams, UML use case diagrams (`usecase-beta`), agent workflows (`agentflow-beta`), swimlanes (`swimlane-beta`), and BPMN shapes in flowcharts (`A@{ shape: bpmn-start }`, `bpmn-activity`, `bpmn-gateway`, `bpmn-end` and others). Diagrams use Mermaid's classic look, and flowcharts, state, class, entity relationship, requirement, use case and agentflow diagrams the dagre layout, unless they ask for something else in their own frontmatter config or a `%%{init: ...}%%` line:
+
+- `look: neo` for Mermaid's newer look, with drop shadows.
+- `layout: elk` for the ELK layout, or a variant such as `elk.stress`, `elk.force`, `elk.mrtree`, `elk.box`, `elk.rectpacking` or `elk.sporeOverlap`. A flowchart starting with `flowchart-elk` gets ELK too.
+- `theme: redux-color` or `theme: redux-dark-color` (or any other Mermaid theme). A diagram that names its own theme shows it in both light and dark mode, so pick one that reads on either background.
+- Any of these for one diagram type only, under its section, for example `flowchart:` with `look: neo` beneath it.
+- Flowchart edges with a step number, such as `e1@{ step: 1 }`, play in order: a dot travels along each edge in turn and the edge playing is highlighted. `flowchart.stepNumbers: true` also labels each edge with its number. The animation is hidden when the system's reduce motion setting is on.
+- `mindmap.colorBy: depth` colors a mindmap by level instead of by branch, and `packet.bitOrder: descending` numbers a packet diagram's bits from the right.
+
+````md
+```mermaid
+---
+config:
+  look: neo
+  layout: elk
+  flowchart:
+    stepNumbers: true
+---
+flowchart LR
+  Client e1@--> API
+  API e2@--> Cache
+  e1@{ step: 1 }
+  e2@{ step: 2 }
+```
+````
+
 Code blocks fenced as ` ```diff ` or ` ```patch ` show the change as a diff below their code: added and removed lines in color with the changed characters highlighted, line numbers when the hunk headers give them, and a header per file for patches that touch several files. **Unified** and **Split** switch the layout, and the choice is the same one the [diff viewer](/docs/diff-viewer) uses. Click **Hide** to show only the diff and **Edit** to bring the code back. **Open in diff panel** opens the diff in its own [diff viewer](/docs/diff-viewer#patches-from-markdown) tab, with room for long changes. Diffs written by hand or by an agent don't need to be valid patches: bare `+` and `-` lines render too, without line numbers, and a block with no diff in it stays a plain code block. The diff follows the light or dark theme, and the block is saved exactly as written unless you edit it.
 
 ### Data widgets
