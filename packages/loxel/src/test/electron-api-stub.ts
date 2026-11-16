@@ -18,6 +18,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     copyWebviewImage: () => {},
     getBrowserPageUsage: async () => ({ totalMemoryKB: 0, pages: [] }),
     setBrowserPageFrozen: async () => true,
+    loadFavicon: async () => null,
     onJavaScriptDialog: () => () => {},
     respondToJavaScriptDialog: () => {},
     onPasskeyQrCode: () => () => {},
