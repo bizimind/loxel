@@ -20,11 +20,11 @@ import {
   type IpcMainInvokeEvent,
   type Session,
   type WebContents,
-  webContents,
 } from "electron";
 
 import { isHttpUrl, isSameOrigin } from "../url-utils";
 import { isAppWindow } from "./app-windows";
+import { hostedWebview } from "./hosted-webview";
 import { BROWSER_FAVICON_LOAD } from "./ipc-channels";
 
 /** Largest favicon loaded; a page picks its favicon's URL, and every window may cache it. */
@@ -157,11 +157,9 @@ async function loadFavicon(
   if (isHttpUrl(url)) {
     return loadWebFavicon(browserSession, url, typeof pageUrl === "string" ? pageUrl : undefined);
   }
-  if (!url.startsWith("blob:") || typeof webContentsId !== "number") return null;
-  const guest = webContents.fromId(webContentsId);
-  // Only a window's own webviews: a renderer must not reach into another window's pages.
-  if (guest?.getType() !== "webview" || guest.hostWebContents !== event.sender) return null;
-  return loadBlobFavicon(guest, url);
+  if (!url.startsWith("blob:")) return null;
+  const guest = hostedWebview(event.sender, webContentsId);
+  return guest ? loadBlobFavicon(guest, url) : null;
 }
 
 /** Answer `BROWSER_FAVICON_LOAD` from Loxel's windows. */
