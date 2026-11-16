@@ -12,7 +12,8 @@
  * every change, because `Notification.permission` is synchronous and main must answer it at
  * once. A site without a decision asks: main forwards the request to the window hosting the page,
  * whose browser panel shows Allow / Block, and the answer resolves every page of that site that
- * is waiting.
+ * is waiting. A site the user muted or snoozed keeps its decision, but main drops its
+ * notifications.
  *
  * Only secure top-level pages (`https`, or `http` on this machine) and same-origin frames in them
  * get notifications; cross-origin frames are denied, as in browsers.
@@ -28,11 +29,14 @@ import {
 import {
   type BrowserNotification,
   type NotificationPermissionRequest,
+  type NotificationMutes,
   type NotificationPermissionState,
   type NotificationSites,
   browserNotificationRefSchema,
+  isMuteActive,
   notificationPermissionResponseSchema,
   pageNotificationSchema,
+  parseNotificationMutes,
   parseNotificationSites,
 } from "./browser-notification-protocol";
 import {
@@ -46,6 +50,7 @@ import {
   BROWSER_NOTIFICATION_PERMISSION_RESPOND,
   BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN,
   BROWSER_NOTIFICATION_REQUEST_PERMISSION,
+  BROWSER_NOTIFICATION_SET_MUTES,
   BROWSER_NOTIFICATION_SET_SITES,
   BROWSER_NOTIFICATION_SHOW,
 } from "./ipc-channels";
@@ -62,6 +67,8 @@ const RATE_WINDOW_MS = 10_000;
 const MAX_REFS_PER_GUEST = 100;
 
 let sites: NotificationSites = {};
+/** Sites muted or snoozed from the notification center: allowed, but nothing is shown. */
+let mutes: NotificationMutes = {};
 /** Whether a renderer has sent the settings' decisions yet; requests wait for them. */
 let sitesLoaded = false;
 let resolveSitesLoaded: () => void = () => {};
@@ -246,6 +253,19 @@ function setSites(event: IpcMainEvent, value: unknown): void {
   settleDecidedRequests();
 }
 
+function setMutes(event: IpcMainEvent, value: unknown): void {
+  if (event.sender.getType() !== "window") return;
+  mutes = parseNotificationMutes(value);
+}
+
+/**
+ * Whether the user muted or snoozed the site: it keeps its permission, so its pages can't tell,
+ * but its notifications, from pages and service workers alike, go nowhere.
+ */
+export function isSiteMuted(origin: string): boolean {
+  return isMuteActive(mutes[origin], Date.now());
+}
+
 /** Whether the guest may show another notification now; counts it if so. */
 export function withinRateLimit(guestId: number): boolean {
   const now = Date.now();
@@ -299,7 +319,7 @@ function showNotification(event: IpcMainEvent, value: unknown): void {
   if (!parsed.success || !frame || pagePermission(event) !== "granted") return;
   const guest = event.sender;
   const host = listeningHost(guest);
-  if (!host || !withinRateLimit(guest.id)) return;
+  if (!host || isSiteMuted(guest.mainFrame.origin) || !withinRateLimit(guest.id)) return;
 
   const { pageId, title, body, tag } = parsed.data;
   const ref = `${guest.id}-${nextRef++}`;
@@ -357,6 +377,7 @@ export function installBrowserNotifications(): void {
     if (event.sender.getType() === "window") listeningHosts.add(event.sender);
   });
   ipcMain.on(BROWSER_NOTIFICATION_SET_SITES, setSites);
+  ipcMain.on(BROWSER_NOTIFICATION_SET_MUTES, setMutes);
   ipcMain.on(BROWSER_NOTIFICATION_PERMISSION_RESPOND, respondToRequest);
   ipcMain.on(BROWSER_NOTIFICATION_CLICK, clickNotification);
 }

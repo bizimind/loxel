@@ -42,6 +42,7 @@ import {
   capTexts,
   isSecureWebOrigin,
   listeningHost,
+  isSiteMuted,
   permissionFor,
   sendToNotificationCenter,
   siteOf,
@@ -242,8 +243,9 @@ function show(caller: Caller | null, value: unknown): RegistrationShowResult {
   const { timestamp, data } = parsed.data;
   if (!fitsDataLimit(data)) return "data-too-large";
   const panel = caller.panel();
-  // Resolved like a shown one: only loaded pages notify, and the rate limit drops the rest quietly.
-  if (!panel || !withinRateLimit(panel.guest.id)) return "shown";
+  // Resolved like a shown one: only loaded pages notify, and a mute or the rate limit drops the
+  // rest quietly.
+  if (!panel || isSiteMuted(caller.origin) || !withinRateLimit(panel.guest.id)) return "shown";
 
   const texts = capTexts(parsed.data);
   // A tag replaces the registration's earlier notification with it, as in browsers.

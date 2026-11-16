@@ -30,6 +30,7 @@ const APP_QUIT_KEEPING_TERMINALS = "app:quit-keeping-terminals";
 const APP_RESTART = "app:restart";
 const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
 const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
+const BROWSER_NOTIFICATION_SET_MUTES = "browser-notification:set-mutes";
 const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
 const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission-request";
 const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
@@ -148,6 +149,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     };
   },
   setNotificationSites: (sites) => ipcRenderer.send(BROWSER_NOTIFICATION_SET_SITES, sites),
+  setNotificationMutes: (mutes) => ipcRenderer.send(BROWSER_NOTIFICATION_SET_MUTES, mutes),
   respondToNotificationPermission: (response) =>
     ipcRenderer.send(BROWSER_NOTIFICATION_PERMISSION_RESPOND, response),
   clickBrowserNotification: (ref) => ipcRenderer.send(BROWSER_NOTIFICATION_CLICK, ref),

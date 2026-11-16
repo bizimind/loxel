@@ -97,6 +97,8 @@ interface Window {
     }) => () => void;
     /** The per-site notification decisions from settings (payload: `NotificationSites`). */
     setNotificationSites: (sites: unknown) => void;
+    /** The per-site mutes and snoozes from settings (payload: `NotificationMutes`). */
+    setNotificationMutes: (mutes: unknown) => void;
     /** Answer a permission request (payload: `NotificationPermissionResponse`). */
     respondToNotificationPermission: (response: unknown) => void;
     /** The user clicked a page's notification in the notification center (payload: `{ ref }`). */

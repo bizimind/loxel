@@ -25,6 +25,34 @@ export function parseNotificationSites(value: unknown): NotificationSites {
   return sites;
 }
 
+/**
+ * A site the user muted from one of its notifications: until `until` (epoch ms, a snooze), or
+ * until unmuted when it is absent. A muted site keeps its decision (the page still reads
+ * `granted`), but its notifications are dropped.
+ */
+export const notificationMuteSchema = z.object({ until: z.number().optional() });
+export type NotificationMute = z.infer<typeof notificationMuteSchema>;
+
+/** Mutes by origin, kept in Loxel's settings next to the decisions. */
+export type NotificationMutes = Record<string, NotificationMute>;
+
+/** The valid entries of stored or sent mutes; anything else (hand-edited) is dropped. */
+export function parseNotificationMutes(value: unknown): NotificationMutes {
+  if (typeof value !== "object" || value === null) return {};
+  const mutes: NotificationMutes = {};
+  for (const [origin, mute] of Object.entries(value)) {
+    const parsed = notificationMuteSchema.safeParse(mute);
+    if (parsed.success) mutes[origin] = parsed.data;
+  }
+  return mutes;
+}
+
+/** Whether a mute is still in effect at `now` (a snooze ends at its `until`). */
+export function isMuteActive(mute: NotificationMute | undefined, now: number): boolean {
+  if (!mute) return false;
+  return mute.until === undefined || now < mute.until;
+}
+
 /** `Notification.permission`, as the page sees it. */
 export type NotificationPermissionState = "default" | "granted" | "denied";
 

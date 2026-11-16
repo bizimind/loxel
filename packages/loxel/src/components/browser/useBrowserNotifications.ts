@@ -3,7 +3,7 @@
  * window (see `src/electron/browser-notifications.ts`), to the panel whose `<webview>` the page is
  * in: a shown notification goes to the notification center with that panel as its source, and a
  * site asking for permission gets the panel's Allow / Block bar. Also keeps main's copy of the
- * per-site decisions in step with settings.
+ * per-site decisions and mutes in step with settings.
  */
 import { type RefObject, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -81,15 +81,23 @@ function handleWithdrawn(value: unknown): void {
   else unclaimed.delete(webContentsId);
 }
 
-/** Send main the settings' per-site decisions now and whenever they change. */
+/** Send main the settings' per-site decisions and mutes now and whenever they change. */
 function syncSitesToMain(): void {
-  const push = () =>
+  const pushMutes = () =>
+    window.electronAPI?.setNotificationMutes(useSettingsStore.getState().browser.notificationMutes);
+  const pushSites = () =>
     window.electronAPI?.setNotificationSites(useSettingsStore.getState().browser.notificationSites);
-  // Not before hydration: main would take the defaults for the user's decisions.
-  if (useSettingsStore.persist.hasHydrated()) push();
-  else useSettingsStore.persist.onFinishHydration(push);
+  // Not before hydration: main would take the defaults for the user's decisions. Mutes go first,
+  // so no muted site's notification gets through once the decisions let pages notify.
+  const pushAll = () => {
+    pushMutes();
+    pushSites();
+  };
+  if (useSettingsStore.persist.hasHydrated()) pushAll();
+  else useSettingsStore.persist.onFinishHydration(pushAll);
   useSettingsStore.subscribe((state, previous) => {
-    if (state.browser.notificationSites !== previous.browser.notificationSites) push();
+    if (state.browser.notificationMutes !== previous.browser.notificationMutes) pushMutes();
+    if (state.browser.notificationSites !== previous.browser.notificationSites) pushSites();
   });
 }
 

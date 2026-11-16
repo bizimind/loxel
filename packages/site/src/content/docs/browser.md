@@ -107,6 +107,8 @@ Notifications come from every browser tab that is running, in any task or in Hom
 
 Sites that notify from their service worker, as many web apps and PWAs do, work the same way while one of their tabs is open: the notification shows on the site's tab you used last, and clicking it lets the site do what it would in a browser, such as opening the page it was about in a new tab. Push messages, which reach a site while none of its tabs are open, aren't supported.
 
+When a site gets chatty, right-click one of its notifications under the bell to **Snooze for 1 hour**, **Snooze until tomorrow** (9 AM), or **Mute until unmuted**. The site stays allowed, so its pages carry on as normal, but nothing it sends reaches the bell, its tab or its task until the snooze ends or you unmute it, from the same menu or in **Settings > Browser**.
+
 ---
 
 ## See also
