@@ -1,8 +1,6 @@
 import type { ElementConstructorOpts } from "@excalidraw/element";
 import {
   computeContainerDimensionForBoundText,
-  getBoundTextMaxHeight,
-  getBoundTextMaxWidth,
   newArrowElement,
   newElement,
   newFreeDrawElement,
@@ -270,34 +268,6 @@ function maybeCreateBoundText(
   }
   centerBoundText(text, container);
   results.push(text);
-}
-
-/**
- * Grow a container around its center until its bound text fits the space
- * Excalidraw gives a label (for a diamond or an ellipse, less than its size),
- * then re-center the text. Excalidraw would wrap the label instead.
- */
-export function fitContainerToBoundText(
-  container: ExcalidrawElement,
-  text: ExcalidrawElement,
-): void {
-  const excalidrawContainer = container as unknown as Parameters<typeof getBoundTextMaxWidth>[0];
-  const boundText = text as unknown as Parameters<typeof getBoundTextMaxHeight>[1];
-  const containerType = container.type as Parameters<
-    typeof computeContainerDimensionForBoundText
-  >[1];
-
-  if (text.width > getBoundTextMaxWidth(excalidrawContainer, boundText)) {
-    const width = computeContainerDimensionForBoundText(text.width, containerType);
-    container.x -= (width - container.width) / 2;
-    container.width = width;
-  }
-  if (text.height > getBoundTextMaxHeight(excalidrawContainer, boundText)) {
-    const height = computeContainerDimensionForBoundText(text.height, containerType);
-    container.y -= (height - container.height) / 2;
-    container.height = height;
-  }
-  centerBoundText(text, container);
 }
 
 const BOUND_TEXT_PADDING = 5;

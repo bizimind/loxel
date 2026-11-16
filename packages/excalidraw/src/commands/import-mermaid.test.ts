@@ -135,6 +135,33 @@ test("moving a shape re-routes its elbow arrows orthogonally", async () => {
   }
 });
 
+test("moving a shape drops elbow segments fixed for the old layout", async () => {
+  const { elements } = await convertMermaid(
+    "flowchart TD\n  A --> C\n  A --> D\n  C --> E\n  D --> E",
+  );
+  const edge = byId(elements, "C_E");
+  expect(edge.fixedSegments).not.toHaveLength(0);
+  const target = byId(elements, "E");
+  target.y -= 600;
+  coMoveBoundElements([target], 0, -600, elements);
+
+  expect(edge.fixedSegments ?? []).toHaveLength(0);
+  expect(isOrthogonal(edge)).toBe(true);
+  // No segment runs through E (a kept fixed segment would cross it to reach its top).
+  const global = points(edge).map(([x, y]) => [edge.x + x, edge.y + y] as const);
+  const crossesTarget = global.slice(1).some(([x2, y2], i) => {
+    const [x1, y1] = global[i]!;
+    const inside = (v: number, lo: number, hi: number) => v > lo + 1 && v < hi - 1;
+    const overlaps = (a: number, b: number, lo: number, hi: number) =>
+      Math.max(a, b) > lo + 1 && Math.min(a, b) < hi - 1;
+    const { x, y, width, height } = target;
+    return x1 === x2
+      ? inside(x1, x, x + width) && overlaps(y1, y2, y, y + height)
+      : inside(y1, y, y + height) && overlaps(x1, x2, x, x + width);
+  });
+  expect(crossesTarget).toBe(false);
+});
+
 test("sequence diagram: participants, messages and blocks", async () => {
   const { elements } = await convertMermaid(`sequenceDiagram
     participant U as User
@@ -170,6 +197,25 @@ test("class diagram: inheritance has a hollow triangle at the parent and no head
   const [inheritance] = arrows(elements);
   expect(inheritance?.startArrowhead).toBe("triangle_outline");
   expect(inheritance?.endArrowhead).toBeNull();
+  // Relations come without IDs from the library and are still bound.
+  expect(bindingTarget(inheritance!, "startBinding")).toBe("Animal");
+  expect(bindingTarget(inheritance!, "endBinding")).toBe("Dog");
+});
+
+test("ER relations are bound to their entities", async () => {
+  const { elements } = await convertMermaid("erDiagram\n  CUSTOMER ||--o{ ORDER : places");
+  const [relation] = arrows(elements);
+  expect(bindingTarget(relation!, "startBinding")).toBe("entity-CUSTOMER-0");
+  expect(bindingTarget(relation!, "endBinding")).toBe("entity-ORDER-1");
+});
+
+test("wraps long decision labels instead of widening diamonds into their neighbors", async () => {
+  const { elements } = await convertMermaid(`flowchart TD
+    A --> B{Is the cache warm enough?}
+    A --> C{Is the database reachable?}`);
+  const [b, c] = [byId(elements, "B"), byId(elements, "C")];
+  expect(boundText(elements, "B").text).toContain("\n");
+  expect(b.x + b.width).toBeLessThan(c.x);
 });
 
 test("swimlane titles are drawn at their header's angle", async () => {

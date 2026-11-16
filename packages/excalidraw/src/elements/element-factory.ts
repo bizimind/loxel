@@ -357,10 +357,11 @@ function rerouteElbowArrow(
   const elementsMap = new Map(allElements.map((el) => [el.id, el])) as unknown as ElementsMap;
   const points = arrow.points as ElbowArrow["points"];
   // Given only its two ends and no fixed segments, the arrow is routed afresh
-  // from its bindings' fixed points.
+  // from its bindings' fixed points. (A null fixedSegments would keep the
+  // arrow's own: segments fixed for the old layout, which could now cross shapes.)
   const updates = updateElbowArrowPoints(arrow as unknown as ElbowArrow, elementsMap, {
     points: [points[0]!, points[points.length - 1]!],
-    fixedSegments: null,
+    fixedSegments: [],
   });
   Object.assign(arrow, updates);
 }

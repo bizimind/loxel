@@ -1,11 +1,13 @@
 import path from "node:path";
 
 import { createResult, runAction } from "@bizimind/cli-common";
+import { bindLinearElement, redrawTextBoundingBox, Scene } from "@excalidraw/element";
 
 import { withDom } from "../dom-shim.ts";
 import { globalToFixedPoint } from "../elements/element-factory.ts";
+import { generateElementId } from "../elements/element-id.ts";
 import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
-import { fitContainerToBoundText, skeletonsToElements } from "../elements/skeleton-converter.ts";
+import { skeletonsToElements } from "../elements/skeleton-converter.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
 import { MERMAID_DIAGRAM_TYPES } from "./mermaid-diagram-types.ts";
 import { readStdinText } from "./stdin-ids.ts";
@@ -107,9 +109,22 @@ export async function convertMermaid(
       );
     }
 
+    // Class, ER and timeline relations come without IDs; name them so they can
+    // be found again to bind once converted.
+    for (const skel of skeletons) {
+      if (skel.type === "arrow" && typeof skel.id !== "string") skel.id = generateElementId();
+    }
+
     const elements = skeletonsToElements(skeletons);
-    fitContainersToLabels(elements);
-    await bindArrows(elements, skeletons);
+    const scene = new Scene(elements as unknown as SceneElement[]);
+    fitContainersToLabels(elements, scene);
+    bindArrows(skeletons, scene);
+    for (const el of elements) {
+      // The Scene numbers elements with fractional indices. Files written by this
+      // CLI carry none (Excalidraw assigns them on load), so drop them again.
+      el.index = null;
+      if (el.type === "arrow" && el.elbowed !== true) addStraightArrowFixedPoints(el, elements);
+    }
     return { elements, files: parsed.files };
   });
 }
@@ -122,18 +137,33 @@ function parseError(err: unknown): Error {
   return new Error(`Invalid mermaid definition: ${message}${hint}`, { cause: err });
 }
 
+type SceneElement = Parameters<typeof bindLinearElement>[1];
+
 /**
- * Grow containers whose label doesn't fit the space Excalidraw gives it. Pele
- * sizes nodes for their labels in Excalifont, but a diamond's or an ellipse's
- * label gets less room in Excalidraw than in Pele's shapes, so Excalidraw
- * would wrap it.
+ * Fit labels to their containers as Excalidraw does when it lays out bound
+ * text: wrap a label wider than the room its container gives it (a diamond or
+ * an ellipse gives less than its size), then grow the container if the wrapped
+ * label is still too tall or a word too wide. Pele sizes nodes for their labels
+ * in Excalifont, so this matters mostly for diamonds. Excalidraw grows a
+ * container from its top-left corner; it's moved back to its center here, where
+ * Pele's arrows meet it.
  */
-function fitContainersToLabels(elements: ExcalidrawElement[]): void {
-  const byId = new Map(elements.map((el) => [el.id, el]));
-  for (const text of elements) {
-    if (text.type !== "text" || typeof text.containerId !== "string") continue;
-    const container = byId.get(text.containerId);
-    if (container && container.type !== "arrow") fitContainerToBoundText(container, text);
+function fitContainersToLabels(elements: ExcalidrawElement[], scene: Scene): void {
+  const byId = scene.getNonDeletedElementsMap();
+  for (const el of elements) {
+    if (el.type !== "text" || typeof el.containerId !== "string") continue;
+    const container = byId.get(el.containerId);
+    if (!container || container.type === "arrow") continue;
+    const text = byId.get(el.id) as Parameters<typeof redrawTextBoundingBox>[0];
+
+    const { width, height } = container;
+    redrawTextBoundingBox(text, container, scene);
+    if (container.width === width && container.height === height) continue;
+    scene.mutateElement(container, {
+      x: container.x - (container.width - width) / 2,
+      y: container.y - (container.height - height) / 2,
+    });
+    redrawTextBoundingBox(text, container, scene);
   }
 }
 
@@ -141,18 +171,12 @@ function fitContainersToLabels(elements: ExcalidrawElement[]): void {
  * Bind arrows to the shapes their skeletons start and end at, the way Excalidraw
  * binds a dropped arrow end (its own skeleton conversion does the same): focus
  * and gap from where the arrow touches the shape, and, for elbow arrows, the
- * fixed point they're routed from when a shape moves. Arrows keep the points
- * Pele routed them along.
+ * fixed point they're routed from when a shape moves. Curved arrows keep the
+ * points Pele routed them along; Excalidraw re-routes elbow arrows as it binds
+ * them, keeping the segments Pele fixed.
  */
-async function bindArrows(
-  elements: ExcalidrawElement[],
-  skeletons: Record<string, unknown>[],
-): Promise<void> {
-  const { Scene, bindLinearElement } = await import("@excalidraw/element");
-  type SceneElement = Parameters<typeof bindLinearElement>[1];
+function bindArrows(skeletons: Record<string, unknown>[], scene: Scene): void {
   type SceneArrow = Parameters<typeof bindLinearElement>[0];
-
-  const scene = new Scene(elements as unknown as SceneElement[]);
   const byId = scene.getNonDeletedElementsMap();
   for (const skel of skeletons) {
     if (skel.type !== "arrow" || typeof skel.id !== "string") continue;
@@ -162,13 +186,6 @@ async function bindArrows(
       const shape = byId.get(skeletonRefId(skel[end]) ?? "");
       if (shape) bindLinearElement(arrow, shape as SceneElement, end, scene);
     }
-  }
-
-  for (const el of elements) {
-    // The Scene numbers elements with fractional indices. Files written by this
-    // CLI carry none (Excalidraw assigns them on load), so drop them again.
-    el.index = null;
-    if (el.type === "arrow" && el.elbowed !== true) addStraightArrowFixedPoints(el, elements);
   }
 }
 
