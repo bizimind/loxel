@@ -88,6 +88,8 @@ export const BROWSER_NOTIFICATION_EVENT = "browser-notification:event";
 export const BROWSER_NOTIFICATION_LISTEN = "browser-notification:listen";
 /** Renderer → main: the per-site decisions from Loxel's settings, on load and on every change. */
 export const BROWSER_NOTIFICATION_SET_SITES = "browser-notification:set-sites";
+/** Renderer → main: the per-site mutes and snoozes from Loxel's settings, sent before the decisions. */
+export const BROWSER_NOTIFICATION_SET_MUTES = "browser-notification:set-mutes";
 /** Main → renderer: show a page's notification in the notification center. */
 export const BROWSER_NOTIFICATION_OPENED = "browser-notification:opened";
 /** Main → renderer: ask whether a site may show notifications, in the panel hosting the page. */

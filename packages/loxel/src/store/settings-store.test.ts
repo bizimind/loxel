@@ -7,6 +7,7 @@ import { classifySchemaGlob } from "@/lib/schema-glob";
 
 import {
   BUILTIN_SCHEMA_DEFAULTS,
+  DEFAULT_BROWSER_BACKGROUND_PAGES,
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type IndentationInputs,
@@ -542,5 +543,81 @@ describe("withValidSettings: terminal bidirectional text", () => {
   test("keeps a stored choice", () => {
     expect(bidiText({ bidiText: true })).toBe(true);
     expect(bidiText({ bidiText: false })).toBe(false);
+  });
+});
+
+describe("browser notification mutes", () => {
+  const site = "https://chat.example";
+  const backgroundPages = DEFAULT_BROWSER_BACKGROUND_PAGES;
+  const reset = () =>
+    useSettingsStore.setState({
+      browser: { notificationSites: {}, notificationMutes: {}, backgroundPages },
+    });
+  const browser = () => useSettingsStore.getState().browser;
+
+  test("muting keeps the site's decision, and unmuting removes the mute", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    store.setNotificationSite(site, "allow");
+    store.setNotificationMute(site, {});
+    expect(browser()).toEqual({
+      notificationSites: { [site]: "allow" },
+      notificationMutes: { [site]: {} },
+      backgroundPages,
+    });
+    store.setNotificationMute(site, null);
+    expect(browser().notificationMutes).toEqual({});
+    reset();
+  });
+
+  test("forgetting a site drops its mute too, and a changed decision keeps it", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    store.setNotificationSite(site, "allow");
+    store.setNotificationMute(site, {});
+    store.setNotificationSite(site, "block");
+    expect(browser().notificationMutes).toEqual({ [site]: {} });
+    store.setNotificationSite(site, null);
+    expect(browser()).toEqual({ notificationSites: {}, notificationMutes: {}, backgroundPages });
+    reset();
+  });
+
+  test("a site without a decision can't be muted", () => {
+    reset();
+    useSettingsStore.getState().setNotificationMute(site, {});
+    expect(browser().notificationMutes).toEqual({});
+  });
+
+  test("a mute change prunes snoozes that have ended", () => {
+    reset();
+    useSettingsStore.setState({
+      browser: {
+        notificationSites: { [site]: "allow" },
+        notificationMutes: { "https://old.example": { until: 1 } },
+        backgroundPages,
+      },
+    });
+    useSettingsStore.getState().setNotificationMute(site, { until: Date.now() + 60_000 });
+    expect(Object.keys(browser().notificationMutes)).toEqual([site]);
+    reset();
+  });
+
+  test("stored mutes are checked on load, and rows from before mutes get none", () => {
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    const current = useSettingsStore.getState();
+    const stored = {
+      notificationSites: { [site]: "allow" },
+      notificationMutes: { [site]: { until: 5 }, "https://bad.example": { until: "soon" } },
+    };
+    expect(merge({ browser: stored }, current).browser).toEqual({
+      notificationSites: { [site]: "allow" },
+      notificationMutes: { [site]: { until: 5 } },
+      backgroundPages,
+    });
+    expect(merge({ browser: { notificationSites: {} } }, current).browser).toEqual({
+      notificationSites: {},
+      notificationMutes: {},
+      backgroundPages,
+    });
   });
 });

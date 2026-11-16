@@ -5,8 +5,12 @@ import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
 import {
+  type NotificationMute,
+  type NotificationMutes,
   type NotificationSiteDecision,
   type NotificationSites,
+  isMuteActive,
+  parseNotificationMutes,
   parseNotificationSites,
 } from "@/electron/browser-notification-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
@@ -40,7 +44,8 @@ export type SidebarZone = "left" | "bottom" | "right";
  * A stored or synced settings slice with the fields that need it checked: an unknown `theme`
  * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
  * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The browser's
- * per-site decisions keep only valid entries, since the Electron main process enforces them. The
+ * per-site decisions and mutes keep only valid entries, since the Electron main process enforces
+ * them, and its background page count falls back to its default when missing or out of range. The
  * terminal's "When quitting Loxel" falls back to its default when it is missing (a row from before
  * it) or unknown, as main does with the value it is sent, and bidirectional text is on only when
  * stored as true.
@@ -82,14 +87,39 @@ export interface BrowserSettings {
    * ask. The Electron main process enforces these (see browser-notifications.ts).
    */
   notificationSites: NotificationSites;
+  /**
+   * Sites muted or snoozed from a notification's context menu: they keep their decision, but
+   * main drops their notifications. Expired snoozes are pruned when a mute changes.
+   */
+  notificationMutes: NotificationMutes;
+  /**
+   * How many browser pages of layouts not shown (other worktrees, or Home) stay loaded; past it,
+   * the least recently shown are unloaded and load again when shown (see store/browser-pages.ts).
+   */
+  backgroundPages: number;
+}
+
+export const DEFAULT_BROWSER_BACKGROUND_PAGES = 10;
+export const MAX_BROWSER_BACKGROUND_PAGES = 50;
+
+/** A whole number of background pages in range, or null. */
+export function parseBackgroundPages(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_BROWSER_BACKGROUND_PAGES
+    ? value
+    : null;
 }
 
 function parseBrowserSettings(value: unknown): BrowserSettings {
-  const sites =
-    typeof value === "object" && value !== null && "notificationSites" in value
-      ? value.notificationSites
-      : undefined;
-  return { notificationSites: parseNotificationSites(sites) };
+  const fields = isRecord(value) ? value : {};
+  return {
+    notificationSites: parseNotificationSites(fields.notificationSites),
+    notificationMutes: parseNotificationMutes(fields.notificationMutes),
+    backgroundPages:
+      parseBackgroundPages(fields.backgroundPages) ?? DEFAULT_BROWSER_BACKGROUND_PAGES,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +693,13 @@ export interface SettingsState {
   // Browser actions
   /** Allow or block notifications from a site, or forget its decision (`null`) so it asks again. */
   setNotificationSite: (origin: string, decision: NotificationSiteDecision | null) => void;
+  /**
+   * Mute or snooze a site's notifications, or unmute it (`null`). Only a site with a decision can
+   * be muted, so every mute shows in Settings > Browser and goes when the site is forgotten.
+   */
+  setNotificationMute: (origin: string, mute: NotificationMute | null) => void;
+  /** Set how many background browser pages stay loaded. */
+  setBrowserBackgroundPages: (count: number) => void;
 
   // Wt config actions
 
@@ -761,7 +798,11 @@ export const useSettingsStore = create<SettingsState>()(
       fileAssociations: [],
       autoRevealInExplorer: false,
       autoCheckForUpdates: true,
-      browser: { notificationSites: {} },
+      browser: {
+        notificationSites: {},
+        notificationMutes: {},
+        backgroundPages: DEFAULT_BROWSER_BACKGROUND_PAGES,
+      },
 
       isOpen: false,
       activeSection: "general",
@@ -1054,8 +1095,27 @@ export const useSettingsStore = create<SettingsState>()(
         set((s) => {
           const { [origin]: _previous, ...others } = s.browser.notificationSites;
           const notificationSites = decision ? { ...others, [origin]: decision } : others;
-          return { browser: { ...s.browser, notificationSites } };
+          if (decision) return { browser: { ...s.browser, notificationSites } };
+          // A forgotten site starts over: if it is allowed again, it isn't still muted.
+          const { [origin]: _mute, ...notificationMutes } = s.browser.notificationMutes;
+          return { browser: { ...s.browser, notificationSites, notificationMutes } };
         }),
+
+      setNotificationMute: (origin, mute) =>
+        set((s) => {
+          if (mute && !s.browser.notificationSites[origin]) return {};
+          const now = Date.now();
+          const notificationMutes = Object.fromEntries(
+            Object.entries(s.browser.notificationMutes).filter(
+              ([other, m]) => other !== origin && isMuteActive(m, now),
+            ),
+          );
+          if (mute) notificationMutes[origin] = mute;
+          return { browser: { ...s.browser, notificationMutes } };
+        }),
+
+      setBrowserBackgroundPages: (count) =>
+        set((s) => ({ browser: { ...s.browser, backgroundPages: count } })),
 
       // -- UI --
 

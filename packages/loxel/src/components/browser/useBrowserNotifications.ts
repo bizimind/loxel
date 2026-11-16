@@ -3,7 +3,7 @@
  * window (see `src/electron/browser-notifications.ts`), to the panel whose `<webview>` the page is
  * in: a shown notification goes to the notification center with that panel as its source, and a
  * site asking for permission gets the panel's Allow / Block bar. Also keeps main's copy of the
- * per-site decisions in step with settings.
+ * per-site decisions and mutes in step with settings.
  */
 import { type RefObject, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -19,7 +19,6 @@ import {
 import { frontendLog } from "@/lib/frontend-logger";
 import type { BrowserBookmark } from "@/store/browser-bookmarks";
 import { useSettingsStore } from "@/store/settings-store";
-import { useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("ui");
 
@@ -82,15 +81,23 @@ function handleWithdrawn(value: unknown): void {
   else unclaimed.delete(webContentsId);
 }
 
-/** Send main the settings' per-site decisions now and whenever they change. */
+/** Send main the settings' per-site decisions and mutes now and whenever they change. */
 function syncSitesToMain(): void {
-  const push = () =>
+  const pushMutes = () =>
+    window.electronAPI?.setNotificationMutes(useSettingsStore.getState().browser.notificationMutes);
+  const pushSites = () =>
     window.electronAPI?.setNotificationSites(useSettingsStore.getState().browser.notificationSites);
-  // Not before hydration: main would take the defaults for the user's decisions.
-  if (useSettingsStore.persist.hasHydrated()) push();
-  else useSettingsStore.persist.onFinishHydration(push);
+  // Not before hydration: main would take the defaults for the user's decisions. Mutes go first,
+  // so no muted site's notification gets through once the decisions let pages notify.
+  const pushAll = () => {
+    pushMutes();
+    pushSites();
+  };
+  if (useSettingsStore.persist.hasHydrated()) pushAll();
+  else useSettingsStore.persist.onFinishHydration(pushAll);
   useSettingsStore.subscribe((state, previous) => {
-    if (state.browser.notificationSites !== previous.browser.notificationSites) push();
+    if (state.browser.notificationMutes !== previous.browser.notificationMutes) pushMutes();
+    if (state.browser.notificationSites !== previous.browser.notificationSites) pushSites();
   });
 }
 
@@ -165,23 +172,22 @@ export type NotificationPermissionAnswer = NotificationSiteDecision | "dismiss";
 
 /**
  * The web notifications of the webview with this guest webContents id (null until it is ready),
- * shown in the notification center as coming from the browser panel `panelId`, with the favicon of
- * the page `pageRef` holds when one arrives. `request` is the oldest open permission request, for
- * the panel's prompt, and `answer` replies to it: Allow and Block are saved for the site, Dismiss
+ * shown in the notification center as coming from the browser panel `panelId` in the layout of
+ * `worktreePath` (null: Home's), whether or not that layout is shown, with the favicon of the page
+ * `pageRef` holds when one arrives. `request` is the oldest open permission request, for the
+ * panel's prompt, and `answer` replies to it: Allow and Block are saved for the site, Dismiss
  * decides nothing.
  */
 export function useBrowserNotifications(
   webContentsId: number | null,
   panelId: string,
+  worktreePath: string | null,
   pageRef: RefObject<PanelPage>,
 ): {
   request: NotificationPermissionRequest | null;
   answer: (answer: NotificationPermissionAnswer) => void;
 } {
   const [queue, setQueue] = useState<NotificationPermissionRequest[]>([]);
-  // The worktree whose layout the panel mounted in, or Home's (null). Read once: during a switch
-  // the active worktree is already the next one while this panel's layout is still up.
-  const [worktreePath] = useState(() => useWorktreeStore.getState().activeWorktreePath);
 
   useEffect(() => {
     listen();

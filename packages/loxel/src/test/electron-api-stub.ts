@@ -30,6 +30,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     restartApp: () => {},
     onBrowserNotifications: () => () => {},
     setNotificationSites: () => {},
+    setNotificationMutes: () => {},
     respondToNotificationPermission: () => {},
     clickBrowserNotification: () => {},
     quitEndingTerminals: () => {},
