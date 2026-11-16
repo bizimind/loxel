@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
+import { wsClient } from "@/api/client";
 import type {
   JavaScriptDialogClosed,
   JavaScriptDialogRequest,
@@ -19,6 +20,7 @@ Object.defineProperty(navigator, "userAgent", {
 });
 
 let openDialog: (request: unknown) => void = () => {};
+let openNotification: (notification: unknown) => void = () => {};
 let closeDialog: (closed: unknown) => void = () => {};
 const respondToJavaScriptDialog = mock();
 window.electronAPI = stubElectronAPI({
@@ -28,6 +30,10 @@ window.electronAPI = stubElectronAPI({
     return () => {};
   },
   respondToJavaScriptDialog,
+  onBrowserNotifications: ({ onOpened }) => {
+    openNotification = onOpened;
+    return () => {};
+  },
 });
 
 const { BrowserPanel } = await import("./BrowserPanel");
@@ -93,6 +99,20 @@ function renderPanel({ ready = true, url = "about:blank" } = {}) {
   const fireReady = () => act(() => void webview.dispatchEvent(new Event("dom-ready")));
   if (ready) fireReady();
   return { webview, guest, reload, reloadIgnoringCache, fireReady };
+}
+
+/** Show `url` in the panel's webview, as committed, with its title and favicon when given. */
+function loadPage(webview: HTMLElement, url: string, title?: string, favicon?: string) {
+  Object.assign(webview, { getURL: () => url });
+  act(() => {
+    webview.dispatchEvent(new Event("did-navigate"));
+    if (title) webview.dispatchEvent(Object.assign(new Event("page-title-updated"), { title }));
+    if (favicon) {
+      webview.dispatchEvent(
+        Object.assign(new Event("page-favicon-updated"), { favicons: [favicon] }),
+      );
+    }
+  });
 }
 
 const lastResponse = () => respondToJavaScriptDialog.mock.calls.at(-1)?.[0];
@@ -351,19 +371,6 @@ describe("bookmarks", () => {
 
   const star = () => screen.getByRole("button", { name: /bookmark/i, pressed: false });
 
-  function loadPage(webview: HTMLElement, url: string, title?: string, favicon?: string) {
-    Object.assign(webview, { getURL: () => url });
-    act(() => {
-      webview.dispatchEvent(new Event("did-navigate"));
-      if (title) webview.dispatchEvent(Object.assign(new Event("page-title-updated"), { title }));
-      if (favicon) {
-        webview.dispatchEvent(
-          Object.assign(new Event("page-favicon-updated"), { favicons: [favicon] }),
-        );
-      }
-    });
-  }
-
   test("the star bookmarks the page with its title and favicon, and removes it again", () => {
     const { webview } = renderPanel();
     loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
@@ -456,5 +463,47 @@ describe("bookmarks", () => {
     expect(screen.getByRole("textbox")).toHaveValue("https://example.com/docs");
     // The start page goes once the panel shows a page.
     expect(screen.queryByRole("heading", { name: "Bookmarks" })).toBeNull();
+  });
+});
+
+describe("notifications", () => {
+  let send: ReturnType<typeof spyOn<typeof wsClient, "send">>;
+  beforeEach(() => {
+    send = spyOn(wsClient, "send").mockImplementation(() => {});
+  });
+  afterEach(() => send.mockRestore());
+
+  /** The source the panel sends the server for a notification from `origin`. */
+  function notify(origin: string) {
+    const notification = {
+      ref: "n1",
+      webContentsId: WEB_CONTENTS_ID,
+      origin,
+      title: "Hi",
+      body: "",
+      tag: "",
+    };
+    act(() => openNotification(notification));
+    const sent = send.mock.calls.at(-1)?.[0];
+    if (sent?.type !== "browser_notification_show") throw new Error("No notification sent");
+    return sent.source;
+  }
+
+  test("carry the favicon the tab shows for the notifying site", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://chat.example/room", "Chat", "https://cdn.example/icon.png");
+    expect(notify("https://chat.example")).toMatchObject({
+      kind: "browser",
+      origin: "https://chat.example",
+      faviconUrl: "https://cdn.example/icon.png",
+    });
+  });
+
+  test("carry no favicon once the panel shows another site, or before the page has one", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://other.example/", "Other", "https://other.example/favicon.ico");
+    expect(notify("https://chat.example")).not.toHaveProperty("faviconUrl");
+    loadPage(webview, "https://chat.example/");
+    expect(notify("https://chat.example")).not.toHaveProperty("faviconUrl");
   });
 });

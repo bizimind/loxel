@@ -12,3 +12,19 @@ export function isHttpUrl(value: string): boolean {
     return false;
   }
 }
+
+/**
+ * Largest favicons kept, inline (`data:`) or as a web URL: the lists that hold them (bookmarks,
+ * notifications) are written and sent to every window, and a page picks its favicon's URL.
+ */
+const MAX_DATA_FAVICON_LENGTH = 16 * 1024;
+const MAX_WEB_FAVICON_LENGTH = 2048;
+
+/**
+ * Whether a page's favicon URL, as Chromium reported it for a browser panel, may be kept beside a
+ * bookmark or a notification: a short web URL, or a small inline image.
+ */
+export function isStorableFavicon(url: string): boolean {
+  if (url.startsWith("data:image/")) return url.length <= MAX_DATA_FAVICON_LENGTH;
+  return url.length <= MAX_WEB_FAVICON_LENGTH && isHttpUrl(url);
+}
