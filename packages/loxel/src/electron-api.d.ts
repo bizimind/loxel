@@ -51,6 +51,17 @@ interface Window {
      */
     setBrowserPageFrozen: (webContentsId: number, frozen: boolean) => Promise<boolean>;
     /**
+     * A browser page's favicon as a `data:` URL, or null if it is no image or can't be loaded.
+     * It loads through the browser panels' session, with cookies only if it has the origin of
+     * `pageUrl`, the page it is shown for. A `blob:` favicon is read in the page of webview
+     * `webContentsId`, which must be one of this window's.
+     */
+    loadFavicon: (
+      url: string,
+      pageUrl: string | undefined,
+      webContentsId?: number,
+    ) => Promise<string | null>;
+    /**
      * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
      * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).
      */

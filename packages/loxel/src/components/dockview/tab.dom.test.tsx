@@ -6,6 +6,7 @@ import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 import { FOCUS_AREA_ATTR } from "@/lib/focus-targets";
 import { registerPanelFocus } from "@/lib/panel-focus";
 import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
+import { setBrowserPageLoading } from "@/store/browser-pages";
 import { setCenterApi } from "@/store/tools-bar";
 
 import { BrowserTab } from "./browser-tab";
@@ -69,13 +70,43 @@ describe("BrowserTab", () => {
   test("clicking it returns focus to the panel's page", () => {
     const focusPage = jest.fn(() => true);
     const unregister = registerPanelFocus("panel-1", focusPage);
-    const api = Object.assign(fakePanelApi("Example"), {
-      onDidParametersChange: () => ({ dispose: () => {} }),
-    });
+    const api = fakePanelApi("Example");
     render(<BrowserTab {...({ api, params: {} } as unknown as BrowserTabProps)} />);
     fireEvent.click(screen.getByText("Example"));
     expect(focusPage).toHaveBeenCalledTimes(1);
     unregister();
+  });
+
+  test("shows the favicon of the panel's params as dockview updates them", () => {
+    const api = fakePanelApi("Example");
+    const tab = (params: object) => (
+      <BrowserTab {...({ api, params } as unknown as BrowserTabProps)} />
+    );
+    const favicon = "https://example.com/favicon.ico";
+    const { container, rerender } = render(
+      tab({ url: "https://example.com/", faviconUrl: favicon }),
+    );
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(favicon);
+
+    // An in-page navigation updates only the URL; dockview passes the merged params.
+    rerender(tab({ url: "https://example.com/#next", faviconUrl: favicon }));
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(favicon);
+
+    rerender(tab({ url: "https://other.example/" }));
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  test("shows a spinner instead of the favicon while its page loads", () => {
+    const api = fakePanelApi("Example");
+    const favicon = "https://example.com/favicon.ico";
+    const params = { url: "https://example.com/", faviconUrl: favicon };
+    render(<BrowserTab {...({ api, params } as unknown as BrowserTabProps)} />);
+    act(() => setBrowserPageLoading("panel-1", true));
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+    act(() => setBrowserPageLoading("panel-1", false));
+    expect(screen.queryByLabelText("Loading")).toBeNull();
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(favicon);
   });
 });
 

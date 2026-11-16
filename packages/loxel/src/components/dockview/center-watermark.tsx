@@ -310,7 +310,7 @@ function AddressField() {
                 index === picked && "bg-primary",
               )}
             >
-              <Favicon url={bookmark.faviconUrl} />
+              <Favicon url={bookmark.faviconUrl} pageUrl={bookmark.url} />
               <span className="text-foreground min-w-0 truncate">
                 {bookmark.title || bookmark.url}
               </span>

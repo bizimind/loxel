@@ -38,6 +38,13 @@ export const BROWSER_PAGE_USAGE = "browser:page-usage";
 /** Freeze one of the window's background browser pages, or resume it. */
 export const BROWSER_PAGE_SET_FROZEN = "browser:page-set-frozen";
 /**
+ * Renderer → main (invoke): a browser page's favicon as a `data:` URL, or null. Args: the favicon's
+ * URL, the URL of the page it is shown for (its own origin's favicons load with cookies), and, for a
+ * `blob:` favicon, the webContents id of the webview whose page made it. See
+ * `browser-favicons.ts`.
+ */
+export const BROWSER_FAVICON_LOAD = "browser:favicon-load";
+/**
  * Webview preload → main, synchronous: a page called `alert()` / `confirm()` / `prompt()`. The
  * page stays blocked until main sets the return value. See `javascript-dialogs.ts`.
  */

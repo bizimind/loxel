@@ -3,6 +3,7 @@ import type {
   DidFailLoadEvent,
   DidNavigateEvent,
   DidNavigateInPageEvent,
+  DidStartNavigationEvent,
   ContextMenuEvent,
   FoundInPageEvent,
   PageFaviconUpdatedEvent,
@@ -33,8 +34,12 @@ import {
   useBrowserBookmarksStore,
   useIsBookmarked,
 } from "@/store/browser-bookmarks";
-import { setBrowserPageUrl, setBrowserPageWebContents } from "@/store/browser-pages";
-import { isHttpUrl } from "@/url-utils";
+import {
+  setBrowserPageLoading,
+  setBrowserPageUrl,
+  setBrowserPageWebContents,
+} from "@/store/browser-pages";
+import { isHttpUrl, isSameOrigin } from "@/url-utils";
 
 import {
   BookmarksMenu,
@@ -43,6 +48,7 @@ import {
   type OpenBookmark,
 } from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
+import { faviconCandidates, pickFavicon } from "./favicon-loads";
 import { JavaScriptDialog } from "./JavaScriptDialog";
 import { NotificationPermissionBar } from "./NotificationPermissionBar";
 import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
@@ -132,6 +138,8 @@ export function BrowserPanel({
   // of it while the next page loads, and the title and favicon arrive after it commits. Its URL is
   // empty while there is none, or after a load failed.
   const pageRef = useRef<BrowserBookmark>({ url: "", title: "" });
+  // Counts the page's favicon changes, so a `blob:` favicon read after a newer one arrived is dropped.
+  const faviconRequestRef = useRef(0);
   const [pageUrl, setPageUrl] = useState("");
   const isBookmarked = useIsBookmarked(pageUrl);
 
@@ -257,8 +265,15 @@ export function BrowserPanel({
       setLoadError(null);
     };
 
+    // The tab's spinner, as browsers show it: from the start of a navigation to a new document of
+    // the page itself (not of a frame in it, nor in-page) until everything the page loads is done.
+    const onStartNavigation = (event: DidStartNavigationEvent) => {
+      if (event.isMainFrame && !event.isInPlace) setBrowserPageLoading(panelId, true);
+    };
+
     const onStopLoading = () => {
       setIsLoading(false);
+      setBrowserPageLoading(panelId, false);
       updateNavState();
     };
 
@@ -279,8 +294,13 @@ export function BrowserPanel({
       setPageUrl(url);
       setBrowserPageUrl(panelId, url);
       if (event.type === "did-navigate") {
-        pageRef.current = { url, title: "" };
-        panelApiRef.current?.updateParameters({ url, faviconUrl: undefined });
+        // A new document reports its favicon once it has parsed its head. Until then a page of the
+        // same site keeps the one before, which is most often its favicon too.
+        const { faviconUrl } = pageRef.current;
+        const keepFavicon = faviconUrl !== undefined && isSameOrigin(pageRef.current.url, url);
+        faviconRequestRef.current++;
+        pageRef.current = { url, title: "", ...(keepFavicon && { faviconUrl }) };
+        panelApiRef.current?.updateParameters({ url, faviconUrl: pageRef.current.faviconUrl });
       } else {
         // The same document, which keeps its title and favicon (Chromium reports them per document).
         pageRef.current = { ...pageRef.current, url };
@@ -294,12 +314,28 @@ export function BrowserPanel({
       panelApiRef.current?.setTitle(event.title);
     };
 
+    const setFavicon = (faviconUrl: string | undefined) => {
+      pageRef.current = { ...pageRef.current, faviconUrl };
+      panelApiRef.current?.updateParameters({ faviconUrl });
+    };
+
+    // Chromium lists the page's favicons, its preferred first. Pages change them as they please (an
+    // unread count, a build status); each change fires the event again.
     const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
-      const favicon = event.favicons[0];
-      if (favicon) {
-        pageRef.current = { ...pageRef.current, faviconUrl: favicon };
-        panelApiRef.current?.updateParameters({ faviconUrl: favicon });
-      }
+      const candidates = faviconCandidates(event.favicons);
+      const [first] = candidates;
+      if (!first) return;
+      const request = ++faviconRequestRef.current;
+      const isCurrent = () => request === faviconRequestRef.current;
+      // The preferred one shows at once, and gives way to the next one that loads if it doesn't.
+      // Only the page that made a `blob:` URL can read it, so main reads it there.
+      if (!first.startsWith("blob:")) setFavicon(first);
+      const readBlob = (url: string) =>
+        window.electronAPI?.loadFavicon(url, undefined, webview.getWebContentsId()) ??
+        Promise.resolve(null);
+      void pickFavicon(candidates, pageRef.current.url, readBlob, isCurrent).then((picked) => {
+        if (isCurrent() && picked !== pageRef.current.faviconUrl) setFavicon(picked);
+      });
     };
 
     const onFailLoad = (event: DidFailLoadEvent) => {
@@ -335,6 +371,7 @@ export function BrowserPanel({
 
     webview.addEventListener("did-start-loading", onStartLoading);
     webview.addEventListener("did-stop-loading", onStopLoading);
+    webview.addEventListener("did-start-navigation", onStartNavigation);
     webview.addEventListener("did-navigate", onDidNavigate);
     webview.addEventListener("did-navigate-in-page", onDidNavigate);
     webview.addEventListener("page-title-updated", onTitleUpdate);
@@ -350,6 +387,9 @@ export function BrowserPanel({
       webview.removeEventListener("dom-ready", onDomReady);
       webview.removeEventListener("did-start-loading", onStartLoading);
       webview.removeEventListener("did-stop-loading", onStopLoading);
+      webview.removeEventListener("did-start-navigation", onStartNavigation);
+      // An unloaded page loads nothing.
+      setBrowserPageLoading(panelId, false);
       webview.removeEventListener("did-navigate", onDidNavigate);
       webview.removeEventListener("did-navigate-in-page", onDidNavigate);
       webview.removeEventListener("page-title-updated", onTitleUpdate);

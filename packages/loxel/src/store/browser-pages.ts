@@ -107,6 +107,29 @@ function resume(id: string, webContentsId: number): void {
   });
 }
 
+/**
+ * The panels whose page is loading a new document, for their tabs' spinner. Apart from the pages
+ * and from the panels' params, which are saved with the layout: it only says what a page is doing.
+ */
+const useLoadingPages = create<{ loading: Readonly<Record<string, true>> }>()(() => ({
+  loading: {},
+}));
+
+/** Record whether panel `id`'s page is loading a new document. */
+export function setBrowserPageLoading(id: string, loading: boolean): void {
+  const current = useLoadingPages.getState().loading;
+  if ((current[id] === true) === loading) return;
+  const next = { ...current };
+  if (loading) next[id] = true;
+  else delete next[id];
+  useLoadingPages.setState({ loading: next });
+}
+
+/** Whether panel `id`'s page is loading a new document, shown or in the background. */
+export function useIsBrowserPageLoading(id: string): boolean {
+  return useLoadingPages((state) => state.loading[id] === true);
+}
+
 /** Panel `id` no longer shows its page in `element`: keep the page running in the background. */
 export function detachBrowserPage(id: string, element: HTMLElement): void {
   const page = useBrowserPages.getState().pages[id];

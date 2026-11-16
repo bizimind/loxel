@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
 import { wsClient } from "@/api/client";
@@ -11,6 +19,7 @@ import type {
 import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { focusRegisteredPanel } from "@/lib/panel-focus";
 import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
+import { useIsBrowserPageLoading } from "@/store/browser-pages";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 // BrowserPanel renders its webview only in Electron (read once, at import).
@@ -23,7 +32,11 @@ let openDialog: (request: unknown) => void = () => {};
 let openNotification: (notification: unknown) => void = () => {};
 let closeDialog: (closed: unknown) => void = () => {};
 const respondToJavaScriptDialog = mock();
+const loadFavicon = mock(
+  async (_url: string, _pageUrl?: string, _webContentsId?: number): Promise<string | null> => null,
+);
 window.electronAPI = stubElectronAPI({
+  loadFavicon,
   onJavaScriptDialog: (onOpen, onClosed) => {
     openDialog = onOpen;
     closeDialog = onClosed;
@@ -505,5 +518,146 @@ describe("notifications", () => {
     expect(notify("https://chat.example")).not.toHaveProperty("faviconUrl");
     loadPage(webview, "https://chat.example/");
     expect(notify("https://chat.example")).not.toHaveProperty("faviconUrl");
+  });
+});
+
+describe("favicons", () => {
+  let updateParameters: ReturnType<typeof spyOn<DockviewPanelApi, "updateParameters">>;
+  beforeEach(() => {
+    updateParameters = spyOn(panelApi, "updateParameters");
+    loadFavicon.mockClear();
+  });
+  afterEach(() => updateParameters.mockRestore());
+
+  const lastFavicon = () => {
+    const params = updateParameters.mock.calls.findLast(([p]) => "faviconUrl" in p)?.[0];
+    return params?.faviconUrl;
+  };
+
+  function updateFavicon(webview: HTMLElement, favicon: string) {
+    act(() => {
+      webview.dispatchEvent(
+        Object.assign(new Event("page-favicon-updated"), { favicons: [favicon] }),
+      );
+    });
+  }
+
+  test("a page of the same site keeps the favicon until its own arrives; another site's drops it", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/a", "A", "https://example.com/a.ico");
+    loadPage(webview, "https://example.com/b");
+    expect(lastFavicon()).toBe("https://example.com/a.ico");
+    updateFavicon(webview, "https://example.com/b.ico");
+    expect(lastFavicon()).toBe("https://example.com/b.ico");
+
+    loadPage(webview, "https://other.example/");
+    expect(updateParameters).toHaveBeenLastCalledWith({
+      url: "https://other.example/",
+      faviconUrl: undefined,
+    });
+  });
+
+  test("an in-page navigation leaves the favicon alone", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+    Object.assign(webview, { getURL: () => "https://example.com/#next" });
+    act(() => void webview.dispatchEvent(new Event("did-navigate-in-page")));
+    expect(updateParameters).toHaveBeenLastCalledWith({ url: "https://example.com/#next" });
+  });
+
+  test("a blob: favicon is read in the page, and dropped if a newer one arrived meanwhile", async () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+    let settle: (src: string | null) => void = () => {};
+    loadFavicon.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    updateFavicon(webview, "blob:https://example.com/1");
+    expect(loadFavicon).toHaveBeenLastCalledWith(
+      "blob:https://example.com/1",
+      undefined,
+      WEB_CONTENTS_ID,
+    );
+    await act(async () => settle("data:image/png;base64,MQ=="));
+    expect(lastFavicon()).toBe("data:image/png;base64,MQ==");
+
+    updateFavicon(webview, "blob:https://example.com/2");
+    const settleSecond = settle;
+    updateFavicon(webview, "https://example.com/new.ico");
+    await act(async () => settleSecond("data:image/png;base64,Mg=="));
+    expect(lastFavicon()).toBe("https://example.com/new.ico");
+  });
+
+  test("falls back to the page's next favicon when the preferred one doesn't load", async () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    loadFavicon.mockImplementation(async (url) =>
+      url.endsWith("/b.ico") ? "data:image/x-icon;base64,AA" : null,
+    );
+    act(() => {
+      webview.dispatchEvent(
+        Object.assign(new Event("page-favicon-updated"), {
+          favicons: ["https://example.com/a.svg", "javascript:void 0", "https://example.com/b.ico"],
+        }),
+      );
+    });
+    expect(lastFavicon()).toBe("https://example.com/a.svg");
+    await act(async () => {
+      await new Promise((flushed) => {
+        setTimeout(flushed);
+      });
+    });
+    expect(lastFavicon()).toBe("https://example.com/b.ico");
+    expect(loadFavicon.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.com/a.svg",
+      "https://example.com/b.ico",
+    ]);
+    loadFavicon.mockImplementation(async () => null);
+  });
+
+  test("a blob: favicon that can't be read, or is too large to keep, shows none", async () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+    loadFavicon.mockResolvedValueOnce(null);
+    updateFavicon(webview, "blob:https://example.com/1");
+    await act(async () => {});
+    expect(lastFavicon()).toBeUndefined();
+
+    loadFavicon.mockResolvedValueOnce(`data:image/png;base64,${"A".repeat(32 * 1024)}`);
+    updateFavicon(webview, "blob:https://example.com/2");
+    await act(async () => {});
+    expect(lastFavicon()).toBeUndefined();
+  });
+});
+
+describe("loading", () => {
+  const navigation = (fields: { isMainFrame: boolean; isInPlace: boolean }) =>
+    Object.assign(new Event("did-start-navigation"), { url: "https://example.com/", ...fields });
+
+  test("a new document of the page shows its tab loading until everything has loaded", () => {
+    const { webview } = renderPanel();
+    const loading = renderHook(() => useIsBrowserPageLoading("browser-test"));
+    act(() => void webview.dispatchEvent(navigation({ isMainFrame: false, isInPlace: false })));
+    act(() => void webview.dispatchEvent(navigation({ isMainFrame: true, isInPlace: true })));
+    expect(loading.result.current).toBe(false);
+
+    act(() => void webview.dispatchEvent(navigation({ isMainFrame: true, isInPlace: false })));
+    expect(loading.result.current).toBe(true);
+    act(() => void webview.dispatchEvent(new Event("did-stop-loading")));
+    expect(loading.result.current).toBe(false);
+  });
+
+  test("an unloaded page is not loading", () => {
+    const { webview } = renderPanel();
+    const isLoading = () =>
+      renderHook(() => useIsBrowserPageLoading("browser-test")).result.current;
+    act(() => void webview.dispatchEvent(navigation({ isMainFrame: true, isInPlace: false })));
+    expect(isLoading()).toBe(true);
+    cleanup();
+    expect(isLoading()).toBe(false);
   });
 });

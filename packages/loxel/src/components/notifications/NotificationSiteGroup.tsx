@@ -46,7 +46,11 @@ export function NotificationSiteGroup({
     <div role="group" aria-label={source}>
       <div className="flex items-center gap-2 px-2 pt-1.5 pb-0.5">
         {newest.source.kind === "browser" && (
-          <Favicon url={newest.source.faviconUrl} className="size-3" />
+          <Favicon
+            url={newest.source.faviconUrl}
+            pageUrl={newest.source.origin}
+            className="size-3"
+          />
         )}
         <span className="text-muted-foreground min-w-0 flex-1 truncate text-[10px] font-medium not-dark:text-[11px]">
           {source} &middot; {notifications.length}

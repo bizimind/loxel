@@ -108,7 +108,11 @@ export function NotificationItem({
 
         {/* A browser page's site, at a glance: its favicon, or a globe without one */}
         {notification.source.kind === "browser" && !inGroup && (
-          <Favicon url={notification.source.faviconUrl} className="mt-px size-3.5" />
+          <Favicon
+            url={notification.source.faviconUrl}
+            pageUrl={notification.source.origin}
+            className="mt-px size-3.5"
+          />
         )}
 
         {/* Content */}
