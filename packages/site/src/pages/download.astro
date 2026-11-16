@@ -4,7 +4,7 @@ import DownloadButton from "../components/DownloadButton.astro";
 import { trackClick } from "../lib/analytics";
 import { fetchManifest } from "../lib/manifest";
 
-const { version, downloads: binaries } = await fetchManifest();
+const { version, downloads: binaries, sbom } = await fetchManifest();
 ---
 
 <Base title="Download" description="Download Loxel for macOS.">
@@ -61,6 +61,11 @@ const { version, downloads: binaries } = await fetchManifest();
               class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity"
             >
               macOS Intel (.dmg)
+            </a>
+          )}
+          {sbom && (
+            <a href={sbom} class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity">
+              Software bill of materials (CycloneDX)
             </a>
           )}
         </div>

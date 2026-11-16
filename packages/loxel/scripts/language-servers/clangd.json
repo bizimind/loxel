@@ -2,7 +2,9 @@
   "script": "download-clangd.ts",
   "resources": ["clangd", "clangd-resource"],
   "platforms": ["darwin"],
+  "version": "23.1.0",
+  "purl": "pkg:github/clangd/clangd@{version}",
   "license": "Apache-2.0 WITH LLVM-exception",
-  "source": "https://github.com/llvm/llvm-project/tree/llvmorg-23.1.0",
+  "source": "https://github.com/llvm/llvm-project/tree/llvmorg-{version}",
   "licenseFile": "licenses/clangd.txt"
 }

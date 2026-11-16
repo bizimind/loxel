@@ -9,6 +9,8 @@ function isObj(v: unknown): v is Record<string, unknown> {
 export interface ManifestData {
   version: string;
   downloads: Record<string, string>;
+  /** The release's CycloneDX SBOM; releases from before SBOMs have none. */
+  sbom?: string;
 }
 
 async function loadManifest(): Promise<ManifestData> {
@@ -24,7 +26,8 @@ async function loadManifest(): Promise<ManifestData> {
       if (isObj(info) && typeof info.url === "string") downloads[platform] = info.url;
     }
   }
-  return { version: manifest.version, downloads };
+  const sbom = typeof manifest.sbom === "string" ? manifest.sbom : undefined;
+  return { version: manifest.version, downloads, sbom };
 }
 
 /**

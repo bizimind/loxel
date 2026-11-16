@@ -1,7 +1,9 @@
 {
   "script": "download-jdtls.ts",
   "resources": ["jdtls"],
+  "version": "1.63.0",
+  "purl": "pkg:github/eclipse-jdtls/eclipse.jdt.ls@v{version}",
   "license": "EPL-2.0",
-  "source": "https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v1.63.0",
+  "source": "https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v{version}",
   "licenseFile": "licenses/jdtls.txt"
 }

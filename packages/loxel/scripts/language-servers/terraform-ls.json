@@ -1,8 +1,10 @@
 {
   "script": "build-terraform-ls.ts",
   "resources": ["terraform-ls"],
+  "version": "0.39.1",
+  "purl": "pkg:golang/github.com/hashicorp/terraform-ls@v{version}",
   "license": "MPL-2.0",
-  "source": "https://github.com/hashicorp/terraform-ls/tree/v0.39.1",
+  "source": "https://github.com/hashicorp/terraform-ls/tree/v{version}",
   "licenseFile": "licenses/terraform-ls.txt",
   "note": "Built unmodified from source. Statically links the Go runtime and standard library (BSD-3-Clause) and its Go module dependencies, listed in scripts/terraform-ls-module/go.mod, under MPL-2.0, Apache-2.0, MIT, BSD-2-Clause and BSD-3-Clause."
 }

@@ -1,8 +1,17 @@
 {
   "script": "build-eslint-language-server.ts",
   "resources": ["eslint-language-server"],
+  "version": "3.0.34",
+  "purl": "pkg:github/microsoft/vscode-eslint@release%2F{version}",
   "license": "MIT",
-  "source": "https://github.com/microsoft/vscode-eslint/tree/release/3.0.34/server",
+  "source": "https://github.com/microsoft/vscode-eslint/tree/release/{version}/server",
   "licenseFile": "licenses/eslint-language-server.txt",
+  "npm": [
+    "vscode-languageserver",
+    "vscode-languageserver-protocol",
+    "vscode-languageserver-textdocument",
+    "vscode-uri",
+    "semver"
+  ],
   "note": "Bundles vscode-languageserver, vscode-languageserver-protocol, vscode-languageserver-textdocument, vscode-uri (MIT) and semver (ISC)."
 }

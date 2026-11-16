@@ -150,7 +150,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 
 **Platform**
 
-- [ELECTRON.md](ELECTRON.md) — Electron process model, full-app updates, browser panels, macOS integration and the default browser
+- [ELECTRON.md](ELECTRON.md) — Electron process model, full-app updates, browser panels, macOS integration, the default browser, and building and releasing the app with its SBOM
 - [SHARED_SERVER.md](SHARED_SERVER.md) — how all windows share one Bun server: one app process, starting, restarting and stopping the server, the app's channel to it, the quit modes and the question before a quit, state scopes
 - [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [WATCHERS.md](WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it

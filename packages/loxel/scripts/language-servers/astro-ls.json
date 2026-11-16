@@ -1,1 +1,1 @@
-{ "script": "build-astro-ls.ts", "resources": ["astro-ls"] }
+{ "script": "build-astro-ls.ts", "resources": ["astro-ls"], "npm": ["@astrojs/language-server"] }

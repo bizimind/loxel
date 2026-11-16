@@ -10,10 +10,11 @@
 import path from "node:path";
 
 import { BUILD_DIR, downloadReleaseBinary, rustTarget } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const VERSION = "0.17.5";
+const VERSION = await manifestVersion("ruff");
 
-/** Pinned SHA256 digests of the archives from the 0.17.5 release, by Rust target. */
+/** Pinned SHA256 digests of the archives from the manifest version's release, by Rust target. */
 const SHA256: Record<string, string> = {
   "aarch64-apple-darwin": "4ffadabec5c5fee1ddb2eecac0787ffe6fa18c665b73da9258b84211f40c5829",
   "x86_64-apple-darwin": "892f70854ebcd70d873b1bee8358cfd3a1e3180388e3851e3fd3e4a1d5a4dfdd",

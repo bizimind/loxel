@@ -5,7 +5,7 @@
  * matter for linking. Its `include` holds the compiler headers, and its `share` the sanitizer
  * ignorelists, whose absence is an error on a project built with `-fsanitize=cfi`. The manager
  * passes that directory as `--resource-dir`, whose layout has no version in it, so an upgrade
- * changes no path: only VERSION and SHA256 here, and the source URL and license in the manifest.
+ * changes no path: only the manifest's version (and license, if it changed) and SHA256 here.
  *
  * clangd publishes no checksum files, so the digest is pinned from the release asset.
  */
@@ -16,8 +16,9 @@ import path from "node:path";
 import { $ } from "bun";
 
 import { BUILD_DIR, downloadReleaseBinary } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const VERSION = "23.1.0";
+const VERSION = await manifestVersion("clangd");
 /** The major version, the name of clangd's resource directory (`lib/clang/<major>`). */
 const MAJOR = VERSION.slice(0, VERSION.indexOf("."));
 

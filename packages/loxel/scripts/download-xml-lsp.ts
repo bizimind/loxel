@@ -12,12 +12,13 @@ import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { installedFrom, recordInstalledFrom } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const VERSION = "0.29.3";
+const VERSION = await manifestVersion("lemminx");
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");
 
-/** Pinned SHA256 digests of the zip archives from the v0.29.3 release. */
+/** Pinned SHA256 digests of the zip archives from the manifest version's release. */
 const SHA256: Record<string, string> = {
   "osx-aarch_64": "185db5630ce85be43ea0fab034e7841b1327c2793db05ab481e029cf493d86ce",
   "osx-x86_64": "9e56123194b5c1fdc7d87f1bd21c83cc996ba7be913def3a2836a13305bcd273",

@@ -1,57 +1,23 @@
 /**
  * Builds and stages what ships next to `loxel-server` for language servers. Each binary is one
- * manifest in scripts/language-servers/, so a new one edits no shared file:
- *
- *   { "script": "download-x.ts", "resources": ["x"], "platforms"?: ["darwin"] }
- *
- * `script` (in scripts/) writes `resources` (paths under build/). Each resource is staged by its
- * base name in build/language-servers/, which electron-builder.yml `extraResources` copies as a
- * whole. A manifest with `platforms` does not exist elsewhere.
+ * manifest in scripts/language-servers/ (see language-server-manifest.ts), so a new one edits no
+ * shared file. Each resource is staged by its base name in build/language-servers/, which
+ * electron-builder.yml `extraResources` copies as a whole. A manifest with `platforms` does not
+ * exist elsewhere.
  *
  *   build [manifest...]  run the scripts; with no names, also stage everything
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { $ } from "bun";
 
+import { type Manifest, readManifests } from "./language-server-manifest";
+
 const LOXEL = path.resolve(import.meta.dir, "..");
 const BUILD_DIR = path.join(LOXEL, "build");
 const STAGE_DIR = path.join(BUILD_DIR, "language-servers");
-const MANIFEST_DIR = path.join(import.meta.dir, "language-servers");
-
-interface Manifest {
-  name: string;
-  script: string;
-  resources: string[];
-  platforms?: string[];
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-async function readManifest(file: string): Promise<Manifest> {
-  const raw: unknown = await Bun.file(path.join(MANIFEST_DIR, file)).json();
-  if (typeof raw !== "object" || raw === null) throw new Error(`${file}: not an object`);
-  const { script, resources, platforms } = raw as Record<string, unknown>;
-  if (
-    typeof script !== "string" ||
-    !isStringArray(resources) ||
-    (platforms !== undefined && !isStringArray(platforms))
-  ) {
-    throw new Error(`${file}: expected script, resources and optionally platforms`);
-  }
-  return { name: path.basename(file, ".json"), script, resources, platforms };
-}
-
-/** This platform's manifests, in name order so the build is the same everywhere. */
-async function readManifests(): Promise<Manifest[]> {
-  const files = readdirSync(MANIFEST_DIR).filter((file) => file.endsWith(".json"));
-  const manifests = await Promise.all(files.toSorted().map(readManifest));
-  return manifests.filter((m) => !m.platforms || m.platforms.includes(process.platform));
-}
 
 /** A resource's built path; download scripts add `.exe` on Windows. */
 function builtPath(resource: string): string {

@@ -1,1 +1,7 @@
-{ "script": "download-tombi.ts", "resources": ["tombi"] }
+{
+  "script": "download-tombi.ts",
+  "resources": ["tombi"],
+  "version": "1.11.3",
+  "purl": "pkg:github/tombi-toml/tombi@v{version}",
+  "license": "MIT"
+}

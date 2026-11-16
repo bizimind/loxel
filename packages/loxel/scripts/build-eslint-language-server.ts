@@ -3,14 +3,15 @@
  * `build/eslint-language-server/eslintServer.cjs`, which Loxel runs under the user's Node. The
  * extension publishes no package of its server, so the source comes from its release tag, pinned
  * by SHA256 and hashed in memory before anything is extracted. Its npm dependencies are this
- * package's devDependencies, at the versions the tag's `server/package.json` names or newer;
+ * package's dependencies (they ship), at the versions the tag's `server/package.json` names or newer;
  * `src/server/eslint-language-server.test.ts` runs the bundle to prove a combination works.
  *
  * Not compiled with `bun build --compile`: the server resolves ESLint by forking `process.execPath`
  * and loads project files from disk, and neither works from a compiled binary.
  *
- * To upgrade: change the tag and hash, raise any devDependency below what its `server/package.json`
- * names, and run that test against the new bundle.
+ * To upgrade: change the version in `language-servers/eslint-language-server.json` and the hash
+ * here, raise any dependency below what its `server/package.json` names, and run that test against
+ * the new bundle.
  */
 
 import { createHash } from "node:crypto";
@@ -18,8 +19,9 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const TAG = "release/3.0.34";
+const TAG = `release/${await manifestVersion("eslint-language-server")}`;
 const SHA256 = "f82fb2aab96eede6273af2d9aafeb9a29c5723c5af5a9819e37c61d7f51cc052";
 const URL = `https://codeload.github.com/microsoft/vscode-eslint/tar.gz/refs/tags/${TAG}`;
 const ARCHIVE_ROOT = `vscode-eslint-${TAG.replace("/", "-")}`;

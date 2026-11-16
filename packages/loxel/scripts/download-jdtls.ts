@@ -8,8 +8,9 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } 
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const VERSION = "1.63.0";
+const VERSION = await manifestVersion("jdtls");
 const ARCHIVE = `jdt-language-server-${VERSION}-202610191322.tar.gz`;
 const SHA256 = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4";
 

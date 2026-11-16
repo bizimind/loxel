@@ -10,10 +10,11 @@
 import path from "node:path";
 
 import { BUILD_DIR, downloadReleaseBinary, rustTarget } from "./download-release-binary";
+import { manifestVersion } from "./language-server-manifest";
 
-const VERSION = "1.11.3";
+const VERSION = await manifestVersion("tombi");
 
-/** Pinned SHA256 digests of the archives from the v1.11.3 release, by Rust target. */
+/** Pinned SHA256 digests of the archives from the manifest version's release, by Rust target. */
 const SHA256: Record<string, string> = {
   "aarch64-apple-darwin": "4e7daae9197910fe3717d241e5ca85cafd0f7f0ead988056fdd0b2cf2a447600",
   "x86_64-apple-darwin": "642900713c3cb04adf45264117649e5f4731395b62cbafee8a9a2824fa479684",
