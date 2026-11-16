@@ -2,13 +2,15 @@
  * Builds the ESLint language server from microsoft/vscode-eslint into one JS file,
  * `build/eslint-language-server/eslintServer.cjs`, which Loxel runs under the user's Node. The
  * extension publishes no package of its server, so the source comes from its release tag, pinned
- * by SHA256 and hashed in memory before anything is extracted, with its npm dependencies pinned in
- * package.json to the versions that tag names in `server/package.json`.
+ * by SHA256 and hashed in memory before anything is extracted. Its npm dependencies are this
+ * package's devDependencies, at the versions the tag's `server/package.json` names or newer;
+ * `src/server/eslint-language-server.test.ts` runs the bundle to prove a combination works.
  *
  * Not compiled with `bun build --compile`: the server resolves ESLint by forking `process.execPath`
  * and loads project files from disk, and neither works from a compiled binary.
  *
- * To upgrade: change the tag and hash, and the devDependencies to match its `server/package.json`.
+ * To upgrade: change the tag and hash, raise any devDependency below what its `server/package.json`
+ * names, and run that test against the new bundle.
  */
 
 import { createHash } from "node:crypto";
