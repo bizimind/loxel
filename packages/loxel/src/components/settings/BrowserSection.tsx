@@ -1,16 +1,32 @@
 import { XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { hostOf } from "@/components/browser/BrowserBookmarks";
 import { muteLabel, useActiveNotificationMutes } from "@/components/notifications/site-mute";
-import { Input } from "@/components/ui/input";
 import { notificationSiteDecisionSchema } from "@/electron/browser-notification-protocol";
+import { BUDGET_PROFILES } from "@/store/browser-page-budget";
 import {
-  DEFAULT_BROWSER_BACKGROUND_PAGES,
-  MAX_BROWSER_BACKGROUND_PAGES,
-  parseBackgroundPages,
+  BACKGROUND_TABS_MODES,
+  type BackgroundTabsMode,
+  isBackgroundTabsMode,
   useSettingsStore,
 } from "@/store/settings-store";
+
+const MODE_LABELS: Record<BackgroundTabsMode, string> = {
+  "save-memory": "Save memory",
+  balanced: "Balanced",
+  "keep-running": "Keep running",
+};
+
+/** What a Background Tabs mode allows, from its budget (see store/browser-page-budget.ts). */
+function modeHint(mode: BackgroundTabsMode): string {
+  const { memoryShare, freezeAfterMs } = BUDGET_PROFILES[mode];
+  const minutes = freezeAfterMs === null ? null : Math.round(freezeAfterMs / 60_000);
+  const pause =
+    minutes === null
+      ? "Tabs never pause."
+      : `Busy tabs pause after ${minutes === 1 ? "a minute" : `${minutes} minutes`}.`;
+  return `Up to ${Math.round(memoryShare * 100)}% of this Mac's memory. ${pause}`;
+}
 
 export function BrowserSection() {
   const sites = useSettingsStore((s) => s.browser.notificationSites);
@@ -18,18 +34,8 @@ export function BrowserSection() {
   const setNotificationMute = useSettingsStore((s) => s.setNotificationMute);
   const mutes = useActiveNotificationMutes();
   const origins = Object.keys(sites).toSorted((a, b) => hostOf(a).localeCompare(hostOf(b)));
-  const backgroundPages = useSettingsStore((s) => s.browser.backgroundPages);
-  const setBackgroundPages = useSettingsStore((s) => s.setBrowserBackgroundPages);
-
-  // Typed freely, committed on blur; an invalid count goes back to the saved one.
-  const [pagesInput, setPagesInput] = useState(String(backgroundPages));
-  useEffect(() => setPagesInput(String(backgroundPages)), [backgroundPages]);
-  const commitPages = () => {
-    const typed = pagesInput.trim();
-    const count = typed === "" ? null : parseBackgroundPages(Number(typed));
-    if (count === null) setPagesInput(String(backgroundPages));
-    else setBackgroundPages(count);
-  };
+  const backgroundTabs = useSettingsStore((s) => s.browser.backgroundTabs);
+  const setBackgroundTabs = useSettingsStore((s) => s.setBackgroundTabs);
 
   return (
     <div className="space-y-5">
@@ -39,25 +45,31 @@ export function BrowserSection() {
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="browser-background-pages" className="text-muted-foreground text-xs">
+        <label htmlFor="browser-background-tabs" className="text-muted-foreground text-xs">
           Background Tabs
         </label>
         <p className="text-muted-foreground text-[10px]">
-          How many browser tabs of other tasks, or of Home, keep running while you work elsewhere,
-          so they keep their state and can notify. Past this, the tabs you saw least recently reload
-          when you come back, starting with sites that can't notify. 0 reloads them every time.
-          Default: {DEFAULT_BROWSER_BACKGROUND_PAGES}.
+          Browser tabs of other tasks, or of Home, keep running while you work elsewhere. Past the
+          memory limit, the biggest tabs you haven&apos;t seen for longest are unloaded and reload
+          when you come back. Tabs that keep using CPU are paused. Tabs that can notify you are
+          unloaded last. Those tabs, pages on this Mac (dev servers), tabs playing sound and tabs
+          with DevTools open are never paused.
         </p>
-        <Input
-          id="browser-background-pages"
-          type="number"
-          value={pagesInput}
-          onChange={(e) => setPagesInput(e.target.value)}
-          onBlur={commitPages}
-          min={0}
-          max={MAX_BROWSER_BACKGROUND_PAGES}
-          className="h-8 w-32 text-xs"
-        />
+        <select
+          id="browser-background-tabs"
+          value={backgroundTabs}
+          onChange={(e) => {
+            if (isBackgroundTabsMode(e.target.value)) setBackgroundTabs(e.target.value);
+          }}
+          className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+        >
+          {BACKGROUND_TABS_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+        <p className="text-muted-foreground text-[10px]">{modeHint(backgroundTabs)}</p>
       </div>
 
       <div className="space-y-1.5">

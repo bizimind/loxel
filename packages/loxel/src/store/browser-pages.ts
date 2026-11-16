@@ -4,10 +4,10 @@
  * A `<webview>` reloads when it is re-attached to the DOM, and a worktree switch rebuilds the
  * center layout. So browser pages don't live in their dockview panels: the window-level
  * `BrowserPagePool` renders every page, and a browser panel only lends it a slot to be shown over
- * (`attachBrowserPage`). A page whose panel's layout is not shown stays loaded in the background
- * until its panel closes, its worktree is removed, or it is unloaded to keep at most
- * `browser.backgroundPages` background pages (`evictBackgroundPages`); its panel then loads it
- * again the next time it is shown.
+ * (`attachBrowserPage`). A page whose panel's layout is not shown runs in the background until its
+ * panel closes or its worktree is removed. On the way it may be frozen and resumed, or unloaded and
+ * loaded again the next time its panel is shown, to keep background pages within a budget
+ * (`browser-page-budget.ts`).
  */
 import type { DockviewPanelApi } from "dockview-react";
 import { create } from "zustand";
@@ -33,9 +33,24 @@ export interface BrowserPage {
   initialUrl: string;
   /** Where the page is shown. Null while it runs in the background. */
   slot: PageSlot | null;
-  /** When the page was last shown or hidden, as a counter; the least recent is unloaded first. */
-  lastShown: number;
+  /** When the page went to the background (`Date.now()`), or null while it is shown. */
+  hiddenSince: number | null;
+  /** Its webview's guest webContents id, once the page has loaded. */
+  webContentsId: number | null;
+  /** Whether its tasks and timers are stopped (see `browser-page-budget.ts`). */
+  frozen: boolean;
+  /**
+   * How many times it was resumed from a freeze. Chromium leaves a resumed page hidden, so the pool
+   * hides and shows its host again on each.
+   */
+  resumes: number;
 }
+
+/**
+ * Background pages kept at most, whatever the budget measures: a backstop for when it can't
+ * measure (outside Electron, or a failed read).
+ */
+const MAX_BACKGROUND_PAGES = 100;
 
 interface BrowserPagesState {
   /** The loaded pages by panel id, in the order they were loaded (the pool's DOM order). */
@@ -43,8 +58,6 @@ interface BrowserPagesState {
 }
 
 export const useBrowserPages = create<BrowserPagesState>()(() => ({ pages: {} }));
-
-let clock = 0;
 
 /**
  * The URL each panel's page is on, unloaded pages included, so a page unloaded after it navigated
@@ -66,15 +79,31 @@ export function attachBrowserPage(
   id: string,
   { layoutKey, url, slot }: { layoutKey: string; url: string; slot: PageSlot },
 ): void {
+  const previous = useBrowserPages.getState().pages[id];
   setPages((pages) => {
     const page = pages[id] ?? {
       id,
       layoutKey,
       initialUrl: pageUrls.get(id)?.url ?? url,
       slot: null,
-      lastShown: 0,
+      hiddenSince: null,
+      webContentsId: null,
+      frozen: false,
+      resumes: 0,
     };
-    pages[id] = { ...page, slot, lastShown: ++clock };
+    pages[id] = { ...page, slot, hiddenSince: null, frozen: false };
+  });
+  if (previous?.frozen && previous.webContentsId !== null) resume(id, previous.webContentsId);
+}
+
+/** Resume a frozen page being shown, then have the pool show it to Chromium again. */
+function resume(id: string, webContentsId: number): void {
+  void window.electronAPI?.setBrowserPageFrozen(webContentsId, false).then(() => {
+    const page = useBrowserPages.getState().pages[id];
+    if (!page || page.webContentsId !== webContentsId) return;
+    setPages((pages) => {
+      pages[id] = { ...page, resumes: page.resumes + 1 };
+    });
   });
 }
 
@@ -83,9 +112,42 @@ export function detachBrowserPage(id: string, element: HTMLElement): void {
   const page = useBrowserPages.getState().pages[id];
   if (page?.slot?.element !== element) return;
   setPages((pages) => {
-    pages[id] = { ...page, slot: null, lastShown: ++clock };
+    pages[id] = { ...page, slot: null, hiddenSince: Date.now() };
   });
-  evictBackgroundPages();
+  capBackgroundPages();
+}
+
+/** Record panel `id`'s webview guest, which a new guest (a crashed page reloaded) replaces. */
+export function setBrowserPageWebContents(id: string, webContentsId: number): void {
+  const page = useBrowserPages.getState().pages[id];
+  if (!page || page.webContentsId === webContentsId) return;
+  setPages((pages) => {
+    pages[id] = { ...page, webContentsId, frozen: false };
+  });
+}
+
+/**
+ * Mark panel `id`'s page frozen, once main froze its guest `webContentsId`; one shown while it was
+ * being frozen is resumed at once.
+ */
+export function markBrowserPageFrozen(id: string, webContentsId: number): void {
+  const page = useBrowserPages.getState().pages[id];
+  if (!page || page.frozen || page.webContentsId !== webContentsId) return;
+  if (page.slot) {
+    resume(id, webContentsId);
+    return;
+  }
+  setPages((pages) => {
+    pages[id] = { ...page, frozen: true };
+  });
+}
+
+/** Unload background pages; their panels load them again when shown. */
+export function unloadBrowserPages(ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  setPages((pages) => {
+    for (const id of ids) delete pages[id];
+  });
 }
 
 /** Record the URL panel `id`'s page is on. */
@@ -117,6 +179,11 @@ export function closeLayoutBrowserPages(layoutKey: string): void {
   });
 }
 
+/** The URL panel `id`'s page is on. */
+export function browserPageUrl(page: BrowserPage): string {
+  return pageUrls.get(page.id)?.url ?? page.initialUrl;
+}
+
 function originOf(url: string): string | null {
   return URL.canParse(url) ? new URL(url).origin : null;
 }
@@ -125,36 +192,42 @@ function originOf(url: string): string | null {
  * Whether a background page is worth keeping ahead of others: its site may notify, or it has a
  * notification in the notification center.
  */
-function canNotify(page: BrowserPage): boolean {
+export function canNotify(page: BrowserPage): boolean {
   if (usePanelNotificationStore.getState().panelIndex.has(page.id)) return true;
-  const origin = originOf(pageUrls.get(page.id)?.url ?? page.initialUrl);
+  const origin = originOf(browserPageUrl(page));
   return (
     origin !== null && useSettingsStore.getState().browser.notificationSites[origin] === "allow"
   );
 }
 
 /**
- * Unload background pages past `browser.backgroundPages`: those that can't notify first, then the
- * least recently shown. Runs when a page goes to the background, not when the setting changes, so
- * a count typed in Settings and then cancelled unloads nothing. Pages of the layout being shown
- * don't count: during a switch the old layout's panels unmount before the new one's mount, and
- * those are about to be shown.
+ * The pages in the background, as candidates for freezing or unloading. Pages of the layout being
+ * shown don't count: during a switch the old layout's panels unmount before the new one's mount,
+ * and those are about to be shown.
  */
-function evictBackgroundPages(): void {
-  const limit = useSettingsStore.getState().browser.backgroundPages;
+export function backgroundBrowserPages(): BrowserPage[] {
   const shownLayout = activeLayoutKey();
-  const background = Object.values(useBrowserPages.getState().pages).filter(
+  return Object.values(useBrowserPages.getState().pages).filter(
     (page) => !page.slot && page.layoutKey !== shownLayout,
   );
-  const excess = background.length - limit;
+}
+
+/**
+ * Unload background pages past `MAX_BACKGROUND_PAGES`: those that can't notify first, then those
+ * hidden longest.
+ */
+function capBackgroundPages(): void {
+  const background = backgroundBrowserPages();
+  const excess = background.length - MAX_BACKGROUND_PAGES;
   if (excess <= 0) return;
-  const evicted = background
+  const unloaded = background
     .map((page) => ({ page, keep: canNotify(page) }))
-    .toSorted((a, b) => Number(a.keep) - Number(b.keep) || a.page.lastShown - b.page.lastShown)
+    .toSorted(
+      (a, b) =>
+        Number(a.keep) - Number(b.keep) || (a.page.hiddenSince ?? 0) - (b.page.hiddenSince ?? 0),
+    )
     .slice(0, excess);
-  setPages((pages) => {
-    for (const { page } of evicted) delete pages[page.id];
-  });
+  unloadBrowserPages(unloaded.map(({ page }) => page.id));
 }
 
 /** Where panel `id`'s page is shown, or null while it is in the background or not loaded. */

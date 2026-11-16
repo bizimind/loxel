@@ -88,6 +88,7 @@ import {
 } from "./app-updater";
 import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
+import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
@@ -865,6 +866,7 @@ if (process.platform === "darwin") {
 
 installWebviewKeystrokeForwarding();
 installWebviewCopyImage();
+installBrowserPageLifecycle();
 installJavaScriptDialogs();
 installNativeTheme();
 installBrowserNotifications();

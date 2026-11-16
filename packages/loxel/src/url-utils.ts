@@ -14,6 +14,19 @@ export function isHttpUrl(value: string): boolean {
 }
 
 /**
+ * A host of this machine (`localhost`, `*.localhost`, `127.x.x.x`, `[::1]`), where dev servers run.
+ * Plain `http` counts as secure there, as browsers do.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "[::1]" ||
+    /^127(\.\d{1,3}){3}$/.test(hostname)
+  );
+}
+
+/**
  * Largest favicons kept, inline (`data:`) or as a web URL: the lists that hold them (bookmarks,
  * notifications) are written and sent to every window, and a page picks its favicon's URL.
  */
