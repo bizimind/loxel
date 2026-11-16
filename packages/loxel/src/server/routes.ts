@@ -61,7 +61,7 @@ import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
-import { classifySchemaGlob } from "@/lib/schema-glob";
+import { classifySchemaGlob, schemaFilePatterns } from "@/lib/schema-glob";
 import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
@@ -2935,12 +2935,19 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 
   for (const entry of schemas) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { glob, url } = entry as { glob?: string; url?: string };
+    const { glob, exclude: rawExclude, url } = entry as Record<string, unknown>;
     if (typeof glob !== "string" || typeof url !== "string") continue;
+    const exclude = typeof rawExclude === "string" ? rawExclude : undefined;
 
     const languages = classifySchemaGlob(glob);
     configuredUrls.push(url);
-    if (languages.yaml) addSchemaGlob(yamlMap, languageServerSchemaUrl(url), glob);
+    // yaml.schemas holds one pattern list per URL, so an exclusion applies to every glob mapped to
+    // the same URL.
+    if (languages.yaml) {
+      for (const pattern of schemaFilePatterns({ glob, exclude })) {
+        addSchemaGlob(yamlMap, languageServerSchemaUrl(url), pattern);
+      }
+    }
     if (languages.toml) addSchemaGlob(tomlMap, languageServerSchemaUrl(url), glob);
   }
 

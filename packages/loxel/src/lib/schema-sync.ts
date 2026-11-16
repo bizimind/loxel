@@ -19,7 +19,7 @@ import {
 import { frontendLog } from "./frontend-logger";
 import { setConfiguredSchemas } from "./json-schema-registry";
 import { editorFilePath, isLiveEditorModel } from "./live-editor-model";
-import { classifySchemaGlob } from "./schema-glob";
+import { classifySchemaGlob, schemaExcludeGlob, schemaFilePatterns } from "./schema-glob";
 import { isRemoteSchemaUrl, schemaGlobMatches, schemaUrlsNamedBy } from "./schema-references";
 
 const log = frontendLog.child("ui");
@@ -36,9 +36,10 @@ const reportedUrls = new Set<string>();
 
 function applyJsonSchemas(): void {
   setConfiguredSchemas(
-    mappings.flatMap(({ glob, url }) => {
-      const schema = jsonSchemas.get(url);
-      return schema === undefined || schema === null ? [] : [{ glob, url, schema }];
+    mappings.flatMap((mapping) => {
+      const schema = jsonSchemas.get(mapping.url);
+      if (schema === undefined || schema === null) return [];
+      return [{ fileMatch: schemaFilePatterns(mapping), url: mapping.url, schema }];
     }),
   );
 }
@@ -57,10 +58,14 @@ export function requestSchemasForOpenFiles(): void {
     const language = model.getLanguageId();
     for (const url of schemaUrlsNamedBy(language, model.getValue())) remoteUrls.add(url);
     if (language !== "json" && language !== "toml") continue;
-    for (const { glob, url } of mappings) {
+    for (const mapping of mappings) {
+      const { glob, url } = mapping;
       if (!classifySchemaGlob(glob)[language] || !schemaGlobMatches(glob, path)) continue;
-      if (language === "json") jsonUrls.add(url);
-      else if (isRemoteSchemaUrl(url)) remoteUrls.add(url);
+      if (language === "json") {
+        const exclude = schemaExcludeGlob(mapping);
+        if (exclude === null || !schemaGlobMatches(exclude, path)) jsonUrls.add(url);
+        // Tombi applies no exclusions, so a TOML file needs the schema whatever `exclude` says.
+      } else if (isRemoteSchemaUrl(url)) remoteUrls.add(url);
     }
   }
 
@@ -97,7 +102,7 @@ export async function syncSchemas(): Promise<void> {
     const schemas = selectEffectiveSchemas(useSettingsStore.getState());
     const enabled = schemas.filter((s) => s.enabled);
 
-    await api.syncSchemas(enabled.map((s) => ({ glob: s.glob, url: s.url })));
+    await api.syncSchemas(enabled.map((s) => ({ glob: s.glob, exclude: s.exclude, url: s.url })));
 
     mappings = enabled;
     // A save retries what failed to download.

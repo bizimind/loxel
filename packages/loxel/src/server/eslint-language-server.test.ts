@@ -21,10 +21,11 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
+import { builtBinaryExists } from "@/test/built-binary";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUNDLE = path.join(LOXEL, "build/eslint-language-server/eslintServer.cjs");
 const NODE = Bun.which("node");
-const REQUIRED = process.env.CI === "true";
 /** A ceiling for a cold start on a loaded machine; each step awaits the server's own answer. */
 const TEST_TIMEOUT_MS = 60_000;
 
@@ -174,7 +175,10 @@ const CAPABILITIES = {
 
 const SOURCE = "var a = 1;\nconsole.log(a);\n";
 
-describe.skipIf(!REQUIRED && !(NODE && existsSync(BUNDLE)))("the ESLint language server", () => {
+// Without Node it still runs in CI, where that is a failure to see.
+const canRun = Boolean(NODE ?? process.env.CI) && (await builtBinaryExists(BUNDLE));
+
+describe.skipIf(!canRun)("the ESLint language server", () => {
   let wt = "";
   let manager: InstanceType<typeof EslintLspManager> | undefined;
   let client: Client;

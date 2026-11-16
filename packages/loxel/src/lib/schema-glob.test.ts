@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { classifySchemaGlob } from "./schema-glob";
+import { classifySchemaGlob, schemaFilePatterns } from "./schema-glob";
 
 describe("classifySchemaGlob", () => {
   test("routes a glob by the extension it ends with", () => {
@@ -46,5 +46,23 @@ describe("classifySchemaGlob", () => {
     expect(classifySchemaGlob("**/*")).toEqual(all);
     expect(classifySchemaGlob("**/Pipfile")).toEqual(all);
     expect(classifySchemaGlob("**/Cargo.lock")).toEqual(all);
+  });
+});
+
+describe("schemaFilePatterns", () => {
+  test("adds the exclusion as a negated pattern", () => {
+    expect(schemaFilePatterns({ glob: "**/*.yaml", exclude: "**/charts/**" })).toEqual([
+      "**/*.yaml",
+      "!**/charts/**",
+    ]);
+  });
+
+  test("takes an exclusion typed with its `!`, and ignores an empty one", () => {
+    expect(schemaFilePatterns({ glob: "**/*.yaml", exclude: " !a.yaml " })).toEqual([
+      "**/*.yaml",
+      "!a.yaml",
+    ]);
+    expect(schemaFilePatterns({ glob: "**/*.yaml", exclude: "  " })).toEqual(["**/*.yaml"]);
+    expect(schemaFilePatterns({ glob: "**/*.yaml" })).toEqual(["**/*.yaml"]);
   });
 });

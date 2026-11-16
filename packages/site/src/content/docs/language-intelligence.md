@@ -110,6 +110,8 @@ Your choices last across restarts and apply to every project. To review or chang
 
 Schemas in [**Settings > Schemas**](/docs/reference-env-files-cli-settings), including the built-in ones, are your own choice and do not ask. Loxel downloads one the first time you open a file that matches it. When Loxel does download a schema, the request goes from your machine to that address, which sees your IP address like any web request.
 
+When a schema applies to a YAML file, a line above each document in it (a file can hold several, separated by `---`) names the schema that document is checked against. When a download fails, a YAML file that uses the schema shows why, for example the server's `HTTP 404 Not Found`, a redirect to an address you haven't allowed, or no answer within 10 seconds.
+
 ---
 
 ## See also

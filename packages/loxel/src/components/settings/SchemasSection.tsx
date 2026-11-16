@@ -49,8 +49,8 @@ export function SchemasSection() {
           <p className="text-muted-foreground mt-1 text-xs">
             Map JSON Schemas to files for auto-completion, hover and validation in JSON, YAML and
             TOML files. A glob ending in .json/.jsonc, .yml/.yaml or .toml applies to that language,
-            any other glob to all three. For TOML files, user mappings take precedence over built-in
-            ones.
+            any other glob to all three. An exclude glob leaves out the JSON and YAML files it
+            matches. For TOML files, user mappings take precedence over built-in ones.
           </p>
         </div>
         <Button variant="outline" size="xs" onClick={handleAdd}>
@@ -61,8 +61,9 @@ export function SchemasSection() {
 
       <div className="divide-border/50 divide-y rounded-md bg-[var(--surface-2)]">
         {/* Header */}
-        <div className="text-muted-foreground grid grid-cols-[1fr_1fr_88px_28px_28px] items-center gap-2 px-3 py-1.5 text-[10px] font-medium tracking-wider uppercase">
+        <div className="text-muted-foreground grid grid-cols-[1fr_0.7fr_1fr_88px_28px_28px] items-center gap-2 px-3 py-1.5 text-[10px] font-medium tracking-wider uppercase">
           <span>Glob Pattern</span>
+          <span>Exclude</span>
           <span>Schema URL</span>
           <span>Languages</span>
           <span />
@@ -76,13 +77,14 @@ export function SchemasSection() {
             <div
               key={schema.id}
               className={cn(
-                "group grid grid-cols-[1fr_1fr_88px_28px_28px] items-center gap-2 px-3",
+                "group grid grid-cols-[1fr_0.7fr_1fr_88px_28px_28px] items-center gap-2 px-3",
                 isBuiltin ? "py-1.5" : "py-0.5",
               )}
             >
               {isBuiltin ? (
                 <>
                   <span className="text-muted-foreground truncate text-xs">{schema.glob}</span>
+                  <span />
                   <span className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
                     <span className="truncate">{schema.url}</span>
                     <span className="bg-muted text-muted-foreground shrink-0 rounded px-1 py-0.5 text-[9px] leading-none">
@@ -98,6 +100,11 @@ export function SchemasSection() {
                     value={schema.glob}
                     onChange={(v) => updateSchema(schema.id, { glob: v })}
                     placeholder="**/file.json"
+                  />
+                  <EditableCell
+                    value={schema.exclude ?? ""}
+                    onChange={(v) => updateSchema(schema.id, { exclude: v })}
+                    placeholder="None"
                   />
                   <EditableCell
                     value={schema.url}

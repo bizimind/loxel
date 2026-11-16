@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
+import { builtBinaryExists } from "@/test/built-binary";
+
 import { lemminxCachePath } from "./schema-downloads";
 import type { StdioLspManager } from "./stdio-lsp-manager";
 import { withoutForceDownload, XmlLspManager } from "./xml-lsp-manager";
@@ -18,6 +20,7 @@ const SCHEMA = JSON.stringify({ type: "object", required: ["name"] });
 interface LspMessage {
   id?: number | string;
   method?: string;
+  result?: unknown;
   params?: { uri?: string; diagnostics?: { message: string }[] };
 }
 
@@ -26,7 +29,11 @@ class FakeClient {
   readonly ws: ServerWebSocket<unknown>;
   private readonly initialized: Promise<void>;
   private markInitialized = () => {};
-  private readonly diagnosticWaiters = new Set<(messages: string[]) => void>();
+  private nextRequestId = 100;
+  private readonly responses = new Map<number | string, (result: unknown) => void>();
+  private readonly diagnosticWaiters = new Set<
+    (messages: string[], uri: string | undefined) => void
+  >();
 
   constructor(private readonly manager: StdioLspManager<never, unknown>) {
     const ws = {
@@ -57,13 +64,31 @@ class FakeClient {
 
   /** Resolves with the next diagnostics the server publishes that satisfy `accept`. */
   diagnostics(accept: (messages: string[]) => boolean): Promise<string[]> {
+    return this.diagnosticsFor(null, accept);
+  }
+
+  /** Like {@link diagnostics}, for one document's (`uri`), or any document's when null. */
+  diagnosticsFor(uri: string | null, accept: (messages: string[]) => boolean): Promise<string[]> {
     return new Promise((done) => {
-      const waiter = (messages: string[]) => {
+      const waiter = (messages: string[], from: string | undefined) => {
+        if (uri !== null && from !== uri) return;
         if (!accept(messages)) return;
         this.diagnosticWaiters.delete(waiter);
         done(messages);
       };
       this.diagnosticWaiters.add(waiter);
+    });
+  }
+
+  /** Sends a request and resolves with the server's result. */
+  request(method: string, params: unknown): Promise<unknown> {
+    const id = this.nextRequestId++;
+    return new Promise((done) => {
+      this.responses.set(id, (result) => {
+        this.responses.delete(id);
+        done(result);
+      });
+      this.send({ id, method, params });
     });
   }
 
@@ -73,12 +98,14 @@ class FakeClient {
 
   private receive(message: LspMessage): void {
     if (message.id === 1 && message.method === undefined) this.markInitialized();
+    const respond = message.method === undefined && message.id !== undefined;
+    if (respond) this.responses.get(message.id!)?.(message.result);
     if (message.method !== undefined && message.id !== undefined) {
       this.send({ id: message.id, result: null });
     }
     if (message.method === "textDocument/publishDiagnostics") {
       const messages = (message.params?.diagnostics ?? []).map((d) => d.message);
-      for (const waiter of [...this.diagnosticWaiters]) waiter(messages);
+      for (const waiter of [...this.diagnosticWaiters]) waiter(messages, message.params?.uri);
     }
   }
 }
@@ -111,7 +138,7 @@ function recordingServer(): { url: (path: string) => string; hits: string[] } {
   return { url: (path) => `http://127.0.0.1:${server.port}${path}`, hits };
 }
 
-describe.skipIf(!(await Bun.file(join(BUILD, "yaml-language-server")).exists()))(
+describe.skipIf(!(await builtBinaryExists(join(BUILD, "yaml-language-server"))))(
   "YamlLspManager with yaml-language-server",
   () => {
     let manager: YamlLspManager | undefined;
@@ -167,6 +194,73 @@ describe.skipIf(!(await Bun.file(join(BUILD, "yaml-language-server")).exists()))
     );
 
     test(
+      "names each YAML document's schema in a lens that runs nothing",
+      async () => {
+        const dir = await tempDir();
+        const schemaPath = join(dir, "titled.json");
+        await Bun.write(schemaPath, JSON.stringify({ title: "Demo Config", type: "object" }));
+        const client = start(async () => "{}");
+        manager?.updateSchemas({ [pathToFileURL(schemaPath).href]: ["**/*.yaml"] });
+        await client.start();
+        const uri = pathToFileURL(join(dir, "multi.yaml")).href;
+        const validated = client.diagnosticsFor(uri, () => true);
+        client.open(uri, "yaml", "a: 1\n---\nb: 2\n");
+        await validated;
+        const lenses = await client.request("textDocument/codeLens", { textDocument: { uri } });
+        expect(lenses).toEqual(
+          [0, 2].map((line) => ({
+            range: { start: { line, character: 0 }, end: { line, character: 0 } },
+            command: { title: "Demo Config (titled.json)", command: "" },
+          })),
+        );
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "leaves out files a negated pattern excludes",
+      async () => {
+        const dir = await tempDir();
+        const schemaPath = join(dir, "mapped.json");
+        await Bun.write(schemaPath, SCHEMA);
+        const client = start(async () => "{}");
+        manager?.updateSchemas({
+          [pathToFileURL(schemaPath).href]: ["**/*.yaml", "!**/skipped.yaml"],
+        });
+        await client.start();
+        const mapped = pathToFileURL(join(dir, "mapped.yaml")).href;
+        const skipped = pathToFileURL(join(dir, "skipped.yaml")).href;
+        const reported = client.diagnosticsFor(skipped, () => true);
+        const mappedReported = client.diagnosticsFor(mapped, (messages) => messages.length > 0);
+        client.open(skipped, "yaml", "other: 1\n");
+        client.open(mapped, "yaml", "other: 1\n");
+        expect((await mappedReported).join("\n")).toContain("name");
+        expect(await reported).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "reports why a schema could not be downloaded",
+      async () => {
+        const dir = await tempDir();
+        const client = start(async () => {
+          throw new Error("HTTP 404 Not Found");
+        });
+        await client.start();
+        const uri = pathToFileURL(join(dir, "a.yaml")).href;
+        const reported = client.diagnostics((messages) => messages.length > 0);
+        client.open(
+          uri,
+          "yaml",
+          "# yaml-language-server: $schema=https://schemas.loxel.invalid/a.json\nother: 1\n",
+        );
+        expect((await reported).join("\n")).toContain("HTTP 404 Not Found");
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
       "accepts the file when Loxel withholds the schema",
       async () => {
         const dir = await tempDir();
@@ -206,7 +300,7 @@ describe("withoutForceDownload", () => {
   });
 });
 
-describe.skipIf(!(await Bun.file(join(BUILD, "lemminx/lemminx")).exists()))(
+describe.skipIf(!(await builtBinaryExists(join(BUILD, "lemminx/lemminx"))))(
   "XmlLspManager with LemMinX",
   () => {
     const XSD = `<?xml version="1.0"?>

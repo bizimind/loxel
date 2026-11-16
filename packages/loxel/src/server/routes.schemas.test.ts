@@ -209,4 +209,33 @@ describe("POST /api/schemas/sync", () => {
       "https://example.com/pipfile.json": ["**/Pipfile"],
     });
   });
+
+  test("gives YAML the exclusions and TOML only the globs", async () => {
+    const consent = newConsent();
+    const yaml: Record<string, string[]>[] = [];
+    const toml: Record<string, string[]>[] = [];
+    const ctx = {
+      schemaConsent: consent,
+      updateYamlSchemas: (map: Record<string, string[]>) => yaml.push(map),
+      updateTomlSchemas: (map: Record<string, string[]>) => toml.push(map),
+    } as unknown as RouteContext;
+    const res = await handleRequest(
+      postRequest("/api/schemas/sync", {
+        schemas: [
+          { glob: "**/*", exclude: "**/skip.*", url: "https://example.com/s.json" },
+          // A malformed exclusion is ignored, not the mapping.
+          { glob: "**/a.yaml", exclude: 7, url: "https://example.com/odd.json" },
+        ],
+      }),
+      ctx,
+    );
+    expect(res!.status).toBe(200);
+    expect(yaml).toEqual([
+      {
+        "https://example.com/s.json": ["**/*", "!**/skip.*"],
+        "https://example.com/odd.json": ["**/a.yaml"],
+      },
+    ]);
+    expect(toml).toEqual([{ "https://example.com/s.json": ["**/*"] }]);
+  });
 });

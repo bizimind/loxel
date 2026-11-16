@@ -7,6 +7,7 @@ import { $, type ServerWebSocket } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
+import { builtBinaryExists } from "@/test/built-binary";
 
 // The shared environment resolution reads interpreter overrides from the store database; keep
 // the tests' state out of the real one.
@@ -193,7 +194,7 @@ class FakeClient {
   }
 }
 
-describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with ruff", () => {
+describe.skipIf(!(await builtBinaryExists(BUNDLED_RUFF)))("RuffLspManager with ruff", () => {
   test(
     "serves lint diagnostics, code actions and config reloads, but neither formatting nor syntax errors",
     async () => {
