@@ -18,6 +18,7 @@ import type {
 } from "@/api/ws-protocol";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
+import { isStorableFavicon } from "@/url-utils";
 
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
@@ -1199,11 +1200,16 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     case "browser_notification_show": {
       // Main already checked and capped what the page sent; this guards the socket itself.
       if (msg.source.kind !== "browser") break;
-      for (const id of notificationStore.dismissReplacedBy(msg.source)) {
+      const { faviconUrl, ...source } = msg.source;
+      for (const id of notificationStore.dismissReplacedBy(source)) {
         broadcastAll({ type: "notification_dismissed", id });
       }
       const { added, evicted } = notificationStore.addBrowser({
-        source: msg.source,
+        // The favicon is kept like a bookmark's (every window gets the list), or dropped.
+        source:
+          typeof faviconUrl === "string" && isStorableFavicon(faviconUrl)
+            ? { ...source, faviconUrl }
+            : source,
         title: msg.title.slice(0, MAX_BROWSER_NOTIFICATION_TEXT),
         body: msg.body?.slice(0, MAX_BROWSER_NOTIFICATION_TEXT),
         urgency: "normal",

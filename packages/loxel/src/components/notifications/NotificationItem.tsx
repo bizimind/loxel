@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { NotificationSource, ServerNotification } from "@/api/notification-model";
 import { hostOf } from "@/components/browser/BrowserBookmarks";
+import { Favicon } from "@/components/browser/Favicon";
 import { NotificationSiteMenu } from "@/components/menus/NotificationSiteMenu";
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
@@ -64,7 +65,7 @@ export function NotificationItem({
   onNavigate?: () => void;
   /** Show this notification as the face of its site's collapsed group. */
   stack?: NotificationStack;
-  /** Listed under its expanded group's header, which already names the source. */
+  /** Listed under its expanded group's header, which already names and shows the source. */
   inGroup?: boolean;
 }) {
   const title = notification.title || DEFAULT_TITLES[notification.source.kind];
@@ -104,6 +105,11 @@ export function NotificationItem({
             URGENCY_COLORS[notification.urgency],
           )}
         />
+
+        {/* A browser page's site, at a glance: its favicon, or a globe without one */}
+        {notification.source.kind === "browser" && !inGroup && (
+          <Favicon url={notification.source.faviconUrl} className="mt-px size-3.5" />
+        )}
 
         {/* Content */}
         <div className="min-w-0 flex-1">

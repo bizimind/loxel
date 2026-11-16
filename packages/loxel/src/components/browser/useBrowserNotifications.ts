@@ -5,7 +5,7 @@
  * site asking for permission gets the panel's Allow / Block bar. Also keeps main's copy of the
  * per-site decisions and mutes in step with settings.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useState } from "react";
 
 import { wsClient } from "@/api/client";
 import {
@@ -17,6 +17,7 @@ import {
   notificationPermissionWithdrawnSchema,
 } from "@/electron/browser-notification-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
+import type { BrowserBookmark } from "@/store/browser-bookmarks";
 import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -128,19 +129,41 @@ function subscribe(webContentsId: number, listener: PanelListener): () => void {
   };
 }
 
+/** The page a browser panel shows (its URL is empty while there is none), with its tab's favicon. */
+type PanelPage = Pick<BrowserBookmark, "url" | "faviconUrl">;
+
+/**
+ * The favicon of `page` for a notification from `origin`: none unless the panel still shows that
+ * site, since the page may have navigated away before the notification arrived.
+ */
+function faviconFor(page: PanelPage, origin: string): string | undefined {
+  if (!page.faviconUrl || !URL.canParse(page.url)) return undefined;
+  return new URL(page.url).origin === origin ? page.faviconUrl : undefined;
+}
+
 /**
  * Add a page's notification to the notification center, from the browser panel `panelId` in the
- * layout of `worktreePath` (null: Home's).
+ * layout of `worktreePath` (null: Home's), with the favicon the panel's tab shows for `page`.
  */
 function showInNotificationCenter(
   notification: BrowserNotification,
   panelId: string,
   worktreePath: string | null,
+  page: PanelPage,
 ): void {
   const { ref, origin, title, body, tag } = notification;
+  const faviconUrl = faviconFor(page, origin);
   wsClient.send({
     type: "browser_notification_show",
-    source: { kind: "browser", panelId, origin, ref, worktreePath, ...(tag && { tag }) },
+    source: {
+      kind: "browser",
+      panelId,
+      origin,
+      ref,
+      worktreePath,
+      ...(tag && { tag }),
+      ...(faviconUrl && { faviconUrl }),
+    },
     title,
     ...(body && { body }),
   });
@@ -150,13 +173,15 @@ export type NotificationPermissionAnswer = NotificationSiteDecision | "dismiss";
 
 /**
  * The web notifications of the webview with this guest webContents id (null until it is ready),
- * shown in the notification center as coming from the browser panel `panelId`. `request` is the
- * oldest open permission request, for the panel's prompt, and `answer` replies to it: Allow and
- * Block are saved for the site, Dismiss decides nothing.
+ * shown in the notification center as coming from the browser panel `panelId`, with the favicon of
+ * the page `pageRef` holds when one arrives. `request` is the oldest open permission request, for
+ * the panel's prompt, and `answer` replies to it: Allow and Block are saved for the site, Dismiss
+ * decides nothing.
  */
 export function useBrowserNotifications(
   webContentsId: number | null,
   panelId: string,
+  pageRef: RefObject<PanelPage>,
 ): {
   request: NotificationPermissionRequest | null;
   answer: (answer: NotificationPermissionAnswer) => void;
@@ -170,13 +195,14 @@ export function useBrowserNotifications(
     listen();
     if (webContentsId === null) return;
     return subscribe(webContentsId, {
-      opened: (notification) => showInNotificationCenter(notification, panelId, worktreePath),
+      opened: (notification) =>
+        showInNotificationCenter(notification, panelId, worktreePath, pageRef.current),
       // A new guest (the webview was re-created) drops the old guest's requests.
       request: (request) =>
         setQueue((prev) => [...prev.filter((r) => r.webContentsId === webContentsId), request]),
       withdraw: (id) => setQueue((prev) => prev.filter((request) => request.id !== id)),
     });
-  }, [webContentsId, panelId, worktreePath]);
+  }, [webContentsId, panelId, worktreePath, pageRef]);
 
   const request = useMemo(
     () => queue.find((r) => r.webContentsId === webContentsId) ?? null,
