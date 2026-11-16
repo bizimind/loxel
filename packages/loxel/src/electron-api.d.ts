@@ -41,6 +41,15 @@ interface Window {
      * the point is in the coordinates of the webview's `context-menu` event.
      */
     copyWebviewImage: (webContentsId: number, x: number, y: number) => void;
+    /** Memory and CPU of this window's webviews by webContents id, and the machine's memory. */
+    getBrowserPageUsage: (
+      webContentsIds: number[],
+    ) => Promise<import("@/electron/browser-page-protocol").BrowserPagesUsage>;
+    /**
+     * Freeze one of this window's hidden webviews (tasks and timers stop), or resume it. Resolves
+     * whether it is now in that state.
+     */
+    setBrowserPageFrozen: (webContentsId: number, frozen: boolean) => Promise<boolean>;
     /**
      * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
      * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).

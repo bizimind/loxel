@@ -45,9 +45,10 @@ export type SidebarZone = "left" | "bottom" | "right";
  * (hand-edited, or from a newer version) falls back to the default, dark, and the color themes are
  * parsed (`parseThemeSettings`), since their colors are written into a stylesheet. The browser's
  * per-site decisions and mutes keep only valid entries, since the Electron main process enforces
- * them, and its background page count falls back to its default when missing or out of range. The
- * terminal's "When quitting Loxel" falls back to its default when it is missing (a row from before
- * it) or unknown, as main does with the value it is sent, and bidirectional text is on only when
+ * them, and its background tabs mode falls back to its default when missing or unknown (the count
+ * it replaced, `backgroundPages`, is dropped). The terminal's "When quitting Loxel" falls back to
+ * its default when it is missing (a row from before it) or unknown, as main does with the value it
+ * is sent, and bidirectional text is on only when
  * stored as true.
  */
 export function withValidSettings<T extends object>(slice: T): T {
@@ -93,23 +94,18 @@ export interface BrowserSettings {
    */
   notificationMutes: NotificationMutes;
   /**
-   * How many browser pages of layouts not shown (other worktrees, or Home) stay loaded; past it,
-   * the least recently shown are unloaded and load again when shown (see store/browser-pages.ts).
+   * How much the browser pages of layouts not shown (other worktrees, or Home) may cost before
+   * they are frozen or unloaded (see store/browser-page-budget.ts).
    */
-  backgroundPages: number;
+  backgroundTabs: BackgroundTabsMode;
 }
 
-export const DEFAULT_BROWSER_BACKGROUND_PAGES = 10;
-export const MAX_BROWSER_BACKGROUND_PAGES = 50;
+export const BACKGROUND_TABS_MODES = ["save-memory", "balanced", "keep-running"] as const;
+export type BackgroundTabsMode = (typeof BACKGROUND_TABS_MODES)[number];
+export const DEFAULT_BACKGROUND_TABS: BackgroundTabsMode = "balanced";
 
-/** A whole number of background pages in range, or null. */
-export function parseBackgroundPages(value: unknown): number | null {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= MAX_BROWSER_BACKGROUND_PAGES
-    ? value
-    : null;
+export function isBackgroundTabsMode(value: unknown): value is BackgroundTabsMode {
+  return BACKGROUND_TABS_MODES.some((mode) => mode === value);
 }
 
 function parseBrowserSettings(value: unknown): BrowserSettings {
@@ -117,8 +113,9 @@ function parseBrowserSettings(value: unknown): BrowserSettings {
   return {
     notificationSites: parseNotificationSites(fields.notificationSites),
     notificationMutes: parseNotificationMutes(fields.notificationMutes),
-    backgroundPages:
-      parseBackgroundPages(fields.backgroundPages) ?? DEFAULT_BROWSER_BACKGROUND_PAGES,
+    backgroundTabs: isBackgroundTabsMode(fields.backgroundTabs)
+      ? fields.backgroundTabs
+      : DEFAULT_BACKGROUND_TABS,
   };
 }
 
@@ -698,8 +695,8 @@ export interface SettingsState {
    * be muted, so every mute shows in Settings > Browser and goes when the site is forgotten.
    */
   setNotificationMute: (origin: string, mute: NotificationMute | null) => void;
-  /** Set how many background browser pages stay loaded. */
-  setBrowserBackgroundPages: (count: number) => void;
+  /** Set how much background browser pages may cost before they are frozen or unloaded. */
+  setBackgroundTabs: (mode: BackgroundTabsMode) => void;
 
   // Wt config actions
 
@@ -801,7 +798,7 @@ export const useSettingsStore = create<SettingsState>()(
       browser: {
         notificationSites: {},
         notificationMutes: {},
-        backgroundPages: DEFAULT_BROWSER_BACKGROUND_PAGES,
+        backgroundTabs: DEFAULT_BACKGROUND_TABS,
       },
 
       isOpen: false,
@@ -1114,8 +1111,8 @@ export const useSettingsStore = create<SettingsState>()(
           return { browser: { ...s.browser, notificationMutes } };
         }),
 
-      setBrowserBackgroundPages: (count) =>
-        set((s) => ({ browser: { ...s.browser, backgroundPages: count } })),
+      setBackgroundTabs: (mode) =>
+        set((s) => ({ browser: { ...s.browser, backgroundTabs: mode } })),
 
       // -- UI --
 

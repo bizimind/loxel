@@ -1,13 +1,19 @@
-import { beforeEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test";
 
 import type { DockviewPanelApi } from "dockview-react";
 
+import { stubElectronAPI } from "@/test/electron-api-stub";
+
 import {
   attachBrowserPage,
+  backgroundBrowserPages,
   closeBrowserPage,
   closeLayoutBrowserPages,
   detachBrowserPage,
+  markBrowserPageFrozen,
   setBrowserPageUrl,
+  setBrowserPageWebContents,
+  unloadBrowserPages,
   useBrowserPages,
   whenBrowserPageAttached,
 } from "./browser-pages";
@@ -36,18 +42,27 @@ const background = () =>
     .filter((page) => !page.slot)
     .map((page) => page.id);
 
-function setLimit(backgroundPages: number): void {
-  useSettingsStore.setState((s) => ({ browser: { ...s.browser, backgroundPages } }));
-}
+const setBrowserPageFrozen = jest.fn(async () => true);
+// Each page goes to the background a millisecond after the previous one.
+let now = 0;
+let clock: ReturnType<typeof spyOn<DateConstructor, "now">>;
 
 beforeEach(() => {
   for (const id of loaded()) closeBrowserPage(id);
   slots.clear();
-  setLimit(2);
+  now = 0;
+  clock = spyOn(Date, "now").mockImplementation(() => ++now);
+  setBrowserPageFrozen.mockClear();
+  window.electronAPI = stubElectronAPI({ setBrowserPageFrozen });
   useSettingsStore.setState((s) => ({ browser: { ...s.browser, notificationSites: {} } }));
   usePanelNotificationStore.setState({ panelIndex: new Set() });
   // Pages hidden here are in layouts that are not being shown.
   useWorktreeStore.setState({ activeWorktreePath: "/wt/elsewhere" });
+});
+
+afterEach(() => {
+  clock.mockRestore();
+  window.electronAPI = undefined;
 });
 
 describe("browser pages", () => {
@@ -68,25 +83,53 @@ describe("browser pages", () => {
     expect(background()).toEqual([]);
   });
 
-  test("unloads the least recently shown background pages past the limit", () => {
-    for (const id of ["p1", "p2", "p3"]) show(id);
-    for (const id of ["p2", "p1", "p3"]) hide(id);
-    expect(loaded().toSorted()).toEqual(["p1", "p3"]);
+  test("past 100 background pages, unloads the one hidden longest", () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `p${i}`);
+    for (const id of ids) show(id);
+    for (const id of ids) hide(id);
+    expect(loaded()).toEqual(ids.slice(1));
   });
 
-  test("a switch doesn't unload the pages of the layout it is about to show", () => {
-    setLimit(3);
-    // B's pages went to the background first, so they are the least recently shown.
+  test("a switch doesn't count the pages of the layout it is about to show", () => {
     for (const id of ["b1", "b2"]) show(id, "/wt/b");
-    show("c1", "/wt/c");
-    for (const id of ["b1", "b2", "c1"]) hide(id);
+    for (const id of ["b1", "b2"]) hide(id);
     show("a1", "/wt/a");
     // Switching to B: A's panel unmounts before B's mount.
     useWorktreeStore.setState({ activeWorktreePath: "/wt/b" });
     hide("a1");
-    expect(loaded().toSorted()).toEqual(["a1", "b1", "b2", "c1"]);
-    for (const id of ["b1", "b2"]) show(id, "/wt/b");
-    expect(background().toSorted()).toEqual(["a1", "c1"]);
+    expect(backgroundBrowserPages().map((page) => page.id)).toEqual(["a1"]);
+  });
+
+  test("a frozen page resumes when shown, then is shown to Chromium again", async () => {
+    show("p1");
+    setBrowserPageWebContents("p1", 7);
+    hide("p1");
+    markBrowserPageFrozen("p1", 7);
+    expect(useBrowserPages.getState().pages.p1?.frozen).toBe(true);
+    show("p1");
+    expect(setBrowserPageFrozen).toHaveBeenCalledWith(7, false);
+    expect(useBrowserPages.getState().pages.p1?.frozen).toBe(false);
+    await Promise.resolve();
+    expect(useBrowserPages.getState().pages.p1?.resumes).toBe(1);
+  });
+
+  test("a page shown while it was being frozen is resumed at once", () => {
+    show("p1");
+    setBrowserPageWebContents("p1", 7);
+    markBrowserPageFrozen("p1", 7);
+    expect(setBrowserPageFrozen).toHaveBeenCalledWith(7, false);
+    expect(useBrowserPages.getState().pages.p1?.frozen).toBe(false);
+  });
+
+  test("a freeze of a replaced guest is ignored, and a new guest starts unfrozen", () => {
+    show("p1");
+    setBrowserPageWebContents("p1", 7);
+    hide("p1");
+    markBrowserPageFrozen("p1", 7);
+    setBrowserPageWebContents("p1", 8);
+    expect(useBrowserPages.getState().pages.p1).toMatchObject({ webContentsId: 8, frozen: false });
+    markBrowserPageFrozen("p1", 7);
+    expect(useBrowserPages.getState().pages.p1?.frozen).toBe(false);
   });
 
   test("calls back once a page is attached, at once if it already is", () => {
@@ -116,31 +159,11 @@ describe("browser pages", () => {
     }
   });
 
-  test("unloads pages that can't notify before those that can", () => {
-    for (const id of ["allowed", "pending", "plain"]) show(id);
-    useSettingsStore.setState((s) => ({
-      browser: { ...s.browser, notificationSites: { "https://allowed.test": "allow" } },
-    }));
-    usePanelNotificationStore.setState({ panelIndex: new Set(["pending"]) });
-    for (const id of ["allowed", "pending", "plain"]) hide(id);
-    expect(loaded().toSorted()).toEqual(["allowed", "pending"]);
-  });
-
-  test("a lower limit applies when the next page goes to the background, and 0 unloads each", () => {
-    for (const id of ["p1", "p2"]) show(id);
-    for (const id of ["p1", "p2"]) hide(id);
-    show("p3");
-    setLimit(0);
-    expect(loaded()).toEqual(["p1", "p2", "p3"]);
-    hide("p3");
-    expect(loaded()).toEqual([]);
-  });
-
   test("an unloaded page comes back on the last URL it was on", () => {
     show("p1", "/wt/a", "https://first.test/");
     setBrowserPageUrl("p1", "https://later.test/");
-    setLimit(0);
     hide("p1");
+    unloadBrowserPages(["p1"]);
     show("p1", "/wt/a", "https://first.test/");
     expect(useBrowserPages.getState().pages.p1?.initialUrl).toBe("https://later.test/");
   });

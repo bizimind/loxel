@@ -10,7 +10,9 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 
 import { PanelErrorBoundary } from "@/components/dockview/panel-error-boundary";
 import { focusAreaProps } from "@/lib/focus-targets";
+import { frontendLog } from "@/lib/frontend-logger";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { REVIEW_INTERVAL_MS, reviewBackgroundPages } from "@/store/browser-page-budget";
 import {
   type BrowserPage,
   attachBrowserPage,
@@ -19,6 +21,8 @@ import {
 } from "@/store/browser-pages";
 
 import { BrowserPanel } from "./BrowserPanel";
+
+const log = frontendLog.child("ui");
 
 /** Mounted once per window, above the layouts, so its pages outlive them. */
 export function BrowserPagePool() {
@@ -39,6 +43,16 @@ export function BrowserPagePool() {
       window.removeEventListener("drop", end, true);
       end();
     };
+  }, []);
+
+  // Keep background pages within the Background Tabs budget.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      reviewBackgroundPages().catch((error: unknown) => {
+        log.warn("Could not review background browser pages", { error: String(error) });
+      });
+    }, REVIEW_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, []);
 
   return Object.values(pages).map((page) => <BrowserPageHost key={page.id} page={page} />);
@@ -76,6 +90,7 @@ const BrowserPageHost = memo(function BrowserPageHost({ page }: { page: BrowserP
           url={page.initialUrl}
           panelId={page.id}
           panelApi={slot?.api ?? null}
+          resumes={page.resumes}
           worktreePath={page.layoutKey === HOME_LAYOUT_KEY ? null : page.layoutKey}
         />
       </PanelErrorBoundary>

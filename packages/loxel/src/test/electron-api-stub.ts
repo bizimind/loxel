@@ -16,6 +16,8 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     isFullScreen: () => false,
     onWindowFullScreenChange: () => () => {},
     copyWebviewImage: () => {},
+    getBrowserPageUsage: async () => ({ totalMemoryKB: 0, pages: [] }),
+    setBrowserPageFrozen: async () => true,
     onJavaScriptDialog: () => () => {},
     respondToJavaScriptDialog: () => {},
     onPasskeyQrCode: () => () => {},

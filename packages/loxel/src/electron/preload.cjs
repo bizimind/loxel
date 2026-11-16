@@ -13,6 +13,8 @@ const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
 const WEBVIEW_FOCUSED = "keybindings:webview-focused";
 const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
+const BROWSER_PAGE_USAGE = "browser:page-usage";
+const BROWSER_PAGE_SET_FROZEN = "browser:page-set-frozen";
 const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
@@ -95,6 +97,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getZoomFactor: () => webFrame.getZoomFactor(),
   copyWebviewImage: (webContentsId, x, y) =>
     ipcRenderer.send(COPY_WEBVIEW_IMAGE, webContentsId, x, y),
+  getBrowserPageUsage: (webContentsIds) => ipcRenderer.invoke(BROWSER_PAGE_USAGE, webContentsIds),
+  setBrowserPageFrozen: (webContentsId, frozen) =>
+    ipcRenderer.invoke(BROWSER_PAGE_SET_FROZEN, webContentsId, frozen),
   onJavaScriptDialog: (onOpen, onClosed) => {
     const openHandler = (_event, request) => onOpen(request);
     const closedHandler = (_event, closed) => onClosed(closed);

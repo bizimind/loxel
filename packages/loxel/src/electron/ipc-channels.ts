@@ -33,6 +33,10 @@ export const WEBVIEW_FOCUSED = "keybindings:webview-focused";
  * panel's context menu). `<webview>` has no `copyImageAt`; only its webContents does.
  */
 export const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
+/** Measure the window's background browser pages (see browser-page-lifecycle.ts). */
+export const BROWSER_PAGE_USAGE = "browser:page-usage";
+/** Freeze one of the window's background browser pages, or resume it. */
+export const BROWSER_PAGE_SET_FROZEN = "browser:page-set-frozen";
 /**
  * Webview preload → main, synchronous: a page called `alert()` / `confirm()` / `prompt()`. The
  * page stays blocked until main sets the return value. See `javascript-dialogs.ts`.

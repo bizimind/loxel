@@ -26,6 +26,7 @@ import {
   ipcMain,
 } from "electron";
 
+import { isLoopbackHost } from "../url-utils";
 import {
   type BrowserNotification,
   type NotificationPermissionRequest,
@@ -117,16 +118,6 @@ interface NotificationTexts {
 /** A notification's texts as the notification center takes them: long ones cut. */
 export function capTexts({ title, body, tag }: NotificationTexts): NotificationTexts {
   return { title: cap(title, MAX_TITLE), body: cap(body, MAX_BODY), tag: cap(tag, MAX_TAG) };
-}
-
-/** Hosts plain `http` counts as secure for, as browsers do: this machine only. */
-function isLoopbackHost(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname === "[::1]" ||
-    /^127(\.\d{1,3}){3}$/.test(hostname)
-  );
 }
 
 /**

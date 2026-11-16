@@ -33,7 +33,7 @@ import {
   useBrowserBookmarksStore,
   useIsBookmarked,
 } from "@/store/browser-bookmarks";
-import { setBrowserPageUrl } from "@/store/browser-pages";
+import { setBrowserPageUrl, setBrowserPageWebContents } from "@/store/browser-pages";
 import { isHttpUrl } from "@/url-utils";
 
 import {
@@ -80,6 +80,11 @@ interface BrowserPanelProps {
   panelApi: DockviewPanelApi | null;
   /** The worktree whose layout the panel is in, or null for Home's. */
   worktreePath: string | null;
+  /**
+   * How many times the page was resumed from a freeze (see `store/browser-pages.ts`). Chromium
+   * leaves a resumed page hidden, so each one hides the webview for a frame to show it again.
+   */
+  resumes?: number;
 }
 
 export function BrowserPanel({
@@ -87,6 +92,7 @@ export function BrowserPanel({
   panelId,
   panelApi,
   worktreePath,
+  resumes = 0,
 }: BrowserPanelProps) {
   const webviewRef = useRef<WebviewTag | null>(null);
   const readyRef = useRef(false);
@@ -99,6 +105,23 @@ export function BrowserPanel({
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<BrowserContextMenuState | null>(null);
   const [webContentsId, setWebContentsId] = useState<number | null>(null);
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (resumes === 0 || !webview) return;
+    webview.style.visibility = "hidden";
+    const frame = requestAnimationFrame(() => {
+      webview.style.visibility = "";
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      webview.style.visibility = "";
+    };
+  }, [resumes]);
+
+  // The pool measures and freezes the page by its guest.
+  useEffect(() => {
+    if (webContentsId !== null) setBrowserPageWebContents(panelId, webContentsId);
+  }, [panelId, webContentsId]);
   const urlInputRef = useRef<HTMLInputElement>(null);
   // The page shown or loading, for the activation focus, which runs outside render.
   const currentUrlRef = useRef(currentUrl);
