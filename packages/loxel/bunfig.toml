@@ -1,2 +1,6 @@
 [test]
-preload = ["./src/test/temp-state-dir.ts"]
+preload = [
+  "./src/test/temp-state-dir.ts",
+  "./src/test/dom-preload.ts",
+  "./src/test/jest-dom-preload.ts",
+]
