@@ -114,12 +114,26 @@ describe("mermaid rendering", () => {
 
   test("renders a light and a dark variant with strict security and unique ids", async () => {
     const preview = await renderAsync("mermaid", "graph TD; A-->B");
-    // Mermaid 11's appearance by default: the classic look and dagre, which a diagram can override.
-    const base = { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true };
-    const classic = { look: "classic", flowchart: expect.objectContaining({ layout: "dagre" }) };
+    // Mermaid 11's appearance by default: the classic look, dagre and 11's node sizing, for every
+    // type mermaid 12 would lay out with ELK instead. A diagram's own config overrides it.
+    const dagre = { layout: "dagre" };
+    const sized = { ...dagre, minNodeWidth: 0, wrappingWidth: 200 };
+    const base = {
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      look: "classic",
+      flowchart: sized,
+      state: sized,
+      class: dagre,
+      er: dagre,
+      requirement: dagre,
+      usecase: dagre,
+      agentflow: dagre,
+    };
     expect(renderCalls.map((c) => c.config)).toEqual([
-      expect.objectContaining({ ...base, ...classic, theme: "default" }),
-      expect.objectContaining({ ...base, ...classic, theme: "dark" }),
+      { ...base, theme: "default" },
+      { ...base, theme: "dark" },
     ]);
     if (typeof preview !== "string") throw new Error("expected an SVG preview");
     const host = document.createElement("div");
