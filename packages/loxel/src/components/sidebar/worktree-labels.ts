@@ -1,4 +1,5 @@
 import type { WorktreeEntry } from "@/api/git-models";
+import type { WorktreeBasePlan } from "@/api/project-model";
 import { dayjs } from "@/lib/dayjs";
 import { abbreviateHomePath } from "@/lib/home-path";
 
@@ -32,4 +33,21 @@ export function worktreeNameFromTitle(title: string): string {
     .replace(/[^a-z0-9._/-]/g, "")
     .replace(/-{2,}/g, "-")
     .replace(/^[-/.]+|[-/.]+$/g, "");
+}
+
+/**
+ * The New worktree dialog's line about where the worktree starts: the remote default, or with
+ * `stackOn`, that parent's commit and how far it is behind the remote default.
+ */
+export function worktreeBaseHint(
+  plan: WorktreeBasePlan,
+  stackOn: { label: string } | null,
+): string {
+  const remote = plan.remoteDefault;
+  if (!stackOn || !plan.parent) return `Starts from ${remote ?? "HEAD"}`;
+  const from = `Starts from ${stackOn.label} at ${plan.parent.commit.slice(0, 7)}`;
+  const { behind } = plan.parent;
+  if (remote === null || behind === null) return from;
+  if (behind === 0) return `${from}, up to date with ${remote}`;
+  return `${from}, ${behind} ${behind === 1 ? "commit" : "commits"} behind ${remote}`;
 }

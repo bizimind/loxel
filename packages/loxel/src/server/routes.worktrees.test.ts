@@ -233,16 +233,32 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       expect((await post("/api/worktree/enable-metadata", { projectPath: repo })).status).toBe(200);
     });
 
-    test("a child branches from its parent's commit and is nested under it", async () => {
+    async function parentWithWork(): Promise<void> {
       expect((await create("parent")).status).toBe(200);
       await writeFile(join(wtPath("parent"), "work.txt"), "work\n");
       await git(wtPath("parent"), "add", ".");
       await git(wtPath("parent"), "commit", "-m", "parent work");
+    }
+
+    test("a child starts where a top-level worktree does, nested under its parent", async () => {
+      await parentWithWork();
 
       expect((await create("child", { parentPath: wtPath("parent") })).status).toBe(200);
 
       const { parent, child } = await byName();
       expect(parent?.wtId).toBeString();
+      expect(child?.parentWtId).toBe(parent!.wtId!);
+      expect(child?.commit).toBe((await git(repo, "rev-parse", "HEAD")).trim());
+      expect(child?.commit).not.toBe(parent!.commit);
+    });
+
+    test("a child with fromParent branches from its parent's commit", async () => {
+      await parentWithWork();
+
+      const res = await create("child", { parentPath: wtPath("parent"), fromParent: true });
+      expect(res.status).toBe(200);
+
+      const { parent, child } = await byName();
       expect(child?.parentWtId).toBe(parent!.wtId!);
       expect(child?.commit).toBe(parent!.commit);
     });
@@ -336,6 +352,79 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       });
       expect(res.status).toBe(200);
       expect(Object.keys(await byName())).toEqual(["late"]);
+    });
+  });
+  describe("starting point with an origin", () => {
+    let origin: string;
+    /** origin/main as last fetched, before origin moved on */
+    let fetched: string;
+    /** origin's main now, one commit past `fetched` */
+    let latest: string;
+
+    const wtPath = (name: string) => join(repo, ".worktrees", name);
+    const headOf = async (path: string) => (await git(path, "rev-parse", "HEAD")).trim();
+
+    beforeEach(async () => {
+      origin = await realpath(await mkdtemp(join(tmpdir(), "loxel-wt-origin-")));
+      await git(origin, "init", "--bare", "--initial-branch=main", ".");
+      await git(repo, "remote", "add", "origin", origin);
+      await git(repo, "push", "--quiet", "origin", "main");
+      await git(repo, "fetch", "--quiet", "origin");
+      await git(repo, "remote", "set-head", "origin", "main");
+      fetched = await headOf(repo);
+
+      // Origin moves on without this clone fetching: push a commit, then forget it locally.
+      await git(repo, "commit", "--allow-empty", "-m", "upstream work");
+      latest = await headOf(repo);
+      await git(repo, "push", "--quiet", "origin", "main");
+      await git(repo, "update-ref", "refs/remotes/origin/main", fetched);
+      await git(repo, "reset", "--hard", "--quiet", fetched);
+    });
+
+    afterEach(async () => {
+      await rm(origin, { recursive: true, force: true });
+    });
+
+    test("fetches origin's default branch and starts from it", async () => {
+      expect((await create("fresh")).status).toBe(200);
+
+      expect(await headOf(wtPath("fresh"))).toBe(latest);
+      expect((await git(repo, "rev-parse", "origin/main")).trim()).toBe(latest);
+    });
+
+    test("starts from origin/main as last fetched when origin cannot be reached", async () => {
+      await git(repo, "remote", "set-url", "origin", join(origin, "missing"));
+
+      expect((await create("offline")).status).toBe(200);
+
+      expect(await headOf(wtPath("offline"))).toBe(fetched);
+    });
+
+    test("a child stacked on its parent is not fetched for", async () => {
+      await post("/api/worktree/enable-metadata", { projectPath: repo });
+      expect((await create("parent")).status).toBe(200);
+      await git(repo, "update-ref", "refs/remotes/origin/main", fetched);
+
+      const res = await create("child", { parentPath: wtPath("parent"), fromParent: true });
+      expect(res.status).toBe(200);
+
+      expect(await headOf(wtPath("child"))).toBe(latest);
+      expect((await git(repo, "rev-parse", "origin/main")).trim()).toBe(fetched);
+    });
+
+    test("plans the base: the remote default, and how far a parent is behind it", async () => {
+      // Created after fetching `latest`, then moved back to the commit before it.
+      expect((await create("parent")).status).toBe(200);
+      await git(wtPath("parent"), "reset", "--hard", "--quiet", fetched);
+
+      const plan = async (body: Record<string, unknown>) =>
+        (await post("/api/worktree/plan-base", { projectPath: repo, ...body })).json();
+
+      expect(await plan({})).toEqual({ remoteDefault: "origin/main", parent: null });
+      expect(await plan({ parentPath: wtPath("parent") })).toEqual({
+        remoteDefault: "origin/main",
+        parent: { commit: fetched, behind: 1 },
+      });
     });
   });
 });

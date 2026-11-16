@@ -4,8 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createNoopLogger } from "@bizimind/logger";
-
+import { createNoopLogger } from "@/api/log-entry-model";
 import type { WsMessage } from "@/api/ws-protocol";
 import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";

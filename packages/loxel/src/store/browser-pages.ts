@@ -157,27 +157,34 @@ function evictBackgroundPages(): void {
   });
 }
 
-/** How long `whenBrowserPageAttached` waits for a layout to mount before giving up. */
+/** Where panel `id`'s page is shown, or null while it is in the background or not loaded. */
+export function getBrowserPageSlot(id: string): PageSlot | null {
+  return useBrowserPages.getState().pages[id]?.slot ?? null;
+}
+
+/** How long `whenBrowserPageAttached` waits for a layout to mount. */
 const ATTACH_TIMEOUT_MS = 5000;
 
 /**
  * Call `attached` once panel `id`'s page has a slot, i.e. its panel's layout is mounted: now, or
- * once a worktree switch or going Home has mounted it (which can fetch the layout first). Never
- * called if that takes too long, e.g. the panel is gone.
+ * once a worktree switch or going Home has mounted it (which can fetch the layout first). Called
+ * with null if that takes too long, e.g. the panel is gone.
  */
-export function whenBrowserPageAttached(id: string, attached: (slot: PageSlot) => void): void {
-  const slotOf = (state: BrowserPagesState) => state.pages[id]?.slot ?? null;
-  const current = slotOf(useBrowserPages.getState());
+export function whenBrowserPageAttached(
+  id: string,
+  attached: (slot: PageSlot | null) => void,
+): void {
+  const current = getBrowserPageSlot(id);
   if (current) return attached(current);
   const unsubscribe = useBrowserPages.subscribe((state) => {
-    const slot = slotOf(state);
+    const slot = state.pages[id]?.slot;
     if (!slot) return;
-    stop();
-    attached(slot);
-  });
-  const timer = setTimeout(unsubscribe, ATTACH_TIMEOUT_MS);
-  function stop(): void {
     clearTimeout(timer);
     unsubscribe();
-  }
+    attached(slot);
+  });
+  const timer = setTimeout(() => {
+    unsubscribe();
+    attached(null);
+  }, ATTACH_TIMEOUT_MS);
 }

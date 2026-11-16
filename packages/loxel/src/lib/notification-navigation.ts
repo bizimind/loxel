@@ -5,7 +5,7 @@
  * click-to-navigate in the notification center overlay.
  */
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
-import { whenBrowserPageAttached } from "@/store/browser-pages";
+import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -30,32 +30,36 @@ export function navigateToNotification(notification: ServerNotification): void {
   if (!isPanelSource(source)) return;
   const { panelId, worktreePath } = source;
 
-  const activate = () => {
+  // Like clicking a browser's notification: the page's `click` handler, or its service worker's
+  // `notificationclick`, runs (to open the chat or build it was about). A page in another worktree
+  // or Home kept running there, so after a switch the click waits for its layout to mount, and what
+  // the page opens lands next to it. Main ignores refs with nothing left to click (the page was
+  // closed, unloaded or reloaded, and no service worker showed it).
+  const activate = (afterSwitch: boolean) => {
     if (source.kind !== "browser") return activatePanelById(panelId);
-    // Like clicking a browser's notification: the page's `click` handler runs (to open the chat or
-    // build it was about). A page in another worktree or Home kept running there, and gets the
-    // click once its layout is mounted, so what it opens lands next to it.
-    // Main ignores refs whose page is gone (it was closed, unloaded or reloaded).
-    whenBrowserPageAttached(panelId, ({ api }) => {
-      api.setActive();
+    const click = (slot: PageSlot | null) => {
+      if (slot) slot.api.setActive();
+      else activatePanelById(panelId);
       window.electronAPI?.clickBrowserNotification({ ref: source.ref });
-    });
+    };
+    if (afterSwitch) whenBrowserPageAttached(panelId, click);
+    else click(getBrowserPageSlot(panelId));
   };
 
   const wtStore = useWorktreeStore.getState();
   if (worktreePath === null && wtStore.activeWorktreePath !== null) {
     // A Home panel's: go Home first, then activate the panel after layout settles
     wtStore.showHome();
-    requestAnimationFrame(activate);
+    requestAnimationFrame(() => activate(true));
   } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
     // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)
-      .then(() => requestAnimationFrame(activate))
+      .then(() => requestAnimationFrame(() => activate(true)))
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);
       });
   } else {
-    activate();
+    activate(false);
   }
 }

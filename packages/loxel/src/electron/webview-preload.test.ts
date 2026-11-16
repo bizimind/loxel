@@ -7,6 +7,9 @@ import {
   BROWSER_NOTIFICATION_REQUEST_PERMISSION,
   BROWSER_NOTIFICATION_SHOW,
   JAVASCRIPT_DIALOG_RUN,
+  REGISTRATION_NOTIFICATION_CLOSE,
+  REGISTRATION_NOTIFICATION_LIST,
+  REGISTRATION_NOTIFICATION_SHOW,
 } from "./ipc-channels";
 
 interface DialogCall {
@@ -261,29 +264,63 @@ describe("webview preload notifications", () => {
     expect(() => new (Notification as unknown as new () => unknown)()).toThrow(TypeError);
   });
 
-  test("routes a service worker registration's showNotification through main", async () => {
+  test("routes a service worker registration's notifications through main", async () => {
     class ServiceWorkerRegistration {
-      readonly scope = "/";
+      readonly scope = "https://app.example/";
     }
     Object.assign(globalThis, { ServiceWorkerRegistration });
     try {
-      notificationPage("granted");
+      const Notification = notificationPage("granted");
       const registration = new ServiceWorkerRegistration() as unknown as {
         showNotification: (title: string, options?: object) => Promise<void>;
-        getNotifications: () => Promise<unknown[]>;
+        getNotifications: (filter?: { tag?: string }) => Promise<PageNotification[]>;
       };
-      await registration.showNotification("Deployed", { body: "v2 is live", tag: "deploy" });
-      expect(send).toHaveBeenCalledWith(BROWSER_NOTIFICATION_SHOW, {
-        pageId: expect.any(Number),
+      const listed = {
+        ref: "sw-1",
         title: "Deployed",
         body: "v2 is live",
         tag: "deploy",
-      });
-      expect(await registration.getNotifications()).toEqual([]);
+        timestamp: 5,
+        data: { url: "/releases/2" },
+      };
+      invoke.mockImplementation((channel: string) =>
+        Promise.resolve(channel === REGISTRATION_NOTIFICATION_LIST ? [listed] : "shown"),
+      );
 
-      sendSync.mockImplementation(() => "denied");
-      expect(registration.showNotification("Nope")).rejects.toThrow(TypeError);
+      const options = { body: "v2 is live", tag: "deploy", data: { url: "/releases/2" } };
+      await registration.showNotification("Deployed", options);
+      expect(invoke).toHaveBeenLastCalledWith(REGISTRATION_NOTIFICATION_SHOW, {
+        scope: "https://app.example/",
+        title: "Deployed",
+        body: "v2 is live",
+        tag: "deploy",
+        timestamp: expect.any(Number),
+        data: { url: "/releases/2" },
+      });
+
+      const [notification] = await registration.getNotifications({ tag: "deploy" });
+      expect(invoke).toHaveBeenLastCalledWith(REGISTRATION_NOTIFICATION_LIST, {
+        scope: "https://app.example/",
+        tag: "deploy",
+      });
+      expect(notification).toBeInstanceOf(Notification);
+      expect([notification!.title, notification!.tag, notification!.data]).toEqual([
+        "Deployed",
+        "deploy",
+        { url: "/releases/2" },
+      ]);
+      // Listing shows nothing again; close() goes to the registration's notification.
+      expect(send).not.toHaveBeenCalledWith(BROWSER_NOTIFICATION_SHOW, expect.anything());
+      notification!.close();
+      expect(send).toHaveBeenCalledWith(REGISTRATION_NOTIFICATION_CLOSE, {
+        scope: "https://app.example/",
+        ref: "sw-1",
+      });
+
+      invoke.mockImplementation(() => Promise.resolve("denied"));
+      await expect(registration.showNotification("Nope")).rejects.toThrow(TypeError);
     } finally {
+      invoke.mockImplementation(() => Promise.resolve("granted"));
       Reflect.deleteProperty(globalThis, "ServiceWorkerRegistration");
     }
   });

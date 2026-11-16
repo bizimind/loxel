@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/wt",
-  "version": "0.1.81",
+  "version": "0.1.82",
   "description": "Configless CLI for managing git worktrees with shell hooks",
   "type": "module",
   "exports": {

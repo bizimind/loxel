@@ -1,6 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["@cloudflare/workers-types", "bun"], "skipLibCheck": true },
-  "include": ["src/**/*", "tests/**/*"],
-  "exclude": ["../channel/**/*"]
-}

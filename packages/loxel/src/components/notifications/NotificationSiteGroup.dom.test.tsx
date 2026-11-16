@@ -11,7 +11,7 @@ import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import { NotificationSiteGroup } from "./NotificationSiteGroup";
 
-function build(n: number): ServerNotification {
+function build(n: number, faviconUrl?: string): ServerNotification {
   return {
     id: `build-${n}`,
     timestamp: Date.now() - (10 - n) * 60_000,
@@ -21,6 +21,7 @@ function build(n: number): ServerNotification {
       worktreePath: null,
       origin: "http://localhost:5173",
       ref: `ref-${n}`,
+      ...(faviconUrl && { faviconUrl }),
     },
     title: `Build ${n} finished`,
     urgency: "normal",
@@ -86,6 +87,17 @@ describe("a site's stacked notifications", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse localhost:5173 · Home" }));
     expect(screen.queryByText("Build 2 finished")).toBeNull();
+  });
+
+  test("show the site's newest favicon once: on the stack, then on the expanded header", () => {
+    const icon = (n: number) => `http://localhost:5173/icon-${n}.png`;
+    const site = [build(3, icon(3)), build(2, icon(2)), build(1, icon(1))] as const;
+    const { container } = render(<NotificationSiteGroup notifications={site} />);
+    const icons = () => [...container.querySelectorAll("img")].map((img) => img.src);
+    expect(icons()).toEqual([icon(3)]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^\+2 more/ }));
+    expect(icons()).toEqual([icon(3)]);
   });
 
   test("dismiss one when expanded, or all of them collapsed or expanded", () => {

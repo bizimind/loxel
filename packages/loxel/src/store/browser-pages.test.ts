@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, jest, test } from "bun:test";
 
 import type { DockviewPanelApi } from "dockview-react";
 
@@ -99,6 +99,21 @@ describe("browser pages", () => {
     show("p1");
     show("p1");
     expect(attached).toEqual(["p1", "p1 again"]);
+  });
+
+  test("calls back with no slot when the page's layout doesn't mount in time", () => {
+    jest.useFakeTimers();
+    try {
+      const results: unknown[] = [];
+      whenBrowserPageAttached("gone", (slot) => results.push(slot));
+      jest.advanceTimersByTime(5000);
+      expect(results).toEqual([null]);
+      // Showing it later doesn't call back again.
+      show("gone");
+      expect(results).toEqual([null]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("unloads pages that can't notify before those that can", () => {

@@ -2,6 +2,7 @@ import { ChevronUpIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { ServerNotification } from "@/api/notification-model";
+import { Favicon } from "@/components/browser/Favicon";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
 import { NotificationItem, sourceLabel } from "./NotificationItem";
@@ -44,6 +45,9 @@ export function NotificationSiteGroup({
   return (
     <div role="group" aria-label={source}>
       <div className="flex items-center gap-2 px-2 pt-1.5 pb-0.5">
+        {newest.source.kind === "browser" && (
+          <Favicon url={newest.source.faviconUrl} className="size-3" />
+        )}
         <span className="text-muted-foreground min-w-0 flex-1 truncate text-[10px] font-medium not-dark:text-[11px]">
           {source} &middot; {notifications.length}
         </span>

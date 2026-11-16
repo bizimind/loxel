@@ -29,6 +29,7 @@ import type {
   ProjectsResponse,
   ProjectWorktreesResponse,
   ScanSuggestionsResult,
+  WorktreeBasePlan,
 } from "./project-model";
 import type {
   Comment,
@@ -688,11 +689,21 @@ export async function planAddWorktree(projectPath: string, name: string) {
   });
 }
 
+/** Where a new worktree would start; with `parentPath`, also that worktree's commit. */
+export async function planWorktreeBase(projectPath: string, parentPath?: string) {
+  return fetchJson<WorktreeBasePlan>("/worktree/plan-base", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, parentPath }),
+  });
+}
+
 export interface CreateWorktreeOptions {
   branch?: string;
   branchResolution?: "use-existing" | "delete-and-create";
-  /** Create a child of this worktree: branched from its current commit and nested under it */
+  /** Create a child of this worktree: nested under it, branched from the remote default */
   parentPath?: string;
+  /** Branch a child from its parent's current commit instead of the remote default */
+  fromParent?: boolean;
   /** Show the new worktree by this title (`loxel-title` metadata) */
   title?: string;
 }

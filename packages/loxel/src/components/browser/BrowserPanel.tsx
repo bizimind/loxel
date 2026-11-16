@@ -136,10 +136,10 @@ export function BrowserPanel({
   } = useJavaScriptDialogs(webContentsId);
   const dialogFocusRef = useRef<HTMLElement | null>(null);
 
-  // The page's web notifications go to the notification center; a site asking to show them gets
-  // a bar under the toolbar.
+  // The page's web notifications go to the notification center, with its favicon; a site asking
+  // to show them gets a bar under the toolbar.
   const { request: notificationRequest, answer: answerNotificationRequest } =
-    useBrowserNotifications(webContentsId, panelId, worktreePath);
+    useBrowserNotifications(webContentsId, panelId, worktreePath, pageRef);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);

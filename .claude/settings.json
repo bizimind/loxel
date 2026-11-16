@@ -21,8 +21,7 @@
       "Read(~/.local/state/loxel/**)",
       "Read(~/.local/state/loxel/ccm/**)",
       "Bash(bunx convex codegen *)",
-      "Bash(bun -e *)",
-      "Bash(axiom query *)"
+      "Bash(bun -e *)"
     ],
     "ask": ["Bash(brew install:*)"],
     "deny": ["Bash(yarn *)", "Bash(eslint *)", "Bash(prettier *)", "Bash(biome *)"]
