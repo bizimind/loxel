@@ -21,7 +21,7 @@ An empty editor area lists what you can open, with a field next to **New Browser
 
 ## Tabs in other tasks
 
-Browser tabs of the tasks you're not looking at, and of Home, keep running in the background. A CI run you left open keeps updating, a preview keeps its hot-reload state, and a page in another task can still [notify](#notifications) you when the build finishes or the deploy fails.
+Browser tabs of the tasks you're not looking at, and of Home, keep running in the background. A CI run you left open keeps updating, a preview keeps its hot-reload state, and a page in another task can still [notify](#notifications) you when the build finishes or the deploy fails. Like a background tab in Chrome, a tab you can't see, in this task or another, knows it: sites that notify or play a sound only when you're away do so, and its animations pause and its timers slow down to save battery.
 
 With dozens of tasks open, that adds up, so Loxel keeps the 10 background tabs you saw most recently running. Past that, the tab you saw longest ago is unloaded, and it reloads on the page it was on when you come back to it. Tabs of sites you allowed to notify, and tabs with a notification waiting under the bell, are unloaded last. Change the number in **Settings > Browser > Background Tabs**; 0 reloads every tab you come back to.
 

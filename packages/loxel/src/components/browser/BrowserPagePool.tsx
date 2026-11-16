@@ -159,6 +159,11 @@ function setStyle(host: HTMLElement, property: "left" | "top" | "width" | "heigh
   if (host.style[property] !== value) host.style[property] = value;
 }
 
+/**
+ * Show or hide a page's host. `visibility: hidden` also hides the page to Chromium, as a
+ * background tab: it reports `document.visibilityState` "hidden" and gets background throttling,
+ * and it keeps its size. Hiding it with opacity would leave it "visible".
+ */
 function setVisible(host: HTMLElement, visible: boolean): void {
   const value = visible ? "" : "hidden";
   if (host.style.visibility === value) return;
