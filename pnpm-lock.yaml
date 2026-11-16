@@ -109,8 +109,8 @@ importers:
         specifier: 0.18.0-9036812b6
         version: 0.18.0-9036812b6
       '@excalidraw/mermaid-to-excalidraw':
-        specifier: ^2.2.2
-        version: 2.2.2
+        specifier: ^3.2.0
+        version: 3.6.0
       '@excalidraw/utils':
         specifier: ^0.1.8
         version: 0.1.8
@@ -1241,6 +1241,9 @@ packages:
 
   '@excalidraw/mermaid-to-excalidraw@2.2.2':
     resolution: {integrity: sha512-5VKQq5CdRocC82vOIUpQ5ufJOVV9FpBTdHGA+ULqazeIVV+cr299877omQCibsdS3Bpitz2fsnTwnIXEmLVDSg==}
+
+  '@excalidraw/mermaid-to-excalidraw@3.6.0':
+    resolution: {integrity: sha512-h21Mr9FxmfLDds78iw0iTRDzes+/CDRFJ5kndFAmH+EVQLG6PHoMyn4Lms1dHiYgDTal+MkBJnqKJC9Xj080uA==}
 
   '@excalidraw/random-username@1.1.0':
     resolution: {integrity: sha512-nULYsQxkWHnbmHvcs+efMkJ4/9TtvNyFeLyHdeGxW0zHs6P+jYVqcRff9A6Vq9w9JXeDRnRh2VKvTtS19GW2qA==}
@@ -5506,6 +5509,10 @@ packages:
     resolution: {integrity: sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw==}
     engines: {node: '>=12', npm: '>=6'}
 
+  pele@1.13.0:
+    resolution: {integrity: sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw==}
+    engines: {node: '>=20'}
+
   perfect-freehand@1.2.0:
     resolution: {integrity: sha512-h/0ikF1M3phW7CwpZ5MMvKnfpHficWoOEyr//KVNTxV4F6deRK1eYMtHyBKEAKFK0aXIEUK9oBvlF6PNXMDsAw==}
 
@@ -7713,6 +7720,12 @@ snapshots:
       '@mermaid-js/parser': 0.6.3
       mermaid: 11.16.1
       nanoid: 5.1.16
+
+  '@excalidraw/mermaid-to-excalidraw@3.6.0':
+    dependencies:
+      '@excalidraw/markdown-to-text': 0.1.2
+      nanoid: 5.1.16
+      pele: 1.13.0
 
   '@excalidraw/random-username@1.1.0': {}
 
@@ -12368,6 +12381,8 @@ snapshots:
   pathe@2.0.3: {}
 
   pe-library@0.4.1: {}
+
+  pele@1.13.0: {}
 
   perfect-freehand@1.2.0: {}
 
