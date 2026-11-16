@@ -211,7 +211,10 @@ export interface WorktreeState {
 
   /** Pending add plan that needs user resolution (branch conflict). */
   pendingAddPlan:
-    | (AddWorktreePlan & { projectPath: string; parentPath?: string; title?: string })
+    | (AddWorktreePlan & { projectPath: string } & Pick<
+          CreateWorktreeOptions,
+          "parentPath" | "fromParent" | "title"
+        >)
     | null;
   /** Pending remove plan that needs user confirmation (dirty state). */
   pendingRemovePlan: (WorktreeRemovePlan & { wtPath: string; projectPath: string }) | null;
@@ -238,15 +241,16 @@ export interface WorktreeState {
   showHome: () => void;
 
   /**
-   * Create a worktree; with `parentPath`, a child branched from that worktree's commit, and with
-   * `title`, shown by that title. Resolves once the create has started, as a pending sidebar entry
+   * Create a worktree; with `parentPath`, a child nested under that worktree (branched from its
+   * commit with `fromParent`, otherwise from the remote default), and with `title`, shown by that
+   * title. Resolves once the create has started, as a pending sidebar entry
    * (null when a branch conflict was parked in `pendingAddPlan` instead); rejects only when the
    * create cannot start. See {@link CreateStarted} for the rest.
    */
   createWorktree: (
     projectPath: string,
     name: string,
-    options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "title">,
+    options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "fromParent" | "title">,
   ) => Promise<CreateStarted | null>;
   requestRemoveWorktree: (projectPath: string, wt: WorktreeEntry) => Promise<void>;
   confirmRemoveWorktree: (options: {
@@ -434,6 +438,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         createWorktree: async (projectPath, name, options) => {
           const plan = await api.planAddWorktree(projectPath, name);
           const parentPath = options?.parentPath;
+          const fromParent = options?.fromParent;
           const title = options?.title;
 
           if (plan.branchConflict) {
@@ -442,13 +447,14 @@ export const useWorktreeStore = create<WorktreeState>()(
                 `A worktree already exists for branch '${plan.branch}' at: ${plan.branchConflict.worktreePath}`,
               );
             }
-            set({ pendingAddPlan: { ...plan, projectPath, parentPath, title } });
+            set({ pendingAddPlan: { ...plan, projectPath, parentPath, fromParent, title } });
             return null;
           }
 
           return startCreate(set, get, projectPath, plan.worktreePath, name, {
             branch: options?.branch,
             parentPath,
+            fromParent,
             title,
           });
         },
@@ -457,12 +463,13 @@ export const useWorktreeStore = create<WorktreeState>()(
           const { pendingAddPlan } = get();
           if (!pendingAddPlan) return null;
 
-          const { name, worktreePath, projectPath, parentPath, title } = pendingAddPlan;
+          const { name, worktreePath, projectPath, parentPath, fromParent, title } = pendingAddPlan;
           set({ pendingAddPlan: null });
 
           return startCreate(set, get, projectPath, worktreePath, name, {
             branchResolution,
             parentPath,
+            fromParent,
             title,
           });
         },

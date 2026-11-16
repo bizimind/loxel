@@ -39,6 +39,18 @@ export interface ProjectWorktreesResponse {
   worktreeMetadata: boolean;
 }
 
+/** Response of POST /api/worktree/plan-base: where a new worktree would start. */
+export interface WorktreeBasePlan {
+  /** The remote default a new branch starts from (`origin/main`); null when it starts from HEAD */
+  remoteDefault: string | null;
+  /** For a child worktree: its parent's current commit, the base when stacking on it */
+  parent: {
+    commit: string;
+    /** Commits on `remoteDefault`, as last fetched, that the parent's commit lacks */
+    behind: number | null;
+  } | null;
+}
+
 /** Response of GET /api/projects. */
 export interface ProjectsResponse {
   projects: EnrichedProject[];

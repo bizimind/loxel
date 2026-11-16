@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import * as api from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
 import { ToastContainer } from "@/components/ui/toast";
@@ -487,9 +488,48 @@ describe("Sidebar worktree nesting", () => {
     await waitFor(() =>
       expect(createWorktree).toHaveBeenCalledWith(project.path, "sub-task-part-2", {
         parentPath: parent.path,
+        fromParent: false,
         title: "Sub task: part 2",
       }),
     );
+  });
+
+  test("a child starts from the remote default unless Start from stacks it on its parent", async () => {
+    const plan = spyOn(api, "planWorktreeBase").mockResolvedValue({
+      remoteDefault: "origin/main",
+      parent: { commit: "c2405e7f00d1", behind: 109 },
+    });
+    const createWorktree = mock(() => Promise.resolve(null));
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    try {
+      render(<Sidebar />);
+
+      fireEvent.contextMenu(screen.getByText("parent"));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "New child worktree" }));
+      expect(plan).toHaveBeenCalledWith(project.path, parent.path);
+      expect(await screen.findByText("Starts from origin/main")).toBeDefined();
+      const stack = screen.getByLabelText("Start from parent");
+      expect(stack).not.toBeChecked();
+
+      fireEvent.click(stack);
+      expect(
+        screen.getByText("Starts from parent at c2405e7, 109 commits behind origin/main"),
+      ).toBeDefined();
+      fireEvent.change(screen.getByPlaceholderText("worktree-name"), {
+        target: { value: "stacked" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+      await waitFor(() =>
+        expect(createWorktree).toHaveBeenCalledWith(project.path, "stacked", {
+          parentPath: parent.path,
+          fromParent: true,
+          title: undefined,
+        }),
+      );
+    } finally {
+      plan.mockRestore();
+    }
   });
 
   test("a name typed in directly stops following the title, until it is cleared", async () => {

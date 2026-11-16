@@ -86,7 +86,7 @@ export async function waitForLoxel(page: Page): Promise<void> {
     const sidebar = page.locator(".border-border.flex.flex-col.border-r").first();
     const firstProject = sidebar
       .locator(
-        'button[title]:not([title="Add project"]):not([title="Collapse sidebar"]):not([title="Expand sidebar"])',
+        'button[title]:not([title="Home"]):not([title="Add project"]):not([title="Collapse sidebar"]):not([title="Expand sidebar"])',
       )
       .first();
     await firstProject.waitFor({ state: "visible", timeout: 15_000 });
