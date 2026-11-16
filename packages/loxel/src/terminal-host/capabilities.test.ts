@@ -9,9 +9,9 @@ import { type Server, type Socket, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createNoopLogger } from "@bizimind/logger";
 import { z } from "zod";
 
+import { createNoopLogger } from "@/api/log-entry-model";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
 import { until } from "@/test/until";
 

@@ -174,7 +174,11 @@ export default defineConfig(({ mode }) => {
                     closeBundle() {
                       const outDir = path.join(import.meta.dirname, "dist-electron/main");
                       mkdirSync(outDir, { recursive: true });
-                      for (const file of ["preload.cjs", "webview-preload.cjs"]) {
+                      for (const file of [
+                        "preload.cjs",
+                        "webview-preload.cjs",
+                        "service-worker-preload.cjs",
+                      ]) {
                         const src = path.join(import.meta.dirname, "src/electron", file);
                         copyFileSync(src, path.join(outDir, file));
                       }

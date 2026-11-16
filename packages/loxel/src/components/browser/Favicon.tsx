@@ -14,6 +14,8 @@ export function Favicon({ url, className }: { url: string | undefined; className
     <img
       src={url}
       alt=""
+      // Loxel's window, not the page, loads it: the site has no business seeing Loxel's address.
+      referrerPolicy="no-referrer"
       className={cn("size-3.5 shrink-0", className)}
       onError={() => setFailedUrl(url)}
     />

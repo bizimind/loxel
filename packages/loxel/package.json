@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.351",
+  "version": "0.1.355",
   "description": "The professional workspace for AI-powered development",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -39,7 +39,6 @@
   "dependencies": {
     "@base-ui/react": "^1.9.0",
     "@bizimind/localdb-sdk": "workspace:*",
-    "@bizimind/logger": "workspace:*",
     "@bizimind/monaco-lsp-client": "workspace:*",
     "@bizimind/wt": "workspace:*",
     "@codemirror/language": "^6.13.1",

@@ -18,6 +18,8 @@ export interface BrowserNotificationSource {
   ref: string;
   /** The page's `tag`: a new notification replaces the origin's earlier one with the same tag. */
   tag?: string;
+  /** The favicon the panel's tab showed for the page when it notified, for the bell's icon. */
+  faviconUrl?: string;
 }
 
 /** The server itself, about the terminal hosts (terminals it had to end at startup). */

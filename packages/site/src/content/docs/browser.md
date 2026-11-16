@@ -93,9 +93,11 @@ Pages in browser panels get what a browser gives every site without asking: copy
 
 ## Notifications
 
-Pages can send notifications too, and they land in Loxel instead of on your desktop. The first time a site asks, a bar under its address bar offers **Allow** or **Block**; close the bar to decide later. An allowed site's notifications appear under the bell in the top bar, with a dot on its tab and on its task in the sidebar, so the dev server's build alert or a chat mention never pulls you out of Loxel. Click one to jump to its tab, and the page reacts as it would in a browser, opening the chat or build it was about. When a site sends several, they stack into one entry that shows the newest and how many more there are, kept apart per task, so a busy dev server never buries your agents' notifications. Click the stack to open the newest, click the count to see each one, or dismiss the whole stack at once.
+Pages can send notifications too, and they land in Loxel instead of on your desktop. The first time a site asks, a bar under its address bar offers **Allow** or **Block**; close the bar to decide later. An allowed site's notifications appear under the bell in the top bar with the site's icon, and a dot on its tab and on its task in the sidebar, so the dev server's build alert or a chat mention never pulls you out of Loxel. Click one to jump to its tab, and the page reacts as it would in a browser, opening the chat or build it was about. When a site sends several, they stack into one entry that shows the newest and how many more there are, kept apart per task, so a busy dev server never buries your agents' notifications. Click the stack to open the newest, click the count to see each one, or dismiss the whole stack at once.
 
 Notifications come from the open browser tabs of the task you're in, or of Home when you're there, and, as in other browsers, from sites on `https` or on your own machine (such as `http://localhost`). A notification the page takes back stays under the bell until you've seen it. Change a site's choice, or remove it so the site asks again, in **Settings > Browser**.
+
+Sites that notify from their service worker, as many web apps and PWAs do, work the same way while one of their tabs is open: the notification shows on the site's tab you used last, and clicking it lets the site do what it would in a browser, such as opening the page it was about in a new tab. Push messages, which reach a site while none of its tabs are open, aren't supported.
 
 ---
 

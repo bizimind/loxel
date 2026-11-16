@@ -101,6 +101,17 @@ function cap(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+interface NotificationTexts {
+  title: string;
+  body: string;
+  tag: string;
+}
+
+/** A notification's texts as the notification center takes them: long ones cut. */
+export function capTexts({ title, body, tag }: NotificationTexts): NotificationTexts {
+  return { title: cap(title, MAX_TITLE), body: cap(body, MAX_BODY), tag: cap(tag, MAX_TAG) };
+}
+
 /** Hosts plain `http` counts as secure for, as browsers do: this machine only. */
 function isLoopbackHost(hostname: string): boolean {
   return (
@@ -115,7 +126,7 @@ function isLoopbackHost(hostname: string): boolean {
  * A secure context's origin, like browsers require for notifications: `https`, or `http` on this
  * machine (dev servers). Plain `http` elsewhere could be anyone on the network.
  */
-function isSecureWebOrigin(origin: string): boolean {
+export function isSecureWebOrigin(origin: string): boolean {
   try {
     const { protocol, hostname } = new URL(origin);
     if (!hostname) return false;
@@ -126,7 +137,7 @@ function isSecureWebOrigin(origin: string): boolean {
 }
 
 /** The site deciding for the calling frame, or null when the frame gets no notifications. */
-function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
+export function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
   const guest = event.sender;
   const frame = event.senderFrame;
   if (guest.getType() !== "webview" || !frame || frame.detached) return null;
@@ -137,13 +148,13 @@ function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
 }
 
 /** The window showing the guest's panel, when it shows notifications. */
-function listeningHost(guest: WebContents): WebContents | null {
+export function listeningHost(guest: WebContents): WebContents | null {
   const host = guest.hostWebContents;
   if (!host || host.isDestroyed() || !listeningHosts.has(host.id)) return null;
   return host;
 }
 
-function permissionFor(site: string): NotificationPermissionState {
+export function permissionFor(site: string): NotificationPermissionState {
   const decision = sites[site];
   if (decision === "allow") return "granted";
   if (decision === "block") return "denied";
@@ -235,13 +246,32 @@ function setSites(event: IpcMainEvent, value: unknown): void {
   settleDecidedRequests();
 }
 
-function withinRateLimit(guestId: number): boolean {
+/** Whether the guest may show another notification now; counts it if so. */
+export function withinRateLimit(guestId: number): boolean {
   const now = Date.now();
   const recent = (recentShows.get(guestId) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
   if (recent.length >= RATE_LIMIT) return false;
   recent.push(now);
   recentShows.set(guestId, recent);
   return true;
+}
+
+/**
+ * Show a notification in the notification center of `host`, for the browser panel of `guest`, with
+ * its texts capped. `ref` is the sender's id for it, which comes back on clicks.
+ */
+export function sendToNotificationCenter(
+  host: WebContents,
+  fields: NotificationTexts & { ref: string; guest: WebContents },
+): void {
+  const { ref, guest } = fields;
+  const notification: BrowserNotification = {
+    ref,
+    webContentsId: guest.id,
+    origin: guest.mainFrame.origin,
+    ...capTexts(fields),
+  };
+  host.send(BROWSER_NOTIFICATION_OPENED, notification);
 }
 
 /** Remember a page's notification for its clicks, keeping the guest's newest ones. */
@@ -274,15 +304,7 @@ function showNotification(event: IpcMainEvent, value: unknown): void {
   const { pageId, title, body, tag } = parsed.data;
   const ref = `${guest.id}-${nextRef++}`;
   track(ref, { guestId: guest.id, host, frame, pageId });
-  const notification: BrowserNotification = {
-    ref,
-    webContentsId: guest.id,
-    origin: guest.mainFrame.origin,
-    title: cap(title, MAX_TITLE),
-    body: cap(body, MAX_BODY),
-    tag: cap(tag, MAX_TAG),
-  };
-  host.send(BROWSER_NOTIFICATION_OPENED, notification);
+  sendToNotificationCenter(host, { ref, guest, title, body, tag });
 }
 
 /**

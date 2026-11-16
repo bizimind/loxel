@@ -3,20 +3,12 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { STORAGE_PREFIX } from "@/lib/env";
-import { isHttpUrl } from "@/url-utils";
+import { isHttpUrl, isStorableFavicon } from "@/url-utils";
 
 import { serverBrowserBookmarksStorage } from "./server-storage";
 
 /** Longest title kept: the whole list is written, and sent to every window, on each change. */
 const MAX_TITLE_LENGTH = 300;
-/** Largest inline (`data:`) favicon kept, for the same reason. */
-const MAX_DATA_FAVICON_LENGTH = 16 * 1024;
-
-function isStorableFavicon(url: string): boolean {
-  if (url.startsWith("data:image/")) return url.length <= MAX_DATA_FAVICON_LENGTH;
-  return isHttpUrl(url);
-}
-
 /**
  * One rule for bookmarks added here and those read from storage or another window: web pages
  * only, since a bookmark can open straight into a new tab, with a capped title and favicon.

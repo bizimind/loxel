@@ -91,6 +91,16 @@ describe("runGit", () => {
     });
   });
 
+  test("a timeout stops git and the helpers holding its output, saying so", async () => {
+    // The alias's shell outlives git unless the timeout stops git's whole process group.
+    const result = await runGit(["-c", "alias.hang=!sleep 600; true", "hang"], {
+      timeoutMs: 50,
+      nothrow: true,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("git hang timed out after 50 ms");
+  });
+
   test("passes global options ahead of the subcommand", async () => {
     await withRepo(async (cwd) => {
       const value = await gitText(["-c", "loxel.test=yes", "config", "--get", "loxel.test"], {

@@ -88,6 +88,7 @@ import {
   nestedBelow,
   projectWorktreesResponse,
   updateWorktreeMeta,
+  worktreeCommit,
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
@@ -111,6 +112,7 @@ import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { getCurrentVersion } from "./version";
+import { fetchRemoteDefault, planWorktreeBase } from "./worktree-base";
 import {
   addFirstWorktreeOfNewRepo,
   addWorktree,
@@ -2515,6 +2517,21 @@ async function handlePlanAddWorktree(req: Request, ctx: RouteContext): Promise<R
   }
 }
 
+// POST /api/worktree/plan-base — where a new worktree would start, for the New worktree dialog
+async function handlePlanWorktreeBase(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+  const parentPath = typeof body.parentPath === "string" ? body.parentPath : undefined;
+
+  try {
+    const parentCommit = parentPath ? await worktreeCommit(project.cwd, parentPath) : undefined;
+    return json(await planWorktreeBase(project.cwd, parentCommit));
+  } catch (err) {
+    return error(describeError(err, "Failed to plan the worktree's base"));
+  }
+}
+
 // POST /api/worktree/create
 async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -2527,13 +2544,19 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
     body.branchResolution === "use-existing" || body.branchResolution === "delete-and-create"
       ? body.branchResolution
       : undefined;
-  // A child worktree branches from its parent's current commit and is nested under it.
+  // A child worktree is nested under its parent and, with `fromParent`, branches from its commit.
   const parentPath = typeof body.parentPath === "string" ? body.parentPath : undefined;
+  const fromParent = body.fromParent === true;
   const title = typeof body.title === "string" ? body.title : undefined;
 
-  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution, parentPath });
+  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution, parentPath, fromParent });
   try {
-    const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
+    const child = parentPath
+      ? await childWorktreeOptions(project.cwd, parentPath, { fromParent })
+      : undefined;
+    // A new branch from the remote default starts from it as it is now, not as last fetched.
+    const checksOutExisting = branch !== undefined || branchResolution === "use-existing";
+    if (!child?.base && !checksOutExisting) await fetchRemoteDefault(project.cwd);
     const meta = { ...child?.meta, ...titleMeta(title) };
     const result = await addWorktree(
       {
@@ -3630,6 +3653,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/unstage-hunk": handleUnstageHunk,
     "/api/file-write": handleFileWrite,
     "/api/worktree/plan-add": handlePlanAddWorktree,
+    "/api/worktree/plan-base": handlePlanWorktreeBase,
     "/api/worktree/create": handleCreateWorktree,
     "/api/worktree/run-init-hook": handleRunInitHook,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,

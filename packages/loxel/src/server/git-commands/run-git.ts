@@ -11,6 +11,8 @@ export interface RunGitOptions {
   stdin?: string | Uint8Array;
   /** Return a non-zero exit as a result instead of throwing {@link GitCommandError}. */
   nothrow?: boolean;
+  /** Kill git if it runs longer than this, as for a command that needs the network. */
+  timeoutMs?: number;
 }
 
 export interface GitResult {
@@ -44,12 +46,13 @@ function decode(bytes: Uint8Array): string {
  */
 export async function runGit(
   args: readonly string[],
-  { cwd, env, stdin, nothrow = false }: RunGitOptions = {},
+  { cwd, env, stdin, nothrow = false, timeoutMs }: RunGitOptions = {},
 ): Promise<GitResult> {
   const executed = await gitExecClient.exec({
     args: cwd === undefined ? args : ["-C", cwd, ...args],
     env: env ?? inheritedGitEnv(),
     stdin: typeof stdin === "string" ? Buffer.from(stdin) : stdin,
+    timeoutMs,
   });
   recordWorkerSpawn(gitCommandLabel(args), executed.spawnBlockMs, executed.wallMs);
 

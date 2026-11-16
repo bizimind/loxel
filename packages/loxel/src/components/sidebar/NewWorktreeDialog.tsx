@@ -1,11 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import * as api from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
+import type { WorktreeBasePlan } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { worktreeLabel, worktreeNameFromTitle } from "./worktree-labels";
+import { worktreeBaseHint, worktreeLabel, worktreeNameFromTitle } from "./worktree-labels";
 
 /** A name typed into the name field: lowercase, whitespace as dashes (as git refs need). */
 function normalizeName(value: string): string {
@@ -14,10 +16,13 @@ function normalizeName(value: string): string {
 
 /**
  * Creates a worktree: a title (when the project's worktrees have metadata) and a name, which
- * follows the title until it is edited directly. With `parent`, the worktree is nested under it.
- * A branch that already exists is resolved here too. The dialog closes as soon as the create has
- * started: the sidebar shows the worktree as pending while it is created (the repo's init hook can
- * take a while), and a failure from then on comes as a toast.
+ * follows the title until it is edited directly. With `parent`, the worktree is nested under it,
+ * and starts from the remote default like any other unless "Start from <parent>" stacks it on the
+ * parent's commit: a choice made each time, never remembered. A line under the fields says where
+ * the worktree starts, with how far a parent is behind. A branch that already exists is resolved
+ * here too. The dialog closes as soon as the create has started: the sidebar shows the worktree
+ * as pending while it is created (the repo's init hook can take a while), and a failure from then
+ * on comes as a toast.
  */
 export function NewWorktreeDialog({
   projectPath,
@@ -47,6 +52,23 @@ export function NewWorktreeDialog({
   const [nameEdited, setNameEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fromParent, setFromParent] = useState(false);
+  /** Where the worktree would start; the hint is left out while it loads or if it fails. */
+  const [basePlan, setBasePlan] = useState<WorktreeBasePlan | null>(null);
+
+  const parentPath = parent?.path;
+  useEffect(() => {
+    let cancelled = false;
+    setBasePlan(null);
+    api
+      .planWorktreeBase(projectPath, parentPath)
+      .then((plan) => !cancelled && setBasePlan(plan))
+      // Only a hint: the create itself reports anything that is really wrong.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath, parentPath]);
 
   /** Set when the dialog is closed while a create is still being planned. */
   const abandoned = useRef(false);
@@ -88,7 +110,11 @@ export function NewWorktreeDialog({
     const savedTitle =
       titles && trimmedTitle && trimmedTitle !== trimmedName ? trimmedTitle : undefined;
     void run(() =>
-      createWorktree(projectPath, trimmedName, { parentPath: parent?.path, title: savedTitle }),
+      createWorktree(projectPath, trimmedName, {
+        parentPath,
+        fromParent: parent !== undefined && fromParent,
+        title: savedTitle,
+      }),
     );
   };
 
@@ -161,6 +187,32 @@ export function NewWorktreeDialog({
                 : "The worktree's directory and branch. Enable worktree nesting to give worktrees titles."}
             </span>
           </label>
+
+          {(parent || basePlan) && (
+            <div className="flex flex-col gap-1">
+              {parent && (
+                <label className="text-foreground flex items-center gap-2 text-[11px] not-dark:text-[12px]">
+                  <input
+                    type="checkbox"
+                    checked={fromParent}
+                    disabled={conflict !== null}
+                    onChange={(e) => setFromParent(e.target.checked)}
+                    className="size-3"
+                  />
+                  Start from {worktreeLabel(parent)}
+                </label>
+              )}
+              {/* Checking out an existing branch starts from that branch, not from this base. */}
+              {basePlan && !conflict && (
+                <span className="text-muted-foreground text-[10px] not-dark:text-[11px] not-dark:leading-snug">
+                  {worktreeBaseHint(
+                    basePlan,
+                    parent && fromParent ? { label: worktreeLabel(parent) } : null,
+                  )}
+                </span>
+              )}
+            </div>
+          )}
 
           {conflict && (
             <div className="border-warning/20 bg-warning/5 rounded-md border p-2.5">

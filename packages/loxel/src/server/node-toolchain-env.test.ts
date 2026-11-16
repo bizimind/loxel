@@ -11,8 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-import { createNoopLogger } from "@bizimind/logger";
-
+import { createNoopLogger } from "@/api/log-entry-model";
 import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
