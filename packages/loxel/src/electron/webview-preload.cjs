@@ -57,12 +57,15 @@ contextBridge.executeInMainWorld({
 // notify. Permission and showing are IPC calls to main, which decides by the page's real origin.
 // See browser-notifications.ts.
 
-// Must match the BROWSER_NOTIFICATION_* constants in ipc-channels.ts.
+// Must match the BROWSER_NOTIFICATION_* and REGISTRATION_NOTIFICATION_* constants in ipc-channels.ts.
 const BROWSER_NOTIFICATION_PERMISSION = "browser-notification:permission";
 const BROWSER_NOTIFICATION_REQUEST_PERMISSION = "browser-notification:request-permission";
 const BROWSER_NOTIFICATION_SHOW = "browser-notification:show";
 const BROWSER_NOTIFICATION_CLOSE = "browser-notification:close";
 const BROWSER_NOTIFICATION_EVENT = "browser-notification:event";
+const REGISTRATION_NOTIFICATION_SHOW = "registration-notification:show";
+const REGISTRATION_NOTIFICATION_LIST = "registration-notification:list";
+const REGISTRATION_NOTIFICATION_CLOSE = "registration-notification:close";
 
 contextBridge.executeInMainWorld({
   // Serialized into the page's world: it can only use its arguments and the page's globals.
@@ -77,6 +80,10 @@ contextBridge.executeInMainWorld({
     const text = (value) => (value === undefined ? "" : `${value}`);
     /** Fires an event main delivered on a live notification; `click` is the only one it sends. */
     let deliver;
+    /** Makes the Notification object for a registration's notification main lists. */
+    let adopt;
+    /** Set while `adopt` constructs one, which shows nothing. */
+    let adopting = null;
 
     class Notification extends EventTarget {
       static {
@@ -84,9 +91,20 @@ contextBridge.executeInMainWorld({
           const notification = live.get(id);
           if (notification && type === "click") notification.#fire("click");
         };
+        adopt = (scope, info) => {
+          adopting = { scope, ref: info.ref };
+          try {
+            const { title, ...options } = info;
+            return new Notification(title, options);
+          } finally {
+            adopting = null;
+          }
+        };
       }
       #id;
       #fields;
+      /** For a registration's notification: its scope and main's ref, which close() sends. */
+      #registration = null;
       constructor(title, options = {}) {
         if (arguments.length === 0) {
           throw new TypeError(
@@ -115,6 +133,10 @@ contextBridge.executeInMainWorld({
         this.onshow = null;
         this.onerror = null;
         this.onclose = null;
+        if (adopting) {
+          this.#registration = adopting;
+          return;
+        }
 
         const granted = bridge.permission() === "granted";
         if (granted) {
@@ -133,6 +155,10 @@ contextBridge.executeInMainWorld({
         if (typeof handler === "function") handler.call(this, event);
       }
       close() {
+        if (this.#registration) {
+          bridge.closeForRegistration(this.#registration);
+          return;
+        }
         if (!live.delete(this.#id)) return;
         bridge.close(this.#id);
         setTimeout(() => this.#fire("close"), 0);
@@ -195,31 +221,51 @@ contextBridge.executeInMainWorld({
     window.Notification = Notification;
 
     // A page showing a notification through its service worker's registration gets it in the
-    // notification center too (clicking it goes to the panel; the worker gets no
-    // notificationclick). Calls made inside the worker itself don't pass here.
-    // Declared apart from its assignment, so it converts its arguments like the DOM does whatever
-    // the typings say they are.
+    // notification center too, kept by main for the registration like the ones the worker shows
+    // itself (service-worker-preload.cjs): clicking it dispatches the worker's notificationclick.
+    // Declared apart from their assignment, so they convert their arguments like the DOM does
+    // whatever the typings say they are.
     function showNotification(title, options = {}) {
-      if (bridge.permission() !== "granted") {
+      if (arguments.length === 0) {
         return Promise.reject(
-          new TypeError("No notification permission has been granted for this origin."),
+          new TypeError(
+            "Failed to execute 'showNotification' on 'ServiceWorkerRegistration': 1 argument required, but only 0 present.",
+          ),
         );
       }
       const opts = options ?? {};
-      bridge.show({
-        pageId: nextId++,
-        title: `${title}`,
-        body: text(opts.body),
-        tag: text(opts.tag),
+      const timestamp = Number(opts.timestamp);
+      // A `data` the bridge can't copy throws here, which becomes the rejection.
+      return new Promise((resolve) => {
+        resolve(
+          bridge.showForRegistration({
+            scope: this.scope,
+            title: `${title}`,
+            body: text(opts.body),
+            tag: text(opts.tag),
+            timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+            data: opts.data ?? null,
+          }),
+        );
+      }).then((result) => {
+        if (result === "denied") {
+          throw new TypeError("No notification permission has been granted for this origin.");
+        }
+        if (result === "data-too-large") {
+          throw new TypeError("The notification's data is too large.");
+        }
       });
-      return Promise.resolve();
+    }
+    function getNotifications(filter = {}) {
+      const { scope } = this;
+      return Promise.resolve(bridge.listForRegistration({ scope, tag: text(filter?.tag) })).then(
+        (infos) => infos.map((info) => adopt(scope, info)),
+      );
     }
     const registration = globalThis.ServiceWorkerRegistration?.prototype;
     if (registration) {
       registration.showNotification = showNotification;
-      registration.getNotifications = function getNotifications() {
-        return Promise.resolve([]);
-      };
+      registration.getNotifications = getNotifications;
     }
 
     // navigator.permissions.query() would ask Chromium, which denies notifications to every
@@ -244,6 +290,11 @@ contextBridge.executeInMainWorld({
       requestPermission: () => ipcRenderer.invoke(BROWSER_NOTIFICATION_REQUEST_PERMISSION),
       show: (notification) => ipcRenderer.send(BROWSER_NOTIFICATION_SHOW, notification),
       close: (id) => ipcRenderer.send(BROWSER_NOTIFICATION_CLOSE, id),
+      showForRegistration: (notification) =>
+        ipcRenderer.invoke(REGISTRATION_NOTIFICATION_SHOW, notification),
+      listForRegistration: (query) => ipcRenderer.invoke(REGISTRATION_NOTIFICATION_LIST, query),
+      closeForRegistration: (notification) =>
+        ipcRenderer.send(REGISTRATION_NOTIFICATION_CLOSE, notification),
       onEvent: (listener) => {
         ipcRenderer.on(BROWSER_NOTIFICATION_EVENT, (_event, id, type) => listener(id, type));
       },

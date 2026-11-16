@@ -97,6 +97,8 @@ Pages can send notifications too, and they land in Loxel instead of on your desk
 
 Notifications come from the open browser tabs of the task you're in, or of Home when you're there, and, as in other browsers, from sites on `https` or on your own machine (such as `http://localhost`). A notification the page takes back stays under the bell until you've seen it. Change a site's choice, or remove it so the site asks again, in **Settings > Browser**.
 
+Sites that notify from their service worker, as many web apps and PWAs do, work the same way while one of their tabs is open: the notification shows on the site's tab you used last, and clicking it lets the site do what it would in a browser, such as opening the page it was about in a new tab. Push messages, which reach a site while none of its tabs are open, aren't supported.
+
 ---
 
 ## See also
