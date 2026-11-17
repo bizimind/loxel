@@ -3016,6 +3016,16 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 // Version route
 // ---------------------------------------------------------------------------
 
+// GET /api/session
+/**
+ * Answers a request that carries the app's session secret; the admission check answers one without
+ * it `401` (request-origin.ts). A window asks when its socket cannot connect, since a refused
+ * WebSocket upgrade does not say why.
+ */
+function handleGetSession(): Response {
+  return new Response(null, { status: 204 });
+}
+
 // GET /api/version
 function handleGetVersion(_req: Request, ctx: RouteContext): Response {
   return json(versionInfo(ctx.isShuttingDown()));
@@ -3855,6 +3865,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
     "/api/version": handleGetVersion,
+    "/api/session": handleGetSession,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
     "/api/repo-trust": handleGetRepoTrust,

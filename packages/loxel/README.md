@@ -63,7 +63,7 @@ pnpm run e2e              # Playwright tests against an isolated server
 pnpm run typecheck
 ```
 
-Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
+Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server's `/api` and `/ws` take only requests that carry its session secret: a server you start yourself writes it to `<stateDir>/run/session-token`, which the Vite dev proxy adds to what it forwards, so open the app through Vite (port 5173), not the server's port; a script that calls the server sends it as `Authorization: Bearer <secret>`. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
 
 To run a second web dev instance beside one already on the default ports (for example from another worktree), give it its own ports and state directory: `LOXEL_SERVE_PORT=7444 LOXEL_VITE_PORT=5183 LOXEL_STATE_DIR=~/.local/state/loxel/loxel-dev-2 pnpm run dev`, then open `http://127.0.0.1:5183`.
 

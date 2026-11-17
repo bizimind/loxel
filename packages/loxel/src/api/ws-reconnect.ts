@@ -2,9 +2,11 @@ import type { WsClientMessage } from "./ws-protocol";
 
 /**
  * The app socket's state as the window shows it: `connecting` until the first server hello,
- * `connected` from then on, and `reconnecting` whenever the socket is down after that.
+ * `connected` from then on, and `reconnecting` whenever the socket is down after that. `expired`
+ * when the server no longer accepts this window's session secret (a server started with another
+ * one): retrying cannot help, only a reload.
  */
-export type ConnectionState = "connecting" | "connected" | "reconnecting";
+export type ConnectionState = "connecting" | "connected" | "reconnecting" | "expired";
 
 const RECONNECT_BASE_MS = 250;
 const RECONNECT_MAX_MS = 10_000;

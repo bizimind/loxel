@@ -4,10 +4,12 @@ import { wsClient } from "@/api/client";
 
 // Every query and mutation goes to the Loxel server, so whether it can run depends on reaching
 // that server, not on the browser's network state: a laptop with no network still reaches a local
-// server. Queries wait while the socket reconnects and run once it is back.
+// server. Queries wait while the socket reconnects and run once it is back, and stop once the
+// server no longer accepts the window.
 onlineManager.setEventListener((setOnline) =>
   wsClient.onConnectionStateChange(() => {
-    setOnline(wsClient.getConnectionState() !== "reconnecting");
+    const state = wsClient.getConnectionState();
+    setOnline(state === "connecting" || state === "connected");
   }),
 );
 

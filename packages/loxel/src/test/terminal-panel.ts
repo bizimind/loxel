@@ -5,6 +5,7 @@
  */
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
+import { bunWebSocket } from "@/session-client";
 
 type Message<T extends WsMessage["type"]> = Extract<WsMessage, { type: T }>;
 
@@ -16,14 +17,17 @@ export function freePort(): number {
   return port;
 }
 
-/** A panel's view of terminals over its own socket: states, sizes, output, exits and its offset. */
-export async function openPanel(baseUrl: string) {
+/**
+ * A panel's view of terminals over its own socket: states, sizes, output, exits and its offset.
+ * `auth` is the header with the server's session secret.
+ */
+export async function openPanel(baseUrl: string, auth: Record<string, string>) {
   const states: Message<"terminal_state">[] = [];
   const sizes: Message<"terminal_size">[] = [];
   const exits: Message<"terminal_exit">[] = [];
   let text = "";
   let offset: number | null = null;
-  const socket = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+  const socket = bunWebSocket(baseUrl.replace("http", "ws") + "/ws", auth);
   socket.binaryType = "arraybuffer";
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {

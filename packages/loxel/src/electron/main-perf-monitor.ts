@@ -11,6 +11,7 @@
 import { app } from "electron";
 
 import { computeLagStats } from "../lib/perf-lag-stats";
+import { serverFetch } from "./app-server";
 
 // --- Configuration ---
 
@@ -31,13 +32,8 @@ let lagSampleCount = 0;
 
 // --- Helpers ---
 
-function postLog(
-  serverUrl: string,
-  level: string,
-  msg: string,
-  ctx: Record<string, unknown>,
-): void {
-  fetch(`${serverUrl}/api/log`, {
+function postLog(level: string, msg: string, ctx: Record<string, unknown>): void {
+  serverFetch("/api/log", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ level, cat: "perf", msg, ctx }),
@@ -69,7 +65,7 @@ interface ProcessSummary {
 
 let metricsTimer: ReturnType<typeof setInterval> | undefined;
 
-function collectAndReport(serverUrl: string): void {
+function collectAndReport(): void {
   // Per-process metrics from Electron
   const appMetrics = app.getAppMetrics();
   const processes: ProcessSummary[] = appMetrics.map((m) => ({
@@ -105,22 +101,19 @@ function collectAndReport(serverUrl: string): void {
   if (lagStats) ctx.eventLoopLag = lagStats;
 
   // Emit summary at debug level
-  postLog(serverUrl, "debug", "main process metrics", ctx);
+  postLog("debug", "main process metrics", ctx);
 
   // Escalate anomalies
   for (const p of processes) {
     if (p.cpuPercent > HIGH_CPU_THRESHOLD) {
-      postLog(serverUrl, "warn", "high CPU usage", {
-        processType: p.type,
-        cpuPercent: p.cpuPercent,
-      });
+      postLog("warn", "high CPU usage", { processType: p.type, cpuPercent: p.cpuPercent });
     }
   }
   if (totalMemoryMB > HIGH_MEMORY_MB) {
-    postLog(serverUrl, "warn", "high total memory", { totalMemoryMB });
+    postLog("warn", "high total memory", { totalMemoryMB });
   }
   if (lagStats && lagStats.max > HIGH_LAG_MS) {
-    postLog(serverUrl, "warn", "main process event loop lag", { ...lagStats });
+    postLog("warn", "main process event loop lag", { ...lagStats });
   }
 
   // Reset lag accumulators
@@ -133,12 +126,10 @@ function collectAndReport(serverUrl: string): void {
 /**
  * Start the main process performance monitor. Returns a cleanup function.
  * Call after app.whenReady() in main.ts.
- *
- * @param serverUrl - The loxel server base URL (e.g. "http://127.0.0.1:7433")
  */
-export function startMainProcessMonitor(serverUrl: string): () => void {
+export function startMainProcessMonitor(): () => void {
   lagTimer = setInterval(probeLag, LAG_PROBE_INTERVAL_MS);
-  metricsTimer = setInterval(() => collectAndReport(serverUrl), METRICS_INTERVAL_MS);
+  metricsTimer = setInterval(collectAndReport, METRICS_INTERVAL_MS);
 
   return () => {
     if (lagTimer !== undefined) clearInterval(lagTimer);

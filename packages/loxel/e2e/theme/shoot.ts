@@ -12,10 +12,10 @@ import { useSettingsStore } from "@/store/settings-store";
 
 import type { PanelShot, ShotContext } from "./lib";
 import {
+  BASE_URL,
   api,
   assertThemeStack,
   fixturePath,
-  SERVER_URL,
   settle,
   trackRequests,
   waitForLoxel,
@@ -37,7 +37,7 @@ await assertThemeStack(workDir);
 
 /** Notifications live on the server; drop leftovers from earlier shots so no bell badge shows. */
 async function clearNotifications(): Promise<void> {
-  const ws = new WebSocket(`${SERVER_URL.replace(/^http/, "ws")}/ws`);
+  const ws = new WebSocket(`${BASE_URL.replace(/^http/, "ws")}/ws`);
   await new Promise<void>((res, rej) => {
     ws.addEventListener("open", () => {
       ws.send(JSON.stringify({ type: "notifications_clear" }));

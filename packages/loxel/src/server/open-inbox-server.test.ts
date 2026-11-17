@@ -12,6 +12,7 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { WsMessage } from "@/api/ws-protocol";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
 import { CaptureLog } from "@/test/git-sync-harness";
 
@@ -50,7 +51,7 @@ async function startServer(stateDir: string) {
     if (server.exitCode !== null) throw new Error(`Server exited: ${server.exitCode}`);
     await Bun.sleep(50);
   }
-  return { server, port };
+  return { server, port, auth: sessionAuthorization(stateDir) };
 }
 
 async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
@@ -59,9 +60,9 @@ async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
 }
 
 /** An app window's socket, recording every message the server sends it. */
-async function connectWindow(port: number) {
+async function connectWindow({ port, auth }: { port: number; auth: { Authorization: string } }) {
   const log = new CaptureLog<WsMessage>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = bunWebSocket(`ws://127.0.0.1:${port}/ws`, auth);
   ws.addEventListener("message", (event) => {
     log.add(JSON.parse(String(event.data)) as WsMessage);
   });
@@ -123,7 +124,7 @@ describe("a server with no window connected", () => {
       current = await startServer(stateDir);
       const windowA = crypto.randomUUID();
       const hello = (windowId: string) => JSON.stringify({ type: "window_hello", windowId });
-      const { ws, log } = await connectWindow(current.port);
+      const { ws, log } = await connectWindow(current);
       ws.send(hello(windowA));
       const delivered = await received(log, "open_from_inbox");
       expect(delivered.message).toEqual({
@@ -150,7 +151,7 @@ describe("a server with no window connected", () => {
       // A reloads before it places the panel: it gets the request again, with no second
       // notification.
       ws.close();
-      const reloaded = await connectWindow(current.port);
+      const reloaded = await connectWindow(current);
       reloaded.ws.send(hello(windowA));
       expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
       await fence(reloaded);
@@ -158,10 +159,10 @@ describe("a server with no window connected", () => {
       // A window that says hello while A is away takes it over, and A is told when it is back, so
       // it does not open it too.
       reloaded.ws.close();
-      const windowB = await connectWindow(current.port);
+      const windowB = await connectWindow(current);
       windowB.ws.send(hello(crypto.randomUUID()));
       expect(await received(windowB.log, "open_from_inbox")).toEqual(delivered);
-      const back = await connectWindow(current.port);
+      const back = await connectWindow(current);
       back.ws.send(hello(windowA));
       expect(await received(back.log, "inbox_open_revoked")).toEqual({
         type: "inbox_open_revoked",
@@ -177,7 +178,7 @@ describe("a server with no window connected", () => {
 
       // Done with once placed, and the notification outlives another restart.
       current = await startServer(stateDir);
-      const next = await connectWindow(current.port);
+      const next = await connectWindow(current);
       next.ws.send(hello(crypto.randomUUID()));
       expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
       await fence(next);
@@ -208,7 +209,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
       // "When an Agent Starts a Terminal" is Ask, as a window saves it.
       const saved = await fetch(`http://127.0.0.1:${current.port}/api/stores/settings`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...current.auth, "Content-Type": "application/json" },
         body: JSON.stringify({
           value: JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
         }),
@@ -224,7 +225,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
       expect(res.status).toBe(202);
       expect(await res.json()).toEqual({ ok: true, asked: true, queued: true });
 
-      const { ws, log } = await connectWindow(current.port);
+      const { ws, log } = await connectWindow(current);
       const windowId = crypto.randomUUID();
       ws.send(JSON.stringify({ type: "window_hello", windowId }));
       const seq = await log.waitFor(
@@ -240,7 +241,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
 
       const answer = await fetch(`http://127.0.0.1:${current.port}/api/agent-terminals/answer`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...current.auth, "Content-Type": "application/json" },
         body: JSON.stringify({ id: ask!.id, answer: "run", windowId }),
       });
       expect(answer.status).toBe(200);

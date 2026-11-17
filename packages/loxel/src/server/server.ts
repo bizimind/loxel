@@ -17,6 +17,7 @@ import {
   type WsClientMessage,
   type WsMessage,
 } from "@/api/ws-protocol";
+import { newSessionSecret } from "@/app-session";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
@@ -49,7 +50,12 @@ import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
 import { RegisteredWorktrees } from "./registered-worktrees";
 import { onRepoTrustStatusChange } from "./repo-trust";
-import { type Principal, type RequestOriginPolicy, checkRequest } from "./request-origin";
+import {
+  type Principal,
+  type RequestOriginPolicy,
+  checkRequest,
+  tcpPrincipal,
+} from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
@@ -74,6 +80,7 @@ import type {
   WorktreeResources,
   WsData,
 } from "./server-state";
+import { removeSessionToken, writeSessionToken } from "./session-token";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
@@ -98,11 +105,12 @@ import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
 
-// --- Exit with the desktop app ---
-// The app stops its server when it quits with a shutdown message on its channel, which says what
-// happens to the terminals. The channel closing without one, or the server being reparented,
-// means the app crashed or was killed. Set up first, so a quit while the server is still starting
-// stops it too.
+// --- The desktop app's channel ---
+// The app's first message is its session secret, which this server waits for before it serves the
+// app over TCP (see request-origin.ts). The app stops its server when it quits with a shutdown
+// message on its channel, which says what happens to the terminals. The channel closing without
+// one, or the server being reparented, means the app crashed or was killed. Set up first, so a
+// quit while the server is still starting stops it too.
 
 const PARENT_CHECK_MS = 2000;
 
@@ -176,8 +184,12 @@ function holdPortWhileStopping(): boolean {
   }
 }
 
+/** The app's session secret, from its channel: requests over TCP must carry it. */
+const appSecret = Promise.withResolvers<string>();
+
 if (config.parentPid !== null) {
   listenToParent(parentChannelInput(), {
+    session: (secret) => appSecret.resolve(secret),
     shutdown: (terminals) => {
       log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
       leaveWithApp(terminals);
@@ -197,6 +209,9 @@ if (config.parentPid !== null) {
     log.info("The desktop app that started this server is gone, shutting down");
     leaveWithApp("drop");
   }, PARENT_CHECK_MS).unref();
+} else {
+  // Started without the app: its own secret, which its token file gives the tools that drive it.
+  appSecret.resolve(newSessionSecret());
 }
 
 // --- Multi-project state (no "active" or "focused" concept) ---
@@ -1600,9 +1615,26 @@ terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminal
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 
+// The app sends its secret as soon as it has started this server, so it is here long before
+// startup is done. Nothing is served over TCP without it. An app that is gone by now closed the
+// channel, which stops this server instead.
+const sessionSecret = await appSecret.promise;
+
 // Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
 // from here to `serving = true` waits, so a stop cannot arrive in between.
 if (stoppingInStartup) await new Promise<never>(() => {});
+
+// A server the app started keeps the secret to itself, except a demo's, which scripts/demo drives.
+// Written before the server listens, so a tool that finds it answering finds the file too.
+const writesSessionToken = config.parentPid === null || config.isDemo;
+if (writesSessionToken) {
+  try {
+    writeSessionToken(config.stateDir, sessionSecret);
+  } catch (err) {
+    // The app still reaches this server; only tools that read the token file cannot.
+    log.error("Could not write the session token file", { error: err });
+  }
+}
 
 /**
  * Listen for the `loxel` CLI, taking the socket over from any older server. Null when that fails:
@@ -1634,8 +1666,9 @@ function listenForCli(): { stop: () => unknown } | null {
 }
 
 /**
- * Serve a request from either listener: `principal` is the one it arrived on (see
- * request-origin.ts), the loopback port's `app` or the CLI socket's `cli`.
+ * Serve a request from either listener: `principal` is decided by the one it arrived on (see
+ * request-origin.ts): the loopback port's `app` or `anonymous`, by its session secret, or the CLI
+ * socket's `cli`.
  */
 async function serveRequest(
   req: Request,
@@ -1697,14 +1730,16 @@ async function serveRequest(
     return new Response(Bun.file(join(distDir, "index.html")));
   }
 
-  return handleRequest(req, routeContext);
+  return error("Not found", 404);
 }
 
 const server = Bun.serve<WsData>({
   port: config.port,
   hostname: "127.0.0.1",
   fetch: (req, server) =>
-    serveRequest(req, "app", (upgraded, data) => server.upgrade(upgraded, { data })),
+    serveRequest(req, tcpPrincipal(req.headers, sessionSecret), (upgraded, data) =>
+      server.upgrade(upgraded, { data }),
+    ),
 
   websocket: {
     open(ws) {
@@ -1956,6 +1991,11 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   server.stop();
   // Leaves the socket's name behind, for the next server to take over.
   cliSocket?.stop();
+  try {
+    if (writesSessionToken) removeSessionToken(config.stateDir, sessionSecret);
+  } catch (err) {
+    log.warn("Could not remove the session token file", { error: err });
+  }
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
   void Promise.race([

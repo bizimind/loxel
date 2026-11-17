@@ -7,8 +7,11 @@ import { resolve } from "node:path";
 
 import type { Locator, Page } from "@playwright/test";
 
+/**
+ * The stack's Vite dev server. The shots reach the server through its proxy too, which adds the
+ * secret from the stack server's token file (see vite.config.ts).
+ */
 export const BASE_URL = "http://127.0.0.1:5173";
-export const SERVER_URL = "http://127.0.0.1:7434";
 
 export interface ShotContext {
   page: Page;
@@ -47,7 +50,7 @@ export function stackTokenPath(workDir: string): string {
 }
 
 /**
- * Throw unless the server on SERVER_URL is the theme stack started with `workDir`. Shots seed
+ * Throw unless the server behind BASE_URL is the theme stack started with `workDir`. Shots seed
  * settings, add the fixture project and clear notifications, so they must never reach a
  * developer's own dev server on the same port.
  */
@@ -60,13 +63,13 @@ export async function assertThemeStack(workDir: string): Promise<void> {
   } | null;
   if (expected === null || stored?.value !== expected) {
     throw new Error(
-      `${SERVER_URL} is not the theme stack started with ${workDir}; start it with e2e/theme/stack.sh`,
+      `The server behind ${BASE_URL} is not the theme stack started with ${workDir}; start it with e2e/theme/stack.sh`,
     );
   }
 }
 
 export async function api(path: string, init?: { method?: string; body?: unknown }) {
-  const res = await fetch(`${SERVER_URL}${path}`, {
+  const res = await fetch(`${BASE_URL}${path}`, {
     method: init?.method ?? (init?.body === undefined ? "GET" : "POST"),
     headers: init?.body === undefined ? {} : { "Content-Type": "application/json" },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),

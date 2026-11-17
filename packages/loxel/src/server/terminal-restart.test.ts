@@ -26,11 +26,13 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { RunningTerminalsSchema } from "@/api/running-terminals-model";
+import { bearer, newSessionSecret, readSessionToken } from "@/app-session";
 import {
   PARENT_CHANNEL_FD,
   type ShutdownTerminals,
   encodeParentMessage,
 } from "@/parent-channel-protocol";
+import { sessionAuthorization } from "@/session-client";
 import { hostLogsDir, hostRunDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
 import { freePort, openPanel } from "@/test/terminal-panel";
@@ -58,6 +60,8 @@ describe("terminals across server restarts", () => {
   let server: { exited: Promise<number>; kill: (signal: NodeJS.Signals) => void } | null = null;
   /** The descriptor of the app's channel to the server, for one started as the app starts it. */
   let appChannel: number | null = null;
+  /** The header with the session secret of the server last started. */
+  let auth: { Authorization: string };
 
   /**
    * Start a server: on its own, or `asApp`, as the desktop app does (this process its parent, with
@@ -75,6 +79,10 @@ describe("terminals across server restarts", () => {
       },
       "the server to listen",
     );
+    // One the app started has the app's secret, which it writes nowhere; one on its own wrote its
+    // own to its token file.
+    if (asApp) expect(readSessionToken(stateDir)).toBeNull();
+    else auth = sessionAuthorization(stateDir);
   }
 
   /** Start a server as {@link startServer} does, without waiting for it to listen. */
@@ -94,6 +102,12 @@ describe("terminals across server restarts", () => {
     server = started;
     const channel = started.stdio[PARENT_CHANNEL_FD];
     appChannel = typeof channel === "number" ? channel : null;
+    if (asApp) {
+      // What the app sends first: the server serves nothing over TCP until it has it.
+      const secret = newSessionSecret();
+      writeSync(appChannel!, encodeParentMessage({ type: "session", secret }));
+      auth = { Authorization: bearer(secret) };
+    }
     return started;
   }
 
@@ -136,7 +150,7 @@ describe("terminals across server restarts", () => {
   /** A panel with a shell in a new terminal, whose PID it has read. */
   async function openShell() {
     const id = crypto.randomUUID();
-    const panel = await openPanel(baseUrl);
+    const panel = await openPanel(baseUrl, auth);
     panel.attach(id);
     await until(() => panel.states.length > 0, TEST_TIMEOUT_MS);
     const pidFile = path.join(stateDir, `${id}.pid`);
@@ -150,7 +164,7 @@ describe("terminals across server restarts", () => {
   /** Reattach the panel of `shell` to a new server, which resumes its stream at the same shell. */
   async function expectResumed(shell: Awaited<ReturnType<typeof openShell>>): Promise<void> {
     const since = { epoch: shell.epoch, offset: shell.panel.offset()! };
-    const resumed = await openPanel(baseUrl);
+    const resumed = await openPanel(baseUrl, auth);
     resumed.attach(shell.id, since);
     await until(() => resumed.states.length > 0, TEST_TIMEOUT_MS);
     expect(resumed.states[0]).toMatchObject({
@@ -182,7 +196,7 @@ describe("terminals across server restarts", () => {
     async () => {
       await startServer();
       const id = crypto.randomUUID();
-      const first = await openPanel(baseUrl);
+      const first = await openPanel(baseUrl, auth);
       first.attach(id);
       await until(() => first.states.length > 0, TEST_TIMEOUT_MS);
       const pidFile = path.join(stateDir, "shell.pid");
@@ -198,7 +212,7 @@ describe("terminals across server restarts", () => {
       const since = { epoch, offset: first.offset()! };
 
       await startServer();
-      const resumed = await openPanel(baseUrl);
+      const resumed = await openPanel(baseUrl, auth);
       resumed.attach(id, since);
       await until(() => resumed.states.length > 0, TEST_TIMEOUT_MS);
       expect(resumed.states[0]).toMatchObject({ epoch, mode: "resume", offset: since.offset });
@@ -207,7 +221,7 @@ describe("terminals across server restarts", () => {
       resumed.close();
 
       // A fresh xterm gets the screen as a snapshot, with what the shell printed before the crash.
-      const fresh = await openPanel(baseUrl);
+      const fresh = await openPanel(baseUrl, auth);
       fresh.attach(id);
       await until(() => fresh.states.length > 0, TEST_TIMEOUT_MS);
       expect(fresh.states[0]).toMatchObject({ epoch, mode: "snapshot" });
@@ -275,8 +289,9 @@ describe("terminals across server restarts", () => {
       await startServer();
       const shell = await openShell();
       const list = async (query = "") =>
-        RunningTerminalsSchema.parse(await (await fetch(`${baseUrl}/api/terminals${query}`)).json())
-          .terminals;
+        RunningTerminalsSchema.parse(
+          await (await fetch(`${baseUrl}/api/terminals${query}`, { headers: auth })).json(),
+        ).terminals;
 
       expect(await list()).toEqual([
         { id: shell.id, worktreePath: "/tmp", cwd: "/tmp", otherHostBuild: false },
@@ -330,10 +345,10 @@ describe("terminals across server restarts", () => {
       await startServer();
       // Known ended before any panel reattaches: no longer listed as running.
       const listed = RunningTerminalsSchema.parse(
-        await (await fetch(`${baseUrl}/api/terminals`)).json(),
+        await (await fetch(`${baseUrl}/api/terminals`, { headers: auth })).json(),
       );
       expect(listed.terminals).toEqual([]);
-      const resumed = await openPanel(baseUrl);
+      const resumed = await openPanel(baseUrl, auth);
       resumed.attach(shell.id, since);
       await until(() => resumed.exits.length > 0, TEST_TIMEOUT_MS);
       expect(resumed.states[0]).toMatchObject({ epoch: shell.epoch, mode: "resume" });

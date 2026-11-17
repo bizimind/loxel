@@ -147,13 +147,13 @@ export function installAppUpdater(): void {
  * The check the app runs on its own shortly after launch, unless "Check for updates automatically"
  * is off. The setting is read when the check is due, so turning it off right after launch counts.
  */
-export function scheduleAutomaticUpdateCheck(serverUrl: string): void {
+export function scheduleAutomaticUpdateCheck(): void {
   if (!app.isPackaged) return;
   setTimeout(() => {
     void (async () => {
       let raw: string | null;
       try {
-        raw = await readSettingsRow(serverUrl);
+        raw = await readSettingsRow();
       } catch (err) {
         console.error("[updater] Skipping the automatic update check: cannot read settings", err);
         return;

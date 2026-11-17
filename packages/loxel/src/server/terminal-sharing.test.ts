@@ -12,6 +12,7 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { RunningTerminalsSchema } from "@/api/running-terminals-model";
+import { sessionAuthorization } from "@/session-client";
 import { hostRunDir } from "@/terminal-host/host-files";
 import { freePort, openPanel } from "@/test/terminal-panel";
 import { until } from "@/test/until";
@@ -36,6 +37,8 @@ async function eventually(check: () => Promise<boolean>): Promise<void> {
 describe("a terminal shown in several windows", () => {
   let stateDir: string;
   let baseUrl: string;
+  /** The header with the server's session secret, from its token file. */
+  let auth: { Authorization: string };
   let server: ReturnType<typeof Bun.spawn> | null = null;
 
   beforeAll(async () => {
@@ -60,6 +63,7 @@ describe("a terminal shown in several windows", () => {
       const response = await fetch(`${baseUrl}/api/version`).catch(() => null);
       return response?.ok ?? false;
     });
+    auth = sessionAuthorization(stateDir);
   }, TEST_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -80,17 +84,17 @@ describe("a terminal shown in several windows", () => {
   });
 
   async function runningIds(): Promise<string[]> {
-    const response = await fetch(`${baseUrl}/api/terminals`);
+    const response = await fetch(`${baseUrl}/api/terminals`, { headers: auth });
     return RunningTerminalsSchema.parse(await response.json()).terminals.map((t) => t.id);
   }
 
   /** Two windows attached to a new terminal, `first` before `second`, each synced. */
   async function twoWindows() {
     const id = crypto.randomUUID();
-    const first = await openPanel(baseUrl);
+    const first = await openPanel(baseUrl, auth);
     first.attach(id);
     await until(() => first.states.length > 0, TEST_TIMEOUT_MS);
-    const second = await openPanel(baseUrl);
+    const second = await openPanel(baseUrl, auth);
     second.attach(id, undefined, { cols: 100, rows: 30 });
     await until(() => second.states.length > 0, TEST_TIMEOUT_MS);
     return { id, first, second };
@@ -146,7 +150,7 @@ describe("a terminal shown in several windows", () => {
       await until(() => shows(second).includes("still-here\r\n"), TEST_TIMEOUT_MS);
 
       // Closing the panel in one window keeps the shell for the window still showing it.
-      const third = await openPanel(baseUrl);
+      const third = await openPanel(baseUrl, auth);
       third.attach(id);
       await until(() => third.states.length > 0, TEST_TIMEOUT_MS);
       third.detach(id);
