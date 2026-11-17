@@ -8,7 +8,10 @@
  * npm packages names them in `npm` (they must be `dependencies` of loxel, so the lockfile's SBOM
  * lists them); any other carries `version`, `purl` and `license` (an SPDX expression). `version`
  * is the one place the version lives: the script reads it with `manifestVersion`, and `{version}`
- * in `purl` and `source` stands for it. `source`, `licenseFile` and `note` are for its notice.
+ * in `purl` and `source` stands for it. A Go server built from a pinned module names the module's
+ * directory in `goModule` instead of a `version`: its version is the one that module's go.mod
+ * requires (of the module in its `pkg:golang` purl), so a bump of the go.mod (Dependabot's) is the
+ * whole upgrade. `source`, `licenseFile` and `note` are for its notice.
  */
 
 import { readdirSync } from "node:fs";
@@ -37,10 +40,19 @@ const ManifestSchema = z.union([
     purl: z.string().regex(/^pkg:[^@]+@[^@]*\{version\}/),
     license: z.string().min(1),
   }),
+  BaseSchema.extend({
+    // A directory under scripts/ holding the go.mod that pins the server.
+    goModule: z.string().min(1),
+    purl: z.string().regex(/^pkg:golang\/[^@]+@v\{version\}$/),
+    license: z.string().min(1),
+  }),
   BaseSchema.extend({ npm: z.array(z.string()).nonempty() }),
 ]);
 
-export type Manifest = z.infer<typeof ManifestSchema> & { name: string };
+type ParsedManifest = z.infer<typeof ManifestSchema>;
+/** A `goModule` manifest gets the version its go.mod requires. */
+type Resolved<T> = T extends { goModule: string } ? T & { version: string } : T;
+export type Manifest = Resolved<ParsedManifest> & { name: string };
 
 /** What a manifest that is not built from npm packages ships, with `{version}` filled in. */
 export interface ShippedComponent {
@@ -56,10 +68,17 @@ export async function readManifest(name: string): Promise<Manifest> {
   const file = path.join(MANIFEST_DIR, `${name}.json`);
   const parsed = ManifestSchema.safeParse(await Bun.file(file).json());
   if (!parsed.success) {
-    const hint = 'it needs "npm", or "version", "purl" and "license"';
+    const hint = 'it needs "npm", or "version" (or "goModule"), "purl" and "license"';
     throw new Error(`${file}: ${hint}\n${z.prettifyError(parsed.error)}`);
   }
-  return { ...parsed.data, name };
+  const manifest = parsed.data;
+  if (!("goModule" in manifest)) return { ...manifest, name };
+  const modulePath = manifest.purl.slice("pkg:golang/".length, manifest.purl.indexOf("@"));
+  const version = await goModRequiredVersion(
+    path.join(import.meta.dir, manifest.goModule),
+    modulePath,
+  );
+  return { ...manifest, name, version };
 }
 
 /** Every manifest, in name order so builds are the same everywhere. */
@@ -100,28 +119,17 @@ export function shippedComponent(manifest: Manifest): ShippedComponent | undefin
   };
 }
 
-/**
- * The version of `modulePath` that the pinned Go module in `moduleDir` requires, which is what the
- * build compiles. Throws unless it is the manifest's version, which the SBOM names.
- */
-export async function pinnedGoModuleVersion(
-  name: string,
-  moduleDir: string,
-  modulePath: string,
-): Promise<string> {
+/** The version, without its `v`, of `modulePath` that the go.mod in `moduleDir` requires. */
+async function goModRequiredVersion(moduleDir: string, modulePath: string): Promise<string> {
   const goMod = await Bun.file(path.join(moduleDir, "go.mod")).text();
   // A lone `require` line, or a line in a `require ( ... )` block (`// indirect` there when only a
-  // `tool` directive names the module).
+  // `tool` directive names the module). Purls lowercase the path, so match it either way.
   const pattern = new RegExp(
-    `^(?:require)?[ \\t]+${modulePath.replaceAll(".", "\\.")} (\\S+)`,
-    "m",
+    `^(?:require)?[ \\t]+${modulePath.replaceAll(".", "\\.")} v(\\S+)`,
+    "mi",
   );
-  const required = pattern.exec(goMod)?.[1];
-  const file = `${path.basename(moduleDir)}/go.mod`;
-  if (!required) throw new Error(`${file} does not require ${modulePath}`);
-  const version = await manifestVersion(name);
-  if (required !== `v${version}`) {
-    throw new Error(`${file} requires ${modulePath} ${required}, but ${name}.json says ${version}`);
-  }
-  return required;
+  const version = pattern.exec(goMod)?.[1];
+  if (!version)
+    throw new Error(`${path.basename(moduleDir)}/go.mod does not require ${modulePath}`);
+  return version;
 }

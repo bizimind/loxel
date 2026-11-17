@@ -1,7 +1,7 @@
 {
   "script": "build-docker-lsp.ts",
   "resources": ["docker-language-server"],
-  "version": "0.20.2-0.20260604162938-5187ff578db6",
+  "goModule": "docker-lsp-module",
   "purl": "pkg:golang/github.com/docker/docker-language-server@v{version}",
   "license": "Apache-2.0"
 }

@@ -15,21 +15,20 @@
  * Dependabot raises its dependencies (.github/dependabot.yml). To upgrade the server itself, run
  * `go get github.com/docker/docker-language-server/cmd/docker-language-server@<version or commit>`
  * in the module directory, raise any dependency a scan of the built binary flags with
- * `go get <module>@<version>`, then `go mod tidy`, and set the same version in
- * `language-servers/docker-language-server.json`.
+ * `go get <module>@<version>`, then `go mod tidy`.
  */
 
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
 import { buildPinnedGoModule } from "./go-toolchain";
-import { pinnedGoModuleVersion } from "./language-server-manifest";
+import { manifestVersion } from "./language-server-manifest";
 
 const MODULE = "github.com/docker/docker-language-server";
 const MODULE_DIR = path.join(import.meta.dir, "docker-lsp-module");
 
 // The version the module pins, which the server reports as its own.
-const version = await pinnedGoModuleVersion("docker-language-server", MODULE_DIR, MODULE);
+const version = `v${await manifestVersion("docker-language-server")}`;
 
 await buildPinnedGoModule({
   moduleDir: MODULE_DIR,

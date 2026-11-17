@@ -14,20 +14,16 @@
  * and Dependabot raises its dependencies (.github/dependabot.yml). To upgrade terraform-ls itself,
  * run `go get github.com/hashicorp/terraform-ls@<version>` in the module directory, raise any
  * dependency a scan of the built binary flags with `go get <module>@<version>`, then
- * `go mod tidy`, and set the same version in `language-servers/terraform-ls.json`.
+ * `go mod tidy`.
  */
 
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
 import { buildPinnedGoModule } from "./go-toolchain";
-import { pinnedGoModuleVersion } from "./language-server-manifest";
-
-const MODULE_DIR = path.join(import.meta.dir, "terraform-ls-module");
-await pinnedGoModuleVersion("terraform-ls", MODULE_DIR, "github.com/hashicorp/terraform-ls");
 
 await buildPinnedGoModule({
-  moduleDir: MODULE_DIR,
+  moduleDir: path.join(import.meta.dir, "terraform-ls-module"),
   pkg: "github.com/hashicorp/terraform-ls",
   outBinary: path.join(
     BUILD_DIR,

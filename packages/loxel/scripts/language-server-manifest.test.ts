@@ -1,22 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
-import { manifestVersion, pinnedGoModuleVersion } from "./language-server-manifest";
+import { manifestVersion, readManifest, shippedComponent } from "./language-server-manifest";
 
-describe("pinnedGoModuleVersion", () => {
+describe("readManifest", () => {
   test.each([
     ["gopls", "gopls-module", "golang.org/x/tools/gopls"],
-    ["docker-language-server", "docker-lsp-module", "github.com/docker/docker-language-server"],
     ["terraform-ls", "terraform-ls-module", "github.com/hashicorp/terraform-ls"],
-  ])("%s's pinned go.mod requires its manifest's version", async (name, dir, modulePath) => {
-    const version = await pinnedGoModuleVersion(name, path.join(import.meta.dir, dir), modulePath);
-    expect(version).toBe(`v${await manifestVersion(name)}`);
-  });
-
-  test("throws when the manifest names another version", async () => {
-    const goplsModule = path.join(import.meta.dir, "gopls-module");
-    await expect(
-      pinnedGoModuleVersion("terraform-ls", goplsModule, "golang.org/x/tools/gopls"),
-    ).rejects.toThrow("but terraform-ls.json says");
+  ])("%s takes its version from the go.mod that pins it", async (name, dir, modulePath) => {
+    const goMod = await Bun.file(path.join(import.meta.dir, dir, "go.mod")).text();
+    const version = await manifestVersion(name);
+    expect(goMod).toContain(`${modulePath} v${version}`);
+    const component = shippedComponent(await readManifest(name));
+    expect(component?.purl).toBe(`pkg:golang/${modulePath}@v${version}`);
   });
 });

@@ -1,7 +1,7 @@
 {
   "script": "build-gopls.ts",
   "resources": ["gopls"],
-  "version": "0.24.0",
+  "goModule": "gopls-module",
   "purl": "pkg:golang/golang.org/x/tools/gopls@v{version}",
   "license": "BSD-3-Clause",
   "source": "https://github.com/golang/tools/tree/gopls/v{version}/gopls",
