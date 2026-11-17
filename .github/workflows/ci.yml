@@ -235,10 +235,9 @@ jobs:
         with:
           path: packages/loxel/build/eslint-language-server-source
           key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts', 'packages/loxel/scripts/language-servers/eslint-language-server.json') }}
-      # gopls and terraform-ls compile from the pinned modules that Dependabot
-      # bumps. The binaries are cached on everything that goes into them, so they only compile when one
-      # of those changed, and their build skips a binary the cache restored (its `.source` record
-      # matches).
+      # gopls and terraform-ls compile at the versions their manifests name, which Renovate bumps. The
+      # binaries are cached on everything that goes into them, so they only compile when one of those
+      # changed, and their build skips a binary the cache restored (its `.source` record matches).
       - if: matrix.package.name == 'loxel'
         id: go-servers
         uses: actions/cache/restore@v6
@@ -248,7 +247,7 @@ jobs:
             packages/loxel/build/gopls.source
             packages/loxel/build/terraform-ls
             packages/loxel/build/terraform-ls.source
-          key: go-servers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/go-toolchain.json', 'packages/loxel/scripts/build-gopls.ts', 'packages/loxel/scripts/build-terraform-ls.ts', 'packages/loxel/scripts/gopls-module/**', 'packages/loxel/scripts/terraform-ls-module/**') }}
+          key: go-servers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/go-toolchain.json', 'packages/loxel/scripts/build-gopls.ts', 'packages/loxel/scripts/build-terraform-ls.ts', 'packages/loxel/scripts/language-servers/gopls.json', 'packages/loxel/scripts/language-servers/terraform-ls.json') }}
       # Only for a compile: the toolchain (go-<version>), the module downloads (go re-extracts them)
       # and the build cache, from the last compile on main with the same toolchain, so a bump
       # recompiles only what it changed.
@@ -260,7 +259,7 @@ jobs:
             packages/loxel/build/go-*.*
             packages/loxel/build/go-path/pkg/mod/cache/download
             packages/loxel/build/go-cache
-          key: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/go-toolchain.json') }}-${{ hashFiles('packages/loxel/scripts/*-module/go.sum') }}
+          key: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/go-toolchain.json') }}-${{ hashFiles('packages/loxel/scripts/language-servers/gopls.json', 'packages/loxel/scripts/language-servers/terraform-ls.json') }}
           restore-keys: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/go-toolchain.json') }}-
       - if: matrix.package.name == 'loxel'
         name: Build the language servers the tests run

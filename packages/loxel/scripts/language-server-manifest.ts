@@ -134,29 +134,3 @@ export function shippedComponent(manifest: Manifest): ShippedComponent | undefin
     source: manifest.source === undefined ? undefined : expandVersion(manifest, manifest.source),
   };
 }
-
-/**
- * The version of `modulePath` that the pinned Go module in `moduleDir` requires, which is what the
- * build compiles. Throws unless it is the manifest's version, which the SBOM names.
- */
-export async function pinnedGoModuleVersion(
-  name: string,
-  moduleDir: string,
-  modulePath: string,
-): Promise<string> {
-  const goMod = await Bun.file(path.join(moduleDir, "go.mod")).text();
-  // A lone `require` line, or a line in a `require ( ... )` block (`// indirect` there when only a
-  // `tool` directive names the module).
-  const pattern = new RegExp(
-    `^(?:require)?[ \\t]+${modulePath.replaceAll(".", "\\.")} (\\S+)`,
-    "m",
-  );
-  const required = pattern.exec(goMod)?.[1];
-  const file = `${path.basename(moduleDir)}/go.mod`;
-  if (!required) throw new Error(`${file} does not require ${modulePath}`);
-  const version = await manifestVersion(name);
-  if (required !== `v${version}`) {
-    throw new Error(`${file} requires ${modulePath} ${required}, but ${name}.json says ${version}`);
-  }
-  return required;
-}
