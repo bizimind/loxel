@@ -520,4 +520,49 @@ describe("TerminalHostPool and a host found not answering", () => {
     expect(adopted).toEqual([[], [session]]);
     expect(await pool.list()).toEqual([session]);
   });
+
+  test("does not tell its sessions are known when the pool leaves it unanswered", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const quiet = await startQuietHost(runDir, "7b7b7b7b", [session]);
+    const { pool } = createPool(stateDir, runDir);
+    const known: boolean[] = [];
+    pool.onSessionsKnown(() => known.push(pool.sessionsKnown));
+
+    jest.useFakeTimers();
+    const connected = quiet.nextConnection();
+    const started = pool.start(() => {});
+    await connected;
+    jest.advanceTimersByTime(INITIALIZE_TIMEOUT_MS);
+    await started;
+    // Restart Loxel keeps the terminals: this host's sessions outlive the server unadopted.
+    pool.dropAll();
+
+    expect(known).toEqual([]);
+  });
+
+  test("tells when its sessions are known, once it answers", async () => {
+    const { stateDir, runDir } = tempStateDir();
+    const quiet = await startQuietHost(runDir, "7a7a7a7a", [session]);
+    const { pool } = createPool(stateDir, runDir);
+    const known: boolean[] = [];
+    pool.onSessionsKnown(() => known.push(pool.sessionsKnown));
+
+    jest.useFakeTimers();
+    const connected = quiet.nextConnection();
+    const started = pool.start(() => {});
+    await connected;
+    const retried = quiet.nextConnection();
+    jest.advanceTimersByTime(INITIALIZE_TIMEOUT_MS);
+    await started;
+    expect(pool.sessionsKnown).toBe(false);
+    await retried;
+    quiet.answer();
+    while (known.length === 0) {
+      jest.advanceTimersByTime(250);
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+    expect(known).toEqual([true]);
+  });
 });

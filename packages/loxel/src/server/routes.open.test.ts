@@ -9,11 +9,13 @@ import type { WsMessage } from "@/api/ws-protocol";
 import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
+import type { InboxMessage } from "./open-inbox";
 import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import { TerminalManager } from "./terminal-manager";
 
 type StartedTerminal = Parameters<RouteContext["startTerminal"]>[0];
+type QueuedOpen = { message: InboxMessage; worktreePath: string | null | undefined };
 
 function git(cwd: string, ...args: string[]): void {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe" });
@@ -26,12 +28,16 @@ describe("POST /api/open terminals and placement", () => {
   let sent: Array<{ windowId: string | null; msg: WsMessage }>;
   let started: StartedTerminal[];
   let window: ActiveWindow | null;
+  let queued: QueuedOpen[];
+  let inboxRoom: number;
 
   beforeEach(async () => {
     root = realpathSync(await mkdtemp(join(tmpdir(), "loxel-open-")));
     await writeFile(join(root, "file.txt"), "x");
     sent = [];
     started = [];
+    queued = [];
+    inboxRoom = 10;
     window = { windowId: "w1", worktreePath: "/projects/app" };
     ctx = {
       broadcastToSubscribers: () => {},
@@ -66,6 +72,16 @@ describe("POST /api/open terminals and placement", () => {
         started.push(target);
       },
       listTerminals: async () => ({ terminals: [] }),
+      queueForWindow: (message, worktreePath) => {
+        if (queued.length >= inboxRoom) return "full";
+        queued.push({ message, worktreePath });
+        return "queued";
+      },
+      dropQueuedTerminal: (id) => {
+        queued = queued.filter(
+          ({ message }) => message.type !== "open_terminal" || message.data.terminalId !== id,
+        );
+      },
     };
   });
 
@@ -146,6 +162,101 @@ describe("POST /api/open terminals and placement", () => {
 
     expect(res.status).toBe(503);
     expect(started).toEqual([]);
+  });
+
+  test("with queue, starts the shell and keeps the panel for the next window", async () => {
+    window = null;
+
+    const res = await open({ terminal: { cwd: root, command: "ls", title: "ls" }, queue: true });
+
+    expect(res.status).toBe(202);
+    const { terminalId } = (await res.json()) as { terminalId: string };
+    expect(started).toEqual([{ id: terminalId, cwd: root, command: "ls" }]);
+    expect(sent).toEqual([]);
+    // Outside every worktree and with no window to say what it shows, the terminal is Home's.
+    expect(queued).toEqual([
+      {
+        message: {
+          type: "open_terminal",
+          data: { terminalId, cwd: root, worktreePath: null, title: "ls" },
+        },
+        worktreePath: null,
+      },
+    ]);
+  });
+
+  test("queues the terminal before its shell starts, and drops it if the shell fails", async () => {
+    window = null;
+    const queuedAtStart: number[] = [];
+    ctx.startTerminal = async () => {
+      queuedAtStart.push(queued.length);
+      throw new Error("no pty");
+    };
+
+    const res = await open({ terminal: { cwd: root, command: "ls" }, queue: true });
+
+    expect(res.status).toBe(500);
+    // Queued in the tick that found no window, so one connecting while the shell starts gets it.
+    expect(queuedAtStart).toEqual([1]);
+    expect(queued).toEqual([]);
+  });
+
+  test("a window that connected meanwhile takes the open at once", async () => {
+    window = null;
+    ctx.queueForWindow = () => "sent";
+
+    const terminal = await open({ terminal: { cwd: root }, queue: true });
+    const file = await open({ filePath: join(root, "file.txt"), queue: true });
+
+    expect(terminal.status).toBe(200);
+    expect(await file.json()).toEqual({ ok: true });
+  });
+
+  test("starts no shell when the inbox is full", async () => {
+    window = null;
+    inboxRoom = 0;
+
+    const res = await open({ terminal: { cwd: root, command: "ls" }, queue: true });
+
+    expect(res.status).toBe(429);
+    expect(started).toEqual([]);
+  });
+
+  test("queues a file, a folder and a page in the worktree that holds them", async () => {
+    registerRootAsProject();
+    window = null;
+
+    const replies = [
+      await open({ filePath: join(root, "file.txt"), focus: false, queue: true }),
+      await open({ filePath: root, queue: true }),
+      await open({ url: "https://example.com", wtPath: root, queue: true }),
+    ];
+
+    expect(replies.map((res) => res.status)).toEqual([202, 202, 202]);
+    expect(await replies[0]!.json()).toEqual({ ok: true, queued: true });
+    expect(queued).toEqual([
+      {
+        message: { type: "open_file", data: { filePath: join(root, "file.txt"), focus: false } },
+        worktreePath: root,
+      },
+      { message: { type: "open_folder", data: { path: root } }, worktreePath: root },
+      {
+        message: { type: "open_url", wtPath: root, data: { url: "https://example.com" } },
+        worktreePath: root,
+      },
+    ]);
+  });
+
+  test("a window takes the open even when the request may queue", async () => {
+    const res = await open({ filePath: join(root, "file.txt"), queue: true });
+
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(queued).toEqual([]);
+  });
+
+  test("rejects a queue flag that is not a boolean", async () => {
+    expect((await open({ filePath: join(root, "file.txt"), queue: "yes" })).status).toBe(400);
   });
 
   test("opens in Home while the window shows no worktree and cwd is in none", async () => {

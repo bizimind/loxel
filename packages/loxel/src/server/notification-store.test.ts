@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { BrowserNotificationSource, NotificationSource } from "@/api/notification-model";
 
@@ -53,8 +56,12 @@ describe("NotificationStore", () => {
     store.add({ source: terminal, urgency: "normal" });
     store.add({ source: browser("a"), urgency: "normal" });
     store.add({ source: { kind: "server" }, urgency: "normal" });
-    expect(store.dismissByWorktree("/wt").toSorted()).toEqual(["browser-1", "t1"]);
-    expect(store.getAll().map((n) => n.source.kind)).toEqual(["server"]);
+    const inbox = store.add({ source: { kind: "inbox", worktreePath: "/wt" }, urgency: "normal" });
+    store.add({ source: { kind: "inbox", worktreePath: "/other" }, urgency: "normal" });
+    const { panelIds, inboxIds } = store.dismissByWorktree("/wt");
+    expect(panelIds.toSorted()).toEqual(["browser-1", "t1"]);
+    expect(inboxIds).toEqual([inbox.id]);
+    expect(store.getAll().map((n) => n.source.kind)).toEqual(["inbox", "server"]);
   });
 
   test("tag replacement stays within one worktree", () => {
@@ -81,5 +88,71 @@ describe("NotificationStore", () => {
     expect(evicted).toHaveLength(10);
     expect(store.getAll().filter((n) => n.source.kind === "browser")).toHaveLength(50);
     expect(store.getAll()).toContainEqual(agent);
+  });
+});
+
+describe("NotificationStore persistence", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "loxel-notifications-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("keeps the list across a restart, dismissals included", () => {
+    const path = join(dir, "notifications.db");
+    const first = new NotificationStore(path);
+    const kept = first.add({ source: terminal, title: "done", urgency: "high" });
+    const dismissed = first.add({ source: { kind: "server" }, urgency: "normal" });
+    const inbox = first.add({ source: { kind: "inbox", worktreePath: "/wt" }, urgency: "normal" });
+    first.addBrowser({ source: browser("a"), title: "build", urgency: "normal" });
+    first.dismiss(dismissed.id);
+    first.close();
+
+    const second = new NotificationStore(path);
+    // Newest first, as before. A browser page's is not kept: what sites write stays off disk.
+    expect(second.getAll()).toEqual([inbox, kept]);
+    second.dismissAll();
+    second.close();
+
+    const third = new NotificationStore(path);
+    expect(third.getAll()).toEqual([]);
+    third.close();
+  });
+
+  test("keeps the newest 200 across a restart", () => {
+    const path = join(dir, "notifications.db");
+    const first = new NotificationStore(path);
+    for (let i = 0; i < 205; i++) first.add({ source: terminal, title: String(i), urgency: "low" });
+    first.close();
+
+    const titles = new NotificationStore(path).getAll().map((n) => n.title);
+    expect(titles).toHaveLength(200);
+    expect(titles[0]).toBe("204");
+    expect(titles.at(-1)).toBe("5");
+  });
+
+  test("goes on in memory when its file cannot be opened", () => {
+    // A file where the database's directory should be.
+    const blocked = join(dir, "blocked");
+    writeFileSync(blocked, "");
+    const store = new NotificationStore(join(blocked, "notifications.db"));
+    const added = store.add({ source: terminal, urgency: "normal" });
+    expect(store.getAll()).toEqual([added]);
+  });
+
+  test("starts empty, keeping it, from a file it cannot read", () => {
+    const path = join(dir, "notifications.db");
+    writeFileSync(path, "not a database");
+
+    const store = new NotificationStore(path);
+    const added = store.add({ source: terminal, urgency: "normal" });
+    store.close();
+
+    expect(readFileSync(`${path}.unreadable`, "utf8")).toBe("not a database");
+    expect(new NotificationStore(path).getAll()).toEqual([added]);
   });
 });

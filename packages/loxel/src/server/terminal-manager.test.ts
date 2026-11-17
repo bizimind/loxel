@@ -685,6 +685,21 @@ describe("TerminalManager with events in flight", () => {
     expect(manager.running().map((session) => session.id)).toEqual([id]);
   });
 
+  test("an orphan the caller keeps (its panel is queued) is neither counted nor destroyed", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const queued = crypto.randomUUID();
+    const orphan = crypto.randomUUID();
+    await manager.ensureSpawned(queued, attachOptions);
+    await manager.ensureSpawned(orphan, attachOptions);
+    const kept = (id: string) => id === queued;
+
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(manager.running().map((session) => session.id)).toEqual([queued]);
+    expect(manager.hasOrphanSessions(kept)).toBe(false);
+    expect(manager.hasOrphanSessions()).toBe(true);
+  });
+
   test("a session found ended on a reconnect is recorded at once, and drained when its panel mounts", async () => {
     const host = new FakeTerminalHost();
     let changes = 0;

@@ -41,6 +41,7 @@ import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-s
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
+import { OpenInbox, deliveredNotices } from "./open-inbox";
 import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
@@ -382,6 +383,47 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
   const targets = activeWindowSockets(windowId);
   for (const ws of targets) sendTo(ws, message);
   return targets.length > 0;
+}
+
+/**
+ * Hand the open inbox to a window that just said hello, the first after a time with none. Each
+ * request opens as it would have then, focus included, and one notification per worktree says what
+ * opened: a panel opened without focus waits unseen in its worktree.
+ */
+function deliverInbox(ws: ServerWebSocket<WsData>): void {
+  const entries = openInbox.takeAll();
+  if (entries.length === 0) return;
+  for (const { message } of entries) sendTo(ws, message);
+  for (const { worktreePath, title, body } of deliveredNotices(entries)) {
+    const notification = notificationStore.add({
+      source: { kind: "inbox", worktreePath },
+      title,
+      ...(body ? { body } : {}),
+      urgency: "normal",
+    });
+    broadcastAll({ type: "notification_added", data: notification });
+  }
+  log.info(`Delivered ${entries.length} open(s) queued while no window was connected`);
+}
+
+/**
+ * Drop the queued terminals that did not outlive the last server: a panel for one would only show
+ * a new shell. Only once every terminal host has listed its sessions: one that did not answer at
+ * startup may still hold them, and is adopted once it does.
+ */
+function dropGoneQueuedTerminals(): void {
+  if (!terminalHosts.sessionsKnown) return;
+  openInbox.dropWhere(
+    ({ message }) =>
+      message.type === "open_terminal" && !terminalManager.get(message.data.terminalId),
+  );
+}
+
+/** The terminal's session is gone: a panel for it would only show a new shell. */
+function dropQueuedTerminal(id: string): void {
+  openInbox.dropWhere(
+    ({ message }) => message.type === "open_terminal" && message.data.terminalId === id,
+  );
 }
 
 /** The window {@link sendToActiveWindow} delivers to, or null when no window is connected. */
@@ -796,10 +838,16 @@ function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
       broadcastAll({ type: "notification_panel_dismissed", panelId: id });
     }
   });
-  for (const panelId of notificationStore.dismissByWorktree(wtPath)) {
-    broadcastAll({ type: "notification_panel_dismissed", panelId });
-  }
+  forgetWorktreeNotifications(wtPath);
   deleteWorktreeRows(wtPath);
+}
+
+/** Dismiss what a removed worktree's panels raised, and drop the opens waiting for it. */
+function forgetWorktreeNotifications(wtPath: string): void {
+  const { panelIds, inboxIds } = notificationStore.dismissByWorktree(wtPath);
+  for (const panelId of panelIds) broadcastAll({ type: "notification_panel_dismissed", panelId });
+  for (const id of inboxIds) broadcastAll({ type: "notification_dismissed", id });
+  openInbox.dropWhere((entry) => entry.worktreePath === wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -925,6 +973,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
   for (const wtPath of deleteRowsOfMissingWorktrees(worktreesDir, registeredPaths)) {
     log.info(`Worktree removed while its project was not watched, deleted its rows: ${wtPath}`);
     forgetWorktreeInLanguageServers(wtPath);
+    forgetWorktreeNotifications(wtPath);
   }
 
   const filteredWorktrees: WorktreeEntry[] = managed
@@ -1001,6 +1050,8 @@ const terminalHosts = new TerminalHostPool({
   log: logger.child("terminal"),
   perfLog: logger.child("perf"),
 });
+// A host that did not answer at startup has answered, or is gone: what it holds is known now.
+terminalHosts.onSessionsKnown(() => dropGoneQueuedTerminals());
 terminalHosts.onEvent((event) => {
   if (event.type === "output") stress.track("pty-output");
 });
@@ -1022,9 +1073,14 @@ const terminalManager = new TerminalManager(terminalHosts, {
     const owner = terminalOwners.get(id);
     if (owner) clients.get(owner)?.terminals.delete(id);
     terminalOwners.delete(id);
+    dropQueuedTerminal(id);
   },
 });
-const notificationStore = new NotificationStore();
+const notificationStore = new NotificationStore(join(config.stateDir, "notifications.db"));
+/** What `loxel` asked to open while no window was connected, for the next window to connect. */
+const openInbox = new OpenInbox({ path: join(config.stateDir, "open-inbox.db") });
+/** A panel for the terminal is waiting in the inbox: it is not an orphan. */
+const queuedTerminal = (id: string) => openInbox.holdsTerminal(id);
 /** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
 const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
@@ -1128,7 +1184,9 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
 
     case "window_hello": {
       const clientState = clients.get(ws);
-      if (clientState) clientState.windowId = msg.windowId;
+      if (!clientState) break;
+      clientState.windowId = msg.windowId;
+      deliverInbox(ws);
       break;
     }
 
@@ -1389,6 +1447,13 @@ const routeContext: RouteContext = {
       command,
     });
   },
+  // A window may have connected while the route awaited: it gets the request now, since the inbox
+  // goes out only on a window's hello.
+  queueForWindow: (message, worktreePath) => {
+    if (clients.size > 0 && sendToActiveWindow(null, message)) return "sent";
+    return openInbox.add(message, worktreePath) ? "queued" : "full";
+  },
+  dropQueuedTerminal,
   listTerminals: async ({ programs }) => {
     const running = terminalManager.running();
     const foreground = programs ? await terminalManager.foregroundProcesses() : {};
@@ -1418,6 +1483,7 @@ try {
 // Terminals that outlived the previous server are this one's before any client can attach to them.
 try {
   const { ended } = await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+  dropGoneQueuedTerminals();
   const notice = endedHostsNotice(ended);
   // Kept in the store, so the first window to connect gets it with notifications_sync.
   if (notice) {
@@ -1635,7 +1701,7 @@ recoverOrphanLayoutSessions();
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
 // the last window closes gives them time to.
-if (terminalManager.hasOrphanSessions()) startIdleTimer();
+if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
@@ -1667,7 +1733,7 @@ function startIdleTimer(): void {
     );
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      const destroyed = terminalManager.destroyOrphans();
+      const destroyed = terminalManager.destroyOrphans(queuedTerminal);
       if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
       if (ownedByApp) return;
       log.info("Idle timeout reached, shutting down");
