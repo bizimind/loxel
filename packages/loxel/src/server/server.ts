@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
@@ -1481,8 +1481,10 @@ async function serveRequest(
   if (worktreeLspManager) {
     const wtPath = url.searchParams.get("wt");
     if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-    const upgraded = server.upgrade(req, {
-      data: { type: worktreeLspManager.name, wtPath, manager: worktreeLspManager },
+    const upgraded = upgrade(req, {
+      type: worktreeLspManager.name,
+      wtPath,
+      manager: worktreeLspManager,
     });
     if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
     return undefined;
@@ -1622,7 +1624,7 @@ if (terminalManager.hasOrphanSessions()) startIdleTimer();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliServer) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
-if (cliServer && !config.cliSocketPath.startsWith(`${config.stateDir}/`)) {
+if (cliServer && dirname(config.cliSocketPath) !== join(config.stateDir, "run")) {
   log.warn(
     `The state directory is too deep for a socket path; the loxel CLI's socket is in ${config.cliSocketPath}, where the system may purge it after a few days unused`,
   );

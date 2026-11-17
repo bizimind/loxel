@@ -86,6 +86,15 @@ describe("the CLI socket", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
+  test("replaces a file that is not a socket", async () => {
+    const path = socketPath();
+    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    await Bun.write(path, "not a socket");
+
+    expect(await listen(path, "new")).not.toBeNull();
+    expect(await answer(path)).toBe("new");
+  });
+
   test("leaves a socket a live server answers on to that server", async () => {
     const path = socketPath();
     await listen(path, "draining");

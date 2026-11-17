@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { findServer, waitForServer, wellKnownSockets } from "./find-server";
+import { findServer, terminalSocket, waitForServer, wellKnownSockets } from "./find-server";
 import { cliSocketPath } from "./socket-paths";
-import { DEFAULT_STATE_DIR } from "./state-dir";
+import { DEFAULT_STATE_DIR, STATE_BASE_DIR } from "./state-dir";
 
 // The package's test preload replaces `fetch` with a browser one, which has no `unix` option.
 if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -85,12 +85,12 @@ describe("findServer", () => {
     expect((await findServer(env, noLegacy))?.given).toBe(true);
   });
 
-  test("says when LOXEL_SOCKET is outside what this process can see", async () => {
+  test("says when LOXEL_SOCKET's directory cannot be found from here", async () => {
     const { socket } = stateDir();
     const hidden = join(dirname(socket), "not-here", "cli.sock");
 
     await expect(findServer({ LOXEL_SOCKET: hidden }, noLegacy)).rejects.toThrow(
-      `Loxel's socket ${hidden} is outside this sandbox: allow it in the sandbox's settings`,
+      `cannot find Loxel's socket ${hidden}: if this runs in a sandbox, allow the path in its settings`,
     );
   });
 
@@ -109,7 +109,7 @@ describe("findServer", () => {
     });
   });
 
-  test("prefers the socket to a port, also in a stale terminal", async () => {
+  test("in a terminal from before the socket, takes its server's socket after an update", async () => {
     const { env, socket } = stateDir();
     serveOnSocket(socket);
     const port = serveOnPort();
@@ -119,7 +119,7 @@ describe("findServer", () => {
       { legacyPorts: [port] },
     );
 
-    expect(found?.address.unix).toBe(socket);
+    expect(found).toEqual({ address: { url: "http://localhost", unix: socket }, given: true });
   });
 });
 
@@ -130,6 +130,17 @@ describe("wellKnownSockets", () => {
       cliSocketPath(DEFAULT_STATE_DIR.production),
       cliSocketPath(DEFAULT_STATE_DIR.dev),
     ]);
+  });
+});
+
+describe("terminalSocket", () => {
+  test("is the socket of the mode a terminal's LOXEL_PORT is the port of", () => {
+    expect(terminalSocket({}, 7433)).toBe(cliSocketPath(DEFAULT_STATE_DIR.production));
+    expect(terminalSocket({}, 7434)).toBe(cliSocketPath(DEFAULT_STATE_DIR.dev));
+    expect(terminalSocket({}, 7435)).toBe(cliSocketPath(`${STATE_BASE_DIR}/loxel-demo`));
+    expect(terminalSocket({}, 7437)).toBe(cliSocketPath(`${STATE_BASE_DIR}/loxel-demo-2`));
+    expect(terminalSocket({}, 3000)).toBeNull();
+    expect(terminalSocket({ LOXEL_STATE_DIR: "/state" }, 7434)).toBe("/state/run/cli.sock");
   });
 });
 

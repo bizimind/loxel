@@ -26,6 +26,8 @@ if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 
 const LOXEL_ROOT = path.resolve(import.meta.dir, "../..");
 const STARTUP_TIMEOUT_MS = 60_000;
+/** A shutdown drains API requests and waits for language servers and terminal hosts. */
+const SHUTDOWN_TIMEOUT_MS = 20_000;
 
 /** A port free right now: the server takes its port from the environment. */
 function freePort(): number {
@@ -35,6 +37,7 @@ function freePort(): number {
   return port;
 }
 
+// The tests share one server and run in order: the last one shuts it down.
 describe("a server's CLI socket", () => {
   let stateDir: string;
   let socket: string;
@@ -112,9 +115,13 @@ describe("a server's CLI socket", () => {
     expect((await fetch(`${baseUrl}/api/projects`)).status).toBe(200);
   });
 
-  test("removes the socket when it shuts down", async () => {
-    server.kill("SIGTERM");
-    await server.exited;
-    expect(existsSync(socket)).toBe(false);
-  });
+  test(
+    "removes the socket when it shuts down",
+    async () => {
+      server.kill("SIGTERM");
+      await server.exited;
+      expect(existsSync(socket)).toBe(false);
+    },
+    SHUTDOWN_TIMEOUT_MS,
+  );
 });

@@ -8,15 +8,20 @@ import { dirname } from "node:path";
 
 import { ensurePrivateDir } from "../socket-paths";
 
-/** Whether a process accepts connections on the socket at `path`. */
+/**
+ * Whether a process accepts connections on the socket at `path`. False only when none can: the
+ * socket file is stale, left by a process that was killed, or not a socket at all. Any other
+ * failure throws, so a socket that may still be live is never removed.
+ */
 async function socketAnswers(path: string): Promise<boolean> {
   try {
     const socket = await Bun.connect({ unix: path, socket: { data: () => {} } });
     socket.end();
     return true;
-  } catch {
-    // ECONNREFUSED: a socket file no process listens on, left by one that was killed.
-    return false;
+  } catch (err) {
+    const code = err instanceof Error && "code" in err ? err.code : undefined;
+    if (code === "ECONNREFUSED" || code === "ENOTSOCK") return false;
+    throw new Error(`Could not tell whether a server listens on ${path}`, { cause: err });
   }
 }
 

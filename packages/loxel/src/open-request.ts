@@ -42,7 +42,10 @@ interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */
   onWaiting?: () => void;
   windowWaitMs?: number;
-  /** The Unix socket to send the request over (the `loxel` CLI's); `serverUrl` then only names it. */
+  /**
+   * The Unix socket to send the request over (the `loxel` CLI's); `serverUrl` then only fills the
+   * URL.
+   */
   unix?: string;
 }
 
