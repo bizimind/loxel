@@ -98,7 +98,7 @@ export class YamlLspManager extends StdioLspManager<BaseLspSession> {
   }
 
   protected buildSession(ws: ServerWebSocket<unknown>, proc: Subprocess): BaseLspSession {
-    return { ws, proc, stdoutBuf: Buffer.alloc(0), documentContents: new Map() };
+    return { ws, proc, stdoutBuf: Buffer.alloc(0) };
   }
 
   protected override onClientInitialized(session: BaseLspSession): void {

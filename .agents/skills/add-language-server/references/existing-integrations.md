@@ -4,26 +4,26 @@ Quick reference for the quirks of the servers that existed before `docs/language
 
 ## Integration Matrix
 
-| LSP                     | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
-| ----------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
-| TypeScript (tsc)        | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
-| YAML                    | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
-| Docker                  | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
-| Terraform               | source-built  | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
-| Python (basedpyright)   | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
-| Python (ruff)           | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
-| Python (mypy)           | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
-| Kotlin (detekt, ktlint) | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
-| Astro                   | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
-| XML (LemMinX)           | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | downloads off (init options)  |
-| TOML (Tombi)            | downloaded    | worktree | lazy       | disabled        | no             | `lsp --offline` | schema map (post-init)        |
-| Go (gopls)              | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
-| Go (golangci-lint)      | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
-| Rust (rust-analyzer)    | user's binary | worktree | lazy       | enabled         | no             | none            | restricted mode, project list |
-| Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import once trusted (pushed)  |
-| ESLint                  | bundled JS    | worktree | lazy       | n/a             | no             | `--stdio`       | settings per file (pulled)    |
-| oxlint                  | project's own | worktree | lazy       | n/a             | no             | `--lsp`         | none                          |
-| Biome                   | project's own | worktree | lazy       | n/a             | no             | `lsp-proxy`     | settings (pulled)             |
+| LSP                     | Binary Source | Scope    | Connection | Semantic Tokens | Spawn Args      | Init Options                  |
+| ----------------------- | ------------- | -------- | ---------- | --------------- | --------------- | ----------------------------- |
+| TypeScript (tsc)        | copy script   | worktree | eager      | enabled         | `--lsp -stdio`  | preferences                   |
+| YAML                    | Bun-built     | global   | always     | enabled         | `--stdio`       | schema map (pulled)           |
+| Docker                  | Bun-built     | worktree | lazy       | disabled        | `--stdio`       | none                          |
+| Terraform               | source-built  | worktree | lazy       | disabled        | `serve`         | indexing ignore dirs          |
+| Python (basedpyright)   | Bun-built     | worktree | lazy       | enabled         | `--stdio`       | interpreter, ruleset (pulled) |
+| Python (ruff)           | downloaded    | worktree | lazy       | n/a             | `server`        | `showSyntaxErrors` off        |
+| Python (mypy)           | project env   | worktree | lazy       | n/a             | in-process      | none                          |
+| Kotlin (detekt, ktlint) | machine PATH  | worktree | lazy       | n/a             | in-process      | none                          |
+| Astro                   | Bun-built     | worktree | lazy       | disabled        | `--stdio`       | TypeScript SDK path           |
+| XML (LemMinX)           | downloaded    | worktree | lazy       | enabled         | `--stdio`       | downloads off (init options)  |
+| TOML (Tombi)            | downloaded    | worktree | lazy       | disabled        | `lsp --offline` | schema map (post-init)        |
+| Go (gopls)              | built from Go | worktree | lazy       | enabled         | `serve`         | settings (pulled)             |
+| Go (golangci-lint)      | machine PATH  | worktree | lazy       | n/a             | in-process      | none                          |
+| Rust (rust-analyzer)    | user's binary | worktree | lazy       | enabled         | none            | restricted mode, project list |
+| Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | JVM flags       | import once trusted (pushed)  |
+| ESLint                  | bundled JS    | worktree | lazy       | n/a             | `--stdio`       | settings per file (pulled)    |
+| oxlint                  | project's own | worktree | lazy       | n/a             | `--lsp`         | none                          |
+| Biome                   | project's own | worktree | lazy       | n/a             | no              | `lsp-proxy`                   | settings (pulled) |
 
 ## TypeScript — Do Not Use as Template
 
@@ -40,14 +40,9 @@ The most complex manager. Unique behaviors not found in other LSPs:
 
 The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Its client calls `createLspClient`'s `connect(null)` once (no `wt`) and never disconnects. In `server.ts`, the YAML route is handled separately from `worktreeLspManagers`.
 
-## Docker — Non-Standard Behaviors
+## Docker
 
-1. **`requiresFullTextSync = true`** — server overwrites entire document on incremental changes
-2. **Panic swallowing** — `handleServerFrame` catches `-32803` errors from a known bug and returns null
-3. **Config** — `getInitializationOptions()` disables compose support (YAML LSP handles compose files) and telemetry; `workspaceConfiguration()` disables Scout
-4. **No network** — built from source without Docker's keys, inlay hints suppressed, spawned with a dead HTTP proxy
-
-Also: serves two language IDs via array, overrides `resolveBinary()` for Windows `.exe`, uses `["start", "--stdio"]`.
+dockerfile-language-server-nodejs, Bun-built (`build-dockerfile-lsp.ts`). The bundle replaces `dockerfile-language-service`'s Docker Hub registry client, which image tag completion would call, with one that has no tags; the build fails if that module is no longer loaded. Semantic tokens off so Shiki's grammar keeps coloring Dockerfiles.
 
 ## Terraform
 

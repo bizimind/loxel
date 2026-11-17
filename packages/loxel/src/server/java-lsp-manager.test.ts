@@ -348,7 +348,6 @@ describe("JavaLspManager, trusted", () => {
       wtPath,
       repoTrusted,
       stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
     } as unknown as WtLspSession;
     const manager = new TestManager();
     const plan: ImportPlan = {

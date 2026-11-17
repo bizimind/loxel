@@ -104,7 +104,6 @@ export class RuffLspManager extends WorktreeSessionLspManager<RuffLspSession> {
       wtPath: context.wtPath,
       repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
       ruff: spawned?.pick ?? null,
       unsubscribeEnv: null,
       repicking: Promise.resolve(),

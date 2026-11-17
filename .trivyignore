@@ -4,11 +4,3 @@
 # Not affected: only used at build time (astro remote-image cache for the static site, and got ->
 # cacheable-request in electron-builder for Electron downloads). No shared multi-user HTTP cache.
 CVE-2026-93748 exp:2027-01-03
-
-# github.com/docker/docker v28.5.2+incompatible: no fixed release on this module path (the fixes ship
-# only under github.com/moby/moby/v2). Required by packages/loxel/scripts/docker-lsp-module through
-# buildx and compose-go. Not affected: both are Docker Engine flaws (image extraction, container file
-# handling), and docker-language-server links only pkg/namesgenerator from this module, on every
-# platform (`go list -deps`), which imports nothing but math/rand and strconv.
-CVE-2026-41567 exp:2026-12-17
-CVE-2026-42306 exp:2026-12-17

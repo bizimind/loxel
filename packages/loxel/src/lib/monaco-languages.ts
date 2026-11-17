@@ -8,7 +8,6 @@ import { conf as typescriptConf } from "monaco-editor/languages/definitions/type
 
 import { extendCFamilyConfiguration } from "./c-language-config";
 import { registerGoProjectFileLanguages } from "./go-monarch";
-import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { stepOverTripleQuotesIn } from "./triple-quote-step-over";
 
@@ -137,11 +136,6 @@ const LOXEL_LANGUAGES: {
     },
     configuration: hclConf,
   },
-  // docker-bake HCL, served by docker-language-server rather than terraform-ls.
-  {
-    language: { id: "dockerbake", aliases: ["Docker Bake", "dockerbake"] },
-    configuration: hclConf,
-  },
   {
     language: { id: "astro", extensions: [".astro"], aliases: ["Astro", "astro"] },
     configuration: ASTRO_CONFIGURATION,
@@ -194,9 +188,8 @@ export function registerLoxelLanguages(): void {
   }
   stepOverTripleQuotesIn("groovy");
   stepOverTripleQuotesIn("toml");
-  // Shiki has no grammar for docker-bake, Go's project files or pip requirements, so they get
-  // Monarch tokenizers.
-  registerDockerBakeMonarch();
+  // Shiki has no grammar for Go's project files or pip requirements, so they get Monarch
+  // tokenizers.
   registerGoProjectFileLanguages();
   registerPipRequirementsLanguage();
 }

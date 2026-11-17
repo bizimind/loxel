@@ -377,12 +377,6 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/.vscode/*.json", "jsonc"),
   fa("**/*.code-workspace", "jsonc"),
 
-  // docker-bake files — *.hcl alone maps to terraform, but bake files
-  // must route to docker-language-server (dockerbake language).
-  fa("**/docker-bake.hcl", "dockerbake"),
-  fa("**/docker-bake.override.hcl", "dockerbake"),
-  fa("**/*.docker-bake.hcl", "dockerbake"),
-
   // pip requirements and constraints files (pip-tools inputs use .in).
   fa("**/requirements*.txt", "pip-requirements"),
   fa("**/requirements*.in", "pip-requirements"),

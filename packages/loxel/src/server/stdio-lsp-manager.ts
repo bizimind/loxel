@@ -38,13 +38,6 @@ export interface BaseLspSession {
   ws: ServerWebSocket<unknown>;
   proc: Subprocess;
   stdoutBuf: Buffer;
-  /**
-   * uri → current full document text. Populated from didOpen/didChange so
-   * we can rewrite incremental `didChange` notifications into full-text ones
-   * for servers that can't handle incremental sync (see
-   * `requiresFullTextSync`). Empty for LSPs that don't opt in.
-   */
-  documentContents: Map<string, string>;
 }
 
 export interface WtLspContext {
@@ -61,21 +54,6 @@ export interface WtLspSession extends BaseLspSession, WtLspContext {}
 export interface SpawnOptions {
   cwd?: string;
   env?: Record<string, string>;
-}
-
-interface LspPosition {
-  line: number;
-  character: number;
-}
-
-interface LspRange {
-  start: LspPosition;
-  end: LspPosition;
-}
-
-interface LspContentChange {
-  range?: LspRange;
-  text: string;
 }
 
 /** How long a server has to exit after SIGTERM before it gets SIGKILL; a hung one never exits. */
@@ -289,16 +267,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly disableCompletionSnippets: boolean = false;
 
   /**
-   * Set to true for servers that advertise `TextDocumentSyncKind.Full` or
-   * otherwise mis-handle incremental `textDocument/didChange` notifications.
-   * When set, we track each document's content from didOpen and apply
-   * incremental changes locally, then rewrite every outgoing didChange as a
-   * single full-text change. Example: docker-language-server, which overwrites
-   * its entire document with each incremental fragment's replacement text.
-   */
-  protected readonly requiresFullTextSync: boolean = false;
-
-  /**
    * LSP features Monaco must not get from this server: their capability is
    * deleted from the initialize response and their dynamic
    * `client/registerCapability` entries are dropped (the server is told they
@@ -487,93 +455,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           this.onClientInitialized(session);
           return;
         }
-        if (this.requiresFullTextSync) {
-          if (msg.method === "textDocument/didOpen") {
-            this.trackDidOpen(session, parsed);
-            this.writeToStdin(session, data);
-            return;
-          }
-          if (msg.method === "textDocument/didChange") {
-            this.writeToStdin(session, this.rewriteDidChangeToFullText(session, parsed));
-            return;
-          }
-          if (msg.method === "textDocument/didClose") {
-            this.trackDidClose(session, parsed);
-            this.writeToStdin(session, data);
-            return;
-          }
-        }
       }
     } catch {
       // Not JSON — forward as-is.
     }
     this.writeToStdin(session, data);
-  }
-
-  /**
-   * Record the text carried in a `textDocument/didOpen` notification.
-   * Subclasses that override handleClientData but still want full-text sync
-   * can call this from their custom path.
-   */
-  protected trackDidOpen(session: TSession, msg: unknown): void {
-    const p = (msg as { params?: { textDocument?: { uri?: string; text?: string } } }).params;
-    if (p?.textDocument?.uri && typeof p.textDocument.text === "string") {
-      session.documentContents.set(p.textDocument.uri, p.textDocument.text);
-    }
-  }
-
-  /** Forget the tracked content for a `textDocument/didClose` URI. */
-  protected trackDidClose(session: TSession, msg: unknown): void {
-    const p = (msg as { params?: { textDocument?: { uri?: string } } }).params;
-    if (p?.textDocument?.uri) session.documentContents.delete(p.textDocument.uri);
-  }
-
-  /**
-   * Apply a `textDocument/didChange` notification's incremental changes to
-   * the session-tracked document and return a rewritten JSON-RPC message
-   * whose `contentChanges` is a single full-text entry. Safe to call even
-   * when the original change was already full-text.
-   */
-  protected rewriteDidChangeToFullText(session: TSession, msg: unknown): string {
-    const params = (msg as { params?: unknown }).params;
-    if (typeof params !== "object" || params === null) return JSON.stringify(msg);
-
-    const p = params as {
-      textDocument?: { uri?: string; version?: number };
-      contentChanges?: LspContentChange[];
-    };
-    const uri = p.textDocument?.uri;
-    const changes = p.contentChanges;
-    if (!uri || !Array.isArray(changes)) return JSON.stringify(msg);
-
-    const tracked = session.documentContents.get(uri);
-    if (tracked === undefined) {
-      // didChange arrived before didOpen — we can't reconstruct full text
-      // without the baseline. Forward as-is; the server will see an incremental
-      // change it may or may not handle, but at least we don't fabricate state.
-      this.log.warn(`didChange for untracked URI, forwarding as-is`, { uri });
-      return JSON.stringify(msg);
-    }
-
-    let content = tracked;
-    for (const change of changes) {
-      if (!change.range) {
-        content = change.text;
-        continue;
-      }
-      const offsets = buildLineOffsets(content);
-      let start = offsetAt(offsets, content.length, change.range.start);
-      let end = offsetAt(offsets, content.length, change.range.end);
-      // Clamp to [0, content.length] and ensure start <= end so a malformed
-      // range can never slice out arbitrary regions.
-      start = Math.min(Math.max(0, start), content.length);
-      end = Math.min(Math.max(start, end), content.length);
-      content = content.slice(0, start) + change.text + content.slice(end);
-    }
-    session.documentContents.set(uri, content);
-
-    p.contentChanges = [{ text: content }];
-    return JSON.stringify(msg);
   }
 
   /**
@@ -985,9 +871,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    *
    * When `devPath` is provided (absolute path to a binary in `build/`), it is
    * checked instead of `node_modules/.bin`. Use this for pre-built binaries
-   * that are downloaded or extracted rather than npm-installed.
+   * that are downloaded or extracted rather than npm-installed. `searchPath`
+   * false skips the PATH, for a build whose namesake there behaves differently.
    */
-  protected resolveBundledBinary(binaryName: string, devPath?: string): string | null {
+  protected resolveBundledBinary(
+    binaryName: string,
+    devPath?: string,
+    searchPath = true,
+  ): string | null {
     const sibling = path.join(path.dirname(process.execPath), binaryName);
     if (Bun.file(sibling).size) return sibling;
 
@@ -997,6 +888,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       const localBin = path.resolve(import.meta.dir, "../../node_modules/.bin/", binaryName);
       if (Bun.file(localBin).size) return localBin;
     }
+    if (!searchPath) return null;
 
     const found = Bun.which(binaryName, { PATH: buildSpawnEnv().PATH ?? "" });
     // It may have been installed since the login-shell PATH was captured; the next start retries.
@@ -1065,7 +957,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     const { toServer, didClose } = handover.disconnect();
     for (const frame of toServer) this.writeToStdin(session, frame);
     for (const frame of didClose) this.handleClientData(session, frame);
-    session.documentContents.clear();
   }
 
   /** Hand `session`'s server from its socket, open or gone, to `ws`. */
@@ -1424,7 +1315,6 @@ export abstract class WorktreeLspManager extends WorktreeSessionLspManager<WtLsp
       wtPath: context.wtPath,
       repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
     };
   }
 }
@@ -1517,18 +1407,4 @@ function closeReason(reason: string): string {
 /** The session's single workspace folder, as `initialize` and `workspace/workspaceFolders` carry it. */
 export function workspaceFolders(workspace: string): { uri: string; name: string }[] {
   return [{ uri: fileUri(workspace), name: path.basename(workspace) || workspace }];
-}
-
-function buildLineOffsets(content: string): number[] {
-  const offsets = [0];
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] === "\n") offsets.push(i + 1);
-  }
-  return offsets;
-}
-
-function offsetAt(lineOffsets: number[], totalLength: number, pos: LspPosition): number {
-  const base = lineOffsets[pos.line];
-  if (base === undefined) return totalLength;
-  return Math.min(base + pos.character, totalLength);
 }
