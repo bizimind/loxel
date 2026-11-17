@@ -39,9 +39,10 @@ updates:
         patterns: ["*"]
 
   # The modules gopls and docker-language-server are built from (packages/loxel/scripts/*-module/),
-  # one entry and so one pull request each. Every requirement there but the server is indirect, so
-  # `allow` has to include indirect ones. Upgrading a server is a deliberate step (see its build
-  # script), and so are major versions, which change APIs the server's own code calls.
+  # one entry and so one pull request each. Every requirement there is indirect, the server
+  # included, since only the `tool` directive names it, so `allow` has to include indirect ones.
+  # Upgrading a server is a deliberate step (see its build script), and so are major versions,
+  # which change APIs the server's own code calls.
   - package-ecosystem: gomod
     directory: /packages/loxel/scripts/gopls-module
     schedule:
