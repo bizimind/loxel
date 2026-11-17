@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } f
 import type { Query } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
-import { type ReconnectInfo, wsClient } from "@/api/client";
+import { wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
@@ -28,7 +28,7 @@ const invalidateQueries = spyOn(queryClient, "invalidateQueries");
 const refreshProjectWorktrees = mock(async () => {});
 const fetchProjects = mock(async () => {});
 let deliver: (message: WsMessage) => void = () => {};
-let reconnect: (info: ReconnectInfo) => void = () => {};
+let reconnect: () => void = () => {};
 // The stores are shared with other test files in the process; put their actions back after.
 const originalFetchProjects = useProjectStore.getState().fetchProjects;
 const originalRefreshProjectWorktrees = useWorktreeStore.getState().refreshProjectWorktrees;
@@ -130,25 +130,22 @@ describe("useWsBridge git messages", () => {
 });
 
 describe("useWsBridge after a reconnect", () => {
-  test.each([false, true])(
-    "refetches everything but file contents, and the projects (server restarted: %p)",
-    async (serverRestarted) => {
-      reconnect({ serverRestarted });
+  test("refetches everything but file contents, and the projects", async () => {
+    reconnect();
 
-      const keys = [
-        queryKeys.status(PROJECT, WT),
-        ["commits", PROJECT],
-        COMMIT_DIFF,
-        queryKeys.runningTerminals(),
-        queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
-      ];
-      // Editors with unsaved changes take new content through worktree_files_resynced instead.
-      expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
-      expect(fetchProjects).toHaveBeenCalledTimes(1);
-      // Worktrees removed meanwhile are released by the per-project refresh.
-      await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
-    },
-  );
+    const keys = [
+      queryKeys.status(PROJECT, WT),
+      ["commits", PROJECT],
+      COMMIT_DIFF,
+      queryKeys.runningTerminals(),
+      queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
+    ];
+    // Editors with unsaved changes take new content through worktree_files_resynced instead.
+    expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
+    expect(fetchProjects).toHaveBeenCalledTimes(1);
+    // Worktrees removed meanwhile are released by the per-project refresh.
+    await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
+  });
 });
 
 describe("useWsBridge file messages", () => {

@@ -127,11 +127,12 @@ describe("a server's CLI socket", () => {
   });
 
   test(
-    "removes the socket when it shuts down",
+    "leaves the socket's name for the next server when it shuts down",
     async () => {
       server.kill("SIGTERM");
       await server.exited;
-      expect(existsSync(socket)).toBe(false);
+      // Nothing listens there any more: the CLI's connection is refused, which is no server.
+      expect(existsSync(socket)).toBe(true);
     },
     SHUTDOWN_TIMEOUT_MS,
   );

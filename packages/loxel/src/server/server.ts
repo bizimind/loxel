@@ -21,7 +21,7 @@ import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channe
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
-import { type CliSocket, takeOverSocket } from "./cli-socket";
+import { takeOverSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { endedHostsNotice } from "./ended-hosts-notice";
@@ -1504,7 +1504,7 @@ if (stoppingInStartup) await new Promise<never>(() => {});
  * the app still works over TCP, and the user is told the CLI cannot reach it. There is no fallback
  * to the TCP port, which the CLI never uses.
  */
-function listenForCli(): CliSocket | null {
+function listenForCli(): { stop: () => unknown } | null {
   const path = config.cliSocketPath;
   try {
     return takeOverSocket(path, (unix) =>
@@ -1827,13 +1827,8 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
-  // Removes the socket file unless a newer server took it over. Nothing here may keep the process
-  // from exiting below.
-  try {
-    cliSocket?.stop();
-  } catch (err) {
-    log.warn(`Could not remove ${config.cliSocketPath}`, { error: err });
-  }
+  // Leaves the socket's name behind, for the next server to take over.
+  cliSocket?.stop();
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
   void Promise.race([

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
-import { type ReconnectInfo, WsClient } from "./client";
+import { WsClient } from "./client";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 
 /** A WebSocket the test opens, feeds and closes by hand. */
@@ -152,15 +152,15 @@ describe("WsClient", () => {
     expect(client.getConnectionState()).toBe("connected");
   });
 
-  test("tells the reconnect listeners whether the server restarted", () => {
+  test("runs the reconnect listeners after a reconnect, whether the server restarted or not", () => {
     const { client } = connected();
-    const infos: ReconnectInfo[] = [];
-    client.onReconnect((info) => infos.push(info));
+    let reconnects = 0;
+    client.onReconnect(() => reconnects++);
 
     dropAndReopen(client).receive(hello("boot-1"));
     dropAndReopen(client).receive(hello("boot-2"));
 
-    expect(infos).toEqual([{ serverRestarted: false }, { serverRestarted: true }]);
+    expect(reconnects).toBe(2);
   });
 
   test("reloads instead of resyncing when a new version of the server answers", () => {

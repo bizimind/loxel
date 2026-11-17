@@ -3,7 +3,7 @@
  * own account can open (see src/server/cli-socket.ts). The CLI never uses the server's TCP port.
  * See docs/TERMINALS.md#the-loxel-cli.
  */
-import { statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { cliSocketPath } from "./socket-paths";
@@ -55,6 +55,29 @@ function outsideSandbox(path: string): string {
   return `Loxel's socket ${path} is outside this sandbox: allow it in the sandbox's settings`;
 }
 
+/**
+ * Why the CLI must not connect to the socket at `path`, or null when it may: the socket's
+ * directory exists but is not a directory of this user's that no one else can enter (0700).
+ * Whoever owns that directory decides what listens in it, which matters for the temporary
+ * directory a deep state directory's socket falls back to, whose name anyone can predict. A
+ * missing directory is fine: nothing listens there, and the connection fails.
+ */
+function untrustedDirReason(path: string): string | null {
+  const dir = dirname(path);
+  let stat;
+  try {
+    stat = lstatSync(dir, { throwIfNoEntry: false });
+  } catch (err) {
+    return blockedReason(err, path);
+  }
+  if (!stat) return null;
+  const isPrivate =
+    stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o777) === 0o700;
+  return isPrivate
+    ? null
+    : `${dir} is not a private directory of this user's, so the loxel CLI does not use the socket in it`;
+}
+
 type Probe =
   | { state: "up" }
   | { state: "draining" }
@@ -64,9 +87,11 @@ type Probe =
 /**
  * Whether a Loxel server answers on the socket at `path`, or one that is shutting down (`draining`),
  * whose replacement is the one to talk to. A missing or stale socket file (a refused connection)
- * means none does.
+ * means none does. A socket in a directory that is not private to this user is never connected to.
  */
 async function probe(path: string): Promise<Probe> {
+  const untrusted = untrustedDirReason(path);
+  if (untrusted) return { state: "blocked", reason: untrusted };
   try {
     const res = await fetch(`${SOCKET_URL}/api/version`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),

@@ -4,9 +4,9 @@
  * On the loopback TCP port, these checks keep web pages (browser tabs and pages inside Loxel's
  * own browser panels) from driving the server. Browsers attach `Origin` to WebSocket upgrades,
  * CORS-mode fetches and non-GET/HEAD requests, but not to no-cors GET loads or navigations, and
- * native clients (the Electron main process, older `loxel` CLIs, curl) send none,
- * so no single header is conclusive: the rules combine `Host`, `Origin`, `Sec-Fetch-Site`,
- * `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Content-Type`.
+ * native clients (the Electron main process, curl) send none, so no single header is conclusive:
+ * the rules combine `Host`, `Origin`, `Sec-Fetch-Site`, `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and
+ * `Content-Type`.
  *
  * The `loxel` CLI does not use the TCP port: it connects to the server's Unix socket, which only
  * the user's own account can open (see cli-socket.ts). The listener a request arrived on decides

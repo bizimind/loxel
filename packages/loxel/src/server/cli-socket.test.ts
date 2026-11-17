@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -98,7 +97,7 @@ describe("the CLI socket", () => {
     expect(await answer(path)).toBe("new");
   });
 
-  test("takes over a live server's socket, which keeps it from removing the new one", async () => {
+  test("takes over a live server's socket, and stopping the older server leaves the new one", async () => {
     const path = socketPath();
     const older = takeOver(path, "older");
 
@@ -109,13 +108,14 @@ describe("the CLI socket", () => {
     expect(await answer(path)).toBe("newer");
   });
 
-  test("stopping the server removes its socket", () => {
+  test("stopping the server leaves its socket's name, which then refuses connections", async () => {
     const path = socketPath();
     const socket = takeOver(path, "hello");
 
-    socket.stop();
+    await socket.stop();
 
-    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(dirname(path))).toEqual(["cli.sock"]);
+    expect(await answer(path)).toBe("ECONNREFUSED");
   });
 
   test("leaves the path as it was when the socket cannot take its name", () => {
