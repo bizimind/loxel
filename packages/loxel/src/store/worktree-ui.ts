@@ -44,10 +44,14 @@ export interface PendingReveal {
 }
 
 /** A panel waiting for its worktree's editor area to mount: a file, a page or a terminal. */
-export type PendingOpen =
+export type PendingOpen = (
   | ({ kind: "file"; path: string; location?: FileLocation } & PanelOpenOptions)
   | ({ kind: "url"; url: string } & PanelOpenOptions)
-  | { kind: "terminal"; terminal: OpenTerminalPanel };
+  | { kind: "terminal"; terminal: OpenTerminalPanel }
+) & {
+  /** The server's open inbox request this opens, which the server keeps until it is placed. */
+  inboxId?: string;
+};
 
 interface WorktreeUIState {
   // Branches panel collapse & side (used by GraphPanel's inner dockview)

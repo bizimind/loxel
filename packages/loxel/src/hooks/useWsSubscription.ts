@@ -11,8 +11,9 @@ import { useWorktreeStore } from "@/store/worktrees";
 /**
  * Subscribe to worktrees for push events.
  * Switching worktrees subscribes to the new one and defers unsubscribing the
- * old until all pending saves complete (via onWorktreeSavesDrained). This keeps
- * server resources alive so auto-save flushes during panel unmount succeed.
+ * old until its saves complete, in flight or waiting in the save outbox (via
+ * onWorktreeSavesDrained). This keeps server resources alive so auto-save flushes
+ * during panel unmount succeed, and queued saves are served when retried.
  * `wsClient` subscribes every one of them again after a reconnect.
  */
 export function useWsSubscription(activeWorktreePath: string | null): void {

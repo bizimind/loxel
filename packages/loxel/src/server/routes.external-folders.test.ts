@@ -214,6 +214,31 @@ describe("Others folders routes", () => {
     expect(await read.json()).toEqual({ content: "new" });
   });
 
+  test("a write expecting what the file no longer holds is refused, leaving the file", async () => {
+    await post("/api/external-folders/add", { wt, path: folder });
+    const file = join(folder, "a.md");
+    await writeFile(file, "changed meanwhile");
+
+    const stale = await post("/api/file-write", {
+      path: file,
+      content: "merged",
+      nonce: "n1",
+      expectedContent: "a",
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "EDISKCHANGED" });
+    expect(await Bun.file(file).text()).toBe("changed meanwhile");
+
+    const current = await post("/api/file-write", {
+      path: file,
+      content: "merged",
+      nonce: "n2",
+      expectedContent: "changed meanwhile",
+    });
+    expect(current.status).toBe(200);
+    expect(await Bun.file(file).text()).toBe("merged");
+  });
+
   describe("GET /api/file-content?preview=1", () => {
     const contentUrl = (path: string, query: string) =>
       `/api/file-content?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(wt)}${query}`;

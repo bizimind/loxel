@@ -46,7 +46,7 @@ open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree
 
 ## Finding Loxel
 
-`loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, `loxel` says so.
+`loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, or the socket's folder is open to other accounts, `loxel` says so and doesn't use it.
 
 Inside a Loxel terminal, `loxel` connects to the socket in `LOXEL_SOCKET`, the one of the Loxel that terminal belongs to. While that Loxel restarts or installs an update, `loxel` waits for it to come back. If you quit Loxel and kept your terminals, `loxel` in one of them waits a few seconds, then launches Loxel in the background, and your file opens once Loxel is ready. Elsewhere it looks for a running Loxel on its socket, the regular one first, then dev mode's, and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. If no Loxel is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
 
@@ -130,7 +130,7 @@ With focus, an open shows you what it opened: Loxel comes to the front when you 
 
 On macOS, Loxel keeps running after you close its last window, and agents keep working in its terminals. What `loxel` opens then isn't lost: it waits for the next Loxel window, and the CLI prints `loxel: no Loxel window is open; this will open in the next window to connect` and succeeds. A `loxel terminal` command starts running right away, without its panel.
 
-When you open a window (click Loxel in the Dock, for example), everything that waited opens in it, in the order it was asked for, and a notification for each worktree says what opened while you were away, such as **2 terminals and a file opened while you were away**. Opens without focus wait in their worktree as usual, so click the notification to go there. Opens wait through a restart of Loxel, up to 100 of them, for at most 3 days. A terminal still has to be running to open: one that ended in the meantime, for example because you quit Loxel and ended its terminals, is dropped.
+When you open a window (click Loxel in the Dock, for example), everything that waited opens in it, in the order it was asked for, each in its worktree without switching the window there, and a notification for each worktree says what opened while you were away, such as **2 terminals and a file opened while you were away**. Click the notification to go there. Until you go there, they stay safe: if the window reloads or closes first, they open in the next one. Opens wait through a restart of Loxel, up to 100 of them, for at most 3 days. A folder doesn't wait: `loxel <folder>` reveals it in an open window, so with none it fails right away with **No Loxel window is open to show the folder in**. A terminal still has to be running to open: one that ended in the meantime, for example because you quit Loxel and ended its terminals, is dropped.
 
 When `loxel` brings Loxel to the front, or launches it, it waits for the window that comes up instead, as long as 30 seconds, so your own opens show up the moment the window does.
 

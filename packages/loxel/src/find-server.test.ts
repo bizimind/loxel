@@ -63,6 +63,16 @@ describe("findServer", () => {
     );
   });
 
+  test("does not use a socket in a directory others can enter", async () => {
+    const { env, socket } = stateDir();
+    serveOnSocket(socket);
+    chmodSync(dirname(socket), 0o755);
+    const reason = `${dirname(socket)} is not a private directory of this user's`;
+
+    await expect(findServer(env)).rejects.toThrow(reason);
+    await expect(findServer({ LOXEL_SOCKET: socket })).rejects.toThrow(reason);
+  });
+
   test("takes LOXEL_SOCKET as given, answering or not", async () => {
     const { socket } = stateDir();
     const env = { LOXEL_SOCKET: socket };

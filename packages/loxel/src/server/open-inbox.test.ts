@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type InboxMessage, OpenInbox, deliveredNotices } from "./open-inbox";
+import { type InboxMessage, OpenInbox, deliveredNotices, sweepOrphans } from "./open-inbox";
 
 const HOUR = 60 * 60_000;
 
@@ -12,8 +12,16 @@ const terminal = (terminalId: string, title?: string): InboxMessage => ({
   type: "open_terminal",
   data: { terminalId, cwd: "/wt", worktreePath: "/wt", ...(title ? { title } : {}), focus: false },
 });
-const file = (filePath: string): InboxMessage => ({ type: "open_file", data: { filePath } });
-const page = (url: string): InboxMessage => ({ type: "open_url", wtPath: "/wt", data: { url } });
+// As the inbox keeps them: without focus.
+const file = (filePath: string): InboxMessage => ({
+  type: "open_file",
+  data: { filePath, focus: false },
+});
+const page = (url: string): InboxMessage => ({
+  type: "open_url",
+  wtPath: "/wt",
+  data: { url, focus: false },
+});
 
 describe("OpenInbox", () => {
   let dir: string;
@@ -29,25 +37,36 @@ describe("OpenInbox", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("hands its requests over oldest first, once", () => {
+  test("keeps its requests, oldest first, until each one's panel is placed", () => {
     const inbox = new OpenInbox({ now: clock });
     inbox.add(file("/wt/a.ts"), "/wt");
     inbox.add(terminal("t1"), "/wt");
 
-    expect(inbox.takeAll().map((entry) => entry.message)).toEqual([
-      file("/wt/a.ts"),
-      terminal("t1"),
-    ]);
-    expect(inbox.takeAll()).toEqual([]);
+    const [first, second] = inbox.list();
+    expect([first?.message, second?.message]).toEqual([file("/wt/a.ts"), terminal("t1")]);
+    inbox.markDelivered([first!.id, second!.id]);
+    expect(inbox.remove(first!.id)).toBe(true);
+    expect(inbox.remove(first!.id)).toBe(false);
+    expect(inbox.list()).toEqual([{ ...second!, delivered: true }]);
   });
 
-  test("holds a queued terminal until it is handed over", () => {
+  test("keeps a request without focus, so it switches no window when one comes", () => {
+    const inbox = new OpenInbox({ now: clock });
+    inbox.add({ type: "open_file", data: { filePath: "/wt/a.ts", focus: true } }, "/wt");
+    inbox.add({ type: "open_url", wtPath: "/wt", data: { url: "http://x/" } }, "/wt");
+
+    expect(inbox.list().map((entry) => entry.message.data.focus)).toEqual([false, false]);
+  });
+
+  test("holds a queued terminal until its panel is placed", () => {
     const inbox = new OpenInbox({ now: clock });
     inbox.add(terminal("t1"), "/wt");
 
     expect(inbox.holdsTerminal("t1")).toBe(true);
     expect(inbox.holdsTerminal("t2")).toBe(false);
-    inbox.takeAll();
+    inbox.markDelivered(inbox.list().map((entry) => entry.id));
+    expect(inbox.holdsTerminal("t1")).toBe(true);
+    inbox.remove(inbox.list()[0]!.id);
     expect(inbox.holdsTerminal("t1")).toBe(false);
   });
 
@@ -68,7 +87,7 @@ describe("OpenInbox", () => {
     now += 2 * HOUR;
 
     expect(inbox.holdsTerminal("t1")).toBe(false);
-    expect(inbox.takeAll().map((entry) => entry.message)).toEqual([file("/wt/a.ts")]);
+    expect(inbox.list().map((entry) => entry.message)).toEqual([file("/wt/a.ts")]);
   });
 
   test("drops what matches", () => {
@@ -78,24 +97,26 @@ describe("OpenInbox", () => {
 
     inbox.dropWhere((entry) => entry.worktreePath === "/wt");
 
-    expect(inbox.takeAll().map((entry) => entry.worktreePath)).toEqual(["/other"]);
+    expect(inbox.list().map((entry) => entry.worktreePath)).toEqual(["/other"]);
   });
 
-  test("survives a restart, and an empty inbox stays empty", () => {
+  test("survives a restart, delivered or not, and an empty inbox stays empty", () => {
     const path = join(dir, "open-inbox.db");
     const first = new OpenInbox({ path, now: clock });
     first.add(terminal("t1", "claude"), "/wt");
     first.add(page("http://localhost:5173/"), "/wt");
     first.add(file("/wt/gone.ts"), "/wt");
     first.dropWhere(({ message }) => message.type === "open_file");
+    first.markDelivered([first.list()[0]!.id]);
     first.close();
 
     const second = new OpenInbox({ path, now: clock });
     expect(second.holdsTerminal("t1")).toBe(true);
-    expect(second.takeAll().map((entry) => entry.message)).toEqual([
-      terminal("t1", "claude"),
-      page("http://localhost:5173/"),
+    expect(second.list().map((entry) => [entry.message, entry.delivered])).toEqual([
+      [terminal("t1", "claude"), true],
+      [page("http://localhost:5173/"), undefined],
     ]);
+    for (const entry of second.list()) second.remove(entry.id);
     second.close();
 
     const third = new OpenInbox({ path, now: clock });
@@ -113,7 +134,7 @@ describe("OpenInbox", () => {
     db.close();
 
     const reopened = new OpenInbox({ path, now: clock });
-    expect(reopened.takeAll().map((entry) => entry.message)).toEqual([file("/wt/a.ts")]);
+    expect(reopened.list().map((entry) => entry.message)).toEqual([file("/wt/a.ts")]);
     reopened.close();
   });
 });
@@ -153,5 +174,30 @@ describe("deliveredNotices", () => {
     expect(deliveredNotices([entry(terminal("t1"), "/wt")])).toEqual([
       { worktreePath: "/wt", title: "A terminal opened while you were away" },
     ]);
+  });
+});
+
+describe("sweepOrphans", () => {
+  test("spares the terminals the inbox holds, until their requests expire", () => {
+    let now = 0;
+    const inbox = new OpenInbox({ now: () => now });
+    inbox.add(terminal("t1"), "/wt");
+    const orphans = new Set(["t1", "t2"]);
+    const destroyOrphans = (kept: (id: string) => boolean) => {
+      const gone = [...orphans].filter((id) => !kept(id));
+      for (const id of gone) orphans.delete(id);
+      return gone.length;
+    };
+
+    // The first sweep, minutes after the last window closed.
+    now = 5 * 60_000;
+    const first = sweepOrphans(inbox, destroyOrphans);
+    expect(first.destroyed).toBe(1);
+    expect([...orphans]).toEqual(["t1"]);
+    expect(first.nextSweepInMs).toBe(72 * HOUR + 1 - now);
+
+    now += first.nextSweepInMs!;
+    expect(sweepOrphans(inbox, destroyOrphans)).toEqual({ destroyed: 1, nextSweepInMs: null });
+    expect(orphans.size).toBe(0);
   });
 });

@@ -84,6 +84,14 @@ export function isFileMissingError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
 }
 
+/**
+ * The server refused a write with `expectedContent` because the file no longer held it (`409`
+ * with `code: "EDISKCHANGED"`): it changed on disk since the client read it.
+ */
+export function isDiskChangedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === "EDISKCHANGED";
+}
+
 export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -280,6 +288,11 @@ export async function writeFileContent(options: {
   worktreePath?: string;
   format?: boolean;
   formattingSettings?: FormattingSettings;
+  /**
+   * Write only if the file still holds this (what a retried save was merged onto); otherwise the
+   * server refuses with {@link isDiskChangedError}.
+   */
+  expectedContent?: string;
 }) {
   // `formatNotice`: why a save requested with `format` went out unformatted, when the user can
   // act on it (formatter not installed, timed out).
@@ -951,12 +964,6 @@ export async function deleteCommentThread(wt: string, threadId: string) {
 // stream offset of their first byte.
 type TerminalOutputHandler = (offset: number, data: Uint8Array) => void;
 
-/** What reconnect listeners learn about the server the socket reconnected to. */
-export interface ReconnectInfo {
-  /** A new server process (its boot epoch changed), which kept nothing in memory from before. */
-  serverRestarted: boolean;
-}
-
 type ServerHello = Extract<WsMessage, { type: "server_hello" }>;
 
 /**
@@ -975,7 +982,7 @@ export class WsClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeListenersAdded = false;
   private listeners = new Set<(msg: WsMessage) => void>();
-  private reconnectListeners = new Set<(info: ReconnectInfo) => void>();
+  private reconnectListeners = new Set<() => void>();
   private stateListeners = new Set<() => void>();
   private terminalOutputHandlers = new Map<string, TerminalOutputHandler>();
   private pendingMessages: WsClientMessage[] = [];
@@ -1116,8 +1123,8 @@ export class WsClient {
   /**
    * The server's hello opens every connection. A different version (a new build started) or a
    * different server reloads the page to pick up its renderer and state. Otherwise the window
-   * re-creates its per-connection state on the server and catches up: the boot epoch tells the
-   * listeners whether the server restarted or this was only the socket.
+   * re-creates its per-connection state on the server and catches up, the same way whether the
+   * server restarted (its boot epoch changed, which is logged) or only the socket dropped.
    */
   private handleHello(hello: ServerHello): void {
     const previous = this.server;
@@ -1148,15 +1155,17 @@ export class WsClient {
       for (const msg of queued) this.sendNow(msg);
       return;
     }
-    const serverRestarted = hello.bootEpoch !== previous.bootEpoch;
     postLogEntry({
       level: "info",
       cat: "server",
-      msg: serverRestarted ? "Reconnected to a restarted server" : "Reconnected",
+      msg:
+        hello.bootEpoch === previous.bootEpoch
+          ? "Reconnected"
+          : "Reconnected to a restarted server",
     });
     for (const listener of this.reconnectListeners) {
       try {
-        listener({ serverRestarted });
+        listener();
       } catch (err) {
         postLogEntry({
           level: "error",
@@ -1239,7 +1248,7 @@ export class WsClient {
    * re-subscribed. Listeners should re-create any other server-side state and catch up on what
    * the window missed meanwhile.
    */
-  onReconnect(handler: (info: ReconnectInfo) => void): () => void {
+  onReconnect(handler: () => void): () => void {
     this.reconnectListeners.add(handler);
     return () => this.reconnectListeners.delete(handler);
   }

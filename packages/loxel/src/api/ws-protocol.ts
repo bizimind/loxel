@@ -45,6 +45,19 @@ export interface ServerIdentity {
   bootEpoch: string;
 }
 
+/** What `POST /api/open` (`loxel <path>`, `loxel terminal`) sends a window. */
+export type OpenRequestMessage =
+  // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
+  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
+  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
+  // Window-scoped (sent to the window the user is working in)
+  | { type: "open_file"; data: OpenFilePanel }
+  | { type: "open_folder"; data: { path: string } }
+  | { type: "open_terminal"; data: OpenTerminalPanel };
+
+/** What the open inbox keeps for a window to come: any open request but a folder's. */
+export type InboxOpenMessage = Exclude<OpenRequestMessage, { type: "open_folder" }>;
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // First message on every connection; the client resyncs from it (see `WsClient`)
@@ -63,13 +76,15 @@ export type WsMessage =
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | ToolchainChangedMessage
-  // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
-  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
-  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
-  // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: OpenFilePanel }
-  | { type: "open_folder"; data: { path: string } }
-  | { type: "open_terminal"; data: OpenTerminalPanel }
+  | OpenRequestMessage
+  /**
+   * An open request the server kept in its open inbox while no window was connected. The window
+   * answers `inbox_open_done` once it has placed the panel (or the open failed); until then the
+   * server keeps the request, and gives it to every window that says hello.
+   */
+  | { type: "open_from_inbox"; inboxId: string; message: InboxOpenMessage }
+  /** A window placed the panel of an `open_from_inbox` request: the others drop their copy. */
+  | { type: "inbox_open_placed"; inboxId: string }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }
@@ -192,6 +207,8 @@ export type WsClientMessage =
   // Window identity and focus (target requests such as `loxel <folder>` at the window in use)
   | { type: "window_hello"; windowId: string }
   | { type: "window_focused" }
+  /** The window placed the panel of an `open_from_inbox` request (or the open failed). */
+  | { type: "inbox_open_done"; inboxId: string }
   // Notifications
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }

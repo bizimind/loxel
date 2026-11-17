@@ -513,6 +513,56 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
   });
 
   test(
+    "two windows subscribing to a worktree at once share one set of its resources",
+    async () => {
+      const { path: wtPath } = await executeAdd({ name: "smoke-twice", repoPath: repo.root });
+      const otherLog = new CaptureLog<WsMessage>();
+      const other = bunWebSocket(socket.url, auth);
+      other.addEventListener("message", (event) => {
+        otherLog.add(JSON.parse(String(event.data)) as WsMessage);
+      });
+      await new Promise((resolve, reject) => {
+        other.addEventListener("open", resolve);
+        other.addEventListener("error", reject);
+      });
+      const resynced = (message: WsMessage) =>
+        message.type === "worktree_files_resynced" && message.wtPath === wtPath;
+
+      // Both arrive while the first is still creating the resources.
+      const since = log.mark();
+      const subscribe = JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath });
+      socket.send(subscribe);
+      other.send(subscribe);
+      await Promise.all([
+        log.waitFor(resynced, { since, label: "the first window's resync" }),
+        otherLog.waitFor(resynced, { since: 0, label: "the second window's resync" }),
+      ]);
+
+      // Both are subscribers of the one set: a change of the worktree's status reaches both.
+      const gitDir = path.resolve(wtPath, await git(wtPath, "rev-parse", "--git-dir"));
+      const lock = path.join(gitDir, "index.lock");
+      const statusOf = (message: WsMessage) =>
+        message.type === "status_changed" && message.wtPath === wtPath;
+      const beforeLock = log.mark();
+      const otherBeforeLock = otherLog.mark();
+      await retryUntil(
+        () => {
+          writeFileSync(lock, "");
+          rmSync(lock);
+        },
+        async (timeoutMs) =>
+          (await log.seenWithin(statusOf, beforeLock, timeoutMs)) &&
+          (await otherLog.seenWithin(statusOf, otherBeforeLock, timeoutMs)),
+        "both windows to get the worktree's status",
+      );
+
+      other.close();
+      socket.send(JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath }));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "a worktree its last window left and came back to keeps its undo history",
     async () => {
       const { path: wtPath } = await executeAdd({ name: "smoke-undo", repoPath: repo.root });

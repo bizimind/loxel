@@ -55,7 +55,7 @@ If a file can't be loaded, the editor stays read-only and a banner says so, so n
 
 If Loxel's server can't be reached when a save happens (it is restarting, for example), the save is kept and the tab shows a hollow dot before its icon until it goes through. Keep typing; Loxel saves as soon as the server is back. Before writing, it reads the file again: if something else changed the file in the meantime, your edits are merged with that change, and if they can't be merged, the [conflict banner](#conflict-detection) appears instead of either version being overwritten.
 
-Closing the tab, reloading the window or quitting Loxel doesn't lose a save that is still waiting. It goes through when the server is back, or the next time Loxel starts, and Loxel tells you which files it saved from the last session. If it can't be merged, the file opens again with your edits and the conflict banner. Opening the file while its save is still waiting shows your edits, not the older version on disk.
+Closing the tab, reloading the window or quitting Loxel doesn't lose a save that is still waiting. It goes through when the server is back, or the next time Loxel starts, and Loxel tells you which files it saved from the last session. A save left from an earlier session is written only if the file is still as you left it: if it changed since, even in a way that would merge, the file opens again with your edits and the conflict banner, so you decide. The same happens to a save that can't be merged. Opening the file while its save is still waiting shows your edits, not the older version on disk.
 
 ---
 
@@ -234,7 +234,7 @@ You have two choices:
 
 If a file you have open is deleted outside Loxel (a `git checkout`, an agent cleaning up, `rm` in a terminal), the tab stays open but its name is struck through and dimmed, and a banner at the top of the editor says the file was deleted from disk. Your content stays in the editor and you can keep editing, but nothing is written while the file is gone: autosave does not quietly bring it back.
 
-To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or click **Re-create file** in the banner. Either writes the editor's current content back to disk. If something else restores the file first, the tab returns to normal on its own: a clean editor reloads the new content, and an editor with unsaved edits merges them with the usual conflict detection.
+To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or click **Re-create file** in the banner. Either writes the editor's current content back to disk. Edits that were waiting to be saved when the file disappeared are kept even if you close the tab: the file opens again with them the next time Loxel starts. Click **Discard changes** in the banner to give them up and close the tab. If something else restores the file first, the tab returns to normal on its own: a clean editor reloads the new content, and an editor with unsaved edits merges them with the usual conflict detection.
 
 ---
 

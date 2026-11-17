@@ -23,7 +23,7 @@ import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
 import { AgentTerminals } from "./agent-terminals";
-import { type CliSocket, takeOverSocket } from "./cli-socket";
+import { takeOverSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { endedHostsNotice } from "./ended-hosts-notice";
@@ -43,7 +43,7 @@ import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-s
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
-import { OpenInbox, deliveredNotices } from "./open-inbox";
+import { OpenInbox, deliveredNotices, sweepOrphans } from "./open-inbox";
 import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
@@ -218,6 +218,12 @@ if (config.parentPid !== null) {
 
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
+/**
+ * The worktrees whose resources a first subscribe is creating: a subscribe meanwhile joins them,
+ * rather than create a second set that would replace the first, leaking its watchers and leaving
+ * its subscriber out.
+ */
+const wtResourcesCreating = new Map<string, Promise<WorktreeResources>>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
 /** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
@@ -409,15 +415,21 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 }
 
 /**
- * Hand the open inbox to a window that just said hello, the first after a time with none. Each
- * request opens as it would have then, focus included, and one notification per worktree says what
- * opened: a panel opened without focus waits unseen in its worktree.
+ * Hand the open inbox to a window that just said hello: every request no window has placed yet,
+ * oldest first, each without focus (the inbox keeps them so), so it waits in its worktree and
+ * switches no window there, until a window says it placed the panel (`inbox_open_done`), which
+ * tells every window to drop its copy. A window that reloads or closes first gets it again, or
+ * leaves it for the next. One notification per worktree says what opened the first time a request
+ * is handed over, since the panel waits unseen in a worktree the user may not be on.
  */
 function deliverInbox(ws: ServerWebSocket<WsData>): void {
-  const entries = openInbox.takeAll();
+  const entries = openInbox.list();
   if (entries.length === 0) return;
-  for (const { message } of entries) sendTo(ws, message);
-  for (const { worktreePath, title, body } of deliveredNotices(entries)) {
+  for (const { id, message } of entries)
+    sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
+  const fresh = entries.filter((entry) => !entry.delivered);
+  openInbox.markDelivered(fresh.map((entry) => entry.id));
+  for (const { worktreePath, title, body } of deliveredNotices(fresh)) {
     const notification = notificationStore.add({
       source: { kind: "inbox", worktreePath },
       title,
@@ -652,6 +664,14 @@ function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectP
 }
 
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
+  const creating = wtResourcesCreating.get(wtPath);
+  if (creating) {
+    // Subscribed to what it creates; one that failed is tried again here. A window that closed
+    // meanwhile subscribes to nothing.
+    await creating.catch(() => {});
+    if (!clients.has(ws)) return;
+    return subscribeWorktree(ws, wtPath);
+  }
   const existing = wtResources.get(wtPath);
   if (existing) {
     // Within its grace period the worktree is adopted as it is, undo history included.
@@ -675,6 +695,56 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     return;
   }
 
+  const creation = createWorktreeResources(ws, wtPath, project);
+  wtResourcesCreating.set(wtPath, creation);
+  let resources: WorktreeResources;
+  try {
+    resources = await creation;
+  } finally {
+    wtResourcesCreating.delete(wtPath);
+  }
+  // The window closed while they were being created: they start their grace period at once.
+  if (!clients.has(ws)) {
+    unsubscribeWorktree(ws, wtPath);
+    return;
+  }
+  const clientState = clients.get(ws);
+  if (clientState) clientState.subscribedWorktrees.add(wtPath);
+  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
+  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
+  project.worktreeStatuses.invalidate();
+
+  // Push initial root directory listing so the file tree isn't empty.
+  // The client may have already requested GET /api/files before resources existed
+  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
+  resources.filesService
+    .getDirContents("", wtPath)
+    .then((entries) => {
+      broadcastToSubscribers(wtPath, {
+        type: "files_dir_changed",
+        wtPath,
+        data: { dir: wtPath, entries },
+      });
+    })
+    .catch(() => {});
+
+  // Push initial detached files listing (same race condition as above).
+  broadcastToSubscribers(wtPath, {
+    type: "detached_files_changed",
+    wtPath,
+    data: { entries: resources.detachedFilesService.listFiles() },
+  });
+  // Same for the Others section, which starts with the folders restored from the last session.
+  broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
+}
+
+/** Create the resources of `wtPath`, with `ws` as their first subscriber. */
+async function createWorktreeResources(
+  ws: ServerWebSocket<WsData>,
+  wtPath: string,
+  project: ProjectState,
+): Promise<WorktreeResources> {
   log.info(`Creating worktree resources for ${wtPath}`);
 
   // A linked worktree keeps its own index/HEAD under <common>/worktrees/<name>, which the
@@ -737,35 +807,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   };
 
   wtResources.set(wtPath, resources);
-  const clientState = clients.get(ws);
-  if (clientState) clientState.subscribedWorktrees.add(wtPath);
-  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
-  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
-  project.worktreeStatuses.invalidate();
-
-  // Push initial root directory listing so the file tree isn't empty.
-  // The client may have already requested GET /api/files before resources existed
-  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
-  filesService
-    .getDirContents("", wtPath)
-    .then((entries) => {
-      broadcastToSubscribers(wtPath, {
-        type: "files_dir_changed",
-        wtPath,
-        data: { dir: wtPath, entries },
-      });
-    })
-    .catch(() => {});
-
-  // Push initial detached files listing (same race condition as above).
-  broadcastToSubscribers(wtPath, {
-    type: "detached_files_changed",
-    wtPath,
-    data: { entries: detachedFilesService.listFiles() },
-  });
-  // Same for the Others section, which starts with the folders restored from the last session.
-  broadcastOthers(wtPath);
-  sendFilesResynced(ws, wtPath, project.cwd);
+  return resources;
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
@@ -1225,6 +1267,12 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       break;
     }
 
+    case "inbox_open_done":
+      if (openInbox.remove(msg.inboxId)) {
+        broadcastAll({ type: "inbox_open_placed", inboxId: msg.inboxId });
+      }
+      break;
+
     case "window_focused":
       lastFocusedClient = ws;
       break;
@@ -1562,7 +1610,7 @@ if (writesSessionToken) {
  * the app still works over TCP, and the user is told the CLI cannot reach it. There is no fallback
  * to the TCP port, which the CLI never uses.
  */
-function listenForCli(): CliSocket | null {
+function listenForCli(): { stop: () => unknown } | null {
   const path = config.cliSocketPath;
   try {
     return takeOverSocket(path, (unix) =>
@@ -1761,8 +1809,9 @@ logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count",
 recoverOrphanLayoutSessions();
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
-// the last window closes gives them time to.
+// the last window closes gives them time to. Ones the open inbox holds wait for their requests.
 if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
+else if (config.parentPid !== null) cleanUpOrphans();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
@@ -1793,10 +1842,12 @@ function startIdleTimer(): void {
       `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
     );
     idleTimer = setTimeout(() => {
+      if (ownedByApp) {
+        cleanUpOrphans();
+        return;
+      }
       idleTimer = null;
-      const destroyed = terminalManager.destroyOrphans(queuedTerminal);
-      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-      if (ownedByApp) return;
+      terminalManager.destroyOrphans(queuedTerminal);
       log.info("Idle timeout reached, shutting down");
       shutdown();
     }, ORPHAN_CLEANUP_MS);
@@ -1807,6 +1858,19 @@ function startIdleTimer(): void {
     log.info("Idle timeout reached, shutting down");
     shutdown();
   }, IDLE_SHUTDOWN_MS);
+}
+
+/**
+ * Destroy the orphaned terminals, and, while the open inbox holds some, do it again once the first
+ * request holding one expires: its terminal is an ordinary orphan then.
+ */
+function cleanUpOrphans(): void {
+  idleTimer = null;
+  const { destroyed, nextSweepInMs } = sweepOrphans(openInbox, (kept) =>
+    terminalManager.destroyOrphans(kept),
+  );
+  if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+  if (nextSweepInMs !== null) idleTimer = setTimeout(cleanUpOrphans, nextSweepInMs);
 }
 
 // --- API requests in flight, drained before shutdown ---
@@ -1891,13 +1955,8 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
-  // Removes the socket file unless a newer server took it over. Nothing here may keep the process
-  // from exiting below.
-  try {
-    cliSocket?.stop();
-  } catch (err) {
-    log.warn(`Could not remove ${config.cliSocketPath}`, { error: err });
-  }
+  // Leaves the socket's name behind, for the next server to take over.
+  cliSocket?.stop();
   try {
     if (writesSessionToken) removeSessionToken(config.stateDir, sessionSecret);
   } catch (err) {

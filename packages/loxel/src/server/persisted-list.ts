@@ -51,12 +51,12 @@ export class PersistedList<T extends Identified> {
     return items;
   }
 
+  /** Add `item` last, or, for one already there, update it where it is. */
   insert(item: T): void {
     this.run("write", (db) => {
-      db.prepare("INSERT OR REPLACE INTO items (id, data) VALUES (?, ?)").run(
-        item.id,
-        JSON.stringify(item),
-      );
+      db.prepare(
+        "INSERT INTO items (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+      ).run(item.id, JSON.stringify(item));
     });
   }
 

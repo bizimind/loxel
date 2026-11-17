@@ -26,6 +26,11 @@ const saveEditorContent = jest.fn(async () => {});
 mock.module("@/lib/save-editor-content", () => ({
   saveEditorContent,
   writeEditorContent: saveEditorContent,
+  // What the save outbox imports.
+  postEditorContent: async () => ({ ok: true }),
+  holdWorktree: () => {},
+  releaseWorktree: () => {},
+  onWorktreeSavesDrained: (_worktreePath: string, callback: () => void) => callback(),
 }));
 
 /** The file at HEAD and on disk */
