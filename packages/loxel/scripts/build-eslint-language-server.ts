@@ -1,19 +1,18 @@
 /**
  * Builds the ESLint language server from microsoft/vscode-eslint into one JS file,
  * `build/eslint-language-server/eslintServer.cjs`, which Loxel runs under the user's Node. The
- * extension publishes no package of its server, so the source comes from its release tag, pinned
- * by SHA256 and hashed in memory before anything is extracted. Its npm dependencies are this
+ * extension publishes no package of its server, so the source comes from its release tag's tarball,
+ * pinned in `language-servers/eslint-language-server.json` (see pinned-download.ts) and hashed in
+ * memory before anything is extracted. Its npm dependencies are this
  * package's dependencies (they ship), at the versions the tag's `server/package.json` names or newer;
  * `src/server/eslint-language-server.test.ts` runs the bundle to prove a combination works.
  *
  * Not compiled with `bun build --compile`: the server resolves ESLint by forking `process.execPath`
  * and loads project files from disk, and neither works from a compiled binary.
  *
- * To upgrade: change the version in `language-servers/eslint-language-server.json` and the hash
- * here, raise any dependency below what its `server/package.json` names, and run that test against
- * the new bundle. Renovate (renovate.json) opens a pull request that changes only the version, since
- * it cannot hash a source tarball: the rest is left to the person completing it, and until then
- * the download fails its hash check.
+ * An upgrade (Renovate's, or the manifest's version and `pnpm run pin-hashes eslint-language-server`)
+ * also raises any dependency below what the new tag's `server/package.json` names; that test, which
+ * CI runs on the new bundle, shows whether one is needed.
  */
 
 import { createHash } from "node:crypto";
@@ -21,15 +20,14 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
-import { manifestVersion } from "./language-server-manifest";
+import { manifestFile, manifestVersion } from "./language-server-manifest";
 
 const TAG = `release/${await manifestVersion("eslint-language-server")}`;
-const SHA256 = "f82fb2aab96eede6273af2d9aafeb9a29c5723c5af5a9819e37c61d7f51cc052";
-const URL = `https://codeload.github.com/microsoft/vscode-eslint/tar.gz/refs/tags/${TAG}`;
+const { url: URL, sha256: SHA256 } = await manifestFile("eslint-language-server", "source");
 const ARCHIVE_ROOT = `vscode-eslint-${TAG.replace("/", "-")}`;
 
 // Under `build/`, so that imports resolve from this package's node_modules. Keyed on the tag as well
-// as the hash, so a version bump that has not updated the hash yet downloads, and fails its check,
+// as the hash, so a version bump whose hash is not pinned yet downloads, and fails its check,
 // instead of building the old source.
 const SOURCE_DIR = path.join(
   BUILD_DIR,

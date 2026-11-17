@@ -10,12 +10,8 @@
  * is the one place the version lives: the script reads it with `manifestVersion`, and `{version}`
  * in `purl` and `source` stands for it. `source`, `licenseFile` and `note` are for its notice.
  *
- * A script that downloads GitHub release assets pins their digests in `sha256`, which it reads with
- * `manifestSha256`. Each is keyed `<release tag>/<target>`, the target being the script's own name
- * for the asset (a Rust target triple, say): the tag (the purl's version) is repeated in every key
- * because Renovate, which bumps these manifests (renovate.json), updates one version and one digest
- * per dependency, so each pinned asset needs its own copy of the version. Renovate replaces the
- * `version` field at the first occurrence of its text, so nothing before that field may contain it.
+ * A script that downloads its server pins the file in `download` and `sha256` (see
+ * pinned-download.ts) and reads it with `manifestFile`.
  */
 
 import { readdirSync } from "node:fs";
@@ -23,10 +19,11 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { pinnedFile, readPinnedDownload } from "./pinned-download";
+
 export const MANIFEST_DIR = path.join(import.meta.dir, "language-servers");
 
 const VERSION_PLACEHOLDER = "{version}";
-const GITHUB_PURL_PREFIX = "pkg:github/";
 
 const BaseSchema = z.strictObject({
   script: z.string(),
@@ -44,7 +41,9 @@ const ManifestSchema = z.union([
     // `pkg:<type>/<namespace>/<name>@<version>`, its version holding `{version}` (`v{version}`).
     purl: z.string().regex(/^pkg:[^@]+@[^@]*\{version\}/),
     license: z.string().min(1),
-    sha256: z.record(z.string(), z.string().regex(/^[0-9a-f]{64}$/)).optional(),
+    // A pinned download (pinned-download.ts), which readPinnedDownload checks.
+    download: z.string().optional(),
+    sha256: z.record(z.string(), z.string()).optional(),
   }),
   BaseSchema.extend({ npm: z.array(z.string()).nonempty() }),
 ]);
@@ -68,7 +67,9 @@ export function parseManifest(name: string, file: string, json: unknown): Manife
     throw new Error(`${file}: ${hint}\n${z.prettifyError(parsed.error)}`);
   }
   const manifest = { ...parsed.data, name };
-  if ("sha256" in manifest && manifest.sha256) checkPinKeys(file, manifest, manifest.sha256);
+  if ("version" in manifest && (manifest.download || manifest.sha256)) {
+    readPinnedDownload(file, json);
+  }
   return manifest;
 }
 
@@ -100,52 +101,24 @@ export async function manifestVersion(name: string): Promise<string> {
   return manifest.version;
 }
 
-type VersionedManifest = Extract<Manifest, { version: string }>;
+/** The URL and pinned SHA256 of the file the manifest's script downloads for `target`. */
+export async function manifestFile(
+  name: string,
+  target: string,
+): Promise<{ url: string; sha256: string }> {
+  const file = path.join(MANIFEST_DIR, `${name}.json`);
+  return pinnedFile(name, readPinnedDownload(file, await Bun.file(file).json()), target);
+}
+
+/** The targets the manifest pins a file for, such as the one archive of a single download. */
+export async function manifestTargets(name: string): Promise<string[]> {
+  const file = path.join(MANIFEST_DIR, `${name}.json`);
+  return Object.keys(readPinnedDownload(file, await Bun.file(file).json()).sha256);
+}
 
 /** `template` with the manifest's version in place of `{version}`. */
-function expandVersion(manifest: VersionedManifest, template: string): string {
+function expandVersion(manifest: Extract<Manifest, { version: string }>, template: string): string {
   return template.replaceAll(VERSION_PLACEHOLDER, manifest.version);
-}
-
-/** The tag of the manifest version's GitHub release: the version in its `pkg:github` purl. */
-function releaseTag(manifest: VersionedManifest): string {
-  const tag = manifest.purl.slice(manifest.purl.indexOf("@") + 1);
-  try {
-    return decodeURIComponent(expandVersion(manifest, tag));
-  } catch (error) {
-    throw new Error(`${manifest.name}.json: the purl's version ${tag} is not URL-encoded`, {
-      cause: error,
-    });
-  }
-}
-
-/** Throws unless every key of `sha256` is `<release tag>/<target>` for the manifest's version. */
-function checkPinKeys(file: string, manifest: VersionedManifest, sha256: Record<string, string>) {
-  if (!manifest.purl.startsWith(GITHUB_PURL_PREFIX)) {
-    throw new Error(`${file}: "sha256" pins GitHub release assets, so "purl" must be pkg:github`);
-  }
-  const tag = releaseTag(manifest);
-  // Renovate's manager reads the tag as the part of the key before its first `/`.
-  if (tag.includes("/")) throw new Error(`${file}: release tag ${tag} cannot key "sha256"`);
-  for (const key of Object.keys(sha256)) {
-    const target = key.slice(tag.length + 1);
-    if (!key.startsWith(`${tag}/`) || !target || target.includes("/")) {
-      throw new Error(`${file}: "sha256" key ${key} is not "${tag}/<target>"`);
-    }
-  }
-}
-
-/**
- * The pinned SHA256 of the asset the manifest's script downloads for `target` from the manifest
- * version's GitHub release. Throws when there is none.
- */
-export async function manifestSha256(name: string, target: string): Promise<string> {
-  const manifest = await readManifest(name);
-  if (!("version" in manifest)) throw new Error(`${name}.json has no version`);
-  const key = `${releaseTag(manifest)}/${target}`;
-  const sha256 = manifest.sha256?.[key];
-  if (!sha256) throw new Error(`${name}.json pins no SHA256 for ${key}`);
-  return sha256;
 }
 
 /** The component a manifest ships, or undefined when it is built only from npm packages. */

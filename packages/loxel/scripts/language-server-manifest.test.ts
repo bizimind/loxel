@@ -2,12 +2,10 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
 import {
-  MANIFEST_DIR,
-  manifestSha256,
+  manifestFile,
   manifestVersion,
   parseManifest,
   pinnedGoModuleVersion,
-  readAllManifests,
 } from "./language-server-manifest";
 
 describe("pinnedGoModuleVersion", () => {
@@ -28,61 +26,38 @@ describe("pinnedGoModuleVersion", () => {
   });
 });
 
-describe("sha256 pins", () => {
-  const digest = "a".repeat(64);
-  const manifest = (purl: string, sha256: Record<string, string>) => ({
+describe("pinned downloads", () => {
+  const manifest = {
     script: "download-x.ts",
     resources: ["x"],
     version: "1.2.3",
-    purl,
+    purl: "pkg:github/o/x@v{version}",
     license: "MIT",
-    sha256,
-  });
+  };
 
-  test("are keyed by the release tag the purl names and a target", () => {
-    const parsed = parseManifest(
-      "x",
-      "x.json",
-      manifest("pkg:github/o/x@v{version}", { "v1.2.3/linux": digest }),
-    );
-    expect("sha256" in parsed && parsed.sha256).toEqual({ "v1.2.3/linux": digest });
-  });
-
-  test.each([
-    ["another release's tag", "pkg:github/o/x@v{version}", "v1.2.2/linux"],
-    ["the version without the tag's prefix", "pkg:github/o/x@v{version}", "1.2.3/linux"],
-    ["no target", "pkg:github/o/x@{version}", "1.2.3/"],
-    ["a target with a slash", "pkg:github/o/x@{version}", "1.2.3/linux/x64"],
-    ["a release tag with a slash", "pkg:github/o/x@release%2F{version}", "release/1.2.3/linux"],
-    ["a purl that is not GitHub's", "pkg:golang/example.com/x@v{version}", "v1.2.3/linux"],
-  ])("reject %s", (_, purl, key) => {
-    expect(() => parseManifest("x", "x.json", manifest(purl, { [key]: digest }))).toThrow(
-      "x.json:",
+  test("a manifest's must be a URL template with hex SHA256s", () => {
+    const pinned = {
+      download: "https://example.com/{version}/x-{target}",
+      sha256: { a: "0".repeat(64) },
+    };
+    expect(() => parseManifest("x", "x.json", { ...manifest, ...pinned })).not.toThrow();
+    expect(() =>
+      parseManifest("x", "x.json", { ...manifest, ...pinned, sha256: { a: "ABC" } }),
+    ).toThrow('"sha256" of a');
+    expect(() => parseManifest("x", "x.json", { ...manifest, sha256: pinned.sha256 })).toThrow(
+      'needs "download"',
     );
   });
 
-  test("manifestSha256 reads a manifest's pin for a target", async () => {
+  test("manifestFile fills in the version and target", async () => {
     const version = await manifestVersion("ruff");
-    const parsed = await Bun.file(path.join(import.meta.dir, "language-servers/ruff.json")).json();
-    expect(await manifestSha256("ruff", "aarch64-apple-darwin")).toBe(
-      parsed.sha256[`${version}/aarch64-apple-darwin`],
+    const { url, sha256 } = await manifestFile("ruff", "aarch64-apple-darwin.tar.gz");
+    expect(url).toBe(
+      `https://github.com/astral-sh/ruff/releases/download/${version}/ruff-aarch64-apple-darwin.tar.gz`,
     );
-    await expect(manifestSha256("ruff", "riscv64gc-unknown-linux-gnu")).rejects.toThrow(
-      "ruff.json pins no SHA256",
+    expect(sha256).toMatch(/^[0-9a-f]{64}$/);
+    await expect(manifestFile("ruff", "riscv64gc-unknown-linux-gnu.tar.gz")).rejects.toThrow(
+      "run `pnpm -C packages/loxel run pin-hashes ruff`",
     );
   });
-});
-
-// Renovate (renovate.json) bumps `version` by replacing the first occurrence of its text.
-test("every manifest's version text first appears in its version field", async () => {
-  const field = '"version": "';
-  for (const manifest of await readAllManifests()) {
-    if (!("version" in manifest)) continue;
-    const raw = await Bun.file(path.join(MANIFEST_DIR, `${manifest.name}.json`)).text();
-    const fieldStart = raw.indexOf(`${field}${manifest.version}"`) + field.length;
-    expect({ name: manifest.name, first: raw.indexOf(manifest.version) }).toEqual({
-      name: manifest.name,
-      first: fieldStart,
-    });
-  }
 });

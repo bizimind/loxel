@@ -8,15 +8,19 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } 
 import path from "node:path";
 
 import { BUILD_DIR } from "./download-release-binary";
-import { manifestVersion } from "./language-server-manifest";
+import { manifestFile, manifestTargets, manifestVersion } from "./language-server-manifest";
 
 const VERSION = await manifestVersion("jdtls");
-// The build timestamp of the manifest version's release, and its SHA256. Renovate (renovate.json)
-// bumps only the manifest's version, since it can hash nothing outside GitHub: the person completing
-// its pull request copies both from `latest.txt` and the archive's `.sha256` in
-// https://download.eclipse.org/jdtls/milestones/<version>/. Until then the download fails.
-const ARCHIVE = `jdt-language-server-${VERSION}-202610191322.tar.gz`;
-const SHA256 = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4";
+// `language-servers/jdtls.json` pins the release's one archive, whose name carries a build
+// timestamp; pin-hashes.ts finds it from the release's `latest.txt`.
+const [ARCHIVE = ""] = await manifestTargets("jdtls");
+if (!ARCHIVE.startsWith(`jdt-language-server-${VERSION}-`)) {
+  throw new Error(
+    `jdtls.json pins ${ARCHIVE}, not an archive of ${VERSION}; ` +
+      "run `pnpm -C packages/loxel run pin-hashes jdtls`",
+  );
+}
+const { url, sha256: SHA256 } = await manifestFile("jdtls", ARCHIVE);
 
 const outDir = path.join(BUILD_DIR, "jdtls");
 const versionFile = `${outDir}.version`;
@@ -30,7 +34,6 @@ if (
   process.exit(0);
 }
 
-const url = `https://download.eclipse.org/jdtls/milestones/${VERSION}/${ARCHIVE}`;
 console.log(`Downloading ${url}`);
 const res = await fetch(url);
 if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);

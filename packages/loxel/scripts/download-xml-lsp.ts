@@ -4,8 +4,8 @@
  * so it can ship alongside `loxel-server` via electron-builder extraResources.
  *
  * LemMinX is compiled to a native binary via GraalVM — no JRE required at
- * runtime. The zip for each platform is pinned by SHA256 in `language-servers/lemminx.json`, which
- * Renovate bumps (renovate.json).
+ * runtime. `language-servers/lemminx.json` pins the zip for each platform (see
+ * pinned-download.ts).
  */
 
 import { createHash } from "node:crypto";
@@ -13,9 +13,8 @@ import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { installedFrom, recordInstalledFrom } from "./download-release-binary";
-import { manifestSha256, manifestVersion } from "./language-server-manifest";
+import { manifestFile } from "./language-server-manifest";
 
-const VERSION = await manifestVersion("lemminx");
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");
 
@@ -29,7 +28,8 @@ function platformKey(): string {
 
 const key = platformKey();
 if (!key) throw new Error(`LemMinX has no build for ${process.platform}`);
-const expectedHash = await manifestSha256("lemminx", key);
+const zipName = `lemminx-${key}.zip`;
+const { url, sha256: expectedHash } = await manifestFile("lemminx", `${key}.zip`);
 
 const isWindows = process.platform === "win32";
 const binaryName = isWindows ? `lemminx-${key}.exe` : `lemminx-${key}`;
@@ -39,9 +39,6 @@ if (installedFrom(outBinary, expectedHash)) {
   console.log(`lemminx already present at ${outBinary}, skipping download`);
   process.exit(0);
 }
-
-const zipName = `lemminx-${key}.zip`;
-const url = `https://github.com/redhat-developer/vscode-xml/releases/download/${VERSION}/${zipName}`;
 
 rmSync(OUTDIR, { recursive: true, force: true });
 mkdirSync(OUTDIR, { recursive: true });

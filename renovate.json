@@ -1,9 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Bumps the pins Dependabot cannot read: the language-server manifests in packages/loxel/scripts/language-servers/, the Go toolchain and Bun. Dependabot keeps everything it covers (.github/dependabot.yml), so only custom managers run here. See packages/loxel/docs/LANGUAGE_SERVERS.md.",
+  "description": "Bumps the versions Dependabot cannot read: the language-server manifests in packages/loxel/scripts/language-servers/, the Go toolchain and Bun. Runs self-hosted, weekly, from .github/workflows/renovate.yml, which is its schedule. Dependabot keeps everything it covers (.github/dependabot.yml), so only custom managers run here. See packages/loxel/docs/LANGUAGE_SERVERS.md.",
   "enabledManagers": ["custom.jsonata", "custom.regex"],
   "dependencyDashboard": false,
-  "schedule": ["* * * * 1"],
   "minimumReleaseAge": "7 days",
   "labels": ["dependencies"],
   "semanticCommits": "enabled",
@@ -11,33 +10,23 @@
   "semanticCommitScope": "loxel",
   "commitMessageAction": "bump",
   "commitMessageTopic": "{{{depName}}}",
-  "commitMessageExtra": "from {{{replace '^v' '' currentValue}}} to {{{replace '^v' '' newValue}}}",
+  "commitMessageExtra": "from {{{currentValue}}} to {{{newValue}}}",
   "customManagers": [
     {
       "customType": "jsonata",
-      "description": "A manifest's version, from the registry its pkg:golang or pkg:github purl names: Go modules, or a GitHub repository's releases (tags when it pins no release assets). The tag is the purl's version, so its prefix around {version} is stripped.",
+      "description": "A manifest's version, from the registry its pkg:golang or pkg:github purl names: Go modules, or a GitHub repository's releases when it downloads a release asset and its tags otherwise. The tag is the purl's version, so the text around {version} is stripped.",
       "fileFormat": "json",
       "managerFilePatterns": ["/^packages/loxel/scripts/language-servers/[^/]+\\.json$/"],
       "matchStrings": [
-        "$exists(version) and $exists(purl) ? ($repo := $substringBefore($substringAfter(purl, '/'), '@'); $tag := $decodeUrlComponent($substringAfter(purl, '@')); $prefix := $substringBefore($tag, '{version}'); $type := $substringBefore(purl, '/'); $type in ['pkg:golang', 'pkg:github'] ? {'depName': $repo, 'currentValue': version, 'datasource': $type = 'pkg:golang' ? 'go' : $exists(sha256) ? 'github-releases' : 'github-tags', 'extractVersion': $prefix != '' ? '^' & $prefix & '(?<version>.+)$'})"
+        "$exists(version) and $exists(purl) ? ($repo := $substringBefore($substringAfter(purl, '/'), '@'); $tag := $decodeUrlComponent($substringAfter(purl, '@')); $prefix := $substringBefore($tag, '{version}'); $type := $substringBefore(purl, '/'); $type in ['pkg:golang', 'pkg:github'] ? {'depName': $repo, 'currentValue': version, 'datasource': $type = 'pkg:golang' ? 'go' : $contains($string(download), '/releases/download/') ? 'github-releases' : 'github-tags', 'extractVersion': $prefix != '' ? '^' & $prefix & '(?<version>.+)$'})"
       ]
     },
     {
       "customType": "jsonata",
-      "description": "Each pinned release asset of a manifest, one dependency per asset since Renovate updates one digest per dependency. Its key, `<release tag>/<target>`, repeats the tag beside the version the dependency above updates, and its depName is the target, so Renovate finds the tag to replace in this asset's own key.",
+      "description": "The Go toolchain the Go language servers build with.",
       "fileFormat": "json",
-      "managerFilePatterns": ["/^packages/loxel/scripts/language-servers/[^/]+\\.json$/"],
-      "matchStrings": [
-        "$exists(sha256) ? ($repo := $substringBefore($substringAfter(purl, '/'), '@'); $each(sha256, function($digest, $key) { {'depName': $substringAfter($key, '/'), 'packageName': $repo, 'currentValue': $substringBefore($key, '/'), 'currentDigest': $digest, 'datasource': 'github-release-attachments'} }))"
-      ]
-    },
-    {
-      "customType": "regex",
-      "description": "The Go toolchain the Go language servers build with. Version only: go.dev is not a source Renovate can hash.",
-      "managerFilePatterns": ["/^packages/loxel/scripts/go-toolchain\\.ts$/"],
-      "matchStrings": ["export const GO_VERSION = \"(?<currentValue>[^\"]+)\";"],
-      "depNameTemplate": "go",
-      "datasourceTemplate": "golang-version"
+      "managerFilePatterns": ["/^packages/loxel/scripts/go-toolchain\\.json$/"],
+      "matchStrings": ["{'depName': 'go', 'currentValue': version, 'datasource': 'golang-version'}"]
     },
     {
       "customType": "regex",
@@ -52,39 +41,25 @@
   ],
   "packageRules": [
     {
-      "description": "One pull request per manifest: its version and every asset pinned from the same release.",
-      "matchFileNames": ["packages/loxel/scripts/language-servers/*.json"],
-      "groupName": "{{{packageName}}}",
-      "groupSlug": "{{{replace '/' '-' packageName}}}"
+      "description": "Pins the new version's SHA256s. The workflow's allowedCommands admits exactly this command.",
+      "matchFileNames": [
+        "packages/loxel/scripts/language-servers/*.json",
+        "packages/loxel/scripts/go-toolchain.json"
+      ],
+      "postUpgradeTasks": {
+        "commands": ["bun packages/loxel/scripts/pin-hashes.ts {{{packageFile}}}"],
+        "fileFilters": [
+          "packages/loxel/scripts/language-servers/*.json",
+          "packages/loxel/scripts/go-toolchain.json"
+        ],
+        "executionMode": "update"
+      }
     },
     {
       "description": "Built from a commit of its main branch in a wrapper module that Dependabot raises.",
       "matchPackageNames": ["github.com/docker/docker-language-server"],
       "enabled": false
     },
-    { "matchDepNames": ["bun"], "semanticCommitScope": "deps" },
-    {
-      "description": "Version only: the download is not a GitHub release asset, so a person completes the pin. A draft until then, since not every one of these builds in CI.",
-      "matchDepNames": ["go", "eclipse-jdtls/eclipse.jdt.ls", "microsoft/vscode-eslint"],
-      "draftPR": true
-    },
-    {
-      "matchDepNames": ["go"],
-      "prBodyNotes": [
-        "**Version only.** Before merging, set `GO_SHA256` in `packages/loxel/scripts/go-toolchain.ts` to the new archives' digests from https://go.dev/dl/?mode=json. Until then the toolchain download fails its hash check. Mark the PR ready when done."
-      ]
-    },
-    {
-      "matchDepNames": ["eclipse-jdtls/eclipse.jdt.ls"],
-      "prBodyNotes": [
-        "**Version only.** Before merging, set `ARCHIVE`'s build timestamp and `SHA256` in `packages/loxel/scripts/download-jdtls.ts` from `latest.txt` and the archive's `.sha256` in https://download.eclipse.org/jdtls/milestones/{{{newVersion}}}/. Until then the download fails; CI does not build jdtls, so run `pnpm -C packages/loxel run build:language-servers jdtls`. Mark the PR ready when done."
-      ]
-    },
-    {
-      "matchDepNames": ["microsoft/vscode-eslint"],
-      "prBodyNotes": [
-        "**Version only.** Before merging, set `SHA256` in `packages/loxel/scripts/build-eslint-language-server.ts` to the hash of https://codeload.github.com/microsoft/vscode-eslint/tar.gz/refs/tags/release/{{{newVersion}}}, raise any loxel dependency below what the tag's `server/package.json` names, and run `src/server/eslint-language-server.test.ts`. Until then the download fails its hash check. Mark the PR ready when done."
-      ]
-    }
+    { "matchDepNames": ["bun"], "semanticCommitScope": "deps" }
   ]
 }

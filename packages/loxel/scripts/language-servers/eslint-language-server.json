@@ -13,5 +13,7 @@
     "vscode-uri",
     "semver"
   ],
-  "note": "Bundles vscode-languageserver, vscode-languageserver-protocol, vscode-languageserver-textdocument, vscode-uri (MIT) and semver (ISC)."
+  "note": "Bundles vscode-languageserver, vscode-languageserver-protocol, vscode-languageserver-textdocument, vscode-uri (MIT) and semver (ISC).",
+  "download": "https://codeload.github.com/microsoft/vscode-eslint/tar.gz/refs/tags/release/{version}",
+  "sha256": { "source": "f82fb2aab96eede6273af2d9aafeb9a29c5723c5af5a9819e37c61d7f51cc052" }
 }

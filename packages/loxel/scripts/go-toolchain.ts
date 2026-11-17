@@ -1,6 +1,7 @@
 /**
  * The Go toolchain language servers built from source compile with, so those builds need no Go
- * install. It is pinned by SHA256 and downloaded into `build/`.
+ * install. go-toolchain.json pins its version and archives by SHA256 (see pinned-download.ts), and
+ * it is downloaded into `build/`.
  */
 
 import { createHash } from "node:crypto";
@@ -13,21 +14,12 @@ import {
   installedFrom,
   recordInstalledFrom,
 } from "./download-release-binary";
+import { pinnedFile, readPinnedDownload } from "./pinned-download";
 
-// Renovate (renovate.json) bumps GO_VERSION alone, since go.dev is not a source it can hash: the
-// person completing its pull request copies the new archives' digests from the URL below. Until
-// then the toolchain download fails its hash check.
-export const GO_VERSION = "1.27.4";
+const PINS_FILE = path.join(import.meta.dir, "go-toolchain.json");
+const PINS = readPinnedDownload(PINS_FILE, await Bun.file(PINS_FILE).json());
 
-/** Pinned SHA256 digests from https://go.dev/dl/?mode=json */
-const GO_SHA256: Record<string, string> = {
-  "darwin-amd64": "2b799377704ef12db39bd254995d5c348c9cc8d86562ca817724390e56c38f43",
-  "darwin-arm64": "91a44a2b8a716600ad94a4f143e156116620db8828086a6e3602291be9bd0bb4",
-  "linux-amd64": "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840",
-  "linux-arm64": "3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92",
-  "windows-amd64": "178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e",
-  "windows-arm64": "9e7a72565792b8ab370b37ac9ac109799237abacb39ff2f541c438b963c0cc64",
-};
+export const GO_VERSION = PINS.version;
 
 function goPlatform(): string {
   const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "amd64" : process.arch;
@@ -45,18 +37,13 @@ export interface GoToolchain {
 
 /** The pinned toolchain, downloading it unless it is already in `build/`. */
 export async function ensureGoToolchain(): Promise<GoToolchain> {
-  const platform = goPlatform();
-  const sha256 = GO_SHA256[platform];
-  if (!sha256) throw new Error(`No pinned Go toolchain for platform ${platform}`);
-
+  const { url, sha256 } = pinnedFile(
+    "go-toolchain",
+    PINS,
+    `${goPlatform()}${ext ? ".zip" : ".tar.gz"}`,
+  );
   const goRoot = path.join(BUILD_DIR, `go-${GO_VERSION}`);
-  await downloadReleaseBinary({
-    name: "go",
-    url: `https://go.dev/dl/go${GO_VERSION}.${platform}${ext ? ".zip" : ".tar.gz"}`,
-    sha256,
-    member: "go",
-    outBinary: goRoot,
-  });
+  await downloadReleaseBinary({ name: "go", url, sha256, member: "go", outBinary: goRoot });
   return { goRoot, go: path.join(goRoot, "bin", `go${ext}`) };
 }
 

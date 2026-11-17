@@ -5,5 +5,9 @@
   "purl": "pkg:github/eclipse-jdtls/eclipse.jdt.ls@v{version}",
   "license": "EPL-2.0",
   "source": "https://github.com/eclipse-jdtls/eclipse.jdt.ls/tree/v{version}",
-  "licenseFile": "licenses/jdtls.txt"
+  "licenseFile": "licenses/jdtls.txt",
+  "download": "https://download.eclipse.org/jdtls/milestones/{version}/{target}",
+  "sha256": {
+    "jdt-language-server-1.63.0-202610191322.tar.gz": "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4"
+  }
 }
