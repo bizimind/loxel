@@ -23,7 +23,12 @@ import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./query-keys";
+import {
+  isDirContentsKeyBelow,
+  isWorkingTreeDiffKey,
+  queryKeys,
+  workingTreeFileContentKey,
+} from "./query-keys";
 
 const log = frontendLog.child("files");
 const serverLog = frontendLog.child("server");
@@ -287,8 +292,12 @@ export function useWsBridge(): void {
             queryKey: queryKeys.status(projectPath, message.wtPath),
           });
           queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(projectPath) });
-          queryClient.invalidateQueries({ queryKey: ["diff", projectPath] });
-          queryClient.invalidateQueries({ queryKey: ["dirContents", projectPath] });
+          // Only this worktree's: commit and range diffs are keyed by SHA, so they cannot be stale.
+          queryClient.invalidateQueries({
+            predicate: ({ queryKey }) =>
+              isWorkingTreeDiffKey(queryKey, projectPath, message.wtPath) ||
+              isDirContentsKeyBelow(queryKey, projectPath, message.wtPath),
+          });
           queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey;

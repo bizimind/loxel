@@ -157,10 +157,22 @@ describe("useWsBridge file messages", () => {
     expect(invalidatedKeys()).toEqual([
       queryKeys.status(PROJECT, WT),
       queryKeys.worktreeStatuses(PROJECT),
-      ["diff", PROJECT],
-      ["dirContents", PROJECT],
       queryKeys.detachedFiles(PROJECT, WT),
       queryKeys.externalFiles(PROJECT, WT),
+    ]);
+    // Only this worktree's working-tree diffs and directory listings.
+    const otherWtDiff = queryKeys.diff(PROJECT, { type: "staged", worktree: `${WT}2` });
+    const ownDirs = [
+      queryKeys.dirContents(PROJECT, WT),
+      queryKeys.dirContents(PROJECT, `${WT}/src`),
+    ];
+    const otherDirs = [
+      queryKeys.dirContents(PROJECT, `${WT}2`),
+      queryKeys.dirContents("/other", WT),
+    ];
+    expect(matchedByPredicates([...DIFF_KEYS, otherWtDiff, ...ownDirs, ...otherDirs])).toEqual([
+      ...WORKING_TREE_DIFFS,
+      ...ownDirs,
     ]);
     expect(setQueryData).not.toHaveBeenCalled();
   });

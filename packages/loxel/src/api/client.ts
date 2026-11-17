@@ -1198,7 +1198,10 @@ export class WsClient {
     if (this.isOpen()) this.sendNow({ type: "subscribe_worktree", worktreePath });
   }
 
-  /** Unsubscribe from worktree events. Server tears down resources when no subscribers remain. */
+  /**
+   * Unsubscribe from worktree events. The server keeps the worktree's resources for a grace period
+   * after its last subscriber leaves.
+   */
   unsubscribeWorktree(worktreePath: string): void {
     if (!this.worktrees.delete(worktreePath)) return;
     if (this.isOpen()) this.sendNow({ type: "unsubscribe_worktree", worktreePath });
