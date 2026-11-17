@@ -101,6 +101,8 @@ describe("project conversion preflight", () => {
       homeDrafts: {} as never,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
+      queueForWindow: () => false,
+      inboxHasRoom: () => false,
     };
   }
 

@@ -113,6 +113,8 @@ describe("Others folders routes", () => {
       homeDrafts: {} as never,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
+      queueForWindow: () => false,
+      inboxHasRoom: () => false,
     };
   });
 

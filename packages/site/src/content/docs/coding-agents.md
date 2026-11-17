@@ -35,7 +35,7 @@ See [Loxel CLI](/docs/cli#terminals) for the details.
 
 With ten agents going, you need to know which one is waiting on you. Terminal programs raise Loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences, and many agents can send them: look for a terminal or iTerm2 notification option in your agent's settings. Choose which sequences Loxel listens to in **Settings > Terminal**.
 
-A notification shows up under the bell in the top bar and as a dot on its worktree in the sidebar, and a folded worktree shows the notifications of the worktrees nested in it. Press `` Ctrl+` `` to jump straight to the panel that raised the most recent one. Pages in browser panels can notify you here too; see [Browser](/docs/browser#notifications).
+A notification shows up under the bell in the top bar and as a dot on its worktree in the sidebar, and a folded worktree shows the notifications of the worktrees nested in it. Press `` Ctrl+` `` to jump straight to the panel that raised the most recent one. Notifications stay until you see them, even when Loxel restarts. Pages in browser panels can notify you here too; see [Browser](/docs/browser#notifications). When an agent opens something with `loxel` while no Loxel window is open, the next window opens it and a notification says so; see [When no window is open](/docs/cli#when-no-window-is-open).
 
 ---
 

@@ -39,6 +39,7 @@ import {
   registrationNotificationSchema,
 } from "./browser-notification-protocol";
 import {
+  LAUNCH_REF_PREFIX,
   capTexts,
   isSecureWebOrigin,
   listeningHost,
@@ -252,7 +253,7 @@ function show(caller: Caller | null, value: unknown): RegistrationShowResult {
   for (const [ref, n] of notifications) {
     if (texts.tag && n.scope === caller.scope && n.tag === texts.tag) notifications.delete(ref);
   }
-  const ref = `sw-${nextRef++}`;
+  const ref = `sw-${LAUNCH_REF_PREFIX}-${nextRef++}`;
   notifications.set(ref, {
     ref,
     ...texts,

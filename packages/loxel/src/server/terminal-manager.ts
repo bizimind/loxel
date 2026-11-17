@@ -578,22 +578,26 @@ export class TerminalManager {
     }
   }
 
-  /** True if any running session has no attached client. */
-  hasOrphanSessions(): boolean {
-    for (const session of this.sessions.values()) {
-      if (!session.sink && !session.ended) return true;
-    }
-    return false;
+  /** True if any running session has no attached client, other than those `kept`. */
+  hasOrphanSessions(kept: (id: string) => boolean = () => false): boolean {
+    return this.orphans(kept).length > 0;
   }
 
   /**
-   * Destroy every running session without an attached client. Ended ones are kept for their
-   * panels to show what they missed. Returns the number destroyed.
+   * Destroy every running session without an attached client, other than those `kept` (a panel
+   * for them is on its way). Ended ones are kept for their panels to show what they missed.
+   * Returns the number destroyed.
    */
-  destroyOrphans(): number {
-    const orphans = [...this.sessions].filter(([, s]) => !s.sink && !s.ended).map(([id]) => id);
+  destroyOrphans(kept: (id: string) => boolean = () => false): number {
+    const orphans = this.orphans(kept);
     for (const id of orphans) this.destroy(id);
     return orphans.length;
+  }
+
+  private orphans(kept: (id: string) => boolean): string[] {
+    return [...this.sessions]
+      .filter(([id, s]) => !s.sink && !s.ended && !kept(id))
+      .map(([id]) => id);
   }
 
   destroyAll(): void {

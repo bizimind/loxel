@@ -6,6 +6,7 @@
  */
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
+import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -26,6 +27,13 @@ function activatePanelById(panelId: string, retries = 1): void {
 export function navigateToNotification(notification: ServerNotification): void {
   const { source } = notification;
 
+  // Panels the inbox opened: go to where they opened. The notification has done its job.
+  if (source.kind === "inbox") {
+    usePanelNotificationStore.getState().dismiss(notification.id);
+    showPlace(source.worktreePath, () => {});
+    return;
+  }
+
   // Only sources with a panel can be navigated to
   if (!isPanelSource(source)) return;
   const { panelId, worktreePath } = source;
@@ -34,7 +42,7 @@ export function navigateToNotification(notification: ServerNotification): void {
   // `notificationclick`, runs (to open the chat or build it was about). A page in another worktree
   // or Home kept running there, so after a switch the click waits for its layout to mount, and what
   // the page opens lands next to it. Main ignores refs with nothing left to click (the page was
-  // closed, unloaded or reloaded, and no service worker showed it).
+  // closed, unloaded or reloaded, a service worker that showed it is gone, or Loxel restarted since).
   const activate = (afterSwitch: boolean) => {
     if (source.kind !== "browser") return activatePanelById(panelId);
     const click = (slot: PageSlot | null) => {
@@ -46,20 +54,26 @@ export function navigateToNotification(notification: ServerNotification): void {
     else click(getBrowserPageSlot(panelId));
   };
 
+  showPlace(worktreePath, activate);
+}
+
+/**
+ * Show a worktree, or Home (null), then call `then` with whether it had to switch there, once the
+ * swapped-in layout has had a frame to mount.
+ */
+function showPlace(worktreePath: string | null, then: (afterSwitch: boolean) => void): void {
   const wtStore = useWorktreeStore.getState();
   if (worktreePath === null && wtStore.activeWorktreePath !== null) {
-    // A Home panel's: go Home first, then activate the panel after layout settles
     wtStore.showHome();
-    requestAnimationFrame(() => activate(true));
+    requestAnimationFrame(() => then(true));
   } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
-    // Switch worktree first, then activate the panel after layout settles
     void wtStore
       .switchWorktree(worktreePath)
-      .then(() => requestAnimationFrame(() => activate(true)))
+      .then(() => requestAnimationFrame(() => then(true)))
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);
       });
   } else {
-    activate(false);
+    then(false);
   }
 }

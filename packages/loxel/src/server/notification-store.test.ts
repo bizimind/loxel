@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { BrowserNotificationSource, NotificationSource } from "@/api/notification-model";
 
@@ -53,8 +56,12 @@ describe("NotificationStore", () => {
     store.add({ source: terminal, urgency: "normal" });
     store.add({ source: browser("a"), urgency: "normal" });
     store.add({ source: { kind: "server" }, urgency: "normal" });
-    expect(store.dismissByWorktree("/wt").toSorted()).toEqual(["browser-1", "t1"]);
-    expect(store.getAll().map((n) => n.source.kind)).toEqual(["server"]);
+    const inbox = store.add({ source: { kind: "inbox", worktreePath: "/wt" }, urgency: "normal" });
+    store.add({ source: { kind: "inbox", worktreePath: "/other" }, urgency: "normal" });
+    const { panelIds, inboxIds } = store.dismissByWorktree("/wt");
+    expect(panelIds.toSorted()).toEqual(["browser-1", "t1"]);
+    expect(inboxIds).toEqual([inbox.id]);
+    expect(store.getAll().map((n) => n.source.kind)).toEqual(["inbox", "server"]);
   });
 
   test("tag replacement stays within one worktree", () => {
@@ -81,5 +88,60 @@ describe("NotificationStore", () => {
     expect(evicted).toHaveLength(10);
     expect(store.getAll().filter((n) => n.source.kind === "browser")).toHaveLength(50);
     expect(store.getAll()).toContainEqual(agent);
+  });
+});
+
+describe("NotificationStore persistence", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "loxel-notifications-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("keeps the list across a restart, dismissals included", () => {
+    const path = join(dir, "notifications.db");
+    const first = new NotificationStore(path);
+    const kept = first.add({ source: terminal, title: "done", urgency: "high" });
+    const dismissed = first.add({ source: { kind: "server" }, urgency: "normal" });
+    const page = first.addBrowser({
+      source: browser("a"),
+      title: "build",
+      urgency: "normal",
+    }).added;
+    first.dismiss(dismissed.id);
+    first.close();
+
+    const second = new NotificationStore(path);
+    // Newest first, as before, and a browser page's keeps its ref: main ignores a stale one.
+    expect(second.getAll()).toEqual([page, kept]);
+    second.dismissAll();
+    second.close();
+
+    const third = new NotificationStore(path);
+    expect(third.getAll()).toEqual([]);
+    third.close();
+  });
+
+  test("keeps the newest 200 across a restart", () => {
+    const path = join(dir, "notifications.db");
+    const first = new NotificationStore(path);
+    for (let i = 0; i < 205; i++) first.add({ source: terminal, title: String(i), urgency: "low" });
+    first.close();
+
+    const titles = new NotificationStore(path).getAll().map((n) => n.title);
+    expect(titles).toHaveLength(200);
+    expect(titles[0]).toBe("204");
+    expect(titles.at(-1)).toBe("5");
+  });
+
+  test("goes on in memory when its file cannot be opened", () => {
+    // A directory where the file should be.
+    const store = new NotificationStore(dir);
+    const added = store.add({ source: terminal, urgency: "normal" });
+    expect(store.getAll()).toEqual([added]);
   });
 });

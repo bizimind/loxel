@@ -60,7 +60,7 @@ An agent that runs its commands in a sandbox can use `loxel` only if the sandbox
 
 ## Files and folders
 
-`loxel <path>` goes to the window you are working in: the window of the Loxel terminal it runs in, or else the most recently focused Loxel window. Other windows are left alone. A file or folder inside one of your projects' worktrees opens in that worktree, switching to it if needed when the open takes focus (a folder is revealed in the file tree). Anything else opens in the [Others section](/docs/editor#other-folders) of that window's active worktree, so files don't need to be inside a git repository. To use a different worktree, see [Choosing the worktree](#choosing-the-worktree). If Loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 30 seconds for a window to connect. Files and folders opened from Finder take the same path (see [Opening files from Finder](/docs/editor#opening-files-from-finder)).
+`loxel <path>` goes to the window you are working in: the window of the Loxel terminal it runs in, or else the most recently focused Loxel window. Other windows are left alone. A file or folder inside one of your projects' worktrees opens in that worktree, switching to it if needed when the open takes focus (a folder is revealed in the file tree). Anything else opens in the [Others section](/docs/editor#other-folders) of that window's active worktree, so files don't need to be inside a git repository. To use a different worktree, see [Choosing the worktree](#choosing-the-worktree). If Loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 30 seconds for a window to connect; if no window is open at all, see [When no window is open](#when-no-window-is-open). Files and folders opened from Finder take the same path (see [Opening files from Finder](/docs/editor#opening-files-from-finder)).
 
 ---
 
@@ -109,6 +109,16 @@ If the file is already open, its tab moves to the requested spot instead of open
 With focus, an open shows you what it opened: Loxel comes to the front when you run `loxel` outside it, the window switches to the worktree the panel belongs to, and the new tab becomes the active one. Without focus, your view stays as it is: Loxel is not brought to the front (only launched if it isn't running), the window stays on its worktree, and the panel is added as a background tab, or as a new split that doesn't take the cursor. Replacing the tab you are on with `--replace` still shows its replacement in its place. A panel for another worktree is waiting there when you next switch to it, and a terminal's command starts running right away, even though you haven't looked at it yet. An already-open file isn't activated, though layout flags still move its tab. A folder can only be revealed with focus, so without it nothing opens and the CLI prints a warning.
 
 `--focus` and `--no-focus` choose explicitly (they can't be combined). Without either, the default depends on who runs the command: you get focus, and a coding agent doesn't, so an agent's opens never pull you away from what you are doing. The CLI recognizes coding agents by the environment variables they set for the commands they run: `CLAUDECODE` (Claude Code), `CODEX_SANDBOX`, `CODEX_CI` or `CODEX_THREAD_ID` (Codex), `GEMINI_CLI` (Gemini CLI), `CURSOR_AGENT` (Cursor), `OPENCODE_CLIENT` (opencode), `AUGMENT_AGENT` (Augment), `ANTIGRAVITY_AGENT` (Antigravity), `CLAUDE_CODE`, and the cross-agent `AI_AGENT`.
+
+---
+
+## When no window is open
+
+On macOS, Loxel keeps running after you close its last window, and agents keep working in its terminals. What `loxel` opens then isn't lost: it waits for the next Loxel window, and the CLI prints `loxel: no Loxel window is open; this will open in the next window to connect` and succeeds. A `loxel terminal` command starts running right away, without its panel.
+
+When you open a window (click Loxel in the Dock, for example), everything that waited opens in it, in the order it was asked for, and a notification for each worktree says what opened while you were away, such as **2 terminals and a file opened while you were away**. Opens without focus wait in their worktree as usual, so click the notification to go there. Opens wait through a restart of Loxel, up to 100 of them, for at most 3 days. A terminal still has to be running to open: one that ended in the meantime, for example because you quit Loxel and ended its terminals, is dropped.
+
+When `loxel` brings Loxel to the front, or launches it, it waits for the window that comes up instead, as long as 30 seconds, so your own opens show up the moment the window does.
 
 ---
 

@@ -102,6 +102,11 @@ interface PageNotification {
 /** The pages' live notifications by main's ref, for clicks. */
 const pageNotifications = new Map<string, PageNotification>();
 let nextRef = 1;
+/**
+ * Starts every ref this launch of the app hands out. The server keeps notifications across
+ * restarts, so a ref from an earlier launch must never name a page that got the same numbers now.
+ */
+export const LAUNCH_REF_PREFIX = crypto.randomUUID().slice(0, 8);
 /** When each guest showed its recent notifications, for the rate limit; kept across reloads. */
 const recentShows = new Map<number, number[]>();
 
@@ -313,7 +318,7 @@ function showNotification(event: IpcMainEvent, value: unknown): void {
   if (!host || isSiteMuted(guest.mainFrame.origin) || !withinRateLimit(guest.id)) return;
 
   const { pageId, title, body, tag } = parsed.data;
-  const ref = `${guest.id}-${nextRef++}`;
+  const ref = `${LAUNCH_REF_PREFIX}-${guest.id}-${nextRef++}`;
   track(ref, { guestId: guest.id, host, frame, pageId });
   sendToNotificationCenter(host, { ref, guest, title, body, tag });
 }

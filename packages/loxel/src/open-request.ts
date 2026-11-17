@@ -4,7 +4,7 @@ import type { PanelOpenOptions } from "./api/panel-placement-model";
  * How long an open request waits for a Loxel window to connect — long enough for a cold start,
  * where the app, its server and the first window's renderer all start up.
  */
-const WINDOW_WAIT_MS = 30_000;
+export const WINDOW_WAIT_MS = 30_000;
 const RETRY_INTERVAL_MS = 300;
 
 /** A terminal to open: where its shell starts, what to type into it, and the tab title. */
@@ -33,15 +33,25 @@ export type OpenRequest = (
   | { terminal: OpenTerminalRequest; pinWtPath?: string }
 ) & { windowId?: string } & PanelOpenOptions;
 
-/** Reply to `POST /api/open`: `warning` notes part of the request that was ignored. */
+/**
+ * Reply to `POST /api/open`: `warning` notes part of the request that was ignored, and `queued`
+ * that no window was connected, so the open waits in the server's inbox for the next one.
+ */
 export interface OpenResult {
   warning?: string;
+  queued?: boolean;
 }
 
 interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */
   onWaiting?: () => void;
   windowWaitMs?: number;
+  /**
+   * How long to wait for a window before letting the server queue the request for the next one
+   * (`queue`), instead of retrying until `windowWaitMs` and failing: 0 when no window is coming
+   * (Loxel was not launched), the wait itself when one should (it was). Undefined never queues.
+   */
+  queueAfterMs?: number;
   /**
    * The Unix socket to send the request over (the `loxel` CLI's); `serverUrl` then only fills the
    * URL.
@@ -50,24 +60,26 @@ interface RequestOpenOptions {
 }
 
 /**
- * Ask the Loxel server at `serverUrl`, or on the `unix` socket, to open a file, folder, URL or terminal. Files, folders and
- * terminals are sent to a window, so a 503 means none has connected yet — Loxel is still
- * launching — and the request is retried for a while instead of failing. So is a request no server
+ * Ask the Loxel server at `serverUrl`, or on the `unix` socket, to open a file, folder, URL or
+ * terminal. Files, folders and terminals are sent to a window, so a 503 means none has connected
+ * yet — Loxel is still launching — and the request is retried for a while instead of failing, or,
+ * after `queueAfterMs`, left in the server's inbox for the next window. So is a request no server
  * answers, as between a server that is exiting (quit, update restart, crash) and its replacement.
  */
 export async function requestOpen(
   serverUrl: string,
   request: OpenRequest,
-  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, unix }: RequestOpenOptions = {},
+  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, queueAfterMs, unix }: RequestOpenOptions = {},
 ): Promise<OpenResult> {
+  const start = Date.now();
   let unreachable: unknown = null;
   /** The response, or null when no server answered: one may be handing over to the next. */
-  const post = async (): Promise<Response | null> => {
+  const post = async (queue: boolean): Promise<Response | null> => {
     try {
       return await fetch(`${serverUrl}/api/open`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
+        body: JSON.stringify(queue ? { ...request, queue } : request),
         ...(unix ? { unix } : {}),
       });
     } catch (err) {
@@ -75,26 +87,29 @@ export async function requestOpen(
       return null;
     }
   };
+  const mayQueue = () => queueAfterMs !== undefined && Date.now() - start >= queueAfterMs;
 
-  let res = await post();
+  let res = await post(mayQueue());
   if (res === null || res.status === 503) {
     onWaiting?.();
-    const start = Date.now();
     while ((res === null || res.status === 503) && Date.now() - start < windowWaitMs) {
       await new Promise((resolve) => {
         setTimeout(resolve, RETRY_INTERVAL_MS);
       });
-      res = await post();
+      res = await post(mayQueue());
     }
   }
+  // The wait ended with no window: the next one gets the request.
+  if (res?.status === 503 && queueAfterMs !== undefined) res = await post(true);
   if (res === null) {
     throw new Error(`Cannot reach Loxel at ${unix ?? serverUrl}`, { cause: unreachable });
   }
   const data: unknown = await res.json().catch(() => null);
   if (res.ok) {
-    const warning =
-      typeof data === "object" && data !== null && "warning" in data ? data.warning : undefined;
-    return typeof warning === "string" ? { warning } : {};
+    const fields = typeof data === "object" && data !== null ? data : {};
+    const warning = "warning" in fields ? fields.warning : undefined;
+    const queued = "queued" in fields && fields.queued === true;
+    return { ...(typeof warning === "string" ? { warning } : {}), ...(queued ? { queued } : {}) };
   }
 
   const message =
@@ -108,6 +123,8 @@ export async function requestOpen(
 export interface OpenAllResult {
   /** The distinct warnings of the requests that went through. */
   warnings: string[];
+  /** How many went to the server's inbox, to open when a window connects. */
+  queued: number;
   /** The requests that failed, by index, and why. */
   failures: Array<{ index: number; message: string }>;
 }
@@ -120,26 +137,30 @@ export interface OpenAllResult {
 export async function requestOpenAll(
   serverUrl: string,
   requests: OpenRequest[],
-  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, unix }: RequestOpenOptions = {},
+  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, queueAfterMs, unix }: RequestOpenOptions = {},
 ): Promise<OpenAllResult> {
-  const deadline = Date.now() + windowWaitMs;
+  const start = Date.now();
+  const remaining = (ms: number) => Math.max(0, start + ms - Date.now());
   let announced = false;
   const warnings = new Set<string>();
+  let queued = 0;
   const failures: OpenAllResult["failures"] = [];
   for (const [index, request] of requests.entries()) {
     try {
-      const { warning } = await requestOpen(serverUrl, request, {
+      const result = await requestOpen(serverUrl, request, {
         unix,
-        windowWaitMs: Math.max(0, deadline - Date.now()),
+        windowWaitMs: remaining(windowWaitMs),
+        ...(queueAfterMs === undefined ? {} : { queueAfterMs: remaining(queueAfterMs) }),
         onWaiting: () => {
           if (!announced) onWaiting?.();
           announced = true;
         },
       });
-      if (warning) warnings.add(warning);
+      if (result.warning) warnings.add(result.warning);
+      if (result.queued) queued += 1;
     } catch (err) {
       failures.push({ index, message: err instanceof Error ? err.message : String(err) });
     }
   }
-  return { warnings: [...warnings], failures };
+  return { warnings: [...warnings], queued, failures };
 }

@@ -79,6 +79,7 @@ import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
+import type { InboxMessage } from "./open-inbox";
 import { SETTINGS_STORE_KEY, stripLegacyAgentSettings } from "./persisted-settings";
 import * as projectStore from "./project-store";
 import {
@@ -218,6 +219,13 @@ export interface RouteContext {
   ) => Promise<void>;
   /** The terminals the server runs; with `programs`, their foreground programs where known. */
   listTerminals: (options: { programs: boolean }) => Promise<RunningTerminals>;
+  /**
+   * Keep an open for the next window to connect, in the open inbox: `worktreePath` is where it
+   * opens (null for Home or what the window shows). Returns false when the inbox is full.
+   */
+  queueForWindow: (message: InboxMessage, worktreePath: string | null) => boolean;
+  /** Whether the open inbox has room for another request. */
+  inboxHasRoom: () => boolean;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -3087,6 +3095,29 @@ async function namedWorktree(ctx: RouteContext, path: unknown): Promise<string |
   return canonical ? owningWorktree(ctx, canonical) : null;
 }
 
+const NO_WINDOW = "No Loxel window is open";
+
+/**
+ * The reply to an open no window can take. With `queue` (the `loxel` CLI expects no window to come
+ * soon) it waits in the open inbox for the next window; without, it is a 503, which the caller
+ * retries while Loxel launches.
+ */
+function openWithoutWindow(
+  ctx: RouteContext,
+  queue: boolean,
+  message: InboxMessage,
+  worktreePath: string | null,
+  reply: { warning?: string } = {},
+): Response {
+  if (!queue) return error(NO_WINDOW, 503);
+  if (!ctx.queueForWindow(message, worktreePath)) return inboxFull();
+  return json({ ok: true, queued: true, ...reply }, 202);
+}
+
+function inboxFull(): Response {
+  return error("Too many opens are waiting for a Loxel window; open one to receive them", 429);
+}
+
 // POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
 // `loxel` CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
@@ -3101,6 +3132,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (body.focus !== undefined && typeof body.focus !== "boolean") {
     return error("focus must be a boolean", 400);
   }
+  if (body.queue !== undefined && typeof body.queue !== "boolean") {
+    return error("queue must be a boolean", 400);
+  }
+  const queue = body.queue === true;
   // Opening without focus leaves the window's worktree and active tab alone.
   const unfocused = body.focus === false ? { focus: false } : {};
   const placed = { ...(placement ? { placement } : {}), ...unfocused };
@@ -3131,34 +3166,39 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
     // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
-    // window shows, else to Home (null), which a window shows with no worktree.
+    // window shows, else to Home (null), which a window shows with no worktree. With no window, the
+    // terminal waits in the inbox for the next one, in Home unless a worktree holds it.
     const owner = pinned ?? (await owningWorktree(ctx, cwd));
     const window = ctx.activeWindow(windowId);
-    if (!window) return error("No Loxel window is open", 503);
-    const worktreePath = owner ?? window.worktreePath;
+    if (!window && !queue) return error(NO_WINDOW, 503);
+    if (!window && !ctx.inboxHasRoom()) return inboxFull();
+    const worktreePath = owner ?? window?.worktreePath ?? null;
 
     const terminalId = crypto.randomUUID();
-    const sent = ctx.sendToActiveWindow(windowId, {
+    const message: InboxMessage = {
       type: "open_terminal",
       data: { terminalId, cwd, worktreePath, ...(title ? { title } : {}), ...placed },
-    });
-    if (!sent) return error("No Loxel window is open", 503);
+    };
+    if (window && !ctx.sendToActiveWindow(windowId, message)) return error(NO_WINDOW, 503);
     // Started here, not by the panel's attach: the panel may not mount for hours (a background
-    // tab, a worktree the user is not on, a window that is not painting), and the command must
-    // run now. Started in the same tick as the send, so the panel's attach finds it.
+    // tab, a worktree the user is not on, a window that is not painting, or none connected), and
+    // the command must run now. Started in the same tick as the send, so the panel's attach finds
+    // it.
     try {
       await ctx.startTerminal({
         id: terminalId,
         cwd,
         ...(worktreePath ? { worktreePath } : {}),
-        ...(window.windowId ? { windowId: window.windowId } : {}),
+        ...(window?.windowId ? { windowId: window.windowId } : {}),
         ...(command ? { command } : {}),
       });
     } catch (err) {
       terminalLog.error("Failed to start terminal", { terminalId, error: err });
       return error("Failed to start the terminal", 500);
     }
-    return json({ ok: true, terminalId });
+    if (window) return json({ ok: true, terminalId });
+    if (!ctx.queueForWindow(message, worktreePath)) return inboxFull();
+    return json({ ok: true, queued: true, terminalId }, 202);
   }
 
   // URL mode: open in browser panel
@@ -3170,12 +3210,13 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     // A link opened with Loxel as the browser names no worktree: the window in use opens it in the
     // worktree it shows, or in Home.
     if (body.wtPath === undefined) {
-      const sent = ctx.sendToActiveWindow(windowId, {
+      const message: InboxMessage = {
         type: "open_url",
         wtPath: null,
         data: { url: body.url, ...placed },
-      });
-      return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+      };
+      if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true });
+      return openWithoutWindow(ctx, queue, message, null);
     }
 
     const wtPath = await namedWorktree(ctx, body.wtPath);
@@ -3184,19 +3225,17 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     // Every window showing the worktree gets the page, but only the one in use applies the
     // placement and takes focus: a `--replace` must not close tabs, nor a page take over, in
     // windows the user did not target.
-    const primary: WsMessage = { type: "open_url", wtPath, data: { url: body.url, ...placed } };
+    const primary: InboxMessage = { type: "open_url", wtPath, data: { url: body.url, ...placed } };
     const shown = ctx.sendToWorktreeWindows(
       wtPath,
       windowId,
       { type: "open_url", wtPath, data: { url: body.url, focus: false } },
       primary,
     );
-    // No window shows the worktree: the window in use opens it there, like a file. 503 like a file
-    // when no window is connected, which the CLI retries while Loxel launches.
-    if (!shown && !ctx.sendToActiveWindow(windowId, primary)) {
-      return error("No Loxel window is open", 503);
-    }
-    return json({ ok: true });
+    // No window shows the worktree: the window in use opens it there, like a file, and with no
+    // window connected it waits like a file.
+    if (shown || ctx.sendToActiveWindow(windowId, primary)) return json({ ok: true });
+    return openWithoutWindow(ctx, queue, primary, wtPath);
   }
 
   const filePath = body.filePath;
@@ -3212,25 +3251,27 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (!stats.isDirectory()) {
     // The worktree of the command's URLs, if it is a project's: the file can open without it.
     const worktreePath = pinned ?? (await namedWorktree(ctx, body.commandWtPath));
-    const sent = ctx.sendToActiveWindow(windowId, {
+    const message: InboxMessage = {
       type: "open_file",
       data: { filePath: path, ...(worktreePath ? { worktreePath } : {}), ...placed },
-    });
-    return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+    };
+    if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true });
+    const place = worktreePath ?? (queue ? await owningWorktree(ctx, path) : null);
+    return openWithoutWindow(ctx, queue, message, place);
   }
 
   // A folder is revealed in the file tree, which takes focus, and is never placed as a panel.
   if (body.focus === false) {
     return json({ ok: true, warning: "A folder is only revealed with focus; pass --focus" });
   }
-  const sent = ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } });
-  if (!sent) return error("No Loxel window is open", 503);
   const ignored = placement ? "Layout flags do not" : pinned ? "--worktree does not" : null;
-  return json(
-    ignored
-      ? { ok: true, warning: `${ignored} apply to a folder; it opens in the file tree` }
-      : { ok: true },
-  );
+  const reply = ignored
+    ? { warning: `${ignored} apply to a folder; it opens in the file tree` }
+    : {};
+  const message: InboxMessage = { type: "open_folder", data: { path } };
+  if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true, ...reply });
+  const place = queue ? await owningWorktree(ctx, path) : null;
+  return openWithoutWindow(ctx, queue, message, place, reply);
 }
 
 // ---------------------------------------------------------------------------

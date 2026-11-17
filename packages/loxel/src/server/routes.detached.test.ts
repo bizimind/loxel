@@ -58,6 +58,8 @@ describe("detached file project destinations", () => {
       homeDrafts,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
+      queueForWindow: () => false,
+      inboxHasRoom: () => false,
     };
   });
 

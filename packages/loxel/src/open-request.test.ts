@@ -106,6 +106,61 @@ describe("requestOpen", () => {
     await expect(result).rejects.toThrow(`Cannot reach Loxel at ${SOCKET}`);
   });
 
+  test("asks the server to queue at once when no window is coming", async () => {
+    const { bodies } = serve([{ status: 202, body: { ok: true, queued: true } }]);
+    let waits = 0;
+
+    const result = await requestOpen(
+      SERVER,
+      { filePath: "/a" },
+      { queueAfterMs: 0, onWaiting: () => waits++ },
+    );
+
+    expect(result).toEqual({ queued: true });
+    expect(bodies).toEqual([{ filePath: "/a", queue: true }]);
+    expect(waits).toBe(0);
+  });
+
+  test("queues once the wait for a launching window is over", async () => {
+    const { bodies } = serve([NO_WINDOW, { status: 202, body: { ok: true, queued: true } }]);
+
+    const result = await requestOpen(
+      SERVER,
+      { filePath: "/a" },
+      { windowWaitMs: 0, queueAfterMs: 30_000 },
+    );
+
+    expect(result).toEqual({ queued: true });
+    expect(bodies).toEqual([{ filePath: "/a" }, { filePath: "/a", queue: true }]);
+  });
+
+  test("waits for a launching window before letting the server queue", async () => {
+    const { bodies } = serve([NO_WINDOW, { status: 202, body: { ok: true, queued: true } }]);
+    // Every look at the clock is 10s later: the first retry is past the 15s it waits.
+    let now = 0;
+    const clock = spyOn(Date, "now").mockImplementation(() => (now += 10_000));
+
+    const result = await requestOpen(
+      SERVER,
+      { filePath: "/a" },
+      { windowWaitMs: 60_000, queueAfterMs: 15_000 },
+    );
+    clock.mockRestore();
+
+    expect(result).toEqual({ queued: true });
+    expect(bodies).toEqual([{ filePath: "/a" }, { filePath: "/a", queue: true }]);
+  });
+
+  test("counts the requests the server queued", async () => {
+    serve([{ status: 202, body: { ok: true, queued: true } }]);
+
+    const result = await requestOpenAll(SERVER, [{ filePath: "/a" }, { filePath: "/b" }], {
+      queueAfterMs: 0,
+    });
+
+    expect(result).toEqual({ warnings: [], queued: 2, failures: [] });
+  });
+
   test("gives up when no window connects in time", async () => {
     serve([NO_WINDOW]);
 
@@ -141,7 +196,11 @@ describe("requestOpen", () => {
       { filePath: "/missing" },
       { url: "https://example.com", wtPath: "/wt" },
     ]);
-    expect(result).toEqual({ warnings: [], failures: [{ index: 1, message: "File not found" }] });
+    expect(result).toEqual({
+      warnings: [],
+      queued: 0,
+      failures: [{ index: 1, message: "File not found" }],
+    });
   });
 
   test("reports each distinct warning once", async () => {
