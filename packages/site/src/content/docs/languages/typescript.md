@@ -9,6 +9,8 @@ Changes made outside the editor reach it without a restart: a `git checkout`, an
 
 [Inlay hints](/docs/editor#inlay-hints) show inferred variable and return types, and the parameter names of literal arguments, such as `add(first: 1, second: 2)`. Turn them off or show them only on demand in **Settings > Editor**.
 
+Loxel never runs a project's TypeScript content mappers (the `contentMappers` in a `tsconfig.json`), since they launch programs the repository names. A project that configures them shows that as an error on its `tsconfig.json`, and the files the mappers would handle get no TypeScript features.
+
 ---
 
 ## See also

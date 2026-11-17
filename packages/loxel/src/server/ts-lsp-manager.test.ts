@@ -102,6 +102,8 @@ const RESOLVE_DEADLINE_MS = 40_000;
 const MISSING_MODULE = "Cannot find module './b'";
 /** "Class 'C' incorrectly implements interface 'I'." */
 const CLASS_INCORRECTLY_IMPLEMENTS = 2420;
+/** "Content mappers require the '--runExternalCode' command line flag to be enabled." */
+const CONTENT_MAPPERS_REQUIRE_RUN_EXTERNAL_CODE = 18068;
 
 let root: string | undefined;
 let manager: TsLspManager | undefined;
@@ -152,6 +154,8 @@ class FakeClient {
   /** Server→client requests that reached the client. */
   readonly requests: Array<{ method: string; params: unknown }> = [];
   private readonly responses = new Map<number, (result: unknown) => void>();
+  /** Waiters for the next `textDocument/publishDiagnostics` of a URI. */
+  private readonly publishWaiters = new Map<string, (diagnostics: Diagnostic[]) => void>();
   private nextId = 1;
 
   constructor(private readonly manager: TsLspManager) {
@@ -165,12 +169,13 @@ class FakeClient {
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
 
-  async start(wtPath: string): Promise<void> {
+  async start(wtPath: string, initializationOptions?: Record<string, unknown>): Promise<void> {
     this.manager.createSession(this.ws, wtPath);
     await this.request("initialize", {
       processId: null,
       rootUri: null,
       capabilities: { textDocument: { diagnostic: {} } },
+      initializationOptions,
     });
     this.send({ method: "initialized", params: {} });
   }
@@ -218,6 +223,13 @@ class FakeClient {
     this.send({
       method: DOCUMENT_INDENTATION_METHOD,
       params: { textDocument: { uri }, indentation },
+    });
+  }
+
+  /** The diagnostics TypeScript next pushes for `uri`, such as a tsconfig's project diagnostics. */
+  nextPublishedDiagnostics(uri: string): Promise<Diagnostic[]> {
+    return new Promise((resolve) => {
+      this.publishWaiters.set(uri, resolve);
     });
   }
 
@@ -297,6 +309,11 @@ class FakeClient {
       return;
     }
     if (message.id !== undefined) this.responses.get(message.id)?.(message.result);
+    if (message.method === "textDocument/publishDiagnostics") {
+      const params = message.params as { uri: string; diagnostics: Diagnostic[] };
+      this.publishWaiters.get(params.uri)?.(params.diagnostics);
+      this.publishWaiters.delete(params.uri);
+    }
   }
 }
 
@@ -448,7 +465,9 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
 
       expect(recording.forwarded("initialize")).toEqual([
         expect.objectContaining({
-          initializationOptions: { userPreferences: expect.objectContaining(off) },
+          initializationOptions: expect.objectContaining({
+            userPreferences: expect.objectContaining(off),
+          }),
         }),
       ]);
 
@@ -470,6 +489,40 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
       expect(recording.forwarded("workspace/didChangeConfiguration")).toEqual([
         { settings: { "js/ts": expect.objectContaining(off) } },
       ]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "never lets a project's content mappers run, whatever the client asks",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspContentMappers-")));
+      // The package need not exist: TypeScript rejects any content mapper while the gate is shut.
+      const tsconfig = JSON.stringify({
+        contentMappers: [{ package: "some-mapper", extensions: [".vue"] }],
+      });
+      await writeFile(join(root, "tsconfig.json"), tsconfig);
+      const text = "export const a = 1;\n";
+      await writeFile(join(root, "a.ts"), text);
+
+      const recording = new RecordingTsLspManager();
+      manager = recording;
+      const client = new FakeClient(recording);
+      await client.start(root, { runExternalCode: true });
+      expect(recording.forwarded("initialize")).toEqual([
+        expect.objectContaining({
+          initializationOptions: expect.objectContaining({ runExternalCode: false }),
+        }),
+      ]);
+
+      // TypeScript pushes a project's config diagnostics on its tsconfig (a JSON file, so `file://`)
+      // once a file of the project is open.
+      const projectDiagnostics = client.nextPublishedDiagnostics(
+        pathToFileURL(join(root, "tsconfig.json")).href,
+      );
+      client.open(join(root, "a.ts"), text);
+      const codes = (await projectDiagnostics).map((d) => d.code);
+      expect(codes).toContain(CONTENT_MAPPERS_REQUIRE_RUN_EXTERNAL_CODE);
     },
     TEST_TIMEOUT_MS,
   );

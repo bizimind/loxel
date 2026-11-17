@@ -211,8 +211,12 @@ export class TsLspManager extends WorktreeLspManager {
     params.rootPath = session.wtPath;
     params.workspaceFolders = workspaceFolders(session.wtPath);
     // TypeScript reads these as the `js/ts` section when the client cannot answer
-    // `workspace/configuration` (monaco-lsp-client does not).
-    params.initializationOptions = { userPreferences: typeScriptSettings(null) };
+    // `workspace/configuration` (monaco-lsp-client does not). `runExternalCode` stays off so a
+    // project's tsconfig `contentMappers` can never make TypeScript run its executables.
+    params.initializationOptions = {
+      userPreferences: typeScriptSettings(null),
+      runExternalCode: false,
+    };
     msg.params = params;
     return JSON.stringify(msg);
   }
