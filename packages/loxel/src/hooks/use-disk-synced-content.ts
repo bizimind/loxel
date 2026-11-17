@@ -287,10 +287,12 @@ export function useDiskSyncedContent<T>(
   }, [isMissingOnDisk, dataUpdatedAt, editorKey]);
 
   // --- Set base content when data is available and state is clean ---
+  // Read live: an editor that just took over an outbox save is no longer clean.
   useEffect(() => {
-    if (data && editorFileState === "clean") {
-      useEditorStateStore.getState().setBaseContent(editorKey, data.content);
-    }
+    if (!data || editorFileState !== "clean") return;
+    const store = useEditorStateStore.getState();
+    if (store.files.get(editorKey)?.state === "clean")
+      store.setBaseContent(editorKey, data.content);
   }, [data, editorKey, editorFileState]);
 
   // --- End of an adoption ---

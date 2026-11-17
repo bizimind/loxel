@@ -37,8 +37,8 @@ export interface EditorFileEntry {
   baseContent: string | null;
   /** The disk content the last external change merge was made against, until the editor's next
    *  write. `baseContent` then holds the editor's form of the merge result, so this is the raw
-   *  disk version the editor's content descends from (see `diskBase`), and the same disk
-   *  content arriving again (a resync, a retry's read) is not merged a second time. */
+   *  disk version the editor's content descends from (see `diskBase`): the base of the next
+   *  merge, and of a save waiting in the outbox. */
   mergedDiskContent: string | null;
   /** Registered by text editors (CodeEditor, MarkdownEditor) for auto-merge.
    *  Returns current editor content as serialized string. null for Excalidraw / unmounted. */
@@ -238,15 +238,6 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     if (!entry) return;
     const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
     const isOwnEcho = matchedNonces.length > 0;
-
-    // Disk content the editor already merged (a resync or a save retry reading the file again):
-    // merging it again with the merge result as base would read as disk undoing the editor's
-    // own edits.
-    const alreadyMerged =
-      !isOwnEcho &&
-      (entry.state === "dirty" || entry.state === "saving") &&
-      diskContent === entry.mergedDiskContent;
-    if (alreadyMerged) return;
 
     // If an own-echo arrives for a nonce that has been superseded (newer saves
     // still in flight), the disk state implied by this echo is stale — a later
@@ -592,8 +583,11 @@ function tryAutoMerge(
   ) => void,
   options?: AutoMergeOptions,
 ): boolean {
-  const { baseContent, getEditorContent, applyMergedContent } = entry;
-  const base = options?.mergeBase ?? baseContent;
+  const { getEditorContent, applyMergedContent } = entry;
+  // The raw disk version the editor's edits descend from, not `baseContent`, which after an
+  // earlier merge is the merge result: against that, a disk change that lacks the editor's edits
+  // would read as removing them.
+  const base = options?.mergeBase ?? diskBase(entry);
   if (base === null || !getEditorContent || !applyMergedContent) return false;
 
   const ours = getEditorContent();

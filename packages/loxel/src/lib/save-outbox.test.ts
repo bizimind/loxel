@@ -17,11 +17,14 @@ let disk: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
 let serverDown = false;
 let refuseWrites = false;
+/** Paths the server answers with a plain 404, as for a worktree it has no resources for. */
+let unserved = new Set<string>();
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
   getFileContentByPath: async (path: string) => {
     if (serverDown) throw new TypeError("Failed to fetch");
+    if (unserved.has(path)) throw new actualClient.ApiError("Not in any worktree", 404);
     const content = disk[path];
     if (content === undefined) throw new actualClient.ApiError("File not found", 404, "ENOENT");
     return { content };
@@ -62,6 +65,7 @@ function openEditor(content: string, editorText: { current: string }): void {
       return merged;
     },
   );
+  store.registerPendingEdit(FILE, () => ({ content: editorText.current }));
 }
 
 function editor() {
@@ -75,6 +79,7 @@ beforeEach(() => {
   writes = [];
   serverDown = false;
   refuseWrites = false;
+  unserved = new Set();
 });
 
 afterEach(() => {
@@ -156,6 +161,29 @@ describe("open editor", () => {
     expect(outboxEntriesForTests()).toEqual([]);
   });
 
+  test("a retry sends what the editor shows now, not the older queued content", async () => {
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+    serverDown = true;
+    await saveEditorContent(FILE, text.current, "/repo");
+    text.current = "a\nb\nc\nd\nTYPED\n"; // typed since, its autosave not due yet
+
+    serverDown = false;
+    await retryQueuedSaves();
+    expect(disk[FILE]).toBe("a\nb\nc\nd\nTYPED\n");
+  });
+
+  test("a second external change does not undo edits kept through the first", async () => {
+    const text = { current: "USER\nb\nc\nd\ne\n" };
+    openEditor("a\nb\nc\nd\ne\n", text);
+    const store = useEditorStateStore.getState();
+    store.markDirty(FILE);
+    store.handleDiskChange(FILE, [], "a\nb\nc\nd\nB\n");
+    expect(text.current).toBe("USER\nb\nc\nd\nB\n");
+    store.handleDiskChange(FILE, [], "a\nb\nC\nd\nB\n");
+    expect(text.current).toBe("USER\nb\nC\nd\nB\n");
+  });
+
   test("a save confirmed without its echo is the base of the next one", async () => {
     const text = { current: "a\nb1\nc\n" };
     openEditor("a\nb\nc\n", text);
@@ -196,6 +224,34 @@ describe("closed editor", () => {
     disk[FILE] = "A\nb\nc\n";
     await retryQueuedSaves();
     expect(disk[FILE]).toBe("A\nb\nc\nd\n");
+  });
+
+  test("a save the server refuses is kept for review", async () => {
+    await queueAndClose("a\nb\nc\n", "a\nb\nc\nd\n");
+    refuseWrites = true;
+    await retryQueuedSaves();
+    expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
+    expect(opened).toEqual([FILE]);
+  });
+
+  test("a conflict is shown at once in the file's tab when it is open and clean", async () => {
+    const side = "compare-1:new";
+    const store = useEditorStateStore.getState();
+    store.openFile(side, FILE);
+    store.setBaseContent(side, "a\nb\nc\n");
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nX\nc\n", "/repo", undefined, side);
+    store.closeFile(side);
+    serverDown = false;
+
+    const tabText = { current: "a\nY\nc\n" };
+    openEditor("a\nY\nc\n", tabText);
+    disk[FILE] = "a\nY\nc\n";
+    await retryQueuedSaves();
+    expect(tabText.current).toBe("a\nX\nc\n");
+    expect(editor()?.state).toBe("diverged");
+    expect(editor()?.diskContent).toBe("a\nY\nc\n");
+    expect(opened).toEqual([]);
   });
 
   test("a conflict reopens the file, whose tab shows the edits against the disk version", async () => {
@@ -249,5 +305,53 @@ describe("recovery", () => {
     expect(disk[FILE]).toBe("a\nb\nc\nd\n");
     expect(removed).toEqual(["e1"]);
     expect(toasts).toEqual(["Saved edits from the last session to a.ts"]);
+  });
+});
+
+describe("queue", () => {
+  test("a save for a path the server does not serve does not hold up the others", async () => {
+    const other = "/gone/b.ts";
+    const store = useEditorStateStore.getState();
+    for (const path of [other, FILE]) {
+      store.openFile(path);
+      store.setBaseContent(path, "a\n");
+    }
+    serverDown = true;
+    await saveEditorContent(other, "a\nb\n", "/gone"); // older, retried first
+    await saveEditorContent(FILE, "a\nb\n", "/repo");
+    serverDown = false;
+    unserved.add(other);
+    disk[other] = "a\n";
+    disk[FILE] = "a\n";
+
+    await retryQueuedSaves();
+    expect(disk[FILE]).toBe("a\nb\n");
+    expect(outboxEntriesForTests().map((e) => [e.filePath, e.status])).toEqual([[other, "queued"]]);
+  });
+});
+
+describe("storage", () => {
+  test("a save in flight from an open editor is stored only once it fails or its editor closes", async () => {
+    const stored = new Map<string, string>();
+    await initSaveOutbox({
+      storage: {
+        load: async () => [],
+        put: (entry) => stored.set(entry.id, entry.status),
+        remove: (id) => stored.delete(id),
+      },
+    });
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+
+    await saveEditorContent(FILE, text.current, "/repo");
+    expect(stored.size).toBe(0); // confirmed at once, never stored
+
+    serverDown = true;
+    await saveEditorContent(FILE, text.current, "/repo");
+    expect([...stored.values()]).toEqual(["queued"]);
+
+    serverDown = false;
+    await retryQueuedSaves();
+    expect(stored.size).toBe(0);
   });
 });

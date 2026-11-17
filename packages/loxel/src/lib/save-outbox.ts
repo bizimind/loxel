@@ -55,11 +55,17 @@ export interface OutboxStorage {
 
 /** Retry delays after consecutive failed rounds; the last one repeats. */
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
+/** A save in flight from an open editor is stored only once it takes this long. */
+const STORE_IN_FLIGHT_AFTER_MS = 1_000;
 const LOCK_PREFIX = "loxel-save-outbox:";
 
 const ownerId = crypto.randomUUID();
 const entries = new Map<string, OutboxEntry>();
 let storage: OutboxStorage | null = null;
+/** Ids of the entries in storage. */
+const storedIds = new Set<string>();
+/** The newest confirmed save of each editor instance, by `seq`. */
+const confirmedSeq = new Map<string, number>();
 let nextSeq = 1;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let failedRounds = 0;
@@ -70,27 +76,44 @@ let runAgain = false;
 const recovered = new Set<string>();
 const recoveredSaved: string[] = [];
 
+/**
+ * Why a failed request may succeed later: `unreachable`, the server could not be reached (or
+ * answered that it is unavailable); `unavailable`, it does not serve this path right now (a plain
+ * 404: the path is in no worktree it has resources for, because it restarted or the window has
+ * not subscribed again yet). null for a real answer, such as ENOENT or a refused write.
+ */
+function retryReason(err: unknown): "unreachable" | "unavailable" | null {
+  if (err instanceof TypeError) return "unreachable"; // fetch could not reach the server
+  if (!(err instanceof api.ApiError)) return null;
+  if (err.status === 404) return err.code === "ENOENT" ? null : "unavailable";
+  return err.status === 502 || err.status === 503 || err.status === 504 ? "unreachable" : null;
+}
+
 /** Whether a failed save may succeed later: the server was unreachable or not ready for it. */
 export function isRetriableSaveError(err: unknown): boolean {
-  if (err instanceof TypeError) return true; // fetch could not reach the server
-  if (!(err instanceof api.ApiError)) return false;
-  // A plain 404 means the path is in no worktree the server has resources for (it restarted, or
-  // the window has not re-subscribed yet); ENOENT is a real answer about the file.
-  if (err.status === 404) return err.code !== "ENOENT";
-  return err.status === 502 || err.status === 503 || err.status === 504;
+  return retryReason(err) !== null;
 }
 
 // -- Entries --
 
-function persist(entry: OutboxEntry): void {
-  storage?.put(entry);
+/**
+ * Write `entry` to storage. A save in flight from an open editor is kept in memory only, unless
+ * `force`d (it is taking a while, or the window is going away): almost all are confirmed within
+ * milliseconds, and its editor still holds the content.
+ */
+function persist(entry: OutboxEntry, force = false): void {
+  if (!storage || entries.get(entry.id) !== entry) return;
+  const inMemoryOnly = entry.status === "sending" && !storedIds.has(entry.id) && ownerEditor(entry);
+  if (inMemoryOnly && !force) return;
+  storedIds.add(entry.id);
+  storage.put(entry);
 }
 
 function removeEntry(entry: OutboxEntry): void {
   if (entries.get(entry.id) !== entry) return;
   entries.delete(entry.id);
   recovered.delete(entry.id);
-  storage?.remove(entry.id);
+  if (storedIds.delete(entry.id)) storage?.remove(entry.id);
   syncQueuedFlags();
 }
 
@@ -111,13 +134,21 @@ function ownerEditor(entry: OutboxEntry): EditorFileEntry | undefined {
  */
 function onEditorsChanged(): void {
   for (const entry of entries.values()) {
-    if (entry.status === "sending" || entry.status === "retrying") continue;
-    if (ownerEditor(entry)?.state === "clean") removeEntry(entry);
+    if (entry.status === "retrying") continue;
+    // In flight when its editor closed (an unmount flush): only the outbox holds it now.
+    if (entry.status === "sending") persist(entry);
+    else if (ownerEditor(entry)?.state === "clean") removeEntry(entry);
   }
   syncQueuedFlags();
 }
 
 useEditorStateStore.subscribe(onEditorsChanged);
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    for (const entry of entries.values()) persist(entry, true);
+  });
+}
 
 // The server is back: retry at once. (A save that was in flight when it went away failed with a
 // network error and is queued like any other.)
@@ -144,15 +175,15 @@ export function addOutboxEntry(
   >,
   status: "sending" | "queued",
 ): OutboxEntry {
+  // Same id as the save it replaces, so its stored record is overwritten, not left behind.
   const previous = entryOfInstance(editor.instanceId);
   if (previous) {
     entries.delete(previous.id);
     recovered.delete(previous.id);
-    storage?.remove(previous.id);
   }
   const entry: OutboxEntry = {
     ...save,
-    id: crypto.randomUUID(),
+    id: previous?.id ?? crypto.randomUUID(),
     instanceId: editor.instanceId,
     ownerId,
     seq: nextSeq++,
@@ -161,6 +192,7 @@ export function addOutboxEntry(
   };
   entries.set(entry.id, entry);
   persist(entry);
+  if (status === "sending") setTimeout(() => persist(entry, true), STORE_IN_FLIGHT_AFTER_MS);
   syncQueuedFlags();
   return entry;
 }
@@ -176,6 +208,9 @@ function isWaiting(entry: OutboxEntry | undefined): boolean {
 
 /** The server wrote `entry` (as `written`, which may be formatted). */
 export function outboxSaveWritten(entry: OutboxEntry, written: string): void {
+  // A late response of a save older than one already confirmed says nothing about the disk now.
+  if ((confirmedSeq.get(entry.instanceId) ?? 0) > entry.seq) return;
+  confirmedSeq.set(entry.instanceId, entry.seq);
   if (entries.get(entry.id) === entry) {
     removeEntry(entry);
     return;
@@ -193,7 +228,9 @@ export function outboxSaveWritten(entry: OutboxEntry, written: string): void {
 export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
   if (entries.get(entry.id) !== entry) return;
   if (!isRetriableSaveError(err)) {
-    removeEntry(entry);
+    // An open editor still holds the edits (dirty, as before the outbox); a closed one does not.
+    if (ownerEditor(entry)) removeEntry(entry);
+    else toReview(entry, null);
     return;
   }
   entry.status = "queued";
@@ -266,7 +303,8 @@ function scheduleRetry(delayMs: number): void {
   }, delayMs);
 }
 
-type RetryOutcome = "done" | "unreachable";
+/** `unreachable` ends the retry round; `unavailable` (this save only) lets it go on. */
+type RetryOutcome = "done" | "unreachable" | "unavailable";
 
 /**
  * Retry every queued save, oldest first, stopping at the first one the server cannot take.
@@ -278,12 +316,12 @@ export function retryQueuedSaves(): Promise<void> {
     return currentRun;
   }
   currentRun = (async () => {
-    let unreachable = false;
+    let failed = false;
     do {
       runAgain = false;
-      unreachable = await retryRound();
-    } while (runAgain && !unreachable);
-    failedRounds = unreachable ? failedRounds + 1 : 0;
+      failed = await retryRound();
+    } while (runAgain && !failed);
+    failedRounds = failed ? failedRounds + 1 : 0;
   })().finally(() => {
     currentRun = null;
     reportRecovered();
@@ -298,24 +336,32 @@ export function ensureRetryScheduled(): void {
   else if (!retryTimer) scheduleRetry(retryDelay());
 }
 
-/** One pass over the queued saves; true when the server could not be reached. */
+/**
+ * One pass over the queued saves; true when one of them failed again. Stops when the server
+ * cannot be reached, but goes on past a save whose path it does not serve right now (a worktree
+ * not subscribed yet, or removed), so that one cannot hold up the others.
+ */
 async function retryRound(): Promise<boolean> {
   const queued = [...entries.values()]
     .filter((e) => e.status === "queued")
     .sort((a, b) => a.seq - b.seq);
+  let failed = false;
   for (const entry of queued) {
     if (entries.get(entry.id) !== entry || entry.status !== "queued") continue;
     const editor = ownerEditor(entry);
     const outcome = editor ? await retryInEditor(entry, editor) : await retryClosed(entry);
     if (outcome === "unreachable") return true;
+    if (outcome === "unavailable") failed = true;
   }
-  return false;
+  return failed;
 }
 
 type DiskRead =
   | { kind: "content"; content: string }
   | { kind: "missing" }
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  | { kind: "unavailable" }
+  | { kind: "error" };
 
 /** Read the file for a retry. Errors other than a missing file count as the server being away. */
 async function readDisk(entry: OutboxEntry): Promise<DiskRead> {
@@ -324,10 +370,11 @@ async function readDisk(entry: OutboxEntry): Promise<DiskRead> {
     return { kind: "content", content };
   } catch (error) {
     if (api.isFileMissingError(error)) return { kind: "missing" };
-    if (!isRetriableSaveError(error)) {
-      log.error("Failed to read a file to retry its save", { path: entry.filePath, error });
-    }
-    return { kind: "unreachable" };
+    const reason = retryReason(error);
+    if (reason === "unreachable") return { kind: "unreachable" };
+    if (reason === "unavailable") return { kind: "unavailable" };
+    log.error("Failed to read a file to retry its save", { path: entry.filePath, error });
+    return { kind: "error" };
   }
 }
 
@@ -348,15 +395,23 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
   if (entries.get(entry.id) !== entry) return "done";
   entry.status = "queued";
   const current = ownerEditor(entry);
-  if (disk.kind === "unreachable") return "unreachable";
+  if (disk.kind === "unreachable" || disk.kind === "unavailable") return disk.kind;
+  if (disk.kind === "error") {
+    toReview(entry, null);
+    return "done";
+  }
   if (!current) return "done"; // retried as a closed editor's save next
+  // Back to clean during the read (the user accepted the disk version): nothing to save.
+  if (current.state === "clean") {
+    removeEntry(entry);
+    return "done";
+  }
   const store = useEditorStateStore.getState();
   if (disk.kind === "missing") {
     store.setDeleted(entry.editorKey, true);
     toReview(entry, null);
     return "done";
   }
-  let content = entry.content;
   if (disk.content !== entry.base && disk.content !== entry.content) {
     store.handleDiskChange(entry.editorKey, [], disk.content);
     const after = ownerEditor(entry);
@@ -364,16 +419,21 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
       toReview(entry, null);
       return "done";
     }
-    content = after.getEditorContent?.() ?? entry.content;
   }
+  // Send what the editor shows now, which can be ahead of the entry (typing since the last
+  // autosave) or merged with the disk: writing the entry's older content would make its echo
+  // look like a change to merge back into the editor, undoing that typing. This also cancels the
+  // editor's pending autosave.
+  const now = ownerEditor(entry);
+  const pending = now?.takePendingEdit?.();
   await writeEditorContent(
     entry.filePath,
-    content,
+    pending?.content ?? now?.getEditorContent?.() ?? entry.content,
     entry.worktreePath,
-    entry.options,
+    pending ? pending.options : entry.options,
     entry.editorKey,
   );
-  return hasQueuedSave(current) ? "unreachable" : "done";
+  return hasQueuedSave(current) ? "unavailable" : "done";
 }
 
 /**
@@ -384,11 +444,11 @@ async function retryClosed(entry: OutboxEntry): Promise<RetryOutcome> {
   entry.status = "sending"; // a tab opening meanwhile shows the disk, then this write
   const disk = await readDisk(entry);
   if (entries.get(entry.id) !== entry) return "done";
-  if (disk.kind === "unreachable") {
+  if (disk.kind === "unreachable" || disk.kind === "unavailable") {
     entry.status = "queued";
-    return "unreachable";
+    return disk.kind;
   }
-  if (disk.kind === "missing") {
+  if (disk.kind === "missing" || disk.kind === "error") {
     toReview(entry, null);
     return "done";
   }
@@ -418,9 +478,10 @@ async function retryClosed(entry: OutboxEntry): Promise<RetryOutcome> {
     });
   } catch (error) {
     if (entries.get(entry.id) !== entry) return "done";
-    if (isRetriableSaveError(error)) {
+    const reason = retryReason(error);
+    if (reason) {
       entry.status = "queued";
-      return "unreachable";
+      return reason;
     }
     log.error("The server refused a queued save", { path: entry.filePath, error });
     toReview(entry, null);
@@ -446,6 +507,19 @@ function toReview(entry: OutboxEntry, disk: string | null): void {
   // An open editor already shows the edits (with its conflict or deleted banner).
   if (ownerEditor(entry)) return;
   const name = getDisplayFilename(entry.filePath);
+  const tab = useEditorStateStore.getState().files.get(entry.filePath);
+  if (tab) {
+    // The file's tab is open (the save came from a closed compare side, or the tab was reopened
+    // while the save was being sent): show the edits there if it has none of its own.
+    const applied =
+      tab.state === "clean" ? tab.applyMergedContent?.(entry.content, true) : undefined;
+    if (typeof applied === "string") {
+      adoptOutboxEntry(entry.filePath, entry);
+    } else {
+      showToast(`Unsaved edits to ${name} are kept until its tab is reopened`, "info");
+    }
+    return;
+  }
   showToast(
     disk === null
       ? `Unsaved edits to ${name} could not be saved`
@@ -477,9 +551,17 @@ function indexedDbStorage(): OutboxStorage | null {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
   });
+  // Logged once: a broken database fails every write the same way.
+  let failed = false;
   const write = (op: (store: IDBObjectStore) => void): void => {
+    if (failed) return;
     db.then((d) => op(d.transaction(STORE, "readwrite").objectStore(STORE))).catch(
-      (error: unknown) => log.error("Failed to persist the save outbox", { error }),
+      (error: unknown) => {
+        failed = true;
+        log.error("Failed to store the save outbox; waiting saves are kept in memory only", {
+          error,
+        });
+      },
     );
   };
   return {
@@ -559,6 +641,7 @@ export async function initSaveOutbox(
           if (entry.status !== "review") entry.status = "queued";
           entry.seq = nextSeq++;
           store.put(entry);
+          storedIds.add(entry.id);
         }
         return orphans;
       }).catch((error: unknown) => {
@@ -580,6 +663,8 @@ export async function initSaveOutbox(
 /** Test hook: forget every entry and stop retrying. */
 export function resetSaveOutboxForTests(): void {
   entries.clear();
+  storedIds.clear();
+  confirmedSeq.clear();
   recovered.clear();
   recoveredSaved.length = 0;
   if (retryTimer) clearTimeout(retryTimer);
