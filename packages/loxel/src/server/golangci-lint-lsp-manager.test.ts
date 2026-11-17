@@ -1,24 +1,18 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import { writeExecutable } from "@/test/executable";
+
 import { fileUri } from "./lsp-file-uri";
 
 // Drives the manager the way the Monaco client does, with a stand-in golangci-lint and go on `PATH`.
-// The stand-in records each run and copies `<runs>/report.json` to the report path it is given.
+// The stand-in records each run in `$GOLANGCI_RUNS`, which the manager passes on from the server's
+// environment, and copies `report.json` from there to the report path it is given.
 
 const stateDir = mkdtempSync(join(tmpdir(), "golangci-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
@@ -33,27 +27,27 @@ const FAKE_GO = `#!/bin/sh
 echo '{"GOVERSION":"go1.27.3","GOROOT":"/goroot","GOPATH":"/gopath","GOMODCACHE":"/gopath/pkg/mod","GOMOD":"/dev/null","GOWORK":"","GOFLAGS":""}'
 `;
 
-const fakeLint = (runs: string, version: string) => `#!/bin/sh
+const fakeLint = (version: string) => `#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "$PWD" > "${runs}/version-cwd"
+  echo "$PWD" > "$GOLANGCI_RUNS/version-cwd"
   echo "golangci-lint has version ${version} built with go1.27.0 from x on y"
   exit 0
 fi
-echo "$PWD|$GOPROXY|$GOTOOLCHAIN|$*" >> "${runs}/runs"
-echo "start" >> "${runs}/order"
+echo "$PWD|$GOPROXY|$GOTOOLCHAIN|$*" >> "$GOLANGCI_RUNS/runs"
+echo "start" >> "$GOLANGCI_RUNS/order"
 report=""
 while [ $# -gt 0 ]; do
   [ "$1" = "--output.json.path" ] && report="$2"
   shift
 done
 echo "stats: stdout is not the report"
-[ -f "${runs}/during" ] && sh "${runs}/during"
-if [ -f "${runs}/hang" ]; then sleep 300 & echo $! > "${runs}/pid"; wait; fi
-[ -f "${runs}/report.json" ] && cp "${runs}/report.json" "$report"
-[ -f "${runs}/stderr" ] && cat "${runs}/stderr" >&2
+[ -f "$GOLANGCI_RUNS/during" ] && sh "$GOLANGCI_RUNS/during"
+if [ -f "$GOLANGCI_RUNS/hang" ]; then sleep 300 & echo $! > "$GOLANGCI_RUNS/pid"; wait; fi
+[ -f "$GOLANGCI_RUNS/report.json" ] && cp "$GOLANGCI_RUNS/report.json" "$report"
+[ -f "$GOLANGCI_RUNS/stderr" ] && cat "$GOLANGCI_RUNS/stderr" >&2
 code=0
-[ -f "${runs}/exit" ] && code="$(cat "${runs}/exit")"
-echo "end" >> "${runs}/order"
+[ -f "$GOLANGCI_RUNS/exit" ] && code="$(cat "$GOLANGCI_RUNS/exit")"
+echo "end" >> "$GOLANGCI_RUNS/order"
 exit "$code"
 `;
 
@@ -159,6 +153,7 @@ afterEach(async () => {
   manager?.destroy();
   manager = undefined;
   process.env.PATH = originalPath;
+  delete process.env.GOLANGCI_RUNS;
   await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
   dirs = [];
 });
@@ -191,8 +186,7 @@ async function makeRepo(files: Record<string, string>, trusted = true): Promise<
 }
 
 async function writeTool(name: string, script: string, dir = bin): Promise<void> {
-  await writeFile(join(dir, name), script);
-  await chmod(join(dir, name), 0o755);
+  await writeExecutable(join(dir, name), script);
 }
 
 async function setUp(
@@ -201,9 +195,10 @@ async function setUp(
 ): Promise<FakeClient> {
   bin = await tempDir("bin");
   runs = await tempDir("runs");
+  process.env.GOLANGCI_RUNS = runs;
   wt = await makeRepo(files, trusted);
   await writeTool("go", FAKE_GO);
-  if (version) await writeTool("golangci-lint", fakeLint(runs, version));
+  if (version) await writeTool("golangci-lint", fakeLint(version));
   process.env.PATH = `${bin}:/usr/bin:/bin`;
   manager = new GolangciLintLspManager(0);
   return connect(wt);
@@ -643,7 +638,7 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
       const client = await setUp({ ...PROJECT, ".golangci.yml": CONFIG }, { version: null });
       const shims = join(await tempDir("mgr"), "shims");
       await mkdir(shims);
-      await writeTool("golangci-lint", fakeLint(runs, "2.15.0"), shims);
+      await writeTool("golangci-lint", fakeLint("2.15.0"), shims);
       process.env.PATH = `${shims}:${bin}:/usr/bin:/bin`;
       client.open(join(wt, "a.go"));
       await client.notice("found no golangci-lint v2");
@@ -653,7 +648,7 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
     test("a binary inside the worktree counts as not installed", async () => {
       const client = await setUp({ ...PROJECT, ".golangci.yml": CONFIG }, { version: null });
       await mkdir(join(wt, "tools"));
-      await writeTool("golangci-lint", fakeLint(runs, "2.15.0"), join(wt, "tools"));
+      await writeTool("golangci-lint", fakeLint("2.15.0"), join(wt, "tools"));
       process.env.PATH = `${join(wt, "tools")}:${bin}:/usr/bin:/bin`;
       client.open(join(wt, "a.go"));
       await client.notice("found no golangci-lint v2");

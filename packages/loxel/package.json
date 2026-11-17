@@ -27,7 +27,7 @@
     "build:server:standalone": "bun scripts/build-server.ts compile && pnpm run build:language-servers",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "bun test src scripts --parallel=2",
+    "test": "n=$(getconf _NPROCESSORS_ONLN); bun test src scripts --parallel=$((n < 6 ? n : 6))",
     "demo": "bun scripts/demo/launch.ts",
     "demo:shots": "bun scripts/demo/capture-shots.ts",
     "e2e": "bun --bun node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts",

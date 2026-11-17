@@ -1,7 +1,9 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+import { writeExecutable } from "@/test/executable";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "python-env-state-"));
@@ -38,13 +40,6 @@ async function makeRoot(): Promise<{ wt: string; outside: string; bin: string }>
   const bin = join(root, "bin");
   await Promise.all([mkdir(wt), mkdir(outside), mkdir(bin)]);
   return { wt, outside, bin };
-}
-
-async function writeExecutable(filePath: string, script = "#!/bin/sh\n"): Promise<string> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-  return filePath;
 }
 
 /** A venv-shaped directory: `pyvenv.cfg` plus an executable `bin/python`. */

@@ -1,16 +1,9 @@
 import { afterAll, afterEach, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+import { writeExecutable } from "@/test/executable";
 
 // Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -51,13 +44,6 @@ afterEach(async () => {
   root = undefined;
 });
 
-async function writeExecutable(filePath: string, script: string): Promise<string> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-  return filePath;
-}
-
 interface Fixture {
   root: string;
   wt: string;
@@ -86,13 +72,13 @@ async function makeFixture(): Promise<Fixture> {
     bin,
     rustupHome,
     log,
-    env: { PATH: bin, HOME: join(root, "home"), RUSTUP_HOME: rustupHome },
+    env: { PATH: bin, HOME: join(root, "home"), RUSTUP_HOME: rustupHome, RUST_RUNS_LOG: log },
     runs: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n"),
   };
 }
 
-const logLine = (log: string) =>
-  `echo "$RUSTUP_AUTO_INSTALL|$RUSTUP_TOOLCHAIN|$PWD|$0 $*" >> "${log}"`;
+/** A stand-in's line in the fixture's log, which the lookup passes on to it in `RUST_RUNS_LOG`. */
+const LOG_LINE = `echo "$RUSTUP_AUTO_INSTALL|$RUSTUP_TOOLCHAIN|$PWD|$0 $*" >> "$RUST_RUNS_LOG"`;
 
 /** A toolchain directory whose `rustc` answers `--version` and records that it ran. */
 async function makeToolchain(
@@ -103,7 +89,7 @@ async function makeToolchain(
 ): Promise<string> {
   await writeExecutable(
     join(dir, "bin", "rustc"),
-    `#!/bin/sh\n${logLine(fixture.log)}\necho "rustc ${version} (abc 2026-01-01)"\n`,
+    `#!/bin/sh\n${LOG_LINE}\necho "rustc ${version} (abc 2026-01-01)"\n`,
   );
   for (const tool of tools) await writeExecutable(join(dir, "bin", tool), "#!/bin/sh\n");
   await mkdir(join(dir, "lib", "rustlib"), { recursive: true });
@@ -137,7 +123,7 @@ async function makeRustup(
   const activeName = typeof active === "string" ? active : "";
   const whichDir = typeof active === "string" ? (installed[active] ?? active) : "";
   const script = `#!/bin/sh
-${logLine(fixture.log)}
+${LOG_LINE}
 case "$1 $2" in
   "--version "*) echo "rustup ${version} (abc 2026-10-21)"
     echo "info: This is the version for the rustup toolchain manager, not the rustc compiler." >&2 ;;
@@ -509,10 +495,7 @@ describe("resolveRustToolchain", () => {
 
   test("a rustup whose version cannot be read is not run in the worktree", async () => {
     const fixture = await makeFixture();
-    await writeExecutable(
-      join(fixture.bin, "rustup"),
-      `#!/bin/sh\n${logLine(fixture.log)}\necho "garbled"\n`,
-    );
+    await writeExecutable(join(fixture.bin, "rustup"), `#!/bin/sh\n${LOG_LINE}\necho "garbled"\n`);
 
     expect(
       await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
@@ -549,7 +532,7 @@ describe("resolveRustToolchain", () => {
     const fixture = await makeFixture();
     const init = await writeExecutable(
       join(fixture.root, "elsewhere", "rustup-init"),
-      `#!/bin/sh\n${logLine(fixture.log)}\necho "rustc 9.9.9"\n`,
+      `#!/bin/sh\n${LOG_LINE}\necho "rustc 9.9.9"\n`,
     );
     await symlink(init, join(fixture.bin, "rustc"));
 
@@ -563,7 +546,7 @@ describe("resolveRustToolchain", () => {
   test("a proxy next to a tracked rustup runs nothing", async () => {
     const fixture = await makeFixture();
     const committed = join(fixture.wt, "tools");
-    await writeExecutable(join(committed, "rustup"), `#!/bin/sh\n${logLine(fixture.log)}\n`);
+    await writeExecutable(join(committed, "rustup"), `#!/bin/sh\n${LOG_LINE}\n`);
     await symlink("rustup", join(committed, "rustc"));
     track(fixture.wt, "tools");
     const copy = join(fixture.root, "copy");
@@ -848,7 +831,7 @@ describe("the toolchain rule", () => {
     const fixture = await makeFixture();
     await writeExecutable(
       join(fixture.bin, "rustc"),
-      `#!/bin/sh\n${logLine(fixture.log)}\necho "rustc 1.88.0"\n`,
+      `#!/bin/sh\n${LOG_LINE}\necho "rustc 1.88.0"\n`,
     );
 
     await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env });
@@ -1000,6 +983,7 @@ describe("the shared resolution", () => {
       off();
       setRustChoice(fixture.wt, null);
       Object.assign(process.env, previous);
+      delete process.env.RUST_RUNS_LOG;
     }
     expect(
       await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
@@ -1019,6 +1003,7 @@ describe("the shared resolution's consistency", () => {
       await run();
     } finally {
       Object.assign(process.env, previous);
+      delete process.env.RUST_RUNS_LOG;
     }
   }
 

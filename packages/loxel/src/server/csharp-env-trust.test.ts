@@ -3,6 +3,8 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
+import { writeExecutable } from "@/test/executable";
+
 // Trust lives in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "csharp-env-trust-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
@@ -41,12 +43,6 @@ async function makeDir(prefix: string): Promise<string> {
 async function write(file: string, content = ""): Promise<string> {
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, content);
-  return file;
-}
-
-async function writeExecutable(file: string): Promise<string> {
-  await write(file, "#!/bin/sh\n");
-  await chmod(file, 0o755);
   return file;
 }
 
