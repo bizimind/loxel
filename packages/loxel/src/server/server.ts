@@ -400,27 +400,22 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 }
 
 /**
- * The inbox's requests sent to a window that has not placed their panels yet, by request id. Each
- * stays in the inbox until its window says it is done (`inbox_open_done`): a window that reloads or
- * closes first would lose it, so it goes to the next window to say hello.
+ * Hand the open inbox to a window that just said hello: the requests it holds (it reloaded or
+ * reconnected before placing their panels) and those no window holds. Each opens as it would have
+ * then, focus included, and the window holds it until it says it placed the panel
+ * (`inbox_open_done`) or closes for good. One notification per worktree says what opened the first
+ * time a request is handed over: a panel opened without focus waits unseen in its worktree.
  */
-const inboxSentTo = new Map<string, ServerWebSocket<WsData>>();
-
-/**
- * Hand the open inbox to a window that just said hello: the requests no other window holds. Each
- * opens as it would have then, focus included, and one notification per worktree says what opened
- * the first time a request is handed over: a panel opened without focus waits unseen in its
- * worktree.
- */
-function deliverInbox(ws: ServerWebSocket<WsData>): void {
-  const entries = openInbox.list().filter((entry) => !inboxSentTo.has(entry.id));
+function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
+  const entries = openInbox.forWindow(windowId);
   if (entries.length === 0) return;
-  for (const { id, message } of entries) {
-    inboxSentTo.set(id, ws);
-    sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
-  }
   const fresh = entries.filter((entry) => !entry.delivered);
-  openInbox.markDelivered(fresh.map((entry) => entry.id));
+  for (const { id, message } of entries)
+    sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
+  openInbox.handTo(
+    entries.map((entry) => entry.id),
+    windowId,
+  );
   for (const { worktreePath, title, body } of deliveredNotices(fresh)) {
     const notification = notificationStore.add({
       source: { kind: "inbox", worktreePath },
@@ -433,17 +428,15 @@ function deliverInbox(ws: ServerWebSocket<WsData>): void {
   log.info(`Delivered ${entries.length} open(s) queued while no window was connected`);
 }
 
-/** The window `ws` went away: the requests it had not placed go to the window in use, if any. */
-function reclaimInbox(ws: ServerWebSocket<WsData>): void {
-  let reclaimed = false;
-  for (const [id, sentTo] of inboxSentTo) {
-    if (sentTo !== ws) continue;
-    inboxSentTo.delete(id);
-    reclaimed = true;
-  }
-  // A window that has not said hello yet gets them with its hello.
-  const [next] = reclaimed ? activeWindowSockets(null) : [];
-  if (next && clients.get(next)?.windowId) deliverInbox(next);
+/**
+ * The window `windowId` closed for good (not a reload, nor a dropped socket, which keep what it
+ * holds): the inbox requests it held go to the window in use, or wait for the next one.
+ */
+function releaseInbox(windowId: string): void {
+  if (!openInbox.release(windowId)) return;
+  const [next] = activeWindowSockets(null);
+  const nextId = next ? clients.get(next)?.windowId : undefined;
+  if (next && nextId) deliverInbox(next, nextId);
 }
 
 /**
@@ -671,8 +664,10 @@ function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectP
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
   const creating = wtResourcesCreating.get(wtPath);
   if (creating) {
-    // Subscribed to what it creates; one that failed is tried again here.
+    // Subscribed to what it creates; one that failed is tried again here. A window that closed
+    // meanwhile subscribes to nothing.
     await creating.catch(() => {});
+    if (!clients.has(ws)) return;
     return subscribeWorktree(ws, wtPath);
   }
   const existing = wtResources.get(wtPath);
@@ -705,6 +700,11 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     resources = await creation;
   } finally {
     wtResourcesCreating.delete(wtPath);
+  }
+  // The window closed while they were being created: they start their grace period at once.
+  if (!clients.has(ws)) {
+    unsubscribeWorktree(ws, wtPath);
+    return;
   }
   const clientState = clients.get(ws);
   if (clientState) clientState.subscribedWorktrees.add(wtPath);
@@ -1259,14 +1259,13 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       const clientState = clients.get(ws);
       if (!clientState) break;
       clientState.windowId = msg.windowId;
-      deliverInbox(ws);
+      deliverInbox(ws, msg.windowId);
       // What waits for an answer with no window to ask in is asked in this one.
       agentTerminals.windowConnected(msg.windowId, isWindowConnected);
       break;
     }
 
     case "inbox_open_done":
-      inboxSentTo.delete(msg.inboxId);
       openInbox.remove(msg.inboxId);
       break;
 
@@ -1535,6 +1534,7 @@ const routeContext: RouteContext = {
     return openInbox.add(message, worktreePath) ? "queued" : "full";
   },
   dropQueuedTerminal,
+  windowClosed: releaseInbox,
   agentTerminals,
   agentTerminalPolicy,
   listTerminals: async ({ programs }) => {
@@ -1731,7 +1731,6 @@ const server = Bun.serve<WsData>({
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
-      reclaimInbox(ws);
       // What this window was asking moves to the window in use, or waits for the next one.
       agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);

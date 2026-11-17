@@ -175,6 +175,7 @@ describe("POST /api/schemas/sync", () => {
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: () => "full",
       dropQueuedTerminal: () => {},
+      windowClosed: () => {},
       agentTerminals: {} as never,
       agentTerminalPolicy: () => "run",
     };

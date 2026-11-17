@@ -41,6 +41,8 @@ export class NotificationStore {
   constructor(path: string | null = null) {
     this.persisted = new PersistedList(path, ServerNotificationSchema);
     this.notifications = this.persisted.load().toReversed();
+    // Kinds kept for the server's life only, written by a build that persisted them.
+    this.removeWhere((n) => !persists(n));
     // A list persisted under a larger cap, or by a store whose trims did not reach the file.
     this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
   }

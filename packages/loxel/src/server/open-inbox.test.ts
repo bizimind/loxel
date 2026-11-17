@@ -36,9 +36,22 @@ describe("OpenInbox", () => {
 
     const [first, second] = inbox.list();
     expect([first?.message, second?.message]).toEqual([file("/wt/a.ts"), terminal("t1")]);
-    inbox.markDelivered([first!.id, second!.id]);
+    inbox.handTo([first!.id, second!.id], "w1");
     inbox.remove(first!.id);
-    expect(inbox.list()).toEqual([{ ...second!, delivered: true }]);
+    expect(inbox.list()).toEqual([{ ...second!, delivered: true, heldBy: "w1" }]);
+  });
+
+  test("gives a request only to the window holding it, until that window closes", () => {
+    const inbox = new OpenInbox({ now: clock });
+    inbox.add(file("/wt/a.ts"), "/wt");
+    const [entry] = inbox.forWindow("w1");
+    inbox.handTo([entry!.id], "w1");
+
+    expect(inbox.forWindow("w2")).toEqual([]);
+    expect(inbox.forWindow("w1").map((e) => e.id)).toEqual([entry!.id]);
+    expect(inbox.release("w2")).toBe(false);
+    expect(inbox.release("w1")).toBe(true);
+    expect(inbox.forWindow("w2").map((e) => [e.id, e.delivered])).toEqual([[entry!.id, true]]);
   });
 
   test("holds a queued terminal until its panel is placed", () => {
@@ -47,7 +60,10 @@ describe("OpenInbox", () => {
 
     expect(inbox.holdsTerminal("t1")).toBe(true);
     expect(inbox.holdsTerminal("t2")).toBe(false);
-    inbox.markDelivered(inbox.list().map((entry) => entry.id));
+    inbox.handTo(
+      inbox.list().map((entry) => entry.id),
+      "w1",
+    );
     expect(inbox.holdsTerminal("t1")).toBe(true);
     inbox.remove(inbox.list()[0]!.id);
     expect(inbox.holdsTerminal("t1")).toBe(false);
@@ -90,13 +106,13 @@ describe("OpenInbox", () => {
     first.add(page("http://localhost:5173/"), "/wt");
     first.add(file("/wt/gone.ts"), "/wt");
     first.dropWhere(({ message }) => message.type === "open_file");
-    first.markDelivered([first.list()[0]!.id]);
+    first.handTo([first.list()[0]!.id], "w1");
     first.close();
 
     const second = new OpenInbox({ path, now: clock });
     expect(second.holdsTerminal("t1")).toBe(true);
-    expect(second.list().map((entry) => [entry.message, entry.delivered])).toEqual([
-      [terminal("t1", "claude"), true],
+    expect(second.list().map((entry) => [entry.message, entry.heldBy])).toEqual([
+      [terminal("t1", "claude"), "w1"],
       [page("http://localhost:5173/"), undefined],
     ]);
     for (const entry of second.list()) second.remove(entry.id);

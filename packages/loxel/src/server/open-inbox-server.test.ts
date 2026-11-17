@@ -121,8 +121,10 @@ describe("a server with no window connected", () => {
       await stopServer(current.server);
 
       current = await startServer(stateDir);
+      const windowA = crypto.randomUUID();
+      const hello = (windowId: string) => JSON.stringify({ type: "window_hello", windowId });
       const { ws, log } = await connectWindow(current.port);
-      ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      ws.send(hello(windowA));
       const delivered = await received(log, "open_from_inbox");
       expect(delivered.message).toEqual({
         type: "open_file",
@@ -139,27 +141,44 @@ describe("a server with no window connected", () => {
       expect(
         log.entries.filter((message) => message.type === "open_from_inbox").map((m) => m.message),
       ).toEqual([delivered.message]);
-      // The window reloads before it places the panel: the request is still there for its next
-      // load, which gets no second notification.
+
+      /** What `window` was sent until now: the server answers a socket's messages in order. */
+      const fence = async (window: Awaited<ReturnType<typeof connectWindow>>) => {
+        window.ws.send(JSON.stringify({ type: "subscribe_logs" }));
+        await received(window.log, "log_error_snapshot");
+      };
+      // Window A's socket drops before it places the panel: another window does not get it.
       ws.close();
+      const windowB = await connectWindow(current.port);
+      windowB.ws.send(hello(crypto.randomUUID()));
+      await fence(windowB);
+      expect(windowB.log.entries.some((m) => m.type === "open_from_inbox")).toBe(false);
+      // A reloads: it gets the request again, with no second notification.
       const reloaded = await connectWindow(current.port);
-      reloaded.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      reloaded.ws.send(hello(windowA));
       expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
-      reloaded.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
-      // Answered in order: the reply comes after anything the messages before it brought.
-      reloaded.ws.send(JSON.stringify({ type: "subscribe_logs" }));
-      await received(reloaded.log, "log_error_snapshot");
+      await fence(reloaded);
       expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
+      // A closes for good: the window in use takes the request over.
       reloaded.ws.close();
+      const closed = await fetch(`http://127.0.0.1:${current.port}/api/layout/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ windowId: windowA }),
+      });
+      expect(closed.ok).toBe(true);
+      expect(await received(windowB.log, "open_from_inbox")).toEqual(delivered);
+      windowB.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
+      await fence(windowB);
+      windowB.ws.close();
       await stopServer(current.server);
 
       // Done with once placed, and the notification outlives another restart.
       current = await startServer(stateDir);
       const next = await connectWindow(current.port);
-      next.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      next.ws.send(hello(crypto.randomUUID()));
       expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
-      next.ws.send(JSON.stringify({ type: "subscribe_logs" }));
-      await received(next.log, "log_error_snapshot");
+      await fence(next);
       expect(next.log.entries.some((message) => message.type === "open_from_inbox")).toBe(false);
       next.ws.close();
     },

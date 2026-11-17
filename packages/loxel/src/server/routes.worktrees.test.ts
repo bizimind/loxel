@@ -87,6 +87,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: () => "full",
       dropQueuedTerminal: () => {},
+      windowClosed: () => {},
       agentTerminals: {} as never,
       agentTerminalPolicy: () => "run",
     };
