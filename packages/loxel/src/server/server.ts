@@ -4,7 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
-import type { Server, ServerWebSocket } from "bun";
+import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
@@ -1417,7 +1417,7 @@ if (stoppingInStartup) await new Promise<never>(() => {});
  * the app still works over TCP, and the user is told the CLI cannot reach it. There is no fallback
  * to the TCP port, which the CLI never uses.
  */
-function listenForCli(): CliSocket<Server<undefined>> | null {
+function listenForCli(): CliSocket | null {
   const path = config.cliSocketPath;
   try {
     return takeOverSocket(path, (unix) =>

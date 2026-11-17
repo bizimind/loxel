@@ -14,9 +14,8 @@ interface SocketServer {
   stop: (closeActiveConnections?: boolean) => unknown;
 }
 
-/** A server on the CLI socket, and how to stop it without removing a newer server's socket. */
-export interface CliSocket<S extends SocketServer> {
-  server: S;
+/** A server on the CLI socket, to stop without removing a newer server's socket. */
+export interface CliSocket {
   /**
    * Stop the server, and remove the socket file if it is still this server's. The server stops
    * even when the file cannot be checked or removed, which then throws.
@@ -37,10 +36,7 @@ const fileAt = (path: string): FileId | undefined => lstatSync(path, { throwIfNo
  * `path`, which replaces the old file in one step. Throws when the directory cannot be set up or
  * the socket cannot be listened on or renamed, leaving `path` as it was.
  */
-export function takeOverSocket<S extends SocketServer>(
-  path: string,
-  listen: (path: string) => S,
-): CliSocket<S> {
+export function takeOverSocket(path: string, listen: (path: string) => SocketServer): CliSocket {
   ensurePrivateDir(dirname(path));
   const temp = cliSocketTempPath(path);
   const server = listen(temp);
@@ -57,7 +53,6 @@ export function takeOverSocket<S extends SocketServer>(
     throw err;
   }
   return {
-    server,
     stop: () => {
       try {
         // A newer server that took the name over owns the file now. Unlinking is not
