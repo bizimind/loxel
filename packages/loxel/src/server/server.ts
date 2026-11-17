@@ -4,7 +4,7 @@ import { basename, join, relative, resolve } from "node:path";
 
 import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
-import type { ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
@@ -20,6 +20,7 @@ import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channe
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
+import { clearSocketPath, listenOnPrivateSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { endedHostsNotice } from "./ended-hosts-notice";
@@ -44,7 +45,7 @@ import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
 import { RegisteredWorktrees } from "./registered-worktrees";
 import { onRepoTrustStatusChange } from "./repo-trust";
-import { type RequestOriginPolicy, checkRequest } from "./request-origin";
+import { type Principal, type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
@@ -330,7 +331,12 @@ function terminalSpawnTarget(
   TerminalSpawnOptions,
   "cwd" | "worktreePath" | "windowId" | "envOverrides" | "activatePythonEnv"
 > {
-  const envOverrides: Record<string, string> = { LOXEL: "1", LOXEL_PORT: String(config.port) };
+  const envOverrides: Record<string, string> = {
+    LOXEL: "1",
+    LOXEL_SOCKET: config.cliSocketPath,
+    // For `loxel` CLIs from before the socket, which find the server by its port.
+    LOXEL_PORT: String(config.port),
+  };
   // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
   if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
@@ -1407,71 +1413,115 @@ terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminal
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 
+// Async, so before the stretch below that must not wait; listened on once the port is.
+const cliSocketFree = await clearCliSocketPath();
+
 // Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
 // from here to `serving = true` waits, so a stop cannot arrive in between.
 if (stoppingInStartup) await new Promise<never>(() => {});
 
+/**
+ * Remove a stale CLI socket. False when a live server answers on it, or it cannot be cleared: the
+ * CLI then cannot reach this server, but the app can.
+ */
+async function clearCliSocketPath(): Promise<boolean> {
+  const path = config.cliSocketPath;
+  try {
+    if (await clearSocketPath(path)) return true;
+    log.error(`Another server listens on ${path}, so the loxel CLI reaches it, not this one`);
+  } catch (err) {
+    log.error(`Could not prepare ${path}, so the loxel CLI cannot reach this server`, {
+      error: err,
+    });
+  }
+  return false;
+}
+
+function listenForCli(): Server<undefined> | null {
+  try {
+    return listenOnPrivateSocket(config.cliSocketPath, (unix) =>
+      Bun.serve({
+        unix,
+        // No WebSockets: the CLI's routes have none, and checkRequest refuses the others.
+        fetch: async (req) =>
+          (await serveRequest(req, "cli", () => false)) ?? error("Not a WebSocket server", 400),
+      }),
+    );
+  } catch (err) {
+    log.error(`Could not listen on ${config.cliSocketPath} for the loxel CLI`, { error: err });
+    return null;
+  }
+}
+
+/**
+ * Serve a request from either listener: `principal` is the one it arrived on (see
+ * request-origin.ts), the loopback port's `app` or the CLI socket's `cli`.
+ */
+async function serveRequest(
+  req: Request,
+  principal: Principal,
+  upgrade: (req: Request, data: WsData) => boolean,
+): Promise<Response | undefined> {
+  const url = new URL(req.url);
+
+  const admitted = { method: req.method, headers: req.headers, pathname: url.pathname };
+  const rejection = checkRequest(admitted, principal, requestPolicy);
+  if (rejection) {
+    log.warn(`Rejected request: ${rejection.reason}`, { ...rejection.details, path: url.pathname });
+    return error(rejection.reason, rejection.status);
+  }
+
+  if (url.pathname === "/ws/yaml-lsp") {
+    const upgraded = upgrade(req, { type: "yaml-lsp" as const });
+    if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+    return undefined;
+  }
+
+  const worktreeLspManager = worktreeLspManagerByRoute.get(url.pathname);
+  if (worktreeLspManager) {
+    const wtPath = url.searchParams.get("wt");
+    if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
+    const upgraded = server.upgrade(req, {
+      data: { type: worktreeLspManager.name, wtPath, manager: worktreeLspManager },
+    });
+    if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+    return undefined;
+  }
+
+  if (url.pathname === "/ws") {
+    const upgraded = upgrade(req, { type: "app" as const });
+    if (!upgraded) {
+      return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+    return undefined;
+  }
+
+  // The relaunching app and the CLI poll /api/version while this server shuts down; counting
+  // those polls as work to drain would keep the drain's quiet period from ever starting.
+  if (url.pathname === "/api/version") return handleRequest(req, routeContext);
+  if (url.pathname.startsWith("/api")) {
+    return trackApiRequest(() => handleRequest(req, routeContext));
+  }
+
+  // Serve static files from dist/ when available (production mode)
+  if (distDir) {
+    const filePath = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+    const resolved = resolve(distDir, filePath);
+    if (resolved.startsWith(distDir + "/") || resolved === distDir) {
+      const file = Bun.file(resolved);
+      if (await file.exists()) return new Response(file);
+    }
+    return new Response(Bun.file(join(distDir, "index.html")));
+  }
+
+  return handleRequest(req, routeContext);
+}
+
 const server = Bun.serve<WsData>({
   port: config.port,
   hostname: "127.0.0.1",
-
-  async fetch(req, server) {
-    const url = new URL(req.url);
-
-    const rejection = checkRequest(req, requestPolicy);
-    if (rejection) {
-      log.warn(`Rejected request: ${rejection.reason}`, {
-        ...rejection.details,
-        path: url.pathname,
-      });
-      return error(rejection.reason, rejection.status);
-    }
-
-    if (url.pathname === "/ws/yaml-lsp") {
-      const upgraded = server.upgrade(req, { data: { type: "yaml-lsp" as const } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    const worktreeLspManager = worktreeLspManagerByRoute.get(url.pathname);
-    if (worktreeLspManager) {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, {
-        data: { type: worktreeLspManager.name, wtPath, manager: worktreeLspManager },
-      });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    if (url.pathname === "/ws") {
-      const upgraded = server.upgrade(req, { data: { type: "app" as const } });
-      if (!upgraded) {
-        return new Response("WebSocket upgrade failed", { status: 400 });
-      }
-      return undefined;
-    }
-
-    // The relaunching app and the CLI poll /api/version while this server shuts down; counting
-    // those polls as work to drain would keep the drain's quiet period from ever starting.
-    if (url.pathname === "/api/version") return handleRequest(req, routeContext);
-    if (url.pathname.startsWith("/api")) {
-      return trackApiRequest(() => handleRequest(req, routeContext));
-    }
-
-    // Serve static files from dist/ when available (production mode)
-    if (distDir) {
-      const filePath = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-      const resolved = resolve(distDir, filePath);
-      if (resolved.startsWith(distDir + "/") || resolved === distDir) {
-        const file = Bun.file(resolved);
-        if (await file.exists()) return new Response(file);
-      }
-      return new Response(Bun.file(join(distDir, "index.html")));
-    }
-
-    return handleRequest(req, routeContext);
-  },
+  fetch: (req, server) =>
+    serveRequest(req, "app", (upgraded, data) => server.upgrade(upgraded, { data })),
 
   websocket: {
     open(ws) {
@@ -1546,6 +1596,9 @@ const server = Bun.serve<WsData>({
   },
 });
 
+/** The `loxel` CLI's socket (see cli-socket.ts), or null when this server could not listen there. */
+const cliServer = cliSocketFree ? listenForCli() : null;
+
 // Wire logger broadcast now that the server and broadcastAll are available.
 // log_entries is subscription-gated — only clients that sent `subscribe_logs`
 // receive full entry batches. log_error_count is always broadcast so the badge
@@ -1568,6 +1621,12 @@ recoverOrphanLayoutSessions();
 if (terminalManager.hasOrphanSessions()) startIdleTimer();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
+if (cliServer) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
+if (cliServer && !config.cliSocketPath.startsWith(`${config.stateDir}/`)) {
+  log.warn(
+    `The state directory is too deep for a socket path; the loxel CLI's socket is in ${config.cliSocketPath}, where the system may purge it after a few days unused`,
+  );
+}
 log.info(`State directory: ${config.stateDir}${config.isDev ? " (dev)" : ""}`);
 if (projects.size === 0) log.info("No projects registered, waiting for project selection");
 
@@ -1688,6 +1747,8 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
+  // Stopping removes the socket file.
+  cliServer?.stop();
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
   void Promise.race([

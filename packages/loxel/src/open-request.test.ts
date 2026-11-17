@@ -3,6 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { requestOpen, requestOpenAll } from "./open-request";
 
 const SERVER = "http://127.0.0.1:7434";
+const SOCKET = "/state/run/cli.sock";
 const NO_WINDOW = { status: 503, body: { error: "No Loxel window is open" } };
 /** No server listening: the old one exited and its replacement has not bound the port yet. */
 const UNREACHABLE = "unreachable";
@@ -18,11 +19,14 @@ describe("requestOpen", () => {
   /** Answer `/api/open` with the given responses in order, repeating the last one. */
   function serve(responses: Array<{ status: number; body: unknown } | typeof UNREACHABLE>): {
     bodies: unknown[];
+    sockets: Array<string | undefined>;
   } {
     const bodies: unknown[] = [];
+    const sockets: Array<string | undefined> = [];
     const fakeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe(`${SERVER}/api/open`);
       bodies.push(JSON.parse(String(init?.body)));
+      sockets.push(init && "unix" in init ? String(init.unix) : undefined);
       const response = responses[Math.min(bodies.length - 1, responses.length - 1)]!;
       if (response === UNREACHABLE) throw new TypeError("fetch failed");
       return Response.json(response.body, { status: response.status });
@@ -30,7 +34,7 @@ describe("requestOpen", () => {
     fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
       Object.assign(fakeFetch, { preconnect: globalThis.fetch.preconnect }),
     );
-    return { bodies };
+    return { bodies, sockets };
   }
 
   test("posts the request", async () => {
@@ -84,6 +88,22 @@ describe("requestOpen", () => {
     const result = requestOpen(SERVER, { filePath: "/tmp/a.md" }, { windowWaitMs: 0 });
 
     await expect(result).rejects.toThrow(`Cannot reach Loxel at ${SERVER}`);
+  });
+
+  test("sends every request over the Unix socket it is given", async () => {
+    const { sockets } = serve([{ status: 200, body: { ok: true } }]);
+
+    await requestOpenAll(SERVER, [{ filePath: "/a" }, { filePath: "/b" }], { unix: SOCKET });
+
+    expect(sockets).toEqual([SOCKET, SOCKET]);
+  });
+
+  test("names the socket when no server answers on it", async () => {
+    serve([UNREACHABLE]);
+
+    const result = requestOpen(SERVER, { filePath: "/a" }, { unix: SOCKET, windowWaitMs: 0 });
+
+    await expect(result).rejects.toThrow(`Cannot reach Loxel at ${SOCKET}`);
   });
 
   test("gives up when no window connects in time", async () => {

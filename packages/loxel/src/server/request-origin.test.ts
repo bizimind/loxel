@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { type RequestOriginPolicy, checkRequest } from "./request-origin";
+import {
+  type AdmissionRequest,
+  type Principal,
+  type RequestOriginPolicy,
+  checkRequest,
+} from "./request-origin";
 
 const PORT = 7433;
 const prod: RequestOriginPolicy = { port: PORT, viteDevPort: null };
@@ -8,15 +13,15 @@ const dev: RequestOriginPolicy = { port: 7434, viteDevPort: 5173 };
 
 // Built from headers rather than `new Request(...)`: the test DOM preload's Request strips the
 // `Host` and `Origin` headers these rules inspect.
-function request(method: string, headers: Record<string, string> = {}) {
-  return { method, headers: new Headers({ Host: `127.0.0.1:${PORT}`, ...headers }) };
+function request(method: string, headers: Record<string, string> = {}, pathname = "/api/projects") {
+  return { method, headers: new Headers({ Host: `127.0.0.1:${PORT}`, ...headers }), pathname };
 }
 
 const jsonPost = (headers: Record<string, string> = {}) =>
   request("POST", { "Content-Type": "application/json", ...headers });
 
-const status = (req: ReturnType<typeof request>, policy = prod) =>
-  checkRequest(req, policy)?.status ?? null;
+const status = (req: AdmissionRequest, policy = prod, principal: Principal = "app") =>
+  checkRequest(req, principal, policy)?.status ?? null;
 
 describe("checkRequest: Host", () => {
   test("accepts loopback hosts on the server port only", () => {
@@ -39,7 +44,7 @@ describe("checkRequest: Host", () => {
     ]) {
       expect(status(request("GET", { Host: host }))).toBe(400);
     }
-    expect(status({ method: "GET", headers: new Headers() })).toBe(400);
+    expect(status({ method: "GET", headers: new Headers(), pathname: "/" })).toBe(400);
   });
 
   test("reports the offending host and checks Host before anything else", () => {
@@ -49,6 +54,7 @@ describe("checkRequest: Host", () => {
         Origin: "https://evil.example",
         "Content-Type": "text/plain",
       }),
+      "app",
       prod,
     );
     expect(rejection).toMatchObject({ status: 400, details: { host: "evil.example" } });
@@ -80,7 +86,7 @@ describe("checkRequest: Origin", () => {
       expect(status(request("GET", { Origin: origin }))).toBe(403);
       expect(status(jsonPost({ Origin: origin }))).toBe(403);
     }
-    const rejection = checkRequest(jsonPost({ Origin: "https://evil.example" }), prod);
+    const rejection = checkRequest(jsonPost({ Origin: "https://evil.example" }), "app", prod);
     expect(rejection).toMatchObject({ status: 403, details: { origin: "https://evil.example" } });
   });
 
@@ -154,7 +160,7 @@ describe("checkRequest: mutation bodies", () => {
       expect(status(request(method))).toBe(415);
     }
     const textPost = request("POST", { "Content-Type": "text/plain" });
-    expect(checkRequest(textPost, prod)).toMatchObject({
+    expect(checkRequest(textPost, "app", prod)).toMatchObject({
       status: 415,
       details: { contentType: "text/plain" },
     });
@@ -184,5 +190,50 @@ describe("checkRequest: GET /api/terminals", () => {
   test("serves the app's own renderer and native clients", () => {
     expect(status(request("GET", { Origin: `http://127.0.0.1:${PORT}` }))).toBeNull();
     expect(status(request("GET"))).toBeNull();
+  });
+});
+
+describe("checkRequest: principals", () => {
+  // Over the Unix socket: no browser can connect there, and Host names no address.
+  const cli = (method: string, pathname: string, headers: Record<string, string> = {}) =>
+    status({ method, headers: new Headers(headers), pathname }, prod, "cli");
+
+  test("the CLI gets the routes it uses, whatever its Host", () => {
+    expect(cli("GET", "/api/version")).toBeNull();
+    expect(cli("GET", "/api/version", { Host: "localhost" })).toBeNull();
+    expect(cli("POST", "/api/open", { "Content-Type": "application/json" })).toBeNull();
+  });
+
+  test("the CLI gets no other route, WebSocket or static file", () => {
+    for (const [method, pathname] of [
+      ["GET", "/api/projects"],
+      ["GET", "/api/terminals"],
+      ["POST", "/api/projects"],
+      ["GET", "/api/open"],
+      ["POST", "/api/version"],
+      ["GET", "/ws"],
+      ["GET", "/"],
+      ["GET", "/index.html"],
+    ] as const) {
+      expect(cli(method, pathname, { "Content-Type": "application/json" })).toBe(403);
+    }
+    const rejection = checkRequest(
+      { method: "GET", headers: new Headers(), pathname: "/api/projects" },
+      "cli",
+      prod,
+    );
+    expect(rejection).toMatchObject({ status: 403, details: { principal: "cli" } });
+  });
+
+  test("the CLI's mutations must still be JSON", () => {
+    expect(cli("POST", "/api/open")).toBe(415);
+    expect(cli("POST", "/api/open", { "Content-Type": "text/plain" })).toBe(415);
+  });
+
+  test("the app gets every route, the CLI's included", () => {
+    expect(status(request("GET", {}, "/api/version"))).toBeNull();
+    expect(status(jsonPost({}))).toBeNull();
+    expect(status(request("GET", {}, "/ws"))).toBeNull();
+    expect(status(request("GET", {}, "/"))).toBeNull();
   });
 });

@@ -100,6 +100,7 @@ Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.
 - `logs/server-{instanceId}.log` — server logs (NDJSON, rotated at 5 MB, stale files removed after 24 h)
 - `logs/terminal-host-{hostId}.log` — terminal host logs (NDJSON, rotated at 5 MB, removed a day after the host is gone)
 - `terminal-host/run/` — running terminal hosts' sockets and entries; `terminal-host/bin/` — the host binaries they run from
+- `run/cli.sock` — the socket the `loxel` CLI reaches the server on, open to this user only
 
 ## Internal docs
 
