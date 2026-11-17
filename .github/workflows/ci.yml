@@ -205,8 +205,9 @@ jobs:
     needs: discover
     if: needs.discover.outputs.test != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    # Healthy loxel runs take up to ~4 min including ~1 min of setup; leave room for slow runners.
-    timeout-minutes: 7
+    # Healthy loxel runs take up to ~4 min including ~1 min of setup; leave room for slow runners and
+    # for compiling gopls and docker-language-server when their caches miss.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -234,9 +235,47 @@ jobs:
         with:
           path: packages/loxel/build/eslint-language-server-source
           key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts') }}
+      # gopls and docker-language-server compile from the pinned modules that Dependabot bumps. The
+      # binaries are cached on everything that goes into them, so they only compile when one of those
+      # changed, and their build skips a binary the cache restored (its `.source` record matches).
+      - if: matrix.package.name == 'loxel'
+        id: go-servers
+        uses: actions/cache/restore@v6
+        with:
+          path: &go-servers-path |
+            packages/loxel/build/gopls
+            packages/loxel/build/gopls.source
+            packages/loxel/build/docker-language-server
+            packages/loxel/build/docker-language-server.source
+          key: go-servers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/build-gopls.ts', 'packages/loxel/scripts/build-docker-lsp.ts', 'packages/loxel/scripts/gopls-module/**', 'packages/loxel/scripts/docker-lsp-module/**') }}
+      # Only for a compile: the toolchain (go-<version>), the module downloads (go re-extracts them)
+      # and the build cache, from the last compile on main with the same toolchain, so a bump
+      # recompiles only what it changed.
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
+        id: go-build
+        uses: actions/cache/restore@v6
+        with:
+          path: &go-build-path |
+            packages/loxel/build/go-*.*
+            packages/loxel/build/go-path/pkg/mod/cache/download
+            packages/loxel/build/go-cache
+          key: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts') }}-${{ hashFiles('packages/loxel/scripts/*-module/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts') }}-
       - if: matrix.package.name == 'loxel'
         name: Build the language servers the tests run
-        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff tombi
+        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff tombi gopls docker-language-server
+      # Saved once built, so a failing test does not throw the compile away. The Go caches, over a
+      # gigabyte, are saved from main only; a pull request starts from main's.
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-servers-path
+          key: ${{ steps.go-servers.outputs.cache-primary-key }}
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true' && steps.go-build.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-build-path
+          key: ${{ steps.go-build.outputs.cache-primary-key }}
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
 

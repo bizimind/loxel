@@ -2,8 +2,6 @@ module loxel.invalid/gopls
 
 go 1.27.3
 
-require golang.org/x/tools/gopls v0.24.0
-
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
@@ -24,8 +22,11 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.51.1-0.20261014163302-24a65270771e // indirect
+	golang.org/x/tools/gopls v0.24.0 // indirect
 	golang.org/x/vuln v1.8.0 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
 	mvdan.cc/gofumpt v0.12.0 // indirect
 	mvdan.cc/xurls/v2 v2.6.0 // indirect
 )
+
+tool golang.org/x/tools/gopls

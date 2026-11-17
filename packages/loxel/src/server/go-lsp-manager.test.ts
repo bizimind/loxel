@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { builtBinaryExists } from "@/test/built-binary";
 import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
 
-import { GO_ENV, refreshGoEnv, subscribeGoEnv } from "./go-env";
+import { GO_ENV, GOPLS, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {
   GO_NOT_FOUND_REASON,
   GoLspManager,
@@ -611,3 +612,28 @@ describe("withoutHiddenActions", () => {
     }
   });
 });
+
+// The gopls that ships, built from scripts/gopls-module/ by `build:language-servers gopls`.
+describe.skipIf(!(await builtBinaryExists(resolve(import.meta.dir, "../../build", GOPLS))))(
+  "GoLspManager with the built gopls",
+  () => {
+    test("starts it and completes the handshake", async () => {
+      const wt = await makeDir("go-wt-");
+      const bin = await makeDir("go-bin-");
+      // The manager starts gopls only beside a `go`; the handshake itself runs none.
+      await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
+      await restrictPath(bin);
+      manager = new GoLspManager();
+
+      const client = fakeSocket();
+      manager.createSession(client.ws, wt);
+      manager.handleMessage(client.ws, INITIALIZE);
+      const { result } = (await client.untilFrame((frame) => frame.id === 1)) as {
+        result: { serverInfo?: { name?: string }; capabilities: Record<string, unknown> };
+      };
+      expect(result.serverInfo?.name).toBe("gopls");
+      expect(result.capabilities.hoverProvider).toBe(true);
+      expect(result.capabilities.definitionProvider).toBe(true);
+    });
+  },
+);

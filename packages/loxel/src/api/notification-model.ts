@@ -22,16 +22,19 @@ export interface BrowserNotificationSource {
   faviconUrl?: string;
 }
 
-/** The server itself, about the terminal hosts (terminals it had to end at startup). */
-export interface TerminalHostNotificationSource {
-  kind: "terminal_host";
+/**
+ * The server itself: terminals it had to end at startup, or a `loxel` CLI socket it could not
+ * listen on.
+ */
+export interface ServerNotificationSource {
+  kind: "server";
 }
 
 /** Source identifies where a notification came from. */
 export type NotificationSource =
   | TerminalNotificationSource
   | BrowserNotificationSource
-  | TerminalHostNotificationSource;
+  | ServerNotificationSource;
 
 /** Sources raised by a panel, in its worktree or in Home: navigable, with a tab dot. */
 export type PanelNotificationSource = TerminalNotificationSource | BrowserNotificationSource;

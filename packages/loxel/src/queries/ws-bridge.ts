@@ -23,9 +23,15 @@ import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./query-keys";
+import {
+  isDirContentsKeyBelow,
+  isWorkingTreeDiffKey,
+  queryKeys,
+  workingTreeFileContentKey,
+} from "./query-keys";
 
 const log = frontendLog.child("files");
+const serverLog = frontendLog.child("server");
 
 const EDITORCONFIG_SUFFIX = "/.editorconfig";
 
@@ -286,8 +292,12 @@ export function useWsBridge(): void {
             queryKey: queryKeys.status(projectPath, message.wtPath),
           });
           queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(projectPath) });
-          queryClient.invalidateQueries({ queryKey: ["diff", projectPath] });
-          queryClient.invalidateQueries({ queryKey: ["dirContents", projectPath] });
+          // Only this worktree's: commit and range diffs are keyed by SHA, so they cannot be stale.
+          queryClient.invalidateQueries({
+            predicate: ({ queryKey }) =>
+              isWorkingTreeDiffKey(queryKey, projectPath, message.wtPath) ||
+              isDirContentsKeyBelow(queryKey, projectPath, message.wtPath),
+          });
           queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey;
@@ -463,6 +473,7 @@ export function useWsBridge(): void {
           void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
           break;
 
+        case "server_hello": // handled by wsClient itself
         case "terminal_exit":
         case "terminal_notice":
         case "terminal_state":
@@ -479,11 +490,39 @@ export function useWsBridge(): void {
       }
     });
 
+    const unsubscribeReconnect = wsClient.onReconnect(() => void resyncAfterReconnect());
+
     return () => {
       unsubscribe();
+      unsubscribeReconnect();
       wsClient.disconnect();
     };
   }, []);
+}
+
+/**
+ * Catch up after the socket came back. Whether the server restarted or only the socket dropped,
+ * every push sent while it was down is lost, and the cache trusts pushes (`staleTime: Infinity`),
+ * so it all goes stale: TanStack refetches the queries on screen now and the rest when next used.
+ * File contents are the exception: an editor with unsaved changes must take new disk content
+ * through its state machine, not as a bare refetch, so they are left to the
+ * `worktree_files_resynced` the server sends each re-subscribed worktree. The projects and their
+ * worktree lists live in stores, so they are fetched again, which also releases worktrees removed
+ * meanwhile.
+ */
+async function resyncAfterReconnect(): Promise<void> {
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) => queryKey[0] !== "fileContent",
+  });
+  try {
+    await useProjectStore.getState().fetchProjects();
+    const { refreshProjectWorktrees } = useWorktreeStore.getState();
+    await Promise.all(
+      useProjectStore.getState().projects.map((p) => refreshProjectWorktrees(p.path)),
+    );
+  } catch (error: unknown) {
+    serverLog.error("Failed to refresh projects after reconnecting", { error });
+  }
 }
 
 /** Derive project path from a worktree path using the project store. */

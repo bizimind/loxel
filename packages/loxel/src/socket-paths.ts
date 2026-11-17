@@ -4,7 +4,7 @@
  * the `loxel` CLI. Each is in a private directory under the state directory, so only the user's
  * own account can open it. See docs/TERMINAL_HOST.md#files-on-disk and docs/ARCHITECTURE.md.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,10 @@ import { join } from "node:path";
 const MAX_SOCKET_PATH_BYTES = 103;
 
 const CLI_SOCKET_NAME = "cli.sock";
+/** Random bytes in the name a server listens on before it takes the CLI socket's name. */
+const TEMP_SUFFIX_BYTES = 4;
+/** The longest name in the CLI socket's directory: a server's temporary one, `cli.sock.<hex>`. */
+const LONGEST_CLI_SOCKET_NAME = `${CLI_SOCKET_NAME}.${"0".repeat(TEMP_SUFFIX_BYTES * 2)}`;
 
 /** Where a socket directory goes when the state directory is too deep for one. */
 interface SocketDirFallback {
@@ -56,13 +60,22 @@ export function ensurePrivateDir(dir: string): void {
 
 /**
  * The Unix socket the server for `stateDir` listens on for the `loxel` CLI: `<stateDir>/run/cli.sock`,
- * or in the temporary directory for a state directory too deep for a socket path.
+ * or in the temporary directory for a state directory too deep for a socket path. The directory is
+ * chosen so that {@link cliSocketTempPath}'s names fit too.
  */
 export function cliSocketPath(stateDir: string, tempDir = tmpdir()): string {
-  const dir = socketDir(join(stateDir, "run"), CLI_SOCKET_NAME, {
+  const dir = socketDir(join(stateDir, "run"), LONGEST_CLI_SOCKET_NAME, {
     prefix: "loxel-run",
     stateDir,
     tempDir,
   });
   return join(dir, CLI_SOCKET_NAME);
+}
+
+/**
+ * A fresh name beside the CLI socket at `socketPath` for a server to listen on before it renames
+ * the socket to `socketPath` (see server/cli-socket.ts): `cli.sock.<8 hex digits>`.
+ */
+export function cliSocketTempPath(socketPath: string): string {
+  return `${socketPath}.${randomBytes(TEMP_SUFFIX_BYTES).toString("hex")}`;
 }

@@ -139,13 +139,13 @@ When changing watcher behavior, verify:
 
 Three invariants must survive any change to this pipeline. Each has a suite against real temporary repositories, in both bare and regular layouts, and a smoke test and a renderer test cover the two ends:
 
-| Suite                                                                   | Locks                                                                                         |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove |
-| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing  |
-| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                 |
-| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process, and what removing a worktree ends   |
-| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message writes or invalidates in the renderer  |
+| Suite                                                                   | Locks                                                                                                          |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove                  |
+| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing                   |
+| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                                  |
+| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process, and what removing a worktree ends                    |
+| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message, and a reconnect, writes or invalidates in the renderer |
 
 The first three use [git-sync-harness.ts](../src/test/git-sync-harness.ts), which wires the real watchers and services the way `initializeProject` and `subscribeWorktree` do and captures what they would broadcast, plus what a client reads back after each message. A change to that wiring in `server.ts` has to be mirrored there; the smoke test runs a real server, for one pass, and is the only check of `server.ts` itself.
 

@@ -12,6 +12,7 @@ import { useWorktreeStore } from "@/store/worktrees";
  * Switching worktrees subscribes to the new one and defers unsubscribing the
  * old until all pending saves complete (via onWorktreeSavesDrained). This keeps
  * server resources alive so auto-save flushes during panel unmount succeed.
+ * `wsClient` subscribes every one of them again after a reconnect.
  */
 export function useWsSubscription(activeWorktreePath: string | null): void {
   const prevWtRef = useRef<string | null>(null);
@@ -26,28 +27,31 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
       void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
     }
     if (prev) {
-      onWorktreeSavesDrained(prev, () => wsClient.unsubscribeWorktree(prev));
+      onWorktreeSavesDrained(prev, () => {
+        // Switched back before its saves drained: it is the shown worktree again.
+        if (prevWtRef.current === prev) return;
+        wsClient.unsubscribeWorktree(prev);
+      });
     }
   }, [activeWorktreePath]);
 
   useEffect(() => {
-    return wsClient.onReconnect(() => {
-      // A restarted server has forgotten what ran restricted, and trust may have changed meanwhile.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+    // The server forgets a worktree's open external files with its resources (after a reconnect,
+    // say), so tell it again once it confirms the subscription: sent right after the subscribe, the
+    // list would arrive before the resources exist and be dropped.
+    return wsClient.subscribe((message) => {
+      if (message.type !== "worktree_files_resynced") return;
       const wt = useWorktreeStore.getState().activeWorktreePath;
-      if (wt) {
-        wsClient.subscribeWorktree(wt);
-        const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
-          (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
-        );
-        if (externalPaths.length > 0) {
-          wsClient.send({
-            type: "register_external_files",
-            worktreePath: wt,
-            filePaths: externalPaths,
-          });
-        }
-      }
+      if (message.wtPath !== wt) return;
+      const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
+        (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
+      );
+      if (externalPaths.length === 0) return;
+      wsClient.send({
+        type: "register_external_files",
+        worktreePath: wt,
+        filePaths: externalPaths,
+      });
     });
   }, []);
 }

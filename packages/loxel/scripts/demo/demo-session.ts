@@ -5,14 +5,8 @@ import { $ } from "bun";
 
 import { withoutAgentEnv } from "../../src/coding-agent-env";
 import { DEMO_WINDOW_SIZE } from "../../src/electron/env";
-import {
-  demoEnv,
-  demoServer,
-  demoStateDir,
-  LOXEL_ROOT,
-  MAIN_JS,
-  registerDemoProjects,
-} from "./demo-app";
+import { cliSocketPath } from "../../src/socket-paths";
+import { demoEnv, demoStateDir, LOXEL_ROOT, MAIN_JS, registerDemoProjects } from "./demo-app";
 import { demoWorktree } from "./demo-projects";
 
 const CLI = resolve(LOXEL_ROOT, "src/cli.ts");
@@ -68,7 +62,7 @@ export async function launchDemo({
     const cliEnv = {
       ...withoutAgentEnv(process.env),
       LOXEL: "1",
-      LOXEL_PORT: new URL(demoServer(instance)).port,
+      LOXEL_SOCKET: cliSocketPath(demoStateDir(instance)),
     };
     return {
       app,

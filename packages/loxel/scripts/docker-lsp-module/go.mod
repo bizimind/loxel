@@ -2,8 +2,6 @@ module loxel.invalid/docker-language-server
 
 go 1.27.3
 
-require github.com/docker/docker-language-server v0.20.2-0.20260604162938-5187ff578db6
-
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
@@ -60,6 +58,7 @@ require (
 	github.com/docker/cli v29.9.3+incompatible // indirect
 	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
+	github.com/docker/docker-language-server v0.20.2-0.20260604162938-5187ff578db6 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dromara/carbon/v2 v2.6.11 // indirect
@@ -244,3 +243,5 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+tool github.com/docker/docker-language-server/cmd/docker-language-server

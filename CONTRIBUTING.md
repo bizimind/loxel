@@ -95,4 +95,4 @@ Examples:
 - A new `wt` subcommand: `feat`, `package:wt`
 - Flaky CI on the release workflow: `chore`, `package:repo`, `component:ci`, `component:tests`
 
-The `dependencies`, `javascript`, and `github_actions` labels are applied by Dependabot to its pull requests and are not part of the issue scheme.
+The `dependencies`, `javascript`, `github_actions`, and `go` labels are applied by Dependabot to its pull requests and are not part of the issue scheme.
