@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "../app-ports";
 import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
 import { cliSocketPath } from "../socket-paths";
-import { DEFAULT_STATE_DIR, STATE_BASE_DIR } from "../state-dir";
+import { STATE_BASE_DIR, stateDirFor } from "../state-dir";
 
 const isDev = process.env.LOXEL_DEV === "1";
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
@@ -12,13 +12,9 @@ const isDev = process.env.LOXEL_DEV === "1";
 const isDemo = process.env.LOXEL_DEMO === "1";
 
 const demoInstance = isDemo ? parseDemoInstance(process.env.LOXEL_DEMO_INSTANCE) : 0;
-const stateDir =
-  process.env.LOXEL_STATE_DIR ??
-  (isDemo
-    ? join(STATE_BASE_DIR, demoStateName(demoInstance))
-    : isDev
-      ? DEFAULT_STATE_DIR.dev
-      : DEFAULT_STATE_DIR.production);
+const stateDir = isDemo
+  ? (process.env.LOXEL_STATE_DIR ?? join(STATE_BASE_DIR, demoStateName(demoInstance)))
+  : stateDirFor(isDev ? "dev" : "production");
 const port =
   parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
   (isDemo

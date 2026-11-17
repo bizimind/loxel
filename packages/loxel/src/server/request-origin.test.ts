@@ -262,6 +262,9 @@ describe("checkRequest: the app's session over TCP", () => {
       ["GET", "/apifoo"],
       ["GET", "/ws"],
       ["GET", "/ws/ts-lsp"],
+      ["HEAD", "/api/projects"],
+      ["OPTIONS", "/api/projects"],
+      ["HEAD", "/api/version"],
     ] as const) {
       expect(anonymous(method, pathname, { "Content-Type": "application/json" })).toBe(401);
     }

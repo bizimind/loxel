@@ -8,7 +8,7 @@
 import { DEFAULT_SERVER_PORT } from "../app-ports";
 import { bearer, newSessionSecret, readSessionToken } from "../app-session";
 import { demoPort } from "../demo-instance";
-import { DEFAULT_STATE_DIR } from "../state-dir";
+import { stateDirFor } from "../state-dir";
 import { DEMO_INSTANCE, IS_DEMO, IS_DEV } from "./env";
 
 export const SERVER_PORT = IS_DEMO
@@ -37,7 +37,7 @@ export function setServerStartedByHand(byHand: boolean): void {
  */
 function currentSecret(): string | null {
   if (!serverStartedByHand) return APP_SESSION_SECRET;
-  return readSessionToken(process.env.LOXEL_STATE_DIR ?? DEFAULT_STATE_DIR.dev);
+  return readSessionToken(stateDirFor("dev"));
 }
 
 /** The header that carries the current server's secret, for requests main makes to it. */
@@ -46,25 +46,48 @@ export function serverAuthorization(): Record<string, string> {
   return secret ? { Authorization: bearer(secret) } : {};
 }
 
+/** What {@link carriesSecret} looks at in a request the windows' session sends. */
+export interface WindowRequest {
+  url: string;
+  /** The type of the web contents that sent it (`window`, `webview`...), when Electron knows. */
+  contentsType?: string;
+  /** The origin of the frame that sent it, when Electron knows: none for a worker's request. */
+  frameOrigin?: string;
+}
+
 /**
- * Add the secret to every request the app's windows send to `appOrigin`: the server's, or in dev
- * the Vite dev server's, which proxies to it. HTTP and WebSocket alike, frames included, and no
- * other origin, so it never reaches another port on the same host (as a cookie would) and the
- * renderer's script never sees it. Browser panels have a session of their own, without it.
+ * Whether a request from the windows' session gets the secret: an `/api` or `/ws` request to
+ * `appOrigin` (HTTP or WebSocket), from an app window, not a `<webview>`, and from a frame of the
+ * app's own origin, not one a page embedded from elsewhere.
+ */
+export function carriesSecret(req: WindowRequest, appOrigin: string): boolean {
+  const url = new URL(req.url);
+  const wsOrigin = `ws://${new URL(appOrigin).host}`;
+  if (url.origin !== appOrigin && url.origin !== wsOrigin) return false;
+  if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/ws")) return false;
+  if (req.contentsType !== undefined && req.contentsType !== "window") return false;
+  return req.frameOrigin === undefined || req.frameOrigin === appOrigin;
+}
+
+/**
+ * Add the secret to the requests the app's windows send to `appOrigin`, the server's or in dev the
+ * Vite dev server's, which proxies to it (see {@link carriesSecret}). It never reaches another
+ * origin, another port on the same host included, as a cookie would, and the renderer's script
+ * never sees it. Browser panels have a session of their own, without it.
  */
 export function authorizeWindowRequests(windows: Electron.Session, appOrigin: string): void {
-  const { hostname, host } = new URL(appOrigin);
-  const wsOrigin = `ws://${host}`;
+  const { hostname } = new URL(appOrigin);
   windows.webRequest.onBeforeSendHeaders(
-    // Narrowed to the host here; the port is checked below.
+    // Narrowed to the host here; carriesSecret checks the rest.
     { urls: [`http://${hostname}/*`, `ws://${hostname}/*`] },
     (details, callback) => {
-      const { origin } = new URL(details.url);
-      if (origin !== appOrigin && origin !== wsOrigin) {
-        callback({ requestHeaders: details.requestHeaders });
-        return;
-      }
-      callback({ requestHeaders: { ...details.requestHeaders, ...serverAuthorization() } });
+      const request = {
+        url: details.url,
+        contentsType: details.webContents?.getType(),
+        frameOrigin: details.frame?.origin,
+      };
+      const headers = carriesSecret(request, appOrigin) ? serverAuthorization() : {};
+      callback({ requestHeaders: { ...details.requestHeaders, ...headers } });
     },
   );
 }

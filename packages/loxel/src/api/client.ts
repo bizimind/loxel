@@ -1062,7 +1062,8 @@ export class WsClient {
    */
   expireSession(): void {
     if (this.state === "expired") return;
-    postLogEntry({ level: "warn", cat: "server", msg: "The server no longer accepts this window" });
+    // Not to the server, which refuses the window's requests now and logs each refusal itself.
+    console.warn("The Loxel server no longer accepts this window's session; reload to reconnect");
     this.closed = true;
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
     this.retryTimer = null;

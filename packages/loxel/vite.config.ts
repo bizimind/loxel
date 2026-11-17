@@ -8,7 +8,7 @@ import electron from "vite-plugin-electron";
 
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
 import { bearer, readSessionToken } from "./src/app-session";
-import { DEFAULT_STATE_DIR } from "./src/state-dir";
+import { stateDirFor } from "./src/state-dir";
 
 const isElectron = !!process.env.ELECTRON;
 
@@ -184,9 +184,7 @@ export default defineConfig(({ mode }) => {
   const serverPort =
     parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
     (isDevMode ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
-  const stateDir =
-    process.env.LOXEL_STATE_DIR ??
-    (isDevMode ? DEFAULT_STATE_DIR.dev : DEFAULT_STATE_DIR.production);
+  const stateDir = stateDirFor(isDevMode ? "dev" : "production");
 
   return {
     plugins: [

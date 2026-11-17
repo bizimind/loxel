@@ -11,10 +11,9 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { WsMessage } from "@/api/ws-protocol";
-import { bunWebSocket } from "@/app-session";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
 import { CaptureLog } from "@/test/git-sync-harness";
-import { sessionAuthorization } from "@/test/session";
 
 // The package's test preload replaces `fetch` and `WebSocket` with browser ones, which have no
 // `unix` option and enforce CORS.

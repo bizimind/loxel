@@ -102,9 +102,9 @@ const log = logger.child("server");
 // --- The desktop app's channel ---
 // The app's first message is its session secret, which this server waits for before it serves the
 // app over TCP (see request-origin.ts). The app stops its server when it quits with a shutdown
-// message on its channel, which says what happens to the terminals. The channel closing without one, or the server being reparented,
-// means the app crashed or was killed. Set up first, so a quit while the server is still starting
-// stops it too.
+// message on its channel, which says what happens to the terminals. The channel closing without
+// one, or the server being reparented, means the app crashed or was killed. Set up first, so a
+// quit while the server is still starting stops it too.
 
 const PARENT_CHECK_MS = 2000;
 
@@ -1517,7 +1517,13 @@ await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 // startup is done. Nothing is served over TCP without it. An app that is gone by now closed the
 // channel, which stops this server instead.
 const sessionSecret = await appSecret.promise;
+
+// Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
+// from here to `serving = true` waits, so a stop cannot arrive in between.
+if (stoppingInStartup) await new Promise<never>(() => {});
+
 // A server the app started keeps the secret to itself, except a demo's, which scripts/demo drives.
+// Written before the server listens, so a tool that finds it answering finds the file too.
 const writesSessionToken = config.parentPid === null || config.isDemo;
 if (writesSessionToken) {
   try {
@@ -1527,10 +1533,6 @@ if (writesSessionToken) {
     log.error("Could not write the session token file", { error: err });
   }
 }
-
-// Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
-// from here to `serving = true` waits, so a stop cannot arrive in between.
-if (stoppingInStartup) await new Promise<never>(() => {});
 
 /**
  * Listen for the `loxel` CLI, taking the socket over from any older server. Null when that fails:

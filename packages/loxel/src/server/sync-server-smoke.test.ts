@@ -24,8 +24,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { WorktreeEntry } from "@/api/git-models";
 import { encodeInputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
-import { bunWebSocket } from "@/app-session";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import {
   CaptureLog,
   createSyncRepo,
@@ -34,7 +34,6 @@ import {
   retryUntil,
   type SyncRepo,
 } from "@/test/git-sync-harness";
-import { sessionAuthorization } from "@/test/session";
 import { until } from "@/test/until";
 
 import { TITLE_KEY } from "./project-worktrees";

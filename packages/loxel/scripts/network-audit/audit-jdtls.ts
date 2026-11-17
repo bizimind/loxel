@@ -42,7 +42,7 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
 
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
@@ -912,12 +912,8 @@ async function exerciseProjects(jar: string): Promise<void> {
 
 const api = `http://127.0.0.1:${port}/api`;
 
-/** The `Authorization` header with the session secret the server writes before it listens. */
-function authorization(): string {
-  const secret = readSessionToken(path.join(work, "state"));
-  if (secret === null) throw new Error("The server wrote no session token");
-  return bearer(secret);
-}
+/** The header with the session secret the server writes before it listens. */
+const authorization = () => sessionAuthorization(path.join(work, "state")).Authorization;
 
 async function post(route: string, body: unknown): Promise<void> {
   const response = await fetch(`${api}${route}`, {

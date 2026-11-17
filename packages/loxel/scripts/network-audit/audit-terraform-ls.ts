@@ -28,7 +28,7 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
 
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
@@ -225,11 +225,9 @@ async function auditBehindLoxel(work: string, dylib: string): Promise<void> {
   try {
     await waitForServer(`http://127.0.0.1:${port}/`);
     // The server writes its session secret before it listens.
-    const secret = readSessionToken(path.join(work, "state"));
-    if (secret === null) throw new Error("loxel-server wrote no session token");
     const ws = await connect(
       `ws://127.0.0.1:${port}/ws/terraform-lsp?wt=${encodeURIComponent(repo)}`,
-      bearer(secret),
+      sessionAuthorization(path.join(work, "state")).Authorization,
     );
     const client = new LspClient((frame) => ws.send(frame));
     ws.addEventListener("message", (event) => {

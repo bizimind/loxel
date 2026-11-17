@@ -15,3 +15,8 @@ export const DEFAULT_STATE_DIR = {
   production: join(STATE_BASE_DIR, "loxel"),
   dev: join(STATE_BASE_DIR, "loxel-dev"),
 } as const;
+
+/** The state directory of a production or dev server: `LOXEL_STATE_DIR`, else the mode's default. */
+export function stateDirFor(mode: keyof typeof DEFAULT_STATE_DIR, env = process.env): string {
+  return env.LOXEL_STATE_DIR ?? DEFAULT_STATE_DIR[mode];
+}

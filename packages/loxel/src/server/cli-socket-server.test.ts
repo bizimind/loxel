@@ -20,9 +20,9 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { ServerNotification } from "@/api/notification-model";
-import { bunWebSocket, sessionTokenPath } from "@/app-session";
+import { sessionTokenPath } from "@/app-session";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
-import { sessionAuthorization } from "@/test/session";
 import { leaveStaleSocket } from "@/test/stale-socket";
 
 // The package's test preload replaces `fetch` with a browser one, which has no `unix` option.

@@ -24,7 +24,7 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
 
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
@@ -153,12 +153,8 @@ const server = Bun.spawn([serverPath], {
   },
 });
 
-/** The `Authorization` header with the session secret the server writes before it listens. */
-function authorization(): string {
-  const secret = readSessionToken(path.join(work, "state"));
-  if (secret === null) throw new Error("The server wrote no session token");
-  return bearer(secret);
-}
+/** The header with the session secret the server writes before it listens. */
+const authorization = () => sessionAuthorization(path.join(work, "state")).Authorization;
 
 const failures: string[] = [];
 function check(ok: boolean, label: string, detail?: unknown): void {

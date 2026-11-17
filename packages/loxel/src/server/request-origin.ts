@@ -3,8 +3,8 @@
  *
  * On the loopback TCP port, every `/api` and `/ws` request must carry the app's session secret
  * (app-session.ts) as an `Authorization: Bearer` header, which Electron main adds to its own
- * requests and to its windows'. Without it only `GET /api/version` (how the app finds and waits for its server) and the
- * renderer's static files are served. The secret is what proves a request comes from the app; the
+ * requests and to its windows'. Without it only `GET /api/version` (how the app finds and waits
+ * for its server) and the renderer's static files are served. The secret is what proves a request comes from the app; the
  * browser-header rules below stay as defense in depth, keeping web pages (browser tabs and pages
  * inside Loxel's own browser panels, which never get the header) from driving the server. Browsers
  * attach `Origin` to WebSocket upgrades, CORS-mode fetches and non-GET/HEAD requests, but not to

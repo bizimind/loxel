@@ -800,7 +800,10 @@ app.on("web-contents-created", (_, contents) => {
 
   // Strip dangerous preferences from any dynamically-created webview, then load Loxel's own
   // sandboxed preload (which also runs in subframes, without Node.js).
-  contents.on("will-attach-webview", (_, webPreferences) => {
+  contents.on("will-attach-webview", (_, webPreferences, params) => {
+    // Browser panels' partition, whatever the element asks for: never the windows' session, whose
+    // requests to the server carry the app's secret.
+    params.partition = BROWSER_PARTITION;
     delete webPreferences.preload;
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInWorker = false;

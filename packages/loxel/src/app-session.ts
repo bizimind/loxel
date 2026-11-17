@@ -2,11 +2,11 @@
  * The app's session secret: what proves that a request to the server's loopback TCP port comes from
  * the app. The desktop app generates it once per run and hands it to the server it starts over its
  * channel (parent-channel-protocol.ts); main adds it as a Bearer header to its own requests and to
- * its windows'. A server started without the app (dev, tests) makes its own and
- * writes it to its token file for the tools that drive it. See docs/ARCHITECTURE.md#request-admission.
+ * its windows'. A server started without the app (dev, tests) makes its own and writes it to its
+ * token file for the tools that drive it (session-client.ts). See
+ * docs/ARCHITECTURE.md#request-admission.
  *
- * Shared by the server, Electron main, the Vite dev proxy and the scripts and tests that start a
- * server.
+ * Shared by the server, Electron main, the Vite dev proxy and session-client.ts.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -44,17 +44,4 @@ export function readSessionToken(stateDir: string): string | null {
   }
   const parsed = SessionSecretSchema.safeParse(text.trim());
   return parsed.success ? parsed.data : null;
-}
-
-/**
- * A WebSocket from a Bun process (a test or a script) to a server, sending `headers` with the
- * upgrade, such as the `Authorization` that carries the secret. Bun's constructor takes them, but
- * lib.dom's type, which wins in this package, does not show its options.
- */
-export function bunWebSocket(url: string, headers: Record<string, string>): WebSocket {
-  const BunWebSocket = WebSocket as unknown as new (
-    url: string,
-    options: Bun.WebSocketOptions,
-  ) => WebSocket;
-  return new BunWebSocket(url, { headers });
 }

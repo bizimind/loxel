@@ -23,7 +23,7 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
 
 const REQUEST_TIMEOUT_MS = 180_000;
 const LOAD_TIMEOUT_MS = 600_000;
@@ -229,12 +229,8 @@ const server = Bun.spawn([serverPath, "src/server/index.ts", repo], {
   },
 });
 
-/** The `Authorization` header with the session secret the server writes before it listens. */
-function authorization(): string {
-  const secret = readSessionToken(path.join(work, "state"));
-  if (secret === null) throw new Error("The server wrote no session token");
-  return bearer(secret);
-}
+/** The header with the session secret the server writes before it listens. */
+const authorization = () => sessionAuthorization(path.join(work, "state")).Authorization;
 
 async function waitForServer(): Promise<void> {
   for (let attempt = 0; attempt < 300; attempt++) {

@@ -28,15 +28,15 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { RunningTerminalsSchema } from "@/api/running-terminals-model";
 import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
-import { bearer, bunWebSocket, newSessionSecret } from "@/app-session";
+import { bearer, newSessionSecret, readSessionToken } from "@/app-session";
 import {
   PARENT_CHANNEL_FD,
   type ShutdownTerminals,
   encodeParentMessage,
 } from "@/parent-channel-protocol";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { hostLogsDir, hostRunDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
-import { sessionAuthorization } from "@/test/session";
 import { until } from "@/test/until";
 
 // The package's test preload replaces `fetch` and `WebSocket` with browser ones that enforce CORS.
@@ -136,8 +136,10 @@ describe("terminals across server restarts", () => {
       },
       "the server to listen",
     );
-    // One the app started has the app's secret; one on its own wrote its own to its token file.
-    if (!asApp) auth = sessionAuthorization(stateDir);
+    // One the app started has the app's secret, which it writes nowhere; one on its own wrote its
+    // own to its token file.
+    if (asApp) expect(readSessionToken(stateDir)).toBeNull();
+    else auth = sessionAuthorization(stateDir);
   }
 
   /** Start a server as {@link startServer} does, without waiting for it to listen. */
