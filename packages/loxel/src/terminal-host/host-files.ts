@@ -12,12 +12,12 @@
  *
  * See docs/TERMINAL_HOST.md#files-on-disk.
  */
-import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { z } from "zod";
+
+import { socketDir } from "@/socket-paths";
 
 /** The name of the host's binary, in the app bundle and in `bin/<hostBuildId>/`. */
 export const TERMINAL_HOST_BINARY = "loxel-terminal-host";
@@ -25,12 +25,6 @@ export const TERMINAL_HOST_BINARY = "loxel-terminal-host";
 /** Host IDs are this many hex characters, which keeps socket paths short. */
 const HOST_ID_LENGTH = 8;
 const HOST_ID = /^[0-9a-f]{8}$/;
-
-/**
- * The longest socket path the platform takes: `sun_path` is 104 bytes on macOS (108 on Linux),
- * terminator included.
- */
-const MAX_SOCKET_PATH_BYTES = 103;
 
 export const HostEntrySchema = z.object({
   pid: z.number().int().positive(),
@@ -56,20 +50,15 @@ export function hostRunDir(stateDir: string): string {
 
 /**
  * Where the hosts' sockets are: the run directory, unless a socket there would pass the socket
- * path limit, which only a deep `LOXEL_STATE_DIR` override does. Then it is a directory in the
- * temporary directory named by a hash of the state directory, so every server for that state
- * directory finds the same one. The entries stay in the run directory either way.
+ * path limit (see `socketDir`); the entries stay in the run directory either way.
  */
 export function hostSocketDir(stateDir: string, tempDir = tmpdir()): string {
-  const runDir = hostRunDir(stateDir);
-  if (fitsSocketPath(runDir)) return runDir;
-  const hash = createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
-  return join(tempDir, `loxel-terminal-host-${hash}`);
-}
-
-function fitsSocketPath(dir: string): boolean {
-  const longest = hostSocketPath(dir, "0".repeat(HOST_ID_LENGTH));
-  return Buffer.byteLength(longest) <= MAX_SOCKET_PATH_BYTES;
+  const longest = `${"0".repeat(HOST_ID_LENGTH)}.sock`;
+  return socketDir(hostRunDir(stateDir), longest, {
+    prefix: "loxel-terminal-host",
+    stateDir,
+    tempDir,
+  });
 }
 
 export function hostSocketPath(socketDir: string, hostId: string): string {
@@ -92,19 +81,6 @@ export const HOST_LOG_PREFIX = "terminal-host-";
 
 export function hostLogPath(stateDir: string, hostId: string): string {
   return join(hostLogsDir(stateDir), `${HOST_LOG_PREFIX}${hostId}.log`);
-}
-
-/**
- * Create the run directory, or check an existing one: it must be a directory of this user's, and
- * is made private (0700), since anyone who can reach a host's socket controls its shells.
- */
-export function ensureRunDir(runDir: string): void {
-  mkdirSync(runDir, { recursive: true, mode: 0o700 });
-  const stat = lstatSync(runDir);
-  if (!stat.isDirectory() || stat.uid !== process.getuid?.()) {
-    throw new Error(`Terminal host run directory ${runDir} is not a directory of this user's`);
-  }
-  if ((stat.mode & 0o777) !== 0o700) chmodSync(runDir, 0o700);
 }
 
 /** Ask the host at `pid` to end its sessions and exit, as it takes a SIGTERM; one gone is no error. */

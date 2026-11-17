@@ -22,7 +22,7 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `LOXEL`           | `1`                                                                                                                        |
 | `LOXEL_WORKTREE`  | Absolute path of the worktree whose layout holds this terminal; not set in a terminal in Home, the layout with no worktree |
-| `LOXEL_PORT`      | Port of the running Loxel; the CLI connects through it                                                                     |
+| `LOXEL_SOCKET`    | Socket of the running Loxel; the CLI connects through it                                                                   |
 | `LOXEL_WINDOW_ID` | The Loxel window this terminal is in; the CLI targets it                                                                   |
 
 ## The `loxel` CLI
@@ -51,7 +51,7 @@ loxel --worktree ../other https://github.com/org/repo/pull/42  # open in another
 
 There is no `--help`: `loxel --help` fails with `unknown option --help` and prints the usage. On success the CLI prints nothing (at most `loxel: waiting for a Loxel window...` while Loxel starts, or a `loxel: warning: ...` line about a flag it ignored) and exits 0. Errors it can detect print `loxel: <message>` to stderr and exit 1. Some requests are accepted and then refused inside Loxel, which shows the user a message while the CLI still exits 0. That happens, for example, with a folder that belongs to a project but to none of its worktrees, such as a bare repo's root.
 
-If `command -v loxel` finds nothing, the CLI isn't installed for this shell. Tell the user, and fall back to the clickable paths and URLs described in [Keep the user oriented](#keep-the-user-oriented).
+If the CLI prints `Loxel's socket <path> is outside this sandbox`, your commands run in a sandbox that blocks Loxel's socket: ask the user to allow that path in the sandbox's settings, or to run the command themselves. If `command -v loxel` finds nothing, the CLI isn't installed for this shell. Tell the user, and fall back to the clickable paths and URLs described in [Keep the user oriented](#keep-the-user-oriented).
 
 ### Several targets
 

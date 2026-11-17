@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "../app-ports";
 import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
+import { cliSocketPath } from "../socket-paths";
+import { DEFAULT_STATE_DIR, STATE_BASE_DIR } from "../state-dir";
 
 const isDev = process.env.LOXEL_DEV === "1";
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
@@ -11,10 +12,13 @@ const isDev = process.env.LOXEL_DEV === "1";
 const isDemo = process.env.LOXEL_DEMO === "1";
 
 const demoInstance = isDemo ? parseDemoInstance(process.env.LOXEL_DEMO_INSTANCE) : 0;
-const stateBase = join(homedir(), ".local", "state", "loxel");
 const stateDir =
   process.env.LOXEL_STATE_DIR ??
-  join(stateBase, isDemo ? demoStateName(demoInstance) : isDev ? "loxel-dev" : "loxel");
+  (isDemo
+    ? join(STATE_BASE_DIR, demoStateName(demoInstance))
+    : isDev
+      ? DEFAULT_STATE_DIR.dev
+      : DEFAULT_STATE_DIR.production);
 const port =
   parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
   (isDemo
@@ -65,6 +69,8 @@ export const config = {
   /** Holds the `terraform` shim terraform-ls runs in a trusted repository; see `TerraformLspManager`. */
   terraformShimDir: join(stateDir, "terraform-ls"),
   port,
+  /** The Unix socket the `loxel` CLI reaches this server on; see cli-socket.ts. */
+  cliSocketPath: cliSocketPath(stateDir),
   /** The Vite dev server's port, whose origin a dev server also admits; null outside dev mode. */
   viteDevPort: isDev ? vitePort(process.env) : null,
   /**

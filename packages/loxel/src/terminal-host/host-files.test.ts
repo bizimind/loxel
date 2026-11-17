@@ -3,14 +3,9 @@ import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  ensureRunDir,
-  hostRunDir,
-  hostSocketDir,
-  hostSocketPath,
-  isHostId,
-  newHostId,
-} from "./host-files";
+import { ensurePrivateDir } from "@/socket-paths";
+
+import { hostRunDir, hostSocketDir, hostSocketPath, isHostId, newHostId } from "./host-files";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -44,10 +39,10 @@ describe("host files", () => {
     const base = mkdtempSync(join(tmpdir(), "thf-"));
     dirs.push(base);
     const runDir = join(base, "run");
-    ensureRunDir(runDir);
+    ensurePrivateDir(runDir);
     expect(statSync(runDir).mode & 0o777).toBe(0o700);
     chmodSync(runDir, 0o755);
-    ensureRunDir(runDir);
+    ensurePrivateDir(runDir);
     expect(statSync(runDir).mode & 0o777).toBe(0o700);
   });
 });

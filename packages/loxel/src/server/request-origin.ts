@@ -1,16 +1,43 @@
 /**
  * Request admission rules for the local server.
  *
- * The server listens on loopback without authentication, so these checks keep web pages (browser
- * tabs and pages inside Loxel's own browser panels) from driving it. Browsers attach `Origin` to
- * WebSocket upgrades, CORS-mode fetches and non-GET/HEAD requests, but not to no-cors GET loads
- * or navigations, and native clients (the `loxel` CLI, the Electron main process, curl) send none,
+ * On the loopback TCP port, these checks keep web pages (browser tabs and pages inside Loxel's
+ * own browser panels) from driving the server. Browsers attach `Origin` to WebSocket upgrades,
+ * CORS-mode fetches and non-GET/HEAD requests, but not to no-cors GET loads or navigations, and
+ * native clients (the Electron main process, older `loxel` CLIs, curl) send none,
  * so no single header is conclusive: the rules combine `Host`, `Origin`, `Sec-Fetch-Site`,
  * `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Content-Type`.
+ *
+ * The `loxel` CLI does not use the TCP port: it connects to the server's Unix socket, which only
+ * the user's own account can open (see cli-socket.ts). The listener a request arrived on decides
+ * its {@link Principal}, and each route lists the principals it serves.
  *
  * Every rule here describes intended policy; `server.ts` applies them to each incoming request
  * before routing, and `RequestOriginPolicy` lets tests pin the port and dev-mode allowances.
  */
+
+/**
+ * Who a request is from, by the listener it arrived on: `app` over the loopback TCP port (the
+ * app's windows and its main process), `cli` over the Unix socket (the `loxel` CLI).
+ */
+export type Principal = "app" | "cli";
+
+/**
+ * The routes some principal other than `app` may use, by `METHOD /path`, with the principals they
+ * serve. Every other route, WebSocket upgrades and static files included, serves `app` only.
+ */
+const ROUTE_PRINCIPALS: ReadonlyMap<string, readonly Principal[]> = new Map([
+  // What the `loxel` CLI sends: src/cli.ts, src/find-server.ts and src/open-request.ts.
+  ["GET /api/version", ["app", "cli"]],
+  ["POST /api/open", ["app", "cli"]],
+]);
+const OTHER_ROUTE_PRINCIPALS: readonly Principal[] = ["app"];
+
+function servesPrincipal(principal: Principal, method: string, pathname: string): boolean {
+  const principals =
+    ROUTE_PRINCIPALS.get(`${method.toUpperCase()} ${pathname}`) ?? OTHER_ROUTE_PRINCIPALS;
+  return principals.includes(principal);
+}
 
 export interface RequestOriginPolicy {
   /** Port the server listens on; `Host` and same-origin `Origin` values must carry it. */
@@ -62,42 +89,46 @@ function mimeType(contentType: string | null): string | null {
   return type ? type : null;
 }
 
+/** What {@link checkRequest} looks at: the method, the headers and the path. */
+export interface AdmissionRequest {
+  method: string;
+  headers: Headers;
+  pathname: string;
+}
+
 /**
  * Decide whether a request may be served. Returns `null` to admit it, otherwise the rejection
  * to send. Applies to HTTP requests and WebSocket upgrades alike:
  *
- * - `Host` must be a loopback host with the server's port (blocks DNS rebinding).
- * - `Origin`, when present, must be the server's own origin (plus the Vite dev origin in dev).
- * - Requests the browser marks `Sec-Fetch-Site: cross-site` are rejected, except top-level
- *   document navigations (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-Dest: document`), so a link
- *   into the app still opens it while cross-site fetches and subresource loads, including
- *   `<iframe>`, `<object>` and `<embed>` (navigations whose destination is not `document`),
- *   cannot reach endpoints.
+ * - The route must serve the request's principal (`403` otherwise).
+ * - For `app`, over TCP:
+ *   - `Host` must be a loopback host with the server's port (blocks DNS rebinding).
+ *   - `Origin`, when present, must be the server's own origin (plus the Vite dev origin in dev).
+ *   - Requests the browser marks `Sec-Fetch-Site: cross-site` are rejected, except top-level
+ *     document navigations (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-Dest: document`), so a
+ *     link into the app still opens it while cross-site fetches and subresource loads, including
+ *     `<iframe>`, `<object>` and `<embed>` (navigations whose destination is not `document`),
+ *     cannot reach endpoints.
+ * - For `cli`, over the Unix socket, none of those: no browser can connect to a Unix socket, so
+ *   there is no page to tell apart, and `Host` names no address there.
  * - State-changing methods must declare `Content-Type: application/json`, which browsers only
- *   send cross-site after a CORS preflight that this server never approves.
+ *   send cross-site after a CORS preflight that this server never approves. The socket keeps the
+ *   rule too, so every principal sends mutations the same way.
  */
 export function checkRequest(
-  req: Pick<Request, "method" | "headers">,
+  req: AdmissionRequest,
+  principal: Principal,
   policy: RequestOriginPolicy,
 ): RequestRejection | null {
   const host = req.headers.get("Host");
   const origin = req.headers.get("Origin");
-  const details = { host, origin, method: req.method };
+  const details = { principal, host, origin, method: req.method };
 
-  if (!isLoopbackHost(host, policy.port)) {
-    return { status: 400, reason: "Invalid Host header", details };
+  if (!servesPrincipal(principal, req.method, req.pathname)) {
+    return { status: 403, reason: `Not available to the ${principal} connection`, details };
   }
-  if (!isAllowedOrigin(origin, policy)) {
-    return { status: 403, reason: "Origin not allowed", details };
-  }
-
-  const fetchSite = req.headers.get("Sec-Fetch-Site")?.toLowerCase();
-  const fetchMode = req.headers.get("Sec-Fetch-Mode")?.toLowerCase();
-  const fetchDest = req.headers.get("Sec-Fetch-Dest")?.toLowerCase();
-  const topLevelNavigation = fetchMode === "navigate" && fetchDest === "document";
-  if (fetchSite === "cross-site" && !topLevelNavigation) {
-    return { status: 403, reason: "Cross-site request not allowed", details };
-  }
+  const browserRejection = principal === "app" ? checkBrowserRules(req, policy, details) : null;
+  if (browserRejection) return browserRejection;
 
   if (!STATE_CHANGING_METHODS.has(req.method.toUpperCase())) return null;
   const contentType = req.headers.get("Content-Type");
@@ -107,6 +138,29 @@ export function checkRequest(
       reason: "Content-Type must be application/json",
       details: { ...details, contentType },
     };
+  }
+  return null;
+}
+
+/** The `Host`, `Origin` and `Sec-Fetch-*` rules of {@link checkRequest}, for requests over TCP. */
+function checkBrowserRules(
+  req: AdmissionRequest,
+  policy: RequestOriginPolicy,
+  details: RequestRejection["details"],
+): RequestRejection | null {
+  if (!isLoopbackHost(req.headers.get("Host"), policy.port)) {
+    return { status: 400, reason: "Invalid Host header", details };
+  }
+  if (!isAllowedOrigin(req.headers.get("Origin"), policy)) {
+    return { status: 403, reason: "Origin not allowed", details };
+  }
+
+  const fetchSite = req.headers.get("Sec-Fetch-Site")?.toLowerCase();
+  const fetchMode = req.headers.get("Sec-Fetch-Mode")?.toLowerCase();
+  const fetchDest = req.headers.get("Sec-Fetch-Dest")?.toLowerCase();
+  const topLevelNavigation = fetchMode === "navigate" && fetchDest === "document";
+  if (fetchSite === "cross-site" && !topLevelNavigation) {
+    return { status: 403, reason: "Cross-site request not allowed", details };
   }
   return null;
 }

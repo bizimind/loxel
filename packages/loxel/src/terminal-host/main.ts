@@ -13,10 +13,11 @@ import { chmodSync, closeSync, openSync, rmSync, writeFileSync, writeSync } from
 import { parseArgs } from "node:util";
 
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
+import { ensurePrivateDir } from "@/socket-paths";
 
 import { embeddedHostBuildId } from "./host-build-id";
 import type { HostEntry } from "./host-files";
-import { ensureRunDir, hostEntryPath, hostSocketPath, isHostId } from "./host-files";
+import { hostEntryPath, hostSocketPath, isHostId } from "./host-files";
 import { HostLog } from "./host-log";
 import { HostPerfMonitor } from "./host-perf-monitor";
 import { TerminalHostService } from "./host-service";
@@ -90,8 +91,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 // The host has no controlling terminal, but a hangup must never take every shell down with it.
 process.on("SIGHUP", () => log.warn("Ignoring SIGHUP"));
 
-ensureRunDir(runDir);
-ensureRunDir(socketDir);
+ensurePrivateDir(runDir);
+ensurePrivateDir(socketDir);
 await service.listen(socketPath);
 chmodSync(socketPath, 0o600);
 const entry: HostEntry = {

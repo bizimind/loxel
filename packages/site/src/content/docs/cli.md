@@ -46,7 +46,13 @@ open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree
 
 ## Finding Loxel
 
-Inside a Loxel terminal, `loxel` connects through `LOXEL_PORT`. Elsewhere it looks for a running Loxel on port 7433 (prod), then 7434 (dev), and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. If no server is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
+`loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, `loxel` says so.
+
+Inside a Loxel terminal, `loxel` connects to the socket in `LOXEL_SOCKET`, the one of the Loxel that terminal belongs to. Elsewhere it looks for a running Loxel on its socket, the regular one first, then dev mode's, and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. A Loxel from before the socket is still found, on port 7433 (prod), then 7434 (dev). If no Loxel is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
+
+### Agents in a sandbox
+
+An agent that runs its commands in a sandbox can use `loxel` only if the sandbox lets it connect to Loxel's socket. When it can't, `loxel` prints `Loxel's socket <path> is outside this sandbox: allow it in the sandbox's settings`. Add that path to the Unix sockets the sandbox allows: in Claude Code, for example, to `sandbox.network.allowUnixSockets` in its settings.
 
 ---
 
