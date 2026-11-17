@@ -204,6 +204,18 @@ describe("opens from outside the window", () => {
     expect(sent).toEqual([]);
   });
 
+  test("an open from the inbox that fails here is left to the other windows", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    // In Home, a file outside every worktree has nowhere to open.
+    useWorktreeStore.setState({ activeWorktreePath: null });
+
+    await openFromInbox("in-4", { type: "open_file", data: { filePath: "/elsewhere/notes.md" } });
+    expect(openedFiles).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   test("targets arriving during a switch keep their order in the new worktree", async () => {
     await openFile({ filePath: `${OTHER}/a.md` });
     await openUrl(OTHER, { url: URL_TARGET });

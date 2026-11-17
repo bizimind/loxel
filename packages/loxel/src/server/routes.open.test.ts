@@ -236,7 +236,7 @@ describe("POST /api/open terminals and placement", () => {
     expect(started).toEqual([]);
   });
 
-  test("queues a file, a folder and a page in the worktree that holds them", async () => {
+  test("queues a file and a page in the worktree that holds them, but not a folder", async () => {
     registerRootAsProject();
     window = null;
 
@@ -246,14 +246,14 @@ describe("POST /api/open terminals and placement", () => {
       await open({ url: "https://example.com", wtPath: root, queue: true }),
     ];
 
-    expect(replies.map((res) => res.status)).toEqual([202, 202, 202]);
+    // A folder is only revealed in the window in use; with none, there is nothing to reveal later.
+    expect(replies.map((res) => res.status)).toEqual([202, 503, 202]);
     expect(await replies[0]!.json()).toEqual({ ok: true, queued: true });
     expect(queued).toEqual([
       {
         message: { type: "open_file", data: { filePath: join(root, "file.txt"), focus: false } },
         worktreePath: root,
       },
-      { message: { type: "open_folder", data: { path: root } }, worktreePath: root },
       {
         message: { type: "open_url", wtPath: root, data: { url: "https://example.com" } },
         worktreePath: root,

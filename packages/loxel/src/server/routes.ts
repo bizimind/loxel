@@ -3462,10 +3462,12 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const reply = ignored
     ? { warning: `${ignored} apply to a folder; it opens in the file tree` }
     : {};
-  const message: InboxMessage = { type: "open_folder", data: { path } };
-  if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true, ...reply });
-  const place = (queue ? await owningWorktree(ctx, path) : null) ?? undefined;
-  return openWithoutWindow(ctx, queue, message, place, reply);
+  // Not kept for a window to come: a reveal is for the window in use, and the inbox's opens wait
+  // unfocused.
+  if (ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } })) {
+    return json({ ok: true, ...reply });
+  }
+  return error(NO_WINDOW, 503);
 }
 
 // ---------------------------------------------------------------------------

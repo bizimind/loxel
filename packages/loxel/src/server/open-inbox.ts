@@ -12,11 +12,11 @@ import type { WsMessage } from "@/api/ws-protocol";
 
 import { PersistedList } from "./persisted-list";
 
-/** The requests the inbox holds: the messages `POST /api/open` sends a window. */
-export type InboxMessage = Extract<
-  WsMessage,
-  { type: "open_file" | "open_folder" | "open_terminal" | "open_url" }
->;
+/**
+ * The requests the inbox holds: the messages `POST /api/open` sends a window, but a folder's, which
+ * is only revealed in the window in use.
+ */
+export type InboxMessage = Extract<WsMessage, { type: "open_file" | "open_terminal" | "open_url" }>;
 
 /**
  * Enough for a burst of agents' requests over a night away, while a runaway loop cannot grow the
@@ -44,7 +44,6 @@ const InboxMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("open_file"),
     data: z.object({ filePath: z.string(), worktreePath: z.string().optional(), ...openOptions }),
   }),
-  z.object({ type: z.literal("open_folder"), data: z.object({ path: z.string() }) }),
   z.object({
     type: z.literal("open_terminal"),
     data: z.object({
@@ -100,14 +99,18 @@ export class OpenInbox {
     this.expire();
   }
 
-  /** Queue `message` for the next window. Returns false, queueing nothing, when the inbox is full. */
+  /**
+   * Queue `message` for the next window, without focus: when a window comes, the user is no longer
+   * looking at it, so it waits in its worktree, with a notification, and switches no window there.
+   * Returns false, queueing nothing, when the inbox is full.
+   */
   add(message: InboxMessage, worktreePath: string | null | undefined): boolean {
     if (!this.hasRoom()) return false;
     const entry: InboxEntry = {
       id: crypto.randomUUID(),
       queuedAt: this.now(),
       ...(worktreePath === undefined ? {} : { worktreePath }),
-      message,
+      message: unfocused(message),
     };
     this.entries.push(entry);
     this.persisted.insert(entry);
@@ -202,8 +205,23 @@ export function sweepOrphans(
   return { destroyed, nextSweepInMs: inbox.msUntilTerminalExpires() };
 }
 
+function unfocused(message: InboxMessage): InboxMessage {
+  switch (message.type) {
+    case "open_file":
+      return { ...message, data: { ...message.data, focus: false } };
+    case "open_terminal":
+      return { ...message, data: { ...message.data, focus: false } };
+    case "open_url":
+      return { ...message, data: { ...message.data, focus: false } };
+    default: {
+      const unknown: never = message;
+      throw new Error(`Unknown inbox message: ${String(unknown)}`);
+    }
+  }
+}
+
 /** What a request opens, for the notification that says it did. */
-type OpenKind = "terminal" | "file" | "folder" | "page";
+type OpenKind = "terminal" | "file" | "page";
 
 function openKind(message: InboxMessage): OpenKind {
   switch (message.type) {
@@ -211,8 +229,6 @@ function openKind(message: InboxMessage): OpenKind {
       return "terminal";
     case "open_file":
       return "file";
-    case "open_folder":
-      return "folder";
     case "open_url":
       return "page";
     default: {
@@ -229,8 +245,6 @@ function openName(message: InboxMessage): string | null {
       return message.data.title ?? null;
     case "open_file":
       return basename(message.data.filePath);
-    case "open_folder":
-      return basename(message.data.path);
     case "open_url":
       return URL.parse(message.data.url)?.host ?? null;
     default: {
@@ -240,7 +254,7 @@ function openName(message: InboxMessage): string | null {
   }
 }
 
-const ORDER: readonly OpenKind[] = ["terminal", "file", "folder", "page"];
+const ORDER: readonly OpenKind[] = ["terminal", "file", "page"];
 const MAX_NAMES = 5;
 
 /** "2 terminals and a file", "3 pages". */

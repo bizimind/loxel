@@ -12,8 +12,16 @@ const terminal = (terminalId: string, title?: string): InboxMessage => ({
   type: "open_terminal",
   data: { terminalId, cwd: "/wt", worktreePath: "/wt", ...(title ? { title } : {}), focus: false },
 });
-const file = (filePath: string): InboxMessage => ({ type: "open_file", data: { filePath } });
-const page = (url: string): InboxMessage => ({ type: "open_url", wtPath: "/wt", data: { url } });
+// As the inbox keeps them: without focus.
+const file = (filePath: string): InboxMessage => ({
+  type: "open_file",
+  data: { filePath, focus: false },
+});
+const page = (url: string): InboxMessage => ({
+  type: "open_url",
+  wtPath: "/wt",
+  data: { url, focus: false },
+});
 
 describe("OpenInbox", () => {
   let dir: string;
@@ -40,6 +48,14 @@ describe("OpenInbox", () => {
     expect(inbox.remove(first!.id)).toBe(true);
     expect(inbox.remove(first!.id)).toBe(false);
     expect(inbox.list()).toEqual([{ ...second!, delivered: true }]);
+  });
+
+  test("keeps a request without focus, so it switches no window when one comes", () => {
+    const inbox = new OpenInbox({ now: clock });
+    inbox.add({ type: "open_file", data: { filePath: "/wt/a.ts", focus: true } }, "/wt");
+    inbox.add({ type: "open_url", wtPath: "/wt", data: { url: "http://x/" } }, "/wt");
+
+    expect(inbox.list().map((entry) => entry.message.data.focus)).toEqual([false, false]);
   });
 
   test("holds a queued terminal until its panel is placed", () => {

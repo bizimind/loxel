@@ -56,8 +56,9 @@ export function dropInboxOpen(inboxId: string): void {
 
 /**
  * Open a request the server kept in its open inbox while no window was connected. The server keeps
- * it until this window is done with it: once its panel is placed, which for a panel queued in a
- * worktree not shown is when the user goes there, or at once for a folder or an open that failed.
+ * it until a window is done with it: once its panel is placed, which for a panel queued in a
+ * worktree not shown is when the user goes there, or at once for a folder. An open that fails here
+ * is left to the other windows.
  * A request this window already had (the server sends them again after a reconnect) is not opened
  * twice, but done with again, in case the server missed that.
  */
@@ -68,10 +69,14 @@ export async function openFromInbox(inboxId: string, message: OpenRequestMessage
     return;
   }
   inboxOpens.set(inboxId, false);
-  if ((await openRequest(message, inboxId)) !== true) inboxOpenDone(inboxId);
+  // Placed (or a folder revealed): done. A failed open leaves it to the other windows, or expiry.
+  if ((await openRequest(message, inboxId)) === false) inboxOpenDone(inboxId);
 }
 
-/** Open what `POST /api/open` sent; resolves to true when its panel is queued for later. */
+/**
+ * Open what `POST /api/open` sent; resolves to true when its panel is queued for later, false
+ * when it is open, and undefined when it could not be opened.
+ */
 export function openRequest(
   message: OpenRequestMessage,
   inboxId?: string,
@@ -166,7 +171,7 @@ export function openFile(
       worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
     if (!target) {
       showToast("Open a project before opening other files");
-      return false;
+      return undefined;
     }
 
     return openInWorktree(target, { kind: "file", path, ...options, inboxId });
