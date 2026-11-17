@@ -1,5 +1,4 @@
 import type { TableSchema, GraphViewDef } from "@bizimind/localdb-sdk";
-import { useState, useEffect } from "react";
 import {
   BarChart,
   Bar,
@@ -19,6 +18,7 @@ import {
 } from "recharts";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
+import { useTableRows } from "../use-table-rows.ts";
 
 interface Props {
   schema: TableSchema;
@@ -26,29 +26,16 @@ interface Props {
   adapter: DataAdapter;
 }
 
-type Row = Record<string, unknown>;
-
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#d97706", "#7c3aed", "#0891b2", "#db2777"];
 
 export function GraphView({ schema, viewDef, adapter }: Props) {
   const { xColumn, yColumn, chartKind, groupByColumn } = viewDef;
   const tableName = schema.table.name;
 
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
+  const tableRows = useTableRows(adapter, tableName, { pageSize: 1000 });
+  const rows = tableRows.page?.rows ?? [];
 
-  useEffect(() => {
-    setLoading(true);
-    adapter
-      .query<Row>(tableName, { pageSize: 1000 })
-      .then((p) => {
-        setRows(p.rows);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [tableName]);
-
-  if (loading) {
+  if (tableRows.loading) {
     return <div className="text-muted-foreground p-4 text-xs">Loading…</div>;
   }
 

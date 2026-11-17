@@ -33,7 +33,7 @@ In the rare case that the process keeping your terminals running stops unexpecte
 
 ### One terminal in several windows
 
-A terminal can be open in more than one window at a time. Every window shows it live, and you can type in any of them. The window you last typed in, clicked, switched to, resized or opened it in sets the terminal's size, and the others show it at that size until you use them. Closing the terminal's tab in one window leaves it running in the others; it ends when you close it in the last one.
+A terminal can be open in more than one window at a time. Every window shows it live, and you can type in any of them. The window you last typed in, clicked or switched to sets the terminal's size, and the others show it at that size until you use them. Opening a terminal that another window is using, or reconnecting to it, never resizes it there: the new window shows it at its current size until you use it. Closing the terminal's tab in one window leaves it running in the others; it ends when you close it in the last one.
 
 ### Quitting without ending your terminals
 

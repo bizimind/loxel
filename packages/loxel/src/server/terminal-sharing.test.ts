@@ -1,8 +1,8 @@
 /**
  * Several windows show one terminal at once: a real server, with one socket per window. Each gets
- * the output, the one its user last typed in (or resized, or attached) sets the PTY's size and has
- * its input written, and one leaving, or closing its panel, leaves the shell running for the
- * others. `LOXEL_DEV=1` keeps the server off the keychain, and a temporary state directory and
+ * the output, the one its user last typed in (or resized, or attached alone) sets the PTY's size
+ * and has its input written, one that opens it meanwhile joins without resizing it, and one
+ * leaving, or closing its panel, leaves the shell running for the others. `LOXEL_DEV=1` keeps the server off the keychain, and a temporary state directory and
  * port keep it and its terminal host apart from any real one.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -101,8 +101,13 @@ describe("a terminal shown in several windows", () => {
   }
 
   /** Type `word` as a command in `panel`, after claiming the terminal as its user's keys do. */
-  function run(panel: Panel, id: string, word: string): void {
-    panel.claim(id);
+  function run(
+    panel: Panel,
+    id: string,
+    word: string,
+    size?: { cols: number; rows: number },
+  ): void {
+    panel.claim(id, size);
     // Quoted apart, so the echo of the typed line itself never reads as the output.
     panel.type(id, `echo ${word.slice(0, 1)}""${word.slice(1)}`);
   }
@@ -114,19 +119,25 @@ describe("a terminal shown in several windows", () => {
     "every window gets the output, and the one in use types and sets the size",
     async () => {
       const { id, first, second } = await twoWindows();
-      // The second window's attach made it the one in use: the first renders at its size.
-      await until(() => first.sizes.length > 0, TEST_TIMEOUT_MS);
-      expect(first.sizes.map(({ cols, rows }) => ({ cols, rows }))).toEqual([
-        { cols: 100, rows: 30 },
+      // The second window joined without claiming: it renders at the first one's size, which the
+      // PTY keeps, and its state says so.
+      expect(second.sizes.map(({ cols, rows }) => ({ cols, rows }))).toEqual([
+        { cols: 80, rows: 24 },
       ]);
-      expect(first.states).toHaveLength(1);
+      expect(second.states.at(-1)).toMatchObject({ cols: 80, rows: 24 });
 
       run(first, id, "from-first");
       await until(() => shows(second).includes("from-first\r\n"), TEST_TIMEOUT_MS);
       await until(() => shows(first).includes("from-first\r\n"), TEST_TIMEOUT_MS);
-      expect(second.sizes.at(-1)).toMatchObject({ cols: 80, rows: 24 });
+      expect(first.sizes).toHaveLength(0);
+      expect(first.states).toHaveLength(1);
 
-      run(second, id, "from-second");
+      // Typing in the second window claims it: the first renders at its size.
+      run(second, id, "from-second", { cols: 100, rows: 30 });
+      await until(() => first.sizes.length > 0, TEST_TIMEOUT_MS);
+      expect(first.sizes.map(({ cols, rows }) => ({ cols, rows }))).toEqual([
+        { cols: 100, rows: 30 },
+      ]);
       await until(() => shows(first).includes("from-second\r\n"), TEST_TIMEOUT_MS);
       await until(() => shows(second).includes("from-second\r\n"), TEST_TIMEOUT_MS);
 

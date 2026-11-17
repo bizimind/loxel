@@ -411,9 +411,12 @@ export async function removeExternalFolder(wt: string, path: string) {
   });
 }
 
-/** Resolve a path (`~/` expanded) and report whether it is a directory. Throws when missing. */
+/**
+ * Resolve a path (`~/` expanded) and report whether it is a directory, its size and modification
+ * time. Throws when missing.
+ */
 export async function getPathInfo(path: string) {
-  return fetchJson<{ path: string; isDir: boolean }>(
+  return fetchJson<{ path: string; isDir: boolean; size: number; mtimeMs: number }>(
     `/path-info?${new URLSearchParams({ path }).toString()}`,
   );
 }

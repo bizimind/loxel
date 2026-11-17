@@ -24,7 +24,10 @@ export interface TerminalSink {
   sendOutput(output: TerminalOutput): void;
   sendExit(end: TerminalEnd): void;
   sendNotice(notice: TerminalNotice): void;
-  /** The PTY's size, set by another client; every client but the active one renders at it. */
+  /**
+   * The PTY's size, which another client set or joined at: every client but the active one renders
+   * at it.
+   */
   sendSize(size: TerminalSize): void;
 }
 
@@ -63,8 +66,13 @@ interface Client {
 }
 
 export class TerminalFanout {
-  /** In the order they last claimed the terminal: the last one is the active client. */
+  /** In the order they attached. */
   private readonly clients = new Map<TerminalSink, Client>();
+  /**
+   * The client whose input is written, and, when it claimed the terminal or attached alone, whose
+   * size the PTY has. Once it leaves, the most recently attached client takes its input over.
+   */
+  private active: TerminalSink | null = null;
   /** The PTY's size: the latest the active client asked for, clamped as the host clamps it. */
   private size: TerminalSize;
   /** Where the live clients are in the stream; null until the host attachment's first state. */
@@ -98,20 +106,27 @@ export class TerminalFanout {
     return this.clients.get(sink)?.status === "waiting";
   }
 
-  /** The client whose size the PTY has and whose input is written: the one that claimed it last. */
   isActive(sink: TerminalSink): boolean {
-    return [...this.clients.keys()].at(-1) === sink;
+    return this.active === sink;
   }
 
   /**
    * Add `sink`, replacing any earlier attach of it, as a client waiting for its state, from
-   * `since` if its xterm is current to that point. It becomes the active client, at `size`.
-   * Returns whether the PTY's size changed.
+   * `since` if its xterm is current to that point. With no other client attached it becomes the
+   * active client, at `size`. Otherwise it joins passive, at the PTY's size, which it is sent:
+   * opening a terminal another window uses must not reflow it there, so it claims only on its
+   * user's input. Returns whether the PTY's size changed.
    */
   attach(sink: TerminalSink, size: TerminalSize, since?: StreamPoint): boolean {
     this.clients.delete(sink);
+    const alone = this.clients.size === 0;
     this.clients.set(sink, { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 });
-    return this.setSize(size, true);
+    if (alone) {
+      this.active = sink;
+      return this.setSize(size, true);
+    }
+    sink.sendSize(this.size);
+    return false;
   }
 
   /**
@@ -119,23 +134,23 @@ export class TerminalFanout {
    * client, at `size`. Returns whether the PTY's size changed; a sink not attached changes nothing.
    */
   claim(sink: TerminalSink, size: TerminalSize): boolean {
-    const client = this.clients.get(sink);
-    if (!client) return false;
+    if (!this.clients.has(sink)) return false;
     const activeChanged = !this.isActive(sink);
-    if (activeChanged) {
-      this.clients.delete(sink);
-      this.clients.set(sink, client);
-    }
+    this.active = sink;
     return this.setSize(size, activeChanged);
   }
 
   /**
-   * Remove `sink`; returns whether it was attached. The client that claimed the terminal before
-   * it becomes the active one, at the size the PTY has, which it already renders at. Once the
-   * last client is gone the stream starts over with the next attach.
+   * Remove `sink`; returns whether it was attached. When it was the active client, the most
+   * recently attached one takes its input over silently, which is not a claim: the PTY keeps its
+   * size, which that one already renders at, and nobody is told or resized, so a window leaving
+   * (or switching worktree and back) reflows nothing, while exactly one xterm still answers the
+   * program's terminal queries. Its user's input claims the terminal as usual. Once the last
+   * client is gone the stream starts over with the next attach.
    */
   detach(sink: TerminalSink): boolean {
     if (!this.clients.delete(sink)) return false;
+    if (this.active === sink) this.active = [...this.clients.keys()].at(-1) ?? null;
     if (this.clients.size === 0) this.offset = null;
     return true;
   }
@@ -209,9 +224,11 @@ export class TerminalFanout {
     this.offset = output.offset + bytes;
     for (const [sink, client] of this.clients) {
       if (client.status !== "live") continue;
-      sink.sendOutput(output);
+      // Counted before it is sent: a client in this process can acknowledge it before
+      // `sendOutput` returns, and an ack applied first would be lost, pausing one that keeps up.
       client.unacked += bytes;
-      if (client.unacked > this.flow.highWaterBytes) {
+      sink.sendOutput(output);
+      if (client.status === "live" && client.unacked > this.flow.highWaterBytes) {
         client.status = "paused";
         const behind = `${client.unacked} bytes behind`;
         log.info(`Terminal ${this.id.slice(0, 8)} client is ${behind}, pausing its output`);

@@ -4,6 +4,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import * as api from "@/api/client";
 import type { EnrichedProject, Project } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { toggleSet } from "@/lib/set-utils";
 
 import { serverProjectsStorage } from "./server-storage";
@@ -27,17 +28,29 @@ export function deriveProject(wtPath: string | null, projects: EnrichedProject[]
   );
 }
 
+/** `discarded`: the project's files are deleted, not only removed from Loxel. */
 async function removeAndSwitchProject(
   id: string,
   get: () => ProjectState,
   apiCall: () => Promise<unknown>,
+  discarded: boolean,
 ): Promise<void> {
   const { useWorktreeStore } = await import("./worktrees");
   const wtStore = useWorktreeStore.getState();
   const activeProject = deriveProject(wtStore.activeWorktreePath, get().projects);
   const isRemovingActive = activeProject?.id === id;
+  const removed = get().projects.find((project) => project.id === id);
+  const removedPaths = removed
+    ? [
+        ...(removed.isBare ? [] : [removed.path]),
+        ...(wtStore.byProject[removed.path]?.worktrees ?? removed.worktrees).map((wt) => wt.path),
+      ]
+    : [];
 
   await apiCall();
+  for (const wtPath of removedPaths) {
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath, discarded });
+  }
   await get().fetchProjects();
 
   if (isRemovingActive) {
@@ -151,11 +164,11 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       removeProject: async (id) => {
-        await removeAndSwitchProject(id, get, () => api.removeProject(id));
+        await removeAndSwitchProject(id, get, () => api.removeProject(id), false);
       },
 
       deleteProject: async (id) => {
-        await removeAndSwitchProject(id, get, () => api.deleteProject(id));
+        await removeAndSwitchProject(id, get, () => api.deleteProject(id), true);
       },
 
       updateProject: async (id, updates) => {

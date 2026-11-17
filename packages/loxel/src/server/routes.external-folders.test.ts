@@ -420,15 +420,17 @@ describe("Others folders routes", () => {
     });
   });
 
-  test("GET /api/path-info reports directories", async () => {
+  test("GET /api/path-info reports directories, sizes and modification times", async () => {
     const dir = await (await get(`/api/path-info?path=${encodeURIComponent(folder)}`)).json();
     const file = await (
       await get(`/api/path-info?path=${encodeURIComponent(join(folder, "a.md"))}`)
     ).json();
     const missing = await get(`/api/path-info?path=${encodeURIComponent(join(root, "nope"))}`);
 
-    expect(dir).toEqual({ path: folder, isDir: true });
-    expect(file).toEqual({ path: join(folder, "a.md"), isDir: false });
+    expect(dir).toMatchObject({ path: folder, isDir: true });
+    expect(file).toMatchObject({ path: join(folder, "a.md"), isDir: false });
+    expect(file.size).toBe(Bun.file(join(folder, "a.md")).size);
+    expect(file.mtimeMs).toBeGreaterThan(0);
     expect(missing.status).toBe(404);
   });
 

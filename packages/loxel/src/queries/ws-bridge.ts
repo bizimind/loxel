@@ -407,13 +407,8 @@ export function useWsBridge(): void {
               queryKey: ["localdb", projectPath, "views", message.data.tableId],
             });
           }
+          // The rows too, which every view of the project's tables shows.
           queryClient.invalidateQueries({ queryKey: ["localdb", projectPath] });
-          dispatchLoxelEvent("loxel-localdb-changed", {
-            projectPath,
-            tableName: message.data.tableName,
-            tableId: message.data.tableId,
-            scope: message.data.scope,
-          });
           break;
         }
 

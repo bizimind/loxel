@@ -11,7 +11,7 @@ import type {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SettingsIcon } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   makeRestAdapter,
@@ -25,7 +25,6 @@ import {
   defaultComponentKey,
 } from "@/components/localdb/ui";
 import { Button } from "@/components/ui/button";
-import { onLoxelEvent } from "@/lib/loxel-events";
 import { cn } from "@/lib/utils";
 import { useQueryScope } from "@/queries/use-scope";
 
@@ -109,16 +108,6 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
   const [pendingViewConfig, setPendingViewConfig] = useState<Partial<ViewDef>>({});
   const [savingView, setSavingView] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [dataVersion, setDataVersion] = useState(0);
-
-  useEffect(() => {
-    return onLoxelEvent("loxel-localdb-changed", (event) => {
-      if (event.projectPath !== activeProjectPath) return;
-      if (event.tableName && event.tableName !== table) return;
-      setDataVersion((version) => version + 1);
-    });
-  }, [activeProjectPath, table]);
-
   const tablesQuery = useQuery({
     queryKey: ["localdb", activeProjectPath, "tables"],
     queryFn: () => adapter.listTables(),
@@ -201,7 +190,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
             : undefined;
         return (
           <DataTable
-            key={`${schema.table.name}:table:${dataVersion}`}
+            key={`${schema.table.name}:table`}
             schema={schema}
             viewDef={vd}
             adapter={adapter}
@@ -214,7 +203,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         if (!vd?.groupByColumn) return <MissingConfig onConfig={openConfig} />;
         return (
           <KanbanBoard
-            key={`${schema.table.name}:kanban:${dataVersion}`}
+            key={`${schema.table.name}:kanban`}
             schema={schema}
             viewDef={vd}
             adapter={adapter}
@@ -237,7 +226,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         if (!vd?.dateColumn) return <MissingConfig onConfig={openConfig} />;
         return (
           <CalendarView
-            key={`${schema.table.name}:calendar:${dataVersion}`}
+            key={`${schema.table.name}:calendar`}
             schema={schema}
             viewDef={vd}
             adapter={adapter}
@@ -249,7 +238,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         if (!vd?.xColumn || !vd?.yColumn) return <MissingConfig onConfig={openConfig} />;
         return (
           <GraphView
-            key={`${schema.table.name}:graph:${dataVersion}`}
+            key={`${schema.table.name}:graph`}
             schema={schema}
             viewDef={vd}
             adapter={adapter}
@@ -261,7 +250,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         if (!vd?.startColumn || !vd?.endColumn) return <MissingConfig onConfig={openConfig} />;
         return (
           <GanttView
-            key={`${schema.table.name}:gantt:${dataVersion}`}
+            key={`${schema.table.name}:gantt`}
             schema={schema}
             viewDef={vd}
             adapter={adapter}
@@ -271,7 +260,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
       default:
         return (
           <DataTable
-            key={`${schema.table.name}:default:${dataVersion}`}
+            key={`${schema.table.name}:default`}
             schema={schema}
             adapter={adapter}
             pageSize={10}
