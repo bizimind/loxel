@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 
+import { readSessionToken } from "../src/app-session";
 import { withoutAgentEnv } from "../src/coding-agent-env";
 
 const LOXEL_ROOT = resolve(import.meta.dirname, "..");
@@ -81,4 +82,10 @@ export default async function globalSetup() {
   process.env.LOXEL_PORT = String(port);
 
   await pollUntilReady(`http://localhost:${port}/api/version`);
+
+  // A server started without the app writes its session secret before it listens; the specs'
+  // pages and requests carry it (playwright.config.ts).
+  const secret = readSessionToken(stateDir);
+  if (!secret) throw new Error(`The Loxel server wrote no session token in ${stateDir}`);
+  process.env.LOXEL_E2E_SESSION_SECRET = secret;
 }

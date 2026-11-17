@@ -42,6 +42,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
 const REQUEST_TIMEOUT_MS = 180_000;
@@ -261,7 +263,7 @@ class LspClient {
 
 function connect(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = bunWebSocket(url, { authorization: authorization() });
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error(`Cannot connect to ${url}`)));
   });
@@ -910,17 +912,26 @@ async function exerciseProjects(jar: string): Promise<void> {
 
 const api = `http://127.0.0.1:${port}/api`;
 
+/** The `Authorization` header with the session secret the server writes before it listens. */
+function authorization(): string {
+  const secret = readSessionToken(path.join(work, "state"));
+  if (secret === null) throw new Error("The server wrote no session token");
+  return bearer(secret);
+}
+
 async function post(route: string, body: unknown): Promise<void> {
   const response = await fetch(`${api}${route}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: authorization() },
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`${route}: ${response.status} ${await response.text()}`);
 }
 
 async function projectIssueOf(root: string): Promise<{ detail: string } | null> {
-  const response = await fetch(`${api}/java-env?wt=${encodeURIComponent(root)}`);
+  const response = await fetch(`${api}/java-env?wt=${encodeURIComponent(root)}`, {
+    headers: { Authorization: authorization() },
+  });
   const { projectIssue } = (await response.json()) as { projectIssue: { detail: string } | null };
   return projectIssue;
 }

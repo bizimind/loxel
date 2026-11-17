@@ -88,6 +88,7 @@ export async function fetchJson<T>(path: string, options?: RequestInit): Promise
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
+  if (response.status === 401) wsClient.expireSession();
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -972,6 +973,8 @@ export class WsClient {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
+    /** Whether the server's hello came on this socket. */
+    let greeted = false;
     // Only the latest socket counts: one a disconnect left closing (as React's StrictMode does
     // with its double effect) must not retry or deliver beside it.
     this.ws = ws;
@@ -991,6 +994,7 @@ export class WsClient {
           if (typeof raw !== "object" || raw === null || !("type" in raw)) return;
           const message = raw as WsMessage;
           if (message.type === "server_hello") {
+            greeted = true;
             this.handleHello(message);
             return;
           }
@@ -1023,7 +1027,18 @@ export class WsClient {
       this.ws = null;
       if (this.closed) return;
       if (this.state === "connected") this.setState("reconnecting");
-      this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
+      if (greeted) {
+        this.scheduleRetry();
+        return;
+      }
+      // A refused upgrade does not say why: ask whether the server still accepts this window's
+      // session, or is only not there.
+      void sessionRefused().then((refused) => {
+        // Unless something else has moved on meanwhile (disconnect, a new connect).
+        if (this.closed || this.ws !== null || this.retryTimer !== null) return;
+        if (refused) this.expireSession();
+        else this.scheduleRetry();
+      });
     };
 
     ws.onerror = (err) => {
@@ -1034,6 +1049,27 @@ export class WsClient {
         ctx: err instanceof ErrorEvent && err.message ? { message: err.message } : undefined,
       });
     };
+  }
+
+  private scheduleRetry(): void {
+    this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
+  }
+
+  /**
+   * The server answered `401`: it does not take this window's session secret, which happens only
+   * once a server with another one has replaced the one the window loaded from. Retrying cannot
+   * help; the window says so and offers a reload.
+   */
+  expireSession(): void {
+    if (this.state === "expired") return;
+    postLogEntry({ level: "warn", cat: "server", msg: "The server no longer accepts this window" });
+    this.closed = true;
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    const ws = this.ws;
+    this.ws = null;
+    ws?.close();
+    this.setState("expired");
   }
 
   /**
@@ -1220,6 +1256,18 @@ export class WsClient {
 }
 
 export const wsClient = new WsClient();
+
+/**
+ * Whether the server refuses this window's session secret, which `GET /api/session` answers with
+ * `401`. False when no server answers either: then it is down, and retrying is right.
+ */
+async function sessionRefused(): Promise<boolean> {
+  try {
+    return (await fetch(`${API_BASE}/session`)).status === 401;
+  } catch {
+    return false;
+  }
+}
 
 // --- Version API ---
 

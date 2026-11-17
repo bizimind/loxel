@@ -1,42 +1,78 @@
 /**
  * Request admission rules for the local server.
  *
- * On the loopback TCP port, these checks keep web pages (browser tabs and pages inside Loxel's
- * own browser panels) from driving the server. Browsers attach `Origin` to WebSocket upgrades,
- * CORS-mode fetches and non-GET/HEAD requests, but not to no-cors GET loads or navigations, and
- * native clients (the Electron main process, older `loxel` CLIs, curl) send none,
- * so no single header is conclusive: the rules combine `Host`, `Origin`, `Sec-Fetch-Site`,
- * `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Content-Type`.
+ * On the loopback TCP port, every `/api` and `/ws` request must carry the app's session secret
+ * (app-session.ts) as an `Authorization: Bearer` header, which Electron main adds to its own
+ * requests and to its windows'. Without it only `GET /api/version` (how the app finds and waits for its server) and the
+ * renderer's static files are served. The secret is what proves a request comes from the app; the
+ * browser-header rules below stay as defense in depth, keeping web pages (browser tabs and pages
+ * inside Loxel's own browser panels, which never get the header) from driving the server. Browsers
+ * attach `Origin` to WebSocket upgrades, CORS-mode fetches and non-GET/HEAD requests, but not to
+ * no-cors GET loads or navigations, and native clients send none, so no single header is
+ * conclusive: those rules combine `Host`, `Origin`, `Sec-Fetch-Site`, `Sec-Fetch-Mode`,
+ * `Sec-Fetch-Dest` and `Content-Type`.
  *
  * The `loxel` CLI does not use the TCP port: it connects to the server's Unix socket, which only
- * the user's own account can open (see cli-socket.ts). The listener a request arrived on decides
- * its {@link Principal}, and each route lists the principals it serves.
+ * the user's own account can open (see cli-socket.ts). The listener a request arrived on, and over
+ * TCP its secret, decide its {@link Principal}, and each route lists the principals it serves.
  *
  * Every rule here describes intended policy; `server.ts` applies them to each incoming request
  * before routing, and `RequestOriginPolicy` lets tests pin the port and dev-mode allowances.
  */
+import { timingSafeEqual } from "node:crypto";
 
 /**
- * Who a request is from, by the listener it arrived on: `app` over the loopback TCP port (the
- * app's windows and its main process), `cli` over the Unix socket (the `loxel` CLI).
+ * Who a request is from: `app` over the loopback TCP port with the app's session secret (the app's
+ * windows and its main process), `anonymous` over that port without it, `cli` over the Unix socket
+ * (the `loxel` CLI).
  */
-export type Principal = "app" | "cli";
+export type Principal = "app" | "anonymous" | "cli";
 
 /**
  * The routes some principal other than `app` may use, by `METHOD /path`, with the principals they
- * serve. Every other route, WebSocket upgrades and static files included, serves `app` only.
+ * serve. Every other endpoint (`/api` and `/ws` paths, WebSocket upgrades included) serves `app`
+ * only, and static files serve `app` and `anonymous`.
  */
 const ROUTE_PRINCIPALS: ReadonlyMap<string, readonly Principal[]> = new Map([
-  // What the `loxel` CLI sends: src/cli.ts, src/find-server.ts and src/open-request.ts.
-  ["GET /api/version", ["app", "cli"]],
+  // How the app finds and waits for its server (src/electron/main.ts), and what the `loxel` CLI
+  // sends: src/cli.ts, src/find-server.ts and src/open-request.ts.
+  ["GET /api/version", ["app", "anonymous", "cli"]],
   ["POST /api/open", ["app", "cli"]],
 ]);
-const OTHER_ROUTE_PRINCIPALS: readonly Principal[] = ["app"];
+const ENDPOINT_PRINCIPALS: readonly Principal[] = ["app"];
+const STATIC_FILE_PRINCIPALS: readonly Principal[] = ["app", "anonymous"];
+
+/** `/api` and `/ws` paths, matched by prefix as `server.ts` dispatches them. */
+function isEndpoint(pathname: string): boolean {
+  return pathname.startsWith("/api") || pathname.startsWith("/ws");
+}
 
 function servesPrincipal(principal: Principal, method: string, pathname: string): boolean {
   const principals =
-    ROUTE_PRINCIPALS.get(`${method.toUpperCase()} ${pathname}`) ?? OTHER_ROUTE_PRINCIPALS;
+    ROUTE_PRINCIPALS.get(`${method.toUpperCase()} ${pathname}`) ??
+    (isEndpoint(pathname) ? ENDPOINT_PRINCIPALS : STATIC_FILE_PRINCIPALS);
   return principals.includes(principal);
+}
+
+/** Compared in constant time, so the response time says nothing about how much of it matched. */
+function isSecret(candidate: string | null | undefined, secret: string): boolean {
+  if (!candidate) return false;
+  const given = Buffer.from(candidate);
+  const expected = Buffer.from(secret);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+function bearerToken(authorization: string | null): string | null {
+  const match = authorization?.match(/^Bearer +(\S+)$/i);
+  return match?.[1] ?? null;
+}
+
+/**
+ * The principal of a request over the TCP port: `app` when its `Authorization: Bearer` header holds
+ * `secret`, `anonymous` otherwise.
+ */
+export function tcpPrincipal(headers: Headers, secret: string): "app" | "anonymous" {
+  return isSecret(bearerToken(headers.get("Authorization")), secret) ? "app" : "anonymous";
 }
 
 export interface RequestOriginPolicy {
@@ -100,8 +136,9 @@ export interface AdmissionRequest {
  * Decide whether a request may be served. Returns `null` to admit it, otherwise the rejection
  * to send. Applies to HTTP requests and WebSocket upgrades alike:
  *
- * - The route must serve the request's principal (`403` otherwise).
- * - For `app`, over TCP:
+ * - The route must serve the request's principal: `401` for `anonymous`, which lacks the app's
+ *   session secret, `403` for any other.
+ * - For `app` and `anonymous`, over TCP:
  *   - `Host` must be a loopback host with the server's port (blocks DNS rebinding).
  *   - `Origin`, when present, must be the server's own origin (plus the Vite dev origin in dev).
  *   - Requests the browser marks `Sec-Fetch-Site: cross-site` are rejected, except top-level
@@ -125,9 +162,11 @@ export function checkRequest(
   const details = { principal, host, origin, method: req.method };
 
   if (!servesPrincipal(principal, req.method, req.pathname)) {
-    return { status: 403, reason: `Not available to the ${principal} connection`, details };
+    return principal === "anonymous"
+      ? { status: 401, reason: "Missing or invalid app session", details }
+      : { status: 403, reason: `Not available to the ${principal} connection`, details };
   }
-  const browserRejection = principal === "app" ? checkBrowserRules(req, policy, details) : null;
+  const browserRejection = principal === "cli" ? null : checkBrowserRules(req, policy, details);
   if (browserRejection) return browserRejection;
 
   if (!STATE_CHANGING_METHODS.has(req.method.toUpperCase())) return null;

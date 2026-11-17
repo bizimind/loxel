@@ -23,6 +23,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+
 const REQUEST_TIMEOUT_MS = 180_000;
 const LOAD_TIMEOUT_MS = 600_000;
 /** Actions this many are resolved, each of which runs real code. */
@@ -227,10 +229,17 @@ const server = Bun.spawn([serverPath, "src/server/index.ts", repo], {
   },
 });
 
+/** The `Authorization` header with the session secret the server writes before it listens. */
+function authorization(): string {
+  const secret = readSessionToken(path.join(work, "state"));
+  if (secret === null) throw new Error("The server wrote no session token");
+  return bearer(secret);
+}
+
 async function waitForServer(): Promise<void> {
   for (let attempt = 0; attempt < 300; attempt++) {
     if (
-      await fetch(`${base}/api/projects`).then(
+      await fetch(`${base}/api/version`).then(
         (res) => res.ok,
         () => false,
       )
@@ -243,7 +252,7 @@ async function waitForServer(): Promise<void> {
 
 function connect(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = bunWebSocket(url, { authorization: authorization() });
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error(`Cannot connect to ${url}`)));
   });
@@ -268,13 +277,13 @@ try {
   await waitForServer();
   await fetch(`${base}/api/projects`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: authorization() },
     body: JSON.stringify({ path: repo }),
   });
   if (values.trust === "yes") {
     const trust = await fetch(`${base}/api/repo-trust`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: authorization() },
       body: JSON.stringify({ worktreePath: repo, decision: "trusted" }),
     });
     check(trust.ok, "the repository is trusted", trust.status);

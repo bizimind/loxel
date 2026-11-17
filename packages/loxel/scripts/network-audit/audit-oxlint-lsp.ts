@@ -17,6 +17,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -138,6 +140,13 @@ const server = Bun.spawn([process.execPath, "src/server/index.ts"], {
   },
 });
 
+/** The `Authorization` header with the session secret the server writes before it listens. */
+function authorization(): string {
+  const secret = readSessionToken(path.join(work, "state"));
+  if (secret === null) throw new Error("The server wrote no session token");
+  return bearer(secret);
+}
+
 const failures: string[] = [];
 function check(ok: boolean, label: string, detail?: unknown): void {
   console.log(
@@ -149,7 +158,7 @@ function check(ok: boolean, label: string, detail?: unknown): void {
 async function post(route: string, body: unknown): Promise<void> {
   const res = await fetch(`${base}${route}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: authorization() },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${route}: ${res.status} ${await res.text()}`);
@@ -169,8 +178,9 @@ try {
   await post("/api/projects", { path: project });
   await post("/api/repo-trust", { worktreePath: project, decision: "trusted" });
 
-  const ws = new WebSocket(
+  const ws = bunWebSocket(
     `ws://127.0.0.1:${port}/ws/oxlint-lsp?wt=${encodeURIComponent(project)}`,
+    { authorization: authorization() },
   );
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve);

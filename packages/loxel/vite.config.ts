@@ -3,10 +3,12 @@ import path from "node:path";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { type Plugin, defineConfig } from "vite";
+import { type Plugin, type ProxyOptions, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
+import { bearer, readSessionToken } from "./src/app-session";
+import { DEFAULT_STATE_DIR } from "./src/state-dir";
 
 const isElectron = !!process.env.ELECTRON;
 
@@ -147,10 +149,44 @@ function xtermWebglPatches(): Plugin {
   };
 }
 
+/**
+ * Proxy `/api` and `/ws` to the server at `serverPort`. For a browser (`pnpm run dev`,
+ * `dev:client`), with the secret from the token file of a server started without the desktop app,
+ * read on every request, since such a server makes a new one each time it restarts: dev only, and
+ * while it runs, whatever reaches this port reaches the dev server's API. Under the dev app
+ * (`dev:app`) it adds nothing: the app's main process adds the secret of the server it uses to its
+ * windows' requests.
+ */
+function serverProxy(serverPort: number, stateDir: string, ws: boolean): ProxyOptions {
+  const authorize = (proxyReq: {
+    getHeader: (name: string) => unknown;
+    setHeader: (name: string, value: string) => void;
+  }) => {
+    if (isElectron || proxyReq.getHeader("authorization") !== undefined) return;
+    const secret = readSessionToken(stateDir);
+    if (secret) proxyReq.setHeader("Authorization", bearer(secret));
+  };
+  return {
+    target: `${ws ? "ws" : "http"}://127.0.0.1:${serverPort}`,
+    ws,
+    // changeOrigin rewrites Host to the server's own host:port; the server rejects requests whose
+    // Host names any other port (src/server/request-origin.ts).
+    changeOrigin: true,
+    configure: (proxy) => {
+      proxy.on("proxyReq", authorize);
+      proxy.on("proxyReqWs", authorize);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
+  const isDevMode = mode === "development";
   const serverPort =
     parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
-    (mode === "development" ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
+    (isDevMode ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
+  const stateDir =
+    process.env.LOXEL_STATE_DIR ??
+    (isDevMode ? DEFAULT_STATE_DIR.dev : DEFAULT_STATE_DIR.production);
 
   return {
     plugins: [
@@ -220,12 +256,9 @@ export default defineConfig(({ mode }) => {
       port: vitePort(process.env),
       strictPort: true,
       proxy: {
-        "/api": { target: `http://127.0.0.1:${serverPort}`, changeOrigin: true },
-        // changeOrigin rewrites Host to the server's own host:port; the server rejects upgrades
-        // whose Host names any other port (src/server/request-origin.ts).
-        "/ws/yaml-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
-        "/ws/ts-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
-        "/ws": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
+        "/api": serverProxy(serverPort, stateDir, false),
+        // Every language server's socket too (`/ws/<lsp>`), by prefix.
+        "/ws": serverProxy(serverPort, stateDir, true),
       },
     },
   };

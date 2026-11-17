@@ -28,6 +28,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
 const PROGRAM = "terraform-ls";
@@ -161,9 +163,9 @@ function socketEvents(logPath: string, run: string): string[] {
   return events;
 }
 
-function connect(url: string): Promise<WebSocket> {
+function connect(url: string, authorization: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = bunWebSocket(url, { authorization });
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error(`Cannot connect to ${url}`)));
   });
@@ -222,8 +224,12 @@ async function auditBehindLoxel(work: string, dylib: string): Promise<void> {
   });
   try {
     await waitForServer(`http://127.0.0.1:${port}/`);
+    // The server writes its session secret before it listens.
+    const secret = readSessionToken(path.join(work, "state"));
+    if (secret === null) throw new Error("loxel-server wrote no session token");
     const ws = await connect(
       `ws://127.0.0.1:${port}/ws/terraform-lsp?wt=${encodeURIComponent(repo)}`,
+      bearer(secret),
     );
     const client = new LspClient((frame) => ws.send(frame));
     ws.addEventListener("message", (event) => {

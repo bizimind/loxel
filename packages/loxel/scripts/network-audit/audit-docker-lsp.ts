@@ -24,6 +24,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bearer, bunWebSocket, readSessionToken } from "../../src/app-session";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -89,7 +91,7 @@ class LspClient {
 
 function connect(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = bunWebSocket(url, { authorization: authorization() });
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error(`Cannot connect to ${url}`)));
   });
@@ -150,6 +152,13 @@ const server = Bun.spawn([serverPath], {
     LOXEL_STATE_DIR: path.join(work, "state"),
   },
 });
+
+/** The `Authorization` header with the session secret the server writes before it listens. */
+function authorization(): string {
+  const secret = readSessionToken(path.join(work, "state"));
+  if (secret === null) throw new Error("The server wrote no session token");
+  return bearer(secret);
+}
 
 const failures: string[] = [];
 function check(ok: boolean, label: string, detail?: unknown): void {

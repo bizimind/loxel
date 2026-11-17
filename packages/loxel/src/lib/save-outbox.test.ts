@@ -92,6 +92,8 @@ describe("isRetriableSaveError", () => {
     expect(isRetriableSaveError(new TypeError("Failed to fetch"))).toBe(true);
     expect(isRetriableSaveError(new actualClient.ApiError("not in any worktree", 404))).toBe(true);
     expect(isRetriableSaveError(new actualClient.ApiError("unavailable", 503))).toBe(true);
+    // The server no longer accepts the window's session: kept for after the reload.
+    expect(isRetriableSaveError(new actualClient.ApiError("session", 401))).toBe(true);
     expect(isRetriableSaveError(new actualClient.ApiError("gone", 404, "ENOENT"))).toBe(false);
     expect(isRetriableSaveError(new actualClient.ApiError("folder", 400))).toBe(false);
     expect(isRetriableSaveError(new actualClient.ApiError("EACCES", 500))).toBe(false);

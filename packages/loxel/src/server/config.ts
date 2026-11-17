@@ -60,6 +60,7 @@ export function getHomeDraftsDir(): string {
 
 export const config = {
   isDev,
+  isDemo,
   stateDir,
   commentsDir: join(stateDir, "comments"),
   /** Tombi's `TOMBI_CACHE_HOME`; see `SchemaDownloads`. */

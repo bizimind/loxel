@@ -1,5 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
+import { bearer } from "../src/app-session";
+
+/** The e2e server's session secret, which global-setup.ts reads from its token file. */
+const sessionSecret = process.env.LOXEL_E2E_SESSION_SECRET ?? "";
+
 export default defineConfig({
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
@@ -20,6 +25,9 @@ export default defineConfig({
         screenshot: "only-on-failure",
         actionTimeout: 60_000,
         baseURL: `http://localhost:${process.env.LOXEL_PORT ?? 7434}`,
+        // As Electron main does for the app's windows: on every request, WebSocket upgrades too,
+        // and for the `request` fixture.
+        extraHTTPHeaders: { Authorization: bearer(sessionSecret) },
       },
     },
   ],
