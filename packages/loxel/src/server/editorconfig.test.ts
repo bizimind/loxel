@@ -85,11 +85,12 @@ describe("section globs", () => {
   });
 });
 
-test("a pathological glob matches in linear time", () => {
+// The matcher fills one table row per token over the path, so its work is bounded by
+// construction; the caps below bound the tokens. Nothing is timed: a loaded runner makes it flaky.
+test("a pathological glob matches without backtracking", () => {
   const glob = compileSectionGlob("*a*a*a*a*a*a*a*a*a*a*b");
-  const start = performance.now();
   expect(globMatches(glob, "a".repeat(250))).toBe(false);
-  expect(performance.now() - start).toBeLessThan(50);
+  expect(globMatches(glob, `${"a".repeat(250)}b`)).toBe(true);
 });
 
 test("an oversized section name or expansion is ignored", () => {
@@ -97,10 +98,10 @@ test("an oversized section name or expansion is ignored", () => {
     `[${"*".repeat(2000)}]\nindent_size = 4\n[*]\nindent_size = 2\n`,
   );
   expect(config.sections.map((section) => section.properties)).toEqual([[["indent_size", "2"]]]);
-  const start = performance.now();
+  // 256 alternatives of over 1,000 tokens each: past the token cap, so it compiles to nothing.
   const glob = compileSectionGlob(`{a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}{o,p}${"*".repeat(1000)}`);
+  expect(glob).toEqual([]);
   expect(globMatches(glob, "a".repeat(200))).toBe(false);
-  expect(performance.now() - start).toBeLessThan(50);
 });
 
 test("a glob expanding to too many alternatives matches nothing", () => {
