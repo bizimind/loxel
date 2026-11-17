@@ -579,8 +579,8 @@ function createFilesService(
 
 /**
  * Tell a new subscriber to refetch the worktree's file queries: whatever it cached was not kept up
- * to date while it was not subscribed (a reload, a reconnect, a look at another worktree), and the
- * directories it lists again are the ones whose changes reach it from now on.
+ * to date while it was not subscribed (a reload, a reconnect, a look at another worktree). A
+ * directory's changes reach it again once it lists that directory again.
  */
 function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectPath: string): void {
   sendTo(ws, { type: "worktree_files_resynced", wtPath, projectPath });
