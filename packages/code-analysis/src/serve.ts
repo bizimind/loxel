@@ -11,10 +11,7 @@ import _treemapHtml from "../resources/treemap/index.html" with { type: "text" }
 import { isLocalRequest } from "./local-request.ts";
 import type { AnalysisPlugin, VizType } from "./plugin.ts";
 
-const HTML: Record<VizType, string> = {
-  treemap: _treemapHtml as unknown as string,
-  "network-graph": _networkGraphHtml as unknown as string,
-};
+const HTML: Record<VizType, string> = { treemap: _treemapHtml, "network-graph": _networkGraphHtml };
 
 /** Path the pages load d3 from; must match the `<script src>` in each page. */
 export const D3_SCRIPT_PATH = "/d3.min.js";

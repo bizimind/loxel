@@ -81,6 +81,16 @@ export function DivergedDot({ title }: { title: string }) {
   return <span className="inline-block size-2 shrink-0 rounded-full bg-yellow-500" title={title} />;
 }
 
+/** The dot before the icon of a tab whose last save waits for the server to be reachable. */
+export function QueuedDot({ title }: { title: string }) {
+  return (
+    <span
+      className="border-muted-foreground inline-block size-2 shrink-0 rounded-full border"
+      title={title}
+    />
+  );
+}
+
 /** Title classes of a tab whose file was deleted from disk. */
 export const DELETED_TAB_TITLE_CLASS = "line-through opacity-50";
 

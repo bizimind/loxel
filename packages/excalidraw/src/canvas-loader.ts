@@ -12,18 +12,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// @ts-expect-error -- Bun file import
 import cascadiaFile from "../fonts/CascadiaCode-Regular.ttf" with { type: "file" };
-// @ts-expect-error -- Bun file import
 import liberationFile from "../fonts/LiberationSans-Regular.ttf" with { type: "file" };
-// @ts-expect-error -- Bun file import
 import virgilFile from "../fonts/Virgil-Regular.ttf" with { type: "file" };
 // Embed native binary and fonts — Bun inlines these into the compiled binary.
 // In dev mode they resolve to regular filesystem paths.
-// @ts-expect-error -- Bun file import
 import nativeBindingFile from "../native/skia.darwin-arm64.bin" with { type: "file" };
 
-const isCompiled = (nativeBindingFile as string).startsWith("/$bunfs/");
+const isCompiled = nativeBindingFile.startsWith("/$bunfs/");
 
 const CACHE_DIR = path.join(os.homedir(), ".cache", "excalidraw-cli");
 

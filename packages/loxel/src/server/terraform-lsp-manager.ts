@@ -29,8 +29,10 @@ const TRUST_RESTRICTION =
  * its built-in schemas.
  *
  * terraform-ls also fetches the inputs and outputs of registry modules a file names from the
- * Terraform Registry, and searches the registry's modules while completing a module `source`, with
- * no setting to turn either off. Both go through its HTTP proxy, so it gets one that leads nowhere.
+ * Terraform Registry, with no setting to turn it off. That goes through its HTTP proxy, so it gets
+ * one that leads nowhere. The bundled build has no registry search: completing a module `source`
+ * searches only with the Algolia credentials HashiCorp's release builds embed, which Loxel's
+ * build from source leaves out (scripts/build-terraform-ls.ts).
  * The `terraform` it runs inherits its environment, and reading provider schemas loads the
  * module's backend, which may be remote, so in a trusted repository terraform-ls finds a shim
  * first on its `PATH` that restores the user's proxy settings and `PATH` and runs their

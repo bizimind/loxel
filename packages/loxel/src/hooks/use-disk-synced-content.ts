@@ -9,13 +9,19 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { MutableRefObject } from "react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { type SaveOptions, type SaveReason, saveEditorContent } from "@/lib/save-editor-content";
+import {
+  adoptOutboxEntry,
+  findAdoptableEntry,
+  forgetOutboxEntry,
+  type OutboxEntry,
+} from "@/lib/save-outbox";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 import { type EditorFileState, useEditorStateStore } from "@/store/editor-state";
@@ -168,10 +174,24 @@ export function useDiskSyncedContent<T>(
   const editorFileState = useEditorStateStore((s) => s.files.get(editorKey)?.state ?? "clean");
   const isDeleted = useEditorStateStore((s) => s.files.get(editorKey)?.deleted ?? false);
 
+  // --- A save of this file still in the outbox ---
+  // A file's own tab opening while a save of the file waits in the outbox (its tab was closed
+  // before the server took it, or the app quit) shows that save's content instead of the disk's
+  // and takes the save over, until the editor is clean again.
+  const [adoption, setAdoption] = useState<{ key: string; entry: OutboxEntry } | null>(() => {
+    const entry = editorKey === filePath ? findAdoptableEntry(filePath) : null;
+    return entry ? { key: editorKey, entry } : null;
+  });
+  const adopted = adoption?.key === editorKey ? adoption.entry : null;
+
   // --- File registration ---
   useEffect(() => {
     useEditorStateStore.getState().openFile(editorKey, filePath);
+    if (adopted) adoptOutboxEntry(editorKey, adopted);
     return () => {
+      // Edits carried over by a move, or of a file deleted from disk, are not saved here.
+      const closing = useEditorStateStore.getState().files.get(editorKey);
+      if (closing && (closing.movedTo || closing.deleted)) forgetOutboxEntry(closing.instanceId);
       // Flush pending save before closing — handles unmount.
       // On scope change, the render-phase flush above already clears the timer,
       // so this is a no-op in that case.
@@ -267,21 +287,37 @@ export function useDiskSyncedContent<T>(
   }, [isMissingOnDisk, dataUpdatedAt, editorKey]);
 
   // --- Set base content when data is available and state is clean ---
+  // Read live: an editor that just took over an outbox save is no longer clean.
   useEffect(() => {
-    if (data && editorFileState === "clean") {
-      useEditorStateStore.getState().setBaseContent(editorKey, data.content);
-    }
+    if (!data || editorFileState !== "clean") return;
+    const store = useEditorStateStore.getState();
+    if (store.files.get(editorKey)?.state === "clean")
+      store.setBaseContent(editorKey, data.content);
   }, [data, editorKey, editorFileState]);
+
+  // --- End of an adoption ---
+  // Read live: the registration effect has just made the adopting editor dirty or diverged.
+  useEffect(() => {
+    if (!adopted || editorFileState !== "clean") return;
+    if (useEditorStateStore.getState().files.get(editorKey)?.state === "clean") setAdoption(null);
+  }, [adopted, editorFileState, editorKey]);
 
   // --- Content derivation ---
   const diskContent = useMemo<T | null>(() => {
+    if (adopted) {
+      try {
+        return deserialize(adopted.content);
+      } catch {
+        return null;
+      }
+    }
     if (!data) return contentCache?.get(cacheKey) ?? null;
     try {
       return deserialize(data.content);
     } catch {
       return null;
     }
-  }, [data, cacheKey, deserialize, contentCache]);
+  }, [adopted, data, cacheKey, deserialize, contentCache]);
 
   // --- Save ---
   const saveOptionsRef = useRef<SaveOptions | undefined>(undefined);
