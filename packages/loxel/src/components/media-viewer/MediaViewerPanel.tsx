@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { wsClient } from "@/api/client";
+import { getPathInfo, wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/components/pan-zoom/pan-zoom";
 import { usePanZoom } from "@/components/pan-zoom/use-pan-zoom";
 import { ZoomControls } from "@/components/pan-zoom/ZoomToolbar";
+import { onLoxelEvent } from "@/lib/loxel-events";
 import { getMediaType } from "@/lib/media-extensions";
 import { cn } from "@/lib/utils";
 
@@ -195,6 +196,32 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     });
     return unsub;
   }, [filePath]);
+
+  // --- Reload after a resync, if the file changed while no push could reach this window ---
+  // Every switch back to the worktree resyncs it too, so the file's size and modification time,
+  // read when it loads (again on each reload), decide: an unconditional reload would restart a
+  // playing video.
+  useEffect(() => {
+    if (!worktreePath) return;
+    const absolutePath = filePath.startsWith("/") ? filePath : `${worktreePath}/${filePath}`;
+    const readStamp = () =>
+      getPathInfo(absolutePath).then(
+        ({ size, mtimeMs }) => `${size}:${mtimeMs}`,
+        () => null,
+      );
+    let disposed = false;
+    const loaded = readStamp();
+    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
+      if (wtPath !== worktreePath) return;
+      void Promise.all([loaded, readStamp()]).then(([before, now]) => {
+        if (!disposed && now !== before) setVersion((v) => v + 1);
+      });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [filePath, worktreePath, version]);
 
   // --- Keyboard ---
   const handleKeyDown = useCallback(

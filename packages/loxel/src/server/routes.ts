@@ -3076,7 +3076,7 @@ async function handlePathInfo(req: Request): Promise<Response> {
   const path = await canonicalPath(rawPath);
   const stats = path ? await stat(path).catch(() => null) : null;
   if (!path || !stats) return error("Path not found", 404);
-  return json({ path, isDir: stats.isDirectory() });
+  return json({ path, isDir: stats.isDirectory(), size: stats.size, mtimeMs: stats.mtimeMs });
 }
 
 // POST /api/external-folders/add { wt, path } — open a folder in the worktree's Others section
