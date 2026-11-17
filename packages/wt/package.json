@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@bizimind/cli-common": "workspace:*",
-    "@inquirer/prompts": "^8.7.5",
+    "@inquirer/prompts": "^8.8.0",
     "commander": "^15.1.0"
   },
   "devDependencies": {
