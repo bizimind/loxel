@@ -150,8 +150,9 @@ jobs:
 
       # CycloneDX SBOM of what this architecture's app ships: pnpm installs only this machine's
       # platform packages, so each leg writes its own. After `pnpm install`, since pnpm reads
-      # licenses from the installed packages, and after the language servers built from the
-      # manifests it lists. Uploaded with the installers; the release job attaches both.
+      # licenses from the installed packages, and after the language servers are built and staged,
+      # since it lists their manifests and reads the Go modules compiled into the Go binaries among
+      # them. Uploaded with the installers; the release job attaches both.
       - name: Generate SBOM
         run: bun packages/loxel/scripts/sbom.ts "packages/loxel/build/Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json"
 

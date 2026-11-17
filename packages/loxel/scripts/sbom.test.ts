@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import { readManifests, shippedComponent } from "./language-server-manifest";
-import { type Bom, bunComponent, checkNpmDependencies, generateSbom, withComponents } from "./sbom";
+import {
+  type Bom,
+  bunComponent,
+  checkNpmDependencies,
+  generateSbom,
+  goAdditions,
+  withComponents,
+} from "./sbom";
 
 const npmManifest = {
   name: "x",
@@ -66,7 +73,7 @@ describe("withComponents", () => {
   };
 
   test("adds the components as dependencies of the root", () => {
-    const result = withComponents(bom, [bunComponent("1.4.3")]);
+    const result = withComponents(bom, [{ component: bunComponent("1.4.3") }]);
     expect(result.components.map((c) => c["bom-ref"])).toEqual([
       "a",
       "pkg:github/oven-sh/bun@bun-v1.4.3",
@@ -76,8 +83,67 @@ describe("withComponents", () => {
     ]);
   });
 
+  test("adds a component as a dependency of its parents", () => {
+    const result = withComponents(bom, [{ component: { "bom-ref": "b" }, parents: ["a", "root"] }]);
+    expect(result.dependencies).toEqual([
+      { ref: "root", dependsOn: ["a", "b"] },
+      { ref: "a", dependsOn: ["b"] },
+    ]);
+  });
+
   test("refuses a component that is already listed", () => {
-    expect(() => withComponents(bom, [{ "bom-ref": "a" }])).toThrow("listed twice");
+    expect(() => withComponents(bom, [{ component: { "bom-ref": "a" } }])).toThrow("listed twice");
+  });
+});
+
+describe("goAdditions", () => {
+  const binary = (goVersion: string, deps: [string, string][], main?: [string, string]) => ({
+    goVersion,
+    main: main && { path: main[0], version: main[1] },
+    deps: deps.map(([modPath, version]) => ({ path: modPath, version })),
+  });
+
+  test("lists each binary's stdlib and modules under it, once per module", () => {
+    const additions = goAdditions(
+      [
+        {
+          file: "x-ls",
+          info: binary(
+            "go1.26.4",
+            [["github.com/BurntSushi/toml", "v1.6.0"]],
+            ["example.com/x", "(devel)"],
+          ),
+        },
+        {
+          file: "y/y-ls",
+          info: binary("go1.26.4", [
+            ["github.com/docker/docker", "v28.4.0+incompatible"],
+            ["github.com/BurntSushi/toml", "v1.6.0"],
+          ]),
+        },
+      ],
+      (file) => `parent:${file.split("/")[0]}`,
+      new Set(),
+    );
+    expect(additions.map((a) => [a.component["bom-ref"], a.parents])).toEqual([
+      ["pkg:golang/stdlib@v1.26.4", ["parent:x-ls", "parent:y"]],
+      ["pkg:golang/github.com/burntsushi/toml@v1.6.0", ["parent:x-ls", "parent:y"]],
+      ["pkg:golang/github.com/docker/docker@v28.4.0%2Bincompatible", ["parent:y"]],
+    ]);
+  });
+
+  test("leaves out the binary's own component", () => {
+    const additions = goAdditions(
+      [
+        {
+          file: "x-ls",
+          info: binary("go1.27.4", [["example.com/x", "v1.0.0"]], ["example.com/x", "v1.0.0"]),
+        },
+      ],
+      () => "pkg:golang/example.com/x@v1.0.0",
+      new Set(),
+    );
+    expect(additions.map((a) => a.component["bom-ref"])).toEqual(["pkg:golang/stdlib@v1.27.4"]);
   });
 });
 
