@@ -145,7 +145,13 @@ export interface OpenAllResult {
 export async function requestOpenAll(
   serverUrl: string,
   requests: OpenRequest[],
-  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, queueAfterMs, unix }: RequestOpenOptions = {},
+  {
+    onWaiting,
+    windowWaitMs = WINDOW_WAIT_MS,
+    queueAfterMs,
+    unix,
+    headers,
+  }: RequestOpenOptions = {},
 ): Promise<OpenAllResult> {
   const start = Date.now();
   const remaining = (ms: number) => Math.max(0, start + ms - Date.now());
@@ -157,6 +163,7 @@ export async function requestOpenAll(
     try {
       const result = await requestOpen(serverUrl, request, {
         unix,
+        headers,
         windowWaitMs: remaining(windowWaitMs),
         ...(queueAfterMs === undefined ? {} : { queueAfterMs: remaining(queueAfterMs) }),
         onWaiting: () => {

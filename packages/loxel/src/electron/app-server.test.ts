@@ -35,6 +35,27 @@ describe("carriesSecret", () => {
     expect(fromWindow(url, "null")).toBe(false);
   });
 
+  test("a frame's navigation by what embeds it, as the media viewer's opaque SVG frame", () => {
+    const frame = `${APP}/api/media-frame?path=/x.svg`;
+    const navigation = (parentOrigin: string) =>
+      carriesSecret(
+        {
+          url: frame,
+          contentsType: "window",
+          frameOrigin: "null",
+          resourceType: "subFrame",
+          parentOrigin,
+        },
+        APP,
+      );
+    expect(navigation(APP)).toBe(true);
+    expect(navigation("null")).toBe(false);
+    expect(navigation("https://example.com")).toBe(false);
+    // What the frame's own scripts request is not a navigation.
+    const fetched = { url: `${APP}/api/projects`, contentsType: "window", frameOrigin: "null" };
+    expect(carriesSecret({ ...fetched, resourceType: "xhr", parentOrigin: APP }, APP)).toBe(false);
+  });
+
   test("the Vite dev server's origin in dev", () => {
     const vite = "http://127.0.0.1:5173";
     const req = (url: string) => ({ url, contentsType: "window", frameOrigin: vite });

@@ -35,7 +35,7 @@ Every tool panel has an icon in the tool bars at the window's left and right edg
 
 The **worktree sidebar** to the far left lists your projects and their worktrees. Collapse or expand it with the sidebar button at the left of the top bar, or `Ctrl+Alt+B`. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
 
-If the window loses its connection to the Loxel server, for example while the server restarts for an update, the top bar shows **Reconnecting…**. Loxel reconnects by itself, and everything on screen catches up with what changed meanwhile. Click it to try again right away.
+If the window loses its connection to the Loxel server, for example while the server restarts for an update, the top bar shows **Reconnecting…**. Loxel reconnects by itself, and everything on screen catches up with what changed meanwhile. Click it to try again right away. If the top bar shows **Server restarted, reload to reconnect** instead, the server no longer accepts the window and it stops retrying: click it to reload the window. Edits you had not saved yet are kept and saved after the reload.
 
 **Settings > Layout** sets which panels each zone holds and opens by default, and the zones' sizes, for new worktree layouts.
 

@@ -53,12 +53,18 @@ export interface WindowRequest {
   contentsType?: string;
   /** The origin of the frame that sent it, when Electron knows: none for a worker's request. */
   frameOrigin?: string;
+  /** Electron's resource type: `subFrame` for a frame's own navigation. */
+  resourceType?: string;
+  /** The origin of that frame's parent, the document that embeds it. */
+  parentOrigin?: string;
 }
 
 /**
  * Whether a request from the windows' session gets the secret: an `/api` or `/ws` request to
  * `appOrigin` (HTTP or WebSocket), from an app window, not a `<webview>`, and from a frame of the
- * app's own origin, not one a page embedded from elsewhere.
+ * app's own origin, not one a page embedded from elsewhere. A frame's navigation is the embedding
+ * document's: the media viewer loads its SVG frame, sandboxed into an opaque origin, from the
+ * server, while what that frame's own scripts request gets nothing.
  */
 export function carriesSecret(req: WindowRequest, appOrigin: string): boolean {
   const url = new URL(req.url);
@@ -66,7 +72,8 @@ export function carriesSecret(req: WindowRequest, appOrigin: string): boolean {
   if (url.origin !== appOrigin && url.origin !== wsOrigin) return false;
   if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/ws")) return false;
   if (req.contentsType !== undefined && req.contentsType !== "window") return false;
-  return req.frameOrigin === undefined || req.frameOrigin === appOrigin;
+  if (req.frameOrigin === undefined || req.frameOrigin === appOrigin) return true;
+  return req.resourceType === "subFrame" && req.parentOrigin === appOrigin;
 }
 
 /**
@@ -85,6 +92,8 @@ export function authorizeWindowRequests(windows: Electron.Session, appOrigin: st
         url: details.url,
         contentsType: details.webContents?.getType(),
         frameOrigin: details.frame?.origin,
+        resourceType: details.resourceType,
+        parentOrigin: details.frame?.parent?.origin,
       };
       const headers = carriesSecret(request, appOrigin) ? serverAuthorization() : {};
       callback({ requestHeaders: { ...details.requestHeaders, ...headers } });
