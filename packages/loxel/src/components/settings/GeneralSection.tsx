@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 import * as api from "@/api/client";
 import type { DefaultBrowserStatus } from "@/api/default-browser-model";
+import { localServerId } from "@/api/local-server";
 import type { RunningTerminal } from "@/api/running-terminals-model";
 import type { UpdateState } from "@/api/update-model";
 import { BusyTerminalList } from "@/components/terminal/BusyTerminalList";
@@ -41,7 +42,7 @@ export function GeneralSection() {
   const setAutoReveal = useSettingsStore((s) => s.setAutoRevealInExplorer);
 
   const { data: versionData } = useQuery({
-    queryKey: queryKeys.version(),
+    queryKey: queryKeys.version(localServerId()),
     queryFn: api.getVersion,
     staleTime: Infinity,
   });
@@ -242,7 +243,9 @@ async function installWithConfirmation(
       updateLog.warn("Could not list the running terminals; counting the last known ones", {
         error: err,
       });
-      running = queryClient.getQueryData<RunningTerminal[]>(queryKeys.runningTerminals()) ?? [];
+      running =
+        queryClient.getQueryData<RunningTerminal[]>(queryKeys.runningTerminals(localServerId())) ??
+        [];
     } finally {
       setListing(false);
     }

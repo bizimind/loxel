@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
+import { localRef } from "@/api/local-server";
 import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
@@ -278,7 +279,7 @@ export function CodeEditorPanel({
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
-    queryKey: queryKeys.editorConfig(filePath, panelWorktreePath ?? undefined),
+    queryKey: queryKeys.editorConfig(filePath, localRef(panelWorktreePath ?? undefined)),
     queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
   });
   const { data: editorConfigData } = editorConfigQuery;
@@ -319,7 +320,7 @@ export function CodeEditorPanel({
   // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
   // only for files tsc can report on.
   const { data: diagData } = useQuery({
-    queryKey: queryKeys.diagnostics(null, undefined, panelWorktreePath ?? undefined),
+    queryKey: queryKeys.diagnostics(null, undefined, localRef(panelWorktreePath ?? undefined)),
     queryFn: () => api.getDiagnostics(panelWorktreePath!),
     enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });

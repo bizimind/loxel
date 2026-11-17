@@ -11,8 +11,9 @@ import type {
   StatusInfo,
   WorktreeStatusInfo,
 } from "@/api/git-models";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { toAbsoluteDir } from "@/lib/detached-path";
-import { queryKeys } from "@/queries/query-keys";
+import { type LoxelQueryKey, queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 import type { DiffSource } from "@/store/worktree-repository";
 import type { BranchFilterPreset } from "@/store/worktree-ui";
@@ -87,16 +88,16 @@ export type DiffQueryData = DiffInfo;
 // ---------------------------------------------------------------------------
 
 function useScopedQuery<TData>(opts: {
-  queryKey: (pp: string | null, wt: string | null) => readonly unknown[];
+  queryKey: (project: WorktreeRef | null, wt: WorktreeRef | null) => LoxelQueryKey;
   queryFn: (wt: string, signal: AbortSignal) => Promise<TData>;
   extraEnabled?: boolean;
   staleTime?: number;
 }): UseQueryResult<TData> {
-  const { activeProjectPath, activeWorktreePath } = useQueryScope();
+  const { activeProject, activeWorktree } = useQueryScope();
   return useQuery({
-    queryKey: opts.queryKey(activeProjectPath, activeWorktreePath),
-    queryFn: ({ signal }) => opts.queryFn(activeWorktreePath!, signal),
-    enabled: activeProjectPath !== null && (opts.extraEnabled ?? true),
+    queryKey: opts.queryKey(activeProject, activeWorktree),
+    queryFn: ({ signal }) => opts.queryFn(activeWorktree!.path, signal),
+    enabled: activeProject !== null && (opts.extraEnabled ?? true),
     ...(opts.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
@@ -150,7 +151,7 @@ export function useDiffQuery(source: DiffSource | null) {
 
 export function useDirContentsQuery(dir: string, enabled: boolean) {
   return useScopedQuery({
-    queryKey: (pp, wt) => queryKeys.dirContents(pp, toAbsoluteDir(dir, wt)),
+    queryKey: (pp, wt) => queryKeys.dirContents(pp, toAbsoluteDir(dir, wt?.path ?? null)),
     queryFn: (wt) => api.getDirContents(wt, dir),
     extraEnabled: enabled,
     staleTime: Infinity, // WebSocket bridge handles updates via files_dir_changed

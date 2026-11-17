@@ -6,8 +6,7 @@ import { getRepoTrust } from "@/api/repo-trust-client";
 import { showToast } from "@/components/ui/toast";
 import { manageRepoTrust } from "@/lib/repo-trust-dialog";
 import { queryKeys } from "@/queries/query-keys";
-import { deriveProject, useProjectStore } from "@/store/projects";
-import { useWorktreeStore } from "@/store/worktrees";
+import { useQueryScope } from "@/queries/use-scope";
 
 /** Repositories this window has already told about, so a toast comes once per repository. */
 const toldRepositories = new Set<string>();
@@ -19,10 +18,10 @@ const toldRepositories = new Set<string>();
  * nothing. Clicking asks.
  */
 export function RepoTrustStatus() {
-  const wtPath = useWorktreeStore((s) => s.activeWorktreePath);
-  const projectPath = useProjectStore((s) => deriveProject(wtPath, s.projects)?.path ?? null);
+  const { activeProject, activeWorktree } = useQueryScope();
+  const wtPath = activeWorktree?.path ?? null;
   const { data } = useQuery({
-    queryKey: queryKeys.repoTrust(projectPath, wtPath),
+    queryKey: queryKeys.repoTrust(activeProject, activeWorktree),
     queryFn: wtPath ? () => getRepoTrust(wtPath) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on repo_trust_changed
   });

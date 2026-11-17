@@ -5,6 +5,7 @@ import type { AddWorktreePlan, CreateWorktreeOptions } from "@/api/client";
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
+import { localRef } from "@/api/local-server";
 import type { EnrichedProject } from "@/api/project-model";
 import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-model";
 import { showToast } from "@/components/ui/toast";
@@ -22,6 +23,7 @@ import {
   type WorktreeNode,
   type WorktreeRow,
 } from "@/lib/worktree-hierarchy";
+import { isKeyWithinWorktree } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 
 import { closeLayoutBrowserPages } from "./browser-pages";
@@ -672,12 +674,8 @@ function releaseWorktree(path: string, discarded = false): void {
   closeLayoutBrowserPages(path);
   purgeWorktreeCache(path);
   useFileSearchStore.getState().purgeWorktree(path);
-  queryClient.removeQueries({
-    predicate: ({ queryKey }) =>
-      queryKey.some(
-        (part) => typeof part === "string" && (part === path || part.startsWith(`${path}/`)),
-      ),
-  });
+  const ref = localRef(path);
+  queryClient.removeQueries({ predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, ref) });
   wsClient.unsubscribeWorktree(path);
   dispatchLoxelEvent("loxel-worktree-gone", { wtPath: path, discarded });
 }

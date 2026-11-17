@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } 
 import { until } from "@/test/until";
 
 import { WsClient } from "./client";
+import { localServerId } from "./local-server";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 
 /** A WebSocket the test opens, feeds and closes by hand. */
@@ -41,12 +42,11 @@ class FakeSocket {
 }
 
 const realWebSocket = globalThis.WebSocket;
-const hello = (bootEpoch = "boot-1", version = "1.0.0"): WsMessage => ({
-  type: "server_hello",
-  version,
-  serverId: "server-1",
-  bootEpoch,
-});
+const hello = (
+  bootEpoch = "boot-1",
+  version = "1.0.0",
+  serverId: string = localServerId(),
+): WsMessage => ({ type: "server_hello", version, serverId, bootEpoch });
 const lastSocket = (): FakeSocket => {
   const socket = FakeSocket.instances.at(-1);
   if (!socket) throw new Error("no socket");
@@ -190,6 +190,18 @@ describe("WsClient", () => {
 
     expect(reload).toHaveBeenCalledTimes(1);
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  test("reloads when the server is not the one the window started with", () => {
+    const reload = mock(() => {});
+    spyOn(window.location, "reload").mockImplementation(reload);
+    const client = new WsClient();
+    client.connect();
+    lastSocket().open();
+
+    lastSocket().receive(hello("boot-1", "1.0.0", "another-server"));
+
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   test("ignores a socket it already replaced", () => {

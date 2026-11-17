@@ -2,6 +2,8 @@ import type { Page, QueryOptions } from "@bizimind/localdb-sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 
+import { queryKeys } from "@/queries/query-keys";
+
 import type { DataAdapter } from "../adapters/data-adapter.ts";
 
 export type Row = Record<string, unknown>;
@@ -14,14 +16,16 @@ export type Row = Record<string, unknown>;
  */
 export function useTableRows(adapter: DataAdapter, tableName: string, options: QueryOptions) {
   const queryClient = useQueryClient();
-  const tableKey = [...adapter.queryKey, "rows", tableName];
-  const queryKey = [...tableKey, options];
+  const tableKey = queryKeys.localdbRows(adapter.queryKey, tableName);
+  const queryKey = queryKeys.localdbRowsPage(adapter.queryKey, tableName, options);
   const query = useQuery({ queryKey, queryFn: () => adapter.query<Row>(tableName, options) });
-  // Stable while the key is, so a view can depend on them (a drag's listeners).
+  // Stable while the keys are, so a view can depend on them (a drag's listeners). The callbacks
+  // parse back the keys built above, through JSON only to keep the callbacks stable.
   const keyHash = JSON.stringify(queryKey);
+  const tableKeyHash = JSON.stringify(tableKey);
   const setPage = useCallback(
     (update: (page: Page<Row>) => Page<Row>) => {
-      const key: unknown[] = JSON.parse(keyHash);
+      const key = JSON.parse(keyHash) as typeof queryKey;
       // A refetch started before the edit would land after it and show the old value again.
       void queryClient.cancelQueries({ queryKey: key, exact: true });
       queryClient.setQueryData<Page<Row>>(key, (page) => page && update(page));
@@ -29,9 +33,8 @@ export function useTableRows(adapter: DataAdapter, tableName: string, options: Q
     [queryClient, keyHash],
   );
   const refresh = useCallback(
-    () =>
-      queryClient.invalidateQueries({ queryKey: (JSON.parse(keyHash) as unknown[]).slice(0, -1) }),
-    [queryClient, keyHash],
+    () => queryClient.invalidateQueries({ queryKey: JSON.parse(tableKeyHash) as typeof tableKey }),
+    [queryClient, tableKeyHash],
   );
   return {
     page: query.data,

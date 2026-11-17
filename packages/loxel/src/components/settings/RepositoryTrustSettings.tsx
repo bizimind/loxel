@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { localServerId } from "@/api/local-server";
 import { forgetRepoTrust, listRepoTrust } from "@/api/repo-trust-client";
 import type { RepoTrustDecision, RepoTrustEntry } from "@/api/repo-trust-model";
 import { Button } from "@/components/ui/button";
@@ -129,7 +130,7 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
  */
 export function RepositoryTrustSettings() {
   const { data, error } = useQuery({
-    queryKey: queryKeys.repoTrustList(),
+    queryKey: queryKeys.repoTrustList(localServerId()),
     queryFn: listRepoTrust,
     // Only trust changes are pushed; projects and worktrees come and go too, so ask on each open.
     refetchOnMount: "always",

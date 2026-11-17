@@ -6,6 +6,7 @@ import { useState } from "react";
 import { MigrationReview, makeRestAdapter } from "@/components/localdb/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 
 import { DataTable } from "./DataTable";
@@ -13,12 +14,13 @@ import { SchemaBuilder } from "./SchemaBuilder";
 
 /** Adapter scoped to the active project via ?project= query param. */
 function useLocalDbAdapter() {
-  const { activeProjectPath } = useQueryScope();
-  return makeRestAdapter("/api/localdb", activeProjectPath);
+  const { activeProject } = useQueryScope();
+  return makeRestAdapter("/api/localdb", activeProject);
 }
 
 export function LocalDbPanel() {
-  const { activeProjectPath } = useQueryScope();
+  const { activeProject } = useQueryScope();
+  const activeProjectPath = activeProject?.path ?? null;
   const adapter = useLocalDbAdapter();
   const queryClient = useQueryClient();
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -27,13 +29,13 @@ export function LocalDbPanel() {
   const [newTableForm, setNewTableForm] = useState<{ name: string; label: string } | null>(null);
 
   const tablesQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "tables"],
+    queryKey: queryKeys.localdbTables(activeProject),
     queryFn: () => adapter.listTables(),
     enabled: !!activeProjectPath,
   });
 
   const schemaQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "schema", selectedTable],
+    queryKey: queryKeys.localdbSchema(activeProject, selectedTable),
     queryFn: () => adapter.getSchema(selectedTable!),
     enabled: !!selectedTable,
   });
@@ -52,7 +54,7 @@ export function LocalDbPanel() {
     },
     onSuccess: () => {
       setNewTableForm(null);
-      queryClient.invalidateQueries({ queryKey: ["localdb", activeProjectPath, "tables"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.localdbTables(activeProject) });
     },
   });
 
@@ -205,7 +207,7 @@ export function LocalDbPanel() {
                       }
                       setPendingPlan(null);
                       queryClient.invalidateQueries({
-                        queryKey: ["localdb", activeProjectPath, "schema", selectedTable],
+                        queryKey: queryKeys.localdbSchema(activeProject, selectedTable),
                       });
                     }}
                     onCancel={() => setPendingPlan(null)}
@@ -227,7 +229,7 @@ export function LocalDbPanel() {
                   adapter={adapter}
                   onSchemaChange={() => {
                     queryClient.invalidateQueries({
-                      queryKey: ["localdb", activeProjectPath, "schema", selectedTable],
+                      queryKey: queryKeys.localdbSchema(activeProject, selectedTable),
                     });
                   }}
                 />

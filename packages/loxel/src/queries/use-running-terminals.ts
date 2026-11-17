@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { RunningTerminal } from "@/api/running-terminals-model";
 
 import { queryKeys } from "./query-keys";
@@ -13,7 +14,7 @@ export function useRunningTerminals(
   options: { enabled?: boolean } = {},
 ): RunningTerminal[] | undefined {
   const { data } = useQuery({
-    queryKey: queryKeys.runningTerminals(),
+    queryKey: queryKeys.runningTerminals(localServerId()),
     queryFn: () => api.getRunningTerminals({ programs: false }),
     enabled: options.enabled ?? true,
     staleTime: Infinity,

@@ -9,8 +9,10 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 import { wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
+import { localRef, localServerId } from "@/api/local-server";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { queryClient } from "@/query-client";
@@ -20,8 +22,13 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { queryKeys } from "./query-keys";
 import { useWsBridge } from "./ws-bridge";
 
-const PROJECT = "/repo";
-const WT = "/repo/.worktrees/wt";
+const PROJECT_PATH = "/repo";
+const WT_PATH = "/repo/.worktrees/wt";
+const PROJECT = localRef(PROJECT_PATH);
+const WT = localRef(WT_PATH);
+/** The same paths on another server, which no message of this one's may touch. */
+const ELSEWHERE = toServerId("other-server");
+const PROJECT_ELSEWHERE = worktreeRef(ELSEWHERE, PROJECT_PATH);
 
 const setQueryData = spyOn(queryClient, "setQueryData");
 const invalidateQueries = spyOn(queryClient, "invalidateQueries");
@@ -44,7 +51,10 @@ beforeAll(() => {
     reconnect = handler;
     return () => {};
   });
-  useProjectStore.setState({ projects: [{ path: PROJECT } as EnrichedProject], fetchProjects });
+  useProjectStore.setState({
+    projects: [{ path: PROJECT_PATH } as EnrichedProject],
+    fetchProjects,
+  });
   useWorktreeStore.setState({ refreshProjectWorktrees });
   renderHook(() => useWsBridge());
 });
@@ -75,26 +85,37 @@ function matchedByPredicates(keys: ReadonlyArray<readonly unknown[]>) {
   );
 }
 
-const STAGED_DIFF = queryKeys.diff(PROJECT, { type: "staged", worktree: WT });
-const UNSTAGED_DIFF = queryKeys.diff(PROJECT, { type: "unstaged", worktree: WT });
-const UNCOMMITTED_DIFF = queryKeys.diff(PROJECT, { type: "uncommitted", worktree: WT });
+const STAGED_DIFF = queryKeys.diff(PROJECT, { type: "staged", worktree: WT_PATH });
+const UNSTAGED_DIFF = queryKeys.diff(PROJECT, { type: "unstaged", worktree: WT_PATH });
+const UNCOMMITTED_DIFF = queryKeys.diff(PROJECT, { type: "uncommitted", worktree: WT_PATH });
 const COMMIT_DIFF = queryKeys.diff(PROJECT, { type: "commit", commit: "abc" });
-const OTHER_PROJECT_DIFF = queryKeys.diff("/other", { type: "staged", worktree: WT });
-const DIFF_KEYS = [STAGED_DIFF, UNSTAGED_DIFF, UNCOMMITTED_DIFF, COMMIT_DIFF, OTHER_PROJECT_DIFF];
+const OTHER_PROJECT_DIFF = queryKeys.diff(localRef("/other"), {
+  type: "staged",
+  worktree: WT_PATH,
+});
+const OTHER_SERVER_DIFF = queryKeys.diff(PROJECT_ELSEWHERE, { type: "staged", worktree: WT_PATH });
+const DIFF_KEYS = [
+  STAGED_DIFF,
+  UNSTAGED_DIFF,
+  UNCOMMITTED_DIFF,
+  COMMIT_DIFF,
+  OTHER_PROJECT_DIFF,
+  OTHER_SERVER_DIFF,
+];
 const WORKING_TREE_DIFFS = [STAGED_DIFF, UNSTAGED_DIFF, UNCOMMITTED_DIFF];
 
 describe("useWsBridge git messages", () => {
   test.each([
-    { type: "refs_changed", projectPath: PROJECT, data: [] },
-    { type: "log_changed", projectPath: PROJECT },
+    { type: "refs_changed", projectPath: PROJECT_PATH, data: [] },
+    { type: "log_changed", projectPath: PROJECT_PATH },
   ] satisfies WsMessage[])(
     "$type refetches the commit lists and working-tree diffs, and nothing else",
     (message) => {
       deliver(message);
 
       expect(invalidatedKeys()).toEqual([
-        ["commits", PROJECT],
-        ["branchCommits", PROJECT],
+        queryKeys.projectCommits(PROJECT),
+        queryKeys.projectBranchCommits(PROJECT),
       ]);
       expect(matchedByPredicates(DIFF_KEYS)).toEqual(WORKING_TREE_DIFFS);
       expect(setQueryData).not.toHaveBeenCalled();
@@ -104,7 +125,7 @@ describe("useWsBridge git messages", () => {
   test("status_changed writes the status and refetches only working-tree diffs", () => {
     const data = { branch: "main" } as StatusInfo;
 
-    deliver({ type: "status_changed", wtPath: WT, data });
+    deliver({ type: "status_changed", wtPath: WT_PATH, data });
 
     expect(setQueryData.mock.calls).toEqual([[queryKeys.status(PROJECT, WT), data]]);
     expect(invalidatedKeys()).toEqual([]);
@@ -112,18 +133,18 @@ describe("useWsBridge git messages", () => {
   });
 
   test("worktree_status_changed writes the list without refetching anything", () => {
-    const data = [{ path: WT }] as WorktreeStatusInfo[];
+    const data = [{ path: WT_PATH }] as WorktreeStatusInfo[];
 
-    deliver({ type: "worktree_status_changed", projectPath: PROJECT, data });
+    deliver({ type: "worktree_status_changed", projectPath: PROJECT_PATH, data });
 
     expect(setQueryData.mock.calls).toEqual([[queryKeys.worktreeStatuses(PROJECT), data]]);
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
   test("worktrees_changed refreshes that project's worktree list", () => {
-    deliver({ type: "worktrees_changed", data: { projectPath: PROJECT } });
+    deliver({ type: "worktrees_changed", data: { projectPath: PROJECT_PATH } });
 
-    expect(refreshProjectWorktrees.mock.calls).toEqual([[PROJECT] as never]);
+    expect(refreshProjectWorktrees.mock.calls).toEqual([[PROJECT_PATH] as never]);
     expect(setQueryData).not.toHaveBeenCalled();
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
@@ -135,22 +156,22 @@ describe("useWsBridge after a reconnect", () => {
 
     const keys = [
       queryKeys.status(PROJECT, WT),
-      ["commits", PROJECT],
+      queryKeys.projectCommits(PROJECT),
       COMMIT_DIFF,
-      queryKeys.runningTerminals(),
+      queryKeys.runningTerminals(localServerId()),
       queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
     ];
     // Editors with unsaved changes take new content through worktree_files_resynced instead.
     expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
     expect(fetchProjects).toHaveBeenCalledTimes(1);
     // Worktrees removed meanwhile are released by the per-project refresh.
-    await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
+    await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT_PATH));
   });
 });
 
 describe("useWsBridge file messages", () => {
   test("worktree_files_resynced refetches what the paused watchers may have missed", () => {
-    deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: PROJECT });
+    deliver({ type: "worktree_files_resynced", wtPath: WT_PATH, projectPath: PROJECT_PATH });
 
     expect(invalidatedKeys()).toEqual([
       queryKeys.status(PROJECT, WT),
@@ -159,14 +180,15 @@ describe("useWsBridge file messages", () => {
       queryKeys.externalFiles(PROJECT, WT),
     ]);
     // Only this worktree's working-tree diffs and directory listings.
-    const otherWtDiff = queryKeys.diff(PROJECT, { type: "staged", worktree: `${WT}2` });
+    const otherWtDiff = queryKeys.diff(PROJECT, { type: "staged", worktree: `${WT_PATH}2` });
     const ownDirs = [
-      queryKeys.dirContents(PROJECT, WT),
-      queryKeys.dirContents(PROJECT, `${WT}/src`),
+      queryKeys.dirContents(PROJECT, WT_PATH),
+      queryKeys.dirContents(PROJECT, `${WT_PATH}/src`),
     ];
     const otherDirs = [
-      queryKeys.dirContents(PROJECT, `${WT}2`),
-      queryKeys.dirContents("/other", WT),
+      queryKeys.dirContents(PROJECT, `${WT_PATH}2`),
+      queryKeys.dirContents(localRef("/other"), WT_PATH),
+      queryKeys.dirContents(PROJECT_ELSEWHERE, WT_PATH),
     ];
     expect(matchedByPredicates([...DIFF_KEYS, otherWtDiff, ...ownDirs, ...otherDirs])).toEqual([
       ...WORKING_TREE_DIFFS,
@@ -175,33 +197,45 @@ describe("useWsBridge file messages", () => {
     expect(setQueryData).not.toHaveBeenCalled();
   });
 
+  test("worktree_files_resynced refetches this worktree's files as on disk, on its server only", () => {
+    deliver({ type: "worktree_files_resynced", wtPath: WT_PATH, projectPath: PROJECT_PATH });
+
+    const own = queryKeys.fileContent(PROJECT, "a.ts", undefined, WT);
+    const others = [
+      queryKeys.fileContent(PROJECT, "a.ts", "HEAD", WT),
+      queryKeys.fileContent(PROJECT, "a.ts", undefined, localRef(`${WT_PATH}2`)),
+      queryKeys.fileContent(PROJECT_ELSEWHERE, "a.ts", undefined, worktreeRef(ELSEWHERE, WT_PATH)),
+    ];
+    expect(matchedByPredicates([own, ...others])).toEqual([own]);
+  });
+
   test("worktree_files_resynced tells the files tree once its listings are invalidated", () => {
-    const ownDir = queryKeys.dirContents(PROJECT, `${WT}/src`);
+    const ownDir = queryKeys.dirContents(PROJECT, `${WT_PATH}/src`);
     const seen: Array<{ wtPath: string; dirInvalidated: boolean }> = [];
     const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
       seen.push({ wtPath, dirInvalidated: matchedByPredicates([ownDir]).length === 1 });
     });
 
-    deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: PROJECT });
+    deliver({ type: "worktree_files_resynced", wtPath: WT_PATH, projectPath: PROJECT_PATH });
     unsubscribe();
 
-    expect(seen).toEqual([{ wtPath: WT, dirInvalidated: true }]);
+    expect(seen).toEqual([{ wtPath: WT_PATH, dirInvalidated: true }]);
   });
 
   test("files_dir_changed writes that directory's listing", () => {
     const entries = [{ name: "a.txt" }] as DirEntry[];
 
-    deliver({ type: "files_dir_changed", wtPath: WT, data: { dir: WT, entries } });
+    deliver({ type: "files_dir_changed", wtPath: WT_PATH, data: { dir: WT_PATH, entries } });
 
-    expect(setQueryData.mock.calls).toEqual([[queryKeys.dirContents(PROJECT, WT), entries]]);
+    expect(setQueryData.mock.calls).toEqual([[queryKeys.dirContents(PROJECT, WT_PATH), entries]]);
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
   test("file_content_changed refetches the diff view's working-tree side of the file", () => {
     deliver({
       type: "file_content_changed",
-      wtPath: WT,
-      data: { path: `${WT}/a.txt`, nonces: [] },
+      wtPath: WT_PATH,
+      data: { path: `${WT_PATH}/a.txt`, nonces: [] },
     });
 
     expect(invalidatedKeys()).toEqual([queryKeys.fileContent(PROJECT, "a.txt", undefined, WT)]);

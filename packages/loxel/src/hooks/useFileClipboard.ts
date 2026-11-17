@@ -86,10 +86,10 @@ export function useFileClipboard(
       if (getTreeRoot(selected) === selected) return selected;
       const parentDirPath = fileParentDir(selected, activeWorktreePath);
       const entryName = pathName(selected);
-      const { activeProjectPath: projectPath } = getQueryScope();
+      const { activeProject } = getQueryScope();
       const absDirPath = toAbsoluteDir(parentDirPath, activeWorktreePath);
       const parentEntries = queryClient.getQueryData<DirEntry[]>(
-        queryKeys.dirContents(projectPath, absDirPath),
+        queryKeys.dirContents(activeProject, absDirPath),
       );
       const isDir = parentEntries?.find((entry) => entry.name === entryName)?.isDir ?? false;
       return isDir ? selected : parentDirPath;

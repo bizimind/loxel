@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
+
 const PATH = "/repo/src/a.ts";
+const REPO = localRef("/repo");
 
 let resolveFetch: (data: { content: string }) => void = () => {};
 const actualClient = await import("@/api/client");
@@ -25,7 +28,7 @@ describe("checkOpenFileExists", () => {
     const store = useEditorStateStore.getState();
     store.openFile(PATH);
 
-    const check = checkOpenFileExists("/repo", "/repo", PATH);
+    const check = checkOpenFileExists(REPO, REPO, PATH);
     // The editor's own refetch 404s first and marks the file deleted...
     useEditorStateStore.getState().setDeleted(PATH, true);
     // ...then this check finds it back (e.g. a checkout re-created it).
@@ -43,7 +46,7 @@ describe("checkOpenFileExists", () => {
     store.openFile(PATH);
     store.setDeleted(PATH, true);
 
-    const check = checkOpenFileExists("/repo", "/repo", PATH);
+    const check = checkOpenFileExists(REPO, REPO, PATH);
     useEditorStateStore.getState().setMovedTo(PATH, "/repo/src/b.ts");
     resolveFetch({ content: "restored" });
     await check;
@@ -59,7 +62,7 @@ describe("refreshOpenFile", () => {
     // Marked deleted by a parent-directory check: the editor's own query never saw a 404.
     store.setDeleted(PATH, true);
 
-    refreshOpenFile("/repo", "/repo", PATH, []);
+    refreshOpenFile(REPO, REPO, PATH, []);
     resolveFetch({ content: "same as before" });
     await Bun.sleep(0);
 
@@ -77,10 +80,10 @@ describe("refreshOpenFile with several editors of one file", () => {
     store.markSaving("compare-1:new", "nonce-1");
     store.markDirty(PATH);
 
-    refreshOpenFile("/repo", "/repo", "compare-1:new", ["nonce-1"]);
+    refreshOpenFile(REPO, REPO, "compare-1:new", ["nonce-1"]);
     resolveFetch({ content: "saved by compare" });
     await Bun.sleep(0);
-    refreshOpenFile("/repo", "/repo", PATH, ["nonce-1"]);
+    refreshOpenFile(REPO, REPO, PATH, ["nonce-1"]);
     resolveFetch({ content: "saved by compare" });
     await Bun.sleep(0);
 

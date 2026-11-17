@@ -15,6 +15,7 @@ import type {
   StatusInfo,
   WorktreeStatusInfo,
 } from "./git-models";
+import { localServerId } from "./local-server";
 import type { LogEntry } from "./log-entry-model";
 import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
@@ -1125,22 +1126,20 @@ export class WsClient {
 
   /**
    * The server's hello opens every connection. A different version (a new build started) or a
-   * different server reloads the page to pick up its renderer and state. Otherwise the window
-   * re-creates its per-connection state on the server and catches up, the same way whether the
-   * server restarted (its boot epoch changed, which is logged) or only the socket dropped.
+   * server other than the one the window started with (`localServerId`, which its cached data is
+   * keyed by) reloads the page to pick up its renderer and state. Otherwise the window re-creates
+   * its per-connection state on the server and catches up, the same way whether the server
+   * restarted (its boot epoch changed, which is logged) or only the socket dropped.
    */
   private handleHello(hello: ServerHello): void {
     const previous = this.server;
-    if (previous && (hello.version !== previous.version || hello.serverId !== previous.serverId)) {
+    const sameServer = hello.serverId === localServerId();
+    if (!sameServer || (previous && hello.version !== previous.version)) {
       postLogEntry({
         level: "info",
         cat: "server",
         msg: "Server changed, reloading",
-        ctx: {
-          oldVersion: previous.version,
-          newVersion: hello.version,
-          sameServer: hello.serverId === previous.serverId,
-        },
+        ctx: { oldVersion: previous?.version, newVersion: hello.version, sameServer },
       });
       window.location.reload();
       return;
@@ -1326,4 +1325,23 @@ export async function getRunningTerminals(options: {
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean } & ServerIdentity> {
   return fetchJson("/version");
+}
+
+const SERVER_ID_RETRY_MAX_MS = 10_000;
+
+/**
+ * The id of the server this window was loaded from, asked until it answers: the app renders only
+ * once it has it (main.tsx), since every query key names it.
+ */
+export async function fetchLocalServerId(): Promise<string> {
+  for (let delayMs = 250; ; delayMs = Math.min(delayMs * 2, SERVER_ID_RETRY_MAX_MS)) {
+    try {
+      return (await getVersion()).serverId;
+    } catch (error: unknown) {
+      console.warn("Could not reach the Loxel server, retrying", error);
+      await new Promise((resolve) => {
+        setTimeout(resolve, delayMs);
+      });
+    }
+  }
 }

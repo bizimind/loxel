@@ -8,6 +8,9 @@ import type {
   ViewMeta,
 } from "@bizimind/localdb-sdk";
 
+import type { WorktreeRef } from "@/api/worktree-ref";
+import { queryKeys } from "@/queries/query-keys";
+
 import type { DataAdapter } from "./data-adapter.ts";
 
 /**
@@ -16,8 +19,9 @@ import type { DataAdapter } from "./data-adapter.ts";
  *
  * @param baseUrl - e.g. "/api/localdb" or "https://host/api/localdb"
  */
-export function makeRestAdapter(baseUrl: string, project?: string | null): DataAdapter {
+export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null): DataAdapter {
   const base = baseUrl.replace(/\/$/, "");
+  const project = projectRef?.path;
   const projectSuffix = project ? `?project=${encodeURIComponent(project)}` : "";
 
   function url(path: string): string {
@@ -65,7 +69,7 @@ export function makeRestAdapter(baseUrl: string, project?: string | null): DataA
   }
 
   return {
-    queryKey: ["localdb", project ?? null],
+    queryKey: queryKeys.localdb(projectRef ?? null),
     listTables: () => get<TableMeta[]>("/tables"),
     getSchema: (tableName) => get<TableSchema>(`/tables/${tableName}/schema`),
 

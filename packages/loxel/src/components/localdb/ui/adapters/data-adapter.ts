@@ -8,6 +8,8 @@ import type {
   ViewMeta,
 } from "@bizimind/localdb-sdk";
 
+import type { LocalDbKey } from "@/queries/query-keys";
+
 /**
  * Protocol-agnostic data access interface.
  * Implement this to connect the UI to any backend: REST, WebSocket, Convex, or in-process SDK.
@@ -17,7 +19,7 @@ export interface DataAdapter {
    * The prefix of the TanStack Query keys the views cache this adapter's data under: invalidating
    * it refreshes every view of it.
    */
-  readonly queryKey: readonly unknown[];
+  readonly queryKey: LocalDbKey;
 
   // Schema
   listTables(): Promise<TableMeta[]>;

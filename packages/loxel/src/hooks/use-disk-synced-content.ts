@@ -12,6 +12,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { localRef } from "@/api/local-server";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { getDisplayFilename } from "@/lib/detached-path";
@@ -116,7 +117,7 @@ export function useDiskSyncedContent<T>(
   const editorKey = options.editorKey ?? filePath;
 
   // --- Scope ---
-  const { activeProjectPath } = useQueryScope();
+  const { activeProject } = useQueryScope();
   const panelWorktreePath = usePanelWorktreePath();
 
   // Absolute file path IS the cache key — no scoping needed
@@ -256,10 +257,10 @@ export function useDiskSyncedContent<T>(
   // --- Query ---
   const { data, dataUpdatedAt, isError, error, refetch } = useQuery({
     queryKey: queryKeys.fileContent(
-      activeProjectPath,
+      activeProject,
       filePath,
       undefined,
-      panelWorktreePath ?? undefined,
+      localRef(panelWorktreePath ?? undefined),
     ),
     queryFn: ({ signal }) => api.getFileContentByPath(filePath, panelWorktreePath, signal),
     // Force a background refetch on every mount so editors pick up external changes

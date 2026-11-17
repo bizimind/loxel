@@ -9,9 +9,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type React from "react";
 
+import { localRef } from "@/api/local-server";
 // Imported through the package barrel so the built-in field components get registered,
 // exactly as in the app.
 import { DataTable, type DataAdapter } from "@/components/localdb/ui";
+import { queryKeys } from "@/queries/query-keys";
 
 afterEach(cleanup);
 
@@ -29,7 +31,7 @@ function makeAdapter(
 ) {
   const insert = mock(() => Promise.resolve(insertResult));
   const adapter = {
-    queryKey: ["localdb", "/repo"],
+    queryKey: queryKeys.localdb(localRef("/repo")),
     query: () =>
       Promise.resolve({
         rows: [...rows],
@@ -137,7 +139,9 @@ describe("DataTable rows", () => {
 
     // What a localdb_changed push or a resync after a reconnect does.
     rows.push({ id: 2, title: "added by an agent", notes: "" });
-    await act(() => queryClient.invalidateQueries({ queryKey: ["localdb", "/repo"] }));
+    await act(() =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.localdb(localRef("/repo")) }),
+    );
 
     expect(await screen.findByText("added by an agent")).toBeInTheDocument();
     expect(screen.getByText("first")).toBeInTheDocument();

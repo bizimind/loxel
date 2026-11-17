@@ -26,6 +26,7 @@ import {
 } from "@/components/localdb/ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 
 interface Props {
@@ -99,9 +100,10 @@ function isApplyValid(type: string, config: Partial<ViewDef>): boolean {
 }
 
 export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
-  const { activeProjectPath } = useQueryScope();
+  const { activeProject } = useQueryScope();
+  const activeProjectPath = activeProject?.path ?? null;
   const queryClient = useQueryClient();
-  const adapter = makeRestAdapter("/api/localdb", activeProjectPath);
+  const adapter = makeRestAdapter("/api/localdb", activeProject);
   const [configOpen, setConfigOpen] = useState(false);
   const [pendingTable, setPendingTable] = useState(table);
   const [pendingView, setPendingView] = useState(view || "table");
@@ -109,19 +111,19 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
   const [savingView, setSavingView] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const tablesQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "tables"],
+    queryKey: queryKeys.localdbTables(activeProject),
     queryFn: () => adapter.listTables(),
     enabled: !!activeProjectPath && (configOpen || !table),
   });
 
   const schemaQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "schema", table],
+    queryKey: queryKeys.localdbSchema(activeProject, table),
     queryFn: () => adapter.getSchema(table),
     enabled: !!table && !!activeProjectPath,
   });
   // Separate query for the pending table selection in config overlay (may differ from committed table)
   const pendingSchemaQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "schema", pendingTable],
+    queryKey: queryKeys.localdbSchema(activeProject, pendingTable),
     queryFn: () => adapter.getSchema(pendingTable),
     enabled: configOpen && !!pendingTable && !!activeProjectPath && pendingTable !== table,
   });
@@ -130,7 +132,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
     configOpen && pendingSchemaQuery.data ? pendingSchemaQuery.data : schemaQuery.data;
 
   const viewsQuery = useQuery({
-    queryKey: ["localdb", activeProjectPath, "views", schemaQuery.data?.table.id],
+    queryKey: queryKeys.localdbViews(activeProject, schemaQuery.data?.table.id),
     queryFn: () => adapter.listViews(schemaQuery.data!.table.id),
     enabled: !!schemaQuery.data,
   });
@@ -161,7 +163,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         ...(existingViewId ? { id: existingViewId } : {}),
       });
       queryClient.setQueryData(
-        ["localdb", activeProjectPath, "views", saved.tableId],
+        queryKeys.localdbViews(activeProject, saved.tableId),
         (existing: typeof viewsQuery.data) => {
           const views = existing ?? [];
           const index = views.findIndex((v) => v.id === saved.id);
