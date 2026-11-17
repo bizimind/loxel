@@ -4,7 +4,7 @@ const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
 const { onLoxelEvent } = await import("./loxel-events");
-const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl } =
+const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, revokeInboxOpens } =
   await import("./open-path");
 const { wsClient } = await import("@/api/client");
 const { useProjectStore } = actualProjects;
@@ -168,6 +168,24 @@ describe("opens from outside the window", () => {
     await openFromInbox("in-1", message);
     expect(sent).toEqual([done, done]);
     expect(created).toHaveLength(1);
+  });
+
+  test("an open from the inbox another window took is not placed here", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    const message = {
+      type: "open_url" as const,
+      wtPath: OTHER,
+      data: { url: URL_TARGET, focus: false },
+    };
+
+    await openFromInbox("in-2", message);
+    revokeInboxOpens(["in-2"]);
+    for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
+      dispatchPendingOpen(open);
+    expect(created).toEqual([]);
+    expect(sent).toEqual([]);
   });
 
   test("targets arriving during a switch keep their order in the new worktree", async () => {

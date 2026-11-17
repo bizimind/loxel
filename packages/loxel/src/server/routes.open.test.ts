@@ -83,7 +83,6 @@ describe("POST /api/open terminals and placement", () => {
         queued.push({ message, worktreePath });
         return "queued";
       },
-      windowClosed: () => {},
       dropQueuedTerminal: (id) => {
         queued = queued.filter(
           ({ message }) => message.type !== "open_terminal" || message.data.terminalId !== id,

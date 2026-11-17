@@ -475,6 +475,19 @@ describe("deleted files", () => {
     expect(opened).toEqual([]);
   });
 
+  test("a compare side of a deleted file gives its edits up when it closes", async () => {
+    const side = "compare-1:new";
+    const store = useEditorStateStore.getState();
+    store.openFile(side, FILE);
+    store.setBaseContent(side, "a\nb\nc\n");
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nX\nc\n", "/repo", undefined, side);
+    store.setDeleted(side, true);
+
+    outboxEditorClosing(side, useEditorStateStore.getState().files.get(side)!, "/repo");
+    expect(outboxEntriesForTests()).toEqual([]);
+  });
+
   test("a clean editor of a deleted file leaves nothing behind", () => {
     openEditor("a\nb\nc\n", { current: "a\nb\nc\n" });
     useEditorStateStore.getState().setDeleted(FILE, true);

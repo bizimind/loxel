@@ -115,7 +115,6 @@ describe("Others folders routes", () => {
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: () => "full",
       dropQueuedTerminal: () => {},
-      windowClosed: () => {},
       agentTerminals: {} as never,
       agentTerminalPolicy: () => "run",
     };

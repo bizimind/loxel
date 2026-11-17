@@ -147,27 +147,29 @@ describe("a server with no window connected", () => {
         window.ws.send(JSON.stringify({ type: "subscribe_logs" }));
         await received(window.log, "log_error_snapshot");
       };
-      // Window A's socket drops before it places the panel: another window does not get it.
+      // A reloads before it places the panel: it gets the request again, with no second
+      // notification.
       ws.close();
-      const windowB = await connectWindow(current.port);
-      windowB.ws.send(hello(crypto.randomUUID()));
-      await fence(windowB);
-      expect(windowB.log.entries.some((m) => m.type === "open_from_inbox")).toBe(false);
-      // A reloads: it gets the request again, with no second notification.
       const reloaded = await connectWindow(current.port);
       reloaded.ws.send(hello(windowA));
       expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
       await fence(reloaded);
       expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
-      // A closes for good: the window in use takes the request over.
+      // A window that says hello while A is away takes it over, and A is told when it is back, so
+      // it does not open it too.
       reloaded.ws.close();
-      const closed = await fetch(`http://127.0.0.1:${current.port}/api/layout/promote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ windowId: windowA }),
-      });
-      expect(closed.ok).toBe(true);
+      const windowB = await connectWindow(current.port);
+      windowB.ws.send(hello(crypto.randomUUID()));
       expect(await received(windowB.log, "open_from_inbox")).toEqual(delivered);
+      const back = await connectWindow(current.port);
+      back.ws.send(hello(windowA));
+      expect(await received(back.log, "inbox_open_revoked")).toEqual({
+        type: "inbox_open_revoked",
+        inboxIds: [delivered.inboxId],
+      });
+      await fence(back);
+      expect(back.log.entries.some((m) => m.type === "open_from_inbox")).toBe(false);
+      back.ws.close();
       windowB.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
       await fence(windowB);
       windowB.ws.close();

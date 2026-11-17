@@ -238,8 +238,6 @@ export interface RouteContext {
   ) => "sent" | "queued" | "full";
   /** Drop the queued panel of a terminal whose shell failed to start. */
   dropQueuedTerminal: (terminalId: string) => void;
-  /** A window closed for good (Electron promotes its layouts): the inbox requests it held move on. */
-  windowClosed: (windowId: string) => void;
   /** The terminals agents asked for that wait for the user's answer, and where they always run. */
   agentTerminals: AgentTerminals;
   /** "When an Agent Starts a Terminal", read from the persisted settings on each call. */
@@ -3993,7 +3991,6 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
         return error("Invalid 'windowId' — expected UUID", 400);
       }
       storeDb.promoteLayoutSession(body.windowId);
-      ctx.windowClosed(body.windowId);
       return json({ success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

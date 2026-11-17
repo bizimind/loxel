@@ -81,8 +81,8 @@ const InboxEntrySchema = z.object({
   /** A window got it, and a notification said so. */
   delivered: z.boolean().optional(),
   /**
-   * The window (`windowId`) it was handed to, which has not placed its panel yet: it alone gets it
-   * again (after a reload or a reconnect) until it closes.
+   * The window (`windowId`) it was handed to, which has not placed its panel yet: it gets it again
+   * after a reload or a reconnect, and another window takes it only while it is away.
    */
   heldBy: z.string().optional(),
 });
@@ -153,9 +153,20 @@ export class OpenInbox {
     return this.entries;
   }
 
-  /** The requests the window `windowId` gets on saying hello: those it holds, and those nobody does. */
-  forWindow(windowId: string): readonly InboxEntry[] {
-    return this.list().filter((entry) => entry.heldBy === undefined || entry.heldBy === windowId);
+  /**
+   * The requests the window `windowId` gets on saying hello: those it holds, those nobody holds,
+   * and those of a window that is not connected (`isConnected`), which a window that closed, or
+   * died, never comes back for.
+   */
+  forWindow(windowId: string, isConnected: (windowId: string) => boolean): readonly InboxEntry[] {
+    return this.list().filter(
+      ({ heldBy }) => heldBy === undefined || heldBy === windowId || !isConnected(heldBy),
+    );
+  }
+
+  /** Whether the window `windowId` holds a request. */
+  holds(windowId: string): boolean {
+    return this.entries.some((entry) => entry.heldBy === windowId);
   }
 
   /** The window `windowId` got the requests `ids`: it holds them until it places their panels. */
@@ -167,16 +178,6 @@ export class OpenInbox {
       entry.heldBy = windowId;
       this.persisted.insert(entry);
     }
-  }
-
-  /** The window `windowId` closed: the requests it held are for the next window. */
-  release(windowId: string): boolean {
-    const released = this.entries.filter((entry) => entry.heldBy === windowId);
-    for (const entry of released) {
-      delete entry.heldBy;
-      this.persisted.insert(entry);
-    }
-    return released.length > 0;
   }
 
   /** A window placed the request's panel: it is done with. */

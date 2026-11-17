@@ -41,17 +41,21 @@ describe("OpenInbox", () => {
     expect(inbox.list()).toEqual([{ ...second!, delivered: true, heldBy: "w1" }]);
   });
 
-  test("gives a request only to the window holding it, until that window closes", () => {
+  test("gives a request to the window holding it, or to any while that one is away", () => {
     const inbox = new OpenInbox({ now: clock });
     inbox.add(file("/wt/a.ts"), "/wt");
-    const [entry] = inbox.forWindow("w1");
+    const connected = new Set(["w1", "w2"]);
+    const isConnected = (id: string) => connected.has(id);
+    const [entry] = inbox.forWindow("w1", isConnected);
     inbox.handTo([entry!.id], "w1");
 
-    expect(inbox.forWindow("w2")).toEqual([]);
-    expect(inbox.forWindow("w1").map((e) => e.id)).toEqual([entry!.id]);
-    expect(inbox.release("w2")).toBe(false);
-    expect(inbox.release("w1")).toBe(true);
-    expect(inbox.forWindow("w2").map((e) => [e.id, e.delivered])).toEqual([[entry!.id, true]]);
+    expect(inbox.holds("w1")).toBe(true);
+    expect(inbox.forWindow("w2", isConnected)).toEqual([]);
+    expect(inbox.forWindow("w1", isConnected).map((e) => e.id)).toEqual([entry!.id]);
+    connected.delete("w1");
+    expect(inbox.forWindow("w2", isConnected).map((e) => [e.id, e.heldBy])).toEqual([
+      [entry!.id, "w1"],
+    ]);
   });
 
   test("holds a queued terminal until its panel is placed", () => {

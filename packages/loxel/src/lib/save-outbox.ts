@@ -294,7 +294,7 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
 
 /**
  * The editor `editorKey` (`editor`, of `worktreePath`) is closing. Edits a move carried over went
- * with it. Those of a file deleted on disk are kept for review, as the editor shows them now
+ * with it. Those of a file deleted on disk, in the file's own tab, are kept for review, as it shows them now
  * (autosave stopped with the deletion), and shown again when the file's tab next opens (at the
  * latest after a reload): only the user gives them up, by discarding them or deleting the file in
  * Loxel.
@@ -305,11 +305,14 @@ export function outboxEditorClosing(
   worktreePath: string | null,
 ): void {
   const entry = entryOfInstance(editor.instanceId);
-  if (editor.movedTo) {
+  if (!editor.deleted && !editor.movedTo) return;
+  // Kept only for the file's own tab, which a reload brings back: another view of the file (a
+  // compare or diff side) gives its edits up with it.
+  if (editor.movedTo || editorKey !== editor.filePath) {
     if (entry) removeEntry(entry);
     return;
   }
-  if (!editor.deleted || editor.state === "clean") return;
+  if (editor.state === "clean") return;
   const content =
     editor.takePendingEdit?.()?.content ?? editor.getEditorContent?.() ?? entry?.content;
   if (content === undefined || content === null) return;

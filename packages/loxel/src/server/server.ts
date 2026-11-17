@@ -400,15 +400,32 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 }
 
 /**
+ * Inbox requests taken from a window while it was away, by its `windowId`: told on its next hello,
+ * so it does not open them too. Only for this process, which is when they were taken.
+ */
+const inboxRevoked = new Map<string, Set<string>>();
+/** How long a window may be away (a reload, a dropped socket) before what it holds moves on. */
+const INBOX_HOLD_GRACE_MS = 15_000;
+
+/**
  * Hand the open inbox to a window that just said hello: the requests it holds (it reloaded or
- * reconnected before placing their panels) and those no window holds. Each opens as it would have
- * then, focus included, and the window holds it until it says it placed the panel
- * (`inbox_open_done`) or closes for good. One notification per worktree says what opened the first
- * time a request is handed over: a panel opened without focus waits unseen in its worktree.
+ * reconnected before placing their panels), those no window holds, and those of a window that is
+ * not connected, which is told on its next hello. Each opens as it would have then, focus
+ * included, and the window holds it until it says it placed the panel (`inbox_open_done`). One
+ * notification per worktree says what opened the first time a request is handed over: a panel
+ * opened without focus waits unseen in its worktree.
  */
 function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
-  const entries = openInbox.forWindow(windowId);
+  const revoked = inboxRevoked.get(windowId);
+  inboxRevoked.delete(windowId);
+  if (revoked) sendTo(ws, { type: "inbox_open_revoked", inboxIds: [...revoked] });
+  const entries = openInbox.forWindow(windowId, isWindowConnected);
   if (entries.length === 0) return;
+  for (const { id, heldBy } of entries) {
+    if (heldBy === undefined || heldBy === windowId) continue;
+    const taken = inboxRevoked.get(heldBy) ?? new Set<string>();
+    inboxRevoked.set(heldBy, taken.add(id));
+  }
   const fresh = entries.filter((entry) => !entry.delivered);
   for (const { id, message } of entries)
     sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
@@ -429,14 +446,17 @@ function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
 }
 
 /**
- * The window `windowId` closed for good (not a reload, nor a dropped socket, which keep what it
- * holds): the inbox requests it held go to the window in use, or wait for the next one.
+ * The window `windowId` lost its socket. If it is still away after a grace period (not a reload or
+ * a dropped socket, then), what it held goes to the window in use; without one, it waits for the
+ * next window to say hello.
  */
-function releaseInbox(windowId: string): void {
-  if (!openInbox.release(windowId)) return;
-  const [next] = activeWindowSockets(null);
-  const nextId = next ? clients.get(next)?.windowId : undefined;
-  if (next && nextId) deliverInbox(next, nextId);
+function moveInboxFromAwayWindow(windowId: string): void {
+  setTimeout(() => {
+    if (isWindowConnected(windowId)) return;
+    const [next] = activeWindowSockets(null);
+    const nextId = next ? clients.get(next)?.windowId : undefined;
+    if (next && nextId) deliverInbox(next, nextId);
+  }, INBOX_HOLD_GRACE_MS);
 }
 
 /**
@@ -1534,7 +1554,6 @@ const routeContext: RouteContext = {
     return openInbox.add(message, worktreePath) ? "queued" : "full";
   },
   dropQueuedTerminal,
-  windowClosed: releaseInbox,
   agentTerminals,
   agentTerminalPolicy,
   listTerminals: async ({ programs }) => {
@@ -1726,11 +1745,14 @@ const server = Bun.serve<WsData>({
         worktreeLsp.manager.destroySession(ws);
         return;
       }
+      const closedWindowId = clients.get(ws)?.windowId;
       unsubscribeAllWorktrees(ws);
       detachClientTerminals(ws);
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
+      if (closedWindowId && openInbox.holds(closedWindowId))
+        moveInboxFromAwayWindow(closedWindowId);
       // What this window was asking moves to the window in use, or waits for the next one.
       agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);

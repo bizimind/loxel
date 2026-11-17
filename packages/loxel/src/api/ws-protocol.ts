@@ -80,6 +80,11 @@ export type WsMessage =
    * server keeps the request, and gives it to the next window if this one goes away.
    */
   | { type: "open_from_inbox"; inboxId: string; message: OpenRequestMessage }
+  /**
+   * Inbox requests this window held that another window took while this one was away: it must not
+   * open them too.
+   */
+  | { type: "inbox_open_revoked"; inboxIds: string[] }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }

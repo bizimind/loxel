@@ -46,6 +46,14 @@ function inboxOpenDone(inboxId: string): void {
 }
 
 /**
+ * Another window took these inbox requests while this one was away: the panels queued for them
+ * here are not placed. A request handed here again later opens as new.
+ */
+export function revokeInboxOpens(inboxIds: readonly string[]): void {
+  for (const id of inboxIds) if (inboxOpens.get(id) === false) inboxOpens.delete(id);
+}
+
+/**
  * Open a request the server kept in its open inbox while no window was connected. The server keeps
  * it until this window is done with it: once its panel is placed, which for a panel queued in a
  * worktree not shown is when the user goes there, or at once for a folder or an open that failed.
@@ -242,10 +250,15 @@ async function openInWorktree(target: string | null, open: PendingOpen): Promise
 /**
  * Create the panel a {@link PendingOpen} describes in the mounted center layout. Creation goes
  * through the typed window events, like every other panel, so this module does not depend on the
- * panel creators. The open inbox request it came from, if any, is done with.
+ * panel creators. The open inbox request it came from, if any, is done with; one another window
+ * took meanwhile is not placed.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
-  if (open.inboxId) inboxOpenDone(open.inboxId);
+  if (open.inboxId) {
+    // Revoked (another window took it), or already placed from an earlier copy of the request.
+    if (inboxOpens.get(open.inboxId) !== false) return;
+    inboxOpenDone(open.inboxId);
+  }
   switch (open.kind) {
     case "file":
       dispatchOpenFile(open.path, open.location, open);
