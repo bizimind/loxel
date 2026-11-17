@@ -83,6 +83,14 @@ export function isFileMissingError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
 }
 
+/**
+ * The server refused a write with `expectedContent` because the file no longer held it (`409`
+ * with `code: "EDISKCHANGED"`): it changed on disk since the client read it.
+ */
+export function isDiskChangedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === "EDISKCHANGED";
+}
+
 export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -278,6 +286,11 @@ export async function writeFileContent(options: {
   worktreePath?: string;
   format?: boolean;
   formattingSettings?: FormattingSettings;
+  /**
+   * Write only if the file still holds this (what a retried save was merged onto); otherwise the
+   * server refuses with {@link isDiskChangedError}.
+   */
+  expectedContent?: string;
 }) {
   // `formatNotice`: why a save requested with `format` went out unformatted, when the user can
   // act on it (formatter not installed, timed out).

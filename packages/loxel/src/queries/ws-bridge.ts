@@ -319,9 +319,10 @@ export function useWsBridge(): void {
           invalidateEditorConfigBelow("");
 
           // A broad query invalidation refreshes clean editors. Dirty/saving editors
-          // need the same conflict-aware state-machine path as a normal file event.
+          // need the same conflict-aware state-machine path as a normal file event. Those with a
+          // save queued are the save outbox's: its retry reads the file and merges it.
           for (const [editorKey, entry] of editorStore.files) {
-            if (entry.state === "clean") continue;
+            if (entry.state === "clean" || entry.queued) continue;
             const path = entry.filePath;
             const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;

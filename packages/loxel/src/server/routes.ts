@@ -1047,12 +1047,38 @@ async function handleUnstageHunk(req: Request, ctx: RouteContext): Promise<Respo
   return json({ success: true });
 }
 
-// POST /api/file-write — Write file content to disk with nonce for loop prevention
+/** A conditional write found the file no longer holding what the client expected. */
+class DiskChangedError extends Error {}
+
+/**
+ * For a write with `expectedContent` (a save retried after merging with what it read): check, right
+ * before writing, that the file at `absolutePath` still holds that, so a change made since is
+ * merged by the client rather than overwritten.
+ */
+async function assertDiskHolds(absolutePath: string, expected: string | undefined): Promise<void> {
+  if (expected === undefined) return;
+  const file = Bun.file(absolutePath);
+  const current = (await file.exists()) ? await file.text() : null;
+  if (current !== expected) throw new DiskChangedError(`${absolutePath} changed on disk`);
+}
+
+// POST /api/file-write — Write file content to disk with nonce for loop prevention. A 409
+// `EDISKCHANGED` answers a write whose `expectedContent` the file no longer holds.
 async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Response> {
+  try {
+    return await writeFileFromRequest(req, ctx);
+  } catch (err) {
+    if (err instanceof DiskChangedError) return error(err.message, 409, "EDISKCHANGED");
+    throw err;
+  }
+}
+
+async function writeFileFromRequest(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const filePath = requireString(body, "path");
   let content = requireString(body, "content");
   const nonce = requireString(body, "nonce");
+  const expected = typeof body.expectedContent === "string" ? body.expectedContent : undefined;
   const shouldFormat = body.format === true;
   const formattingSettings = shouldFormat
     ? parseFormatOnSaveSettings(body.formattingSettings)
@@ -1077,10 +1103,12 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     );
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
+      await assertDiskHolds(filePath, expected);
       await resolved.service.writeFileContent(resolved.name, content, nonce);
       return json({ success: true });
     }
     if (resolved.type === "external") {
+      await assertDiskHolds(resolved.absolutePath, expected);
       await resolved.resources.externalFilesService.writeFileContent(
         resolved.absolutePath,
         content,
@@ -1094,6 +1122,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     // (Others folders, drafts and external files are written as-is).
     if (tree.root === resolved.wtPath) content = await maybeFormat(content, filePath, tree.root);
     await tree.filesService.writeFile(relativePath, nonce, async () => {
+      await assertDiskHolds(join(tree.root, relativePath), expected);
       await Bun.write(join(tree.root, relativePath), content);
     });
     void tree.filesService.trackFile(relativePath);
@@ -1106,14 +1135,16 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
 
   content = await maybeFormat(content, filePath, resolved.wtPath);
 
+  const write = async () => {
+    await assertDiskHolds(join(resolved.wtPath, filePath), expected);
+    await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
+  };
   const resources = ctx.getWorktreeResources(resolved.wtPath);
   if (resources) {
-    await resources.filesService.writeFile(filePath, nonce, () =>
-      git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content),
-    );
+    await resources.filesService.writeFile(filePath, nonce, write);
   } else {
     // Fallback for when no subscriber has activated resources yet
-    await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
+    await write();
   }
   return json({ success: true, content, formatNotice });
 }

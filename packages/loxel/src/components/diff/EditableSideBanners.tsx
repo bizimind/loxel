@@ -13,7 +13,11 @@ export function EditableSideBanners({ side }: { side: EditableSide }) {
   return (
     <>
       {side.isDeleted && !side.loadFailed && (
-        <DeletedFileBanner fileName={fileName} onRecreate={() => void side.recreateFile()} />
+        <DeletedFileBanner
+          filePath={side.filePath}
+          fileName={fileName}
+          onRecreate={() => void side.recreateFile()}
+        />
       )}
       {side.isDiverged && (
         <ConflictBanner

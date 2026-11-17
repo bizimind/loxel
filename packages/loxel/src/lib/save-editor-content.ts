@@ -21,15 +21,16 @@ import { diskBase, useEditorStateStore } from "@/store/editor-state";
  * (when the user types between saves) are handled correctly without losing nonces.
  */
 
-// -- Pending save tracking per worktree --
-// Used to defer WS unsubscribe until all saves for a worktree complete.
+// -- Worktrees held for saves --
+// A worktree stays subscribed while a save for it is in flight, or waits in the save outbox, so
+// the server still serves it when the save goes out: unsubscribing waits for them to drain.
 
-const pendingSaves = new Map<string, number>();
+const heldSaves = new Map<string, number>();
 const drainCallbacks = new Map<string, () => void>();
 
-/** Register a callback to fire when all pending saves for a worktree complete. */
+/** Register a callback to fire once no save holds `worktreePath` (at once if none does). */
 export function onWorktreeSavesDrained(worktreePath: string, callback: () => void): void {
-  const count = pendingSaves.get(worktreePath) ?? 0;
+  const count = heldSaves.get(worktreePath) ?? 0;
   if (count === 0) {
     callback();
   } else {
@@ -37,21 +38,22 @@ export function onWorktreeSavesDrained(worktreePath: string, callback: () => voi
   }
 }
 
-function incrementPending(worktreePath: string): void {
-  pendingSaves.set(worktreePath, (pendingSaves.get(worktreePath) ?? 0) + 1);
+/** A save for `worktreePath` is in flight or waiting: keep it subscribed until released. */
+export function holdWorktree(worktreePath: string): void {
+  heldSaves.set(worktreePath, (heldSaves.get(worktreePath) ?? 0) + 1);
 }
 
-function decrementPending(worktreePath: string): void {
-  const count = (pendingSaves.get(worktreePath) ?? 1) - 1;
+export function releaseWorktree(worktreePath: string): void {
+  const count = (heldSaves.get(worktreePath) ?? 1) - 1;
   if (count <= 0) {
-    pendingSaves.delete(worktreePath);
+    heldSaves.delete(worktreePath);
     const cb = drainCallbacks.get(worktreePath);
     if (cb) {
       drainCallbacks.delete(worktreePath);
       cb();
     }
   } else {
-    pendingSaves.set(worktreePath, count);
+    heldSaves.set(worktreePath, count);
   }
 }
 
@@ -150,13 +152,29 @@ export async function writeEditorContent(
   options?: SaveOptions,
   editorKey: string = filePath,
 ): Promise<boolean> {
+  const result = await postEditorContent(filePath, content, worktreePath, options, editorKey);
+  return result.ok;
+}
+
+/**
+ * `writeEditorContent`, saying why it failed. With `expectedContent`, the server writes only if
+ * the file still holds that (a retried save merged onto what it read).
+ */
+export async function postEditorContent(
+  filePath: string,
+  content: string,
+  worktreePath: string | null | undefined,
+  options: SaveOptions | undefined,
+  editorKey: string,
+  expectedContent?: string,
+): Promise<{ ok: true } | { ok: false; error: unknown }> {
   const nonce = crypto.randomUUID();
   const wtKey = worktreePath ?? "";
   const store = useEditorStateStore.getState();
   // A write with no editor behind it (a move carrying edits to a path with no tab yet) is not
   // kept: its caller keeps the edits if it fails.
   const editor = store.files.get(editorKey);
-  const outboxEntry = editor
+  const outbox = editor
     ? addOutboxEntry(
         editor,
         {
@@ -171,8 +189,10 @@ export async function writeEditorContent(
       )
     : null;
   store.markSaving(editorKey, nonce);
-  if (wtKey) incrementPending(wtKey);
+  if (wtKey) holdWorktree(wtKey);
   try {
+    // Stored before it is sent, so a reload or a crash while it is in flight keeps it.
+    await outbox?.stored;
     const result = await api.writeFileContent({
       path: filePath,
       content,
@@ -180,10 +200,11 @@ export async function writeEditorContent(
       worktreePath: worktreePath ?? undefined,
       format: options?.format,
       formattingSettings: options?.formattingSettings,
+      expectedContent,
     });
     const written = result.content ?? content;
     useEditorStateStore.getState().markWritten(editorKey, nonce, written);
-    if (outboxEntry) outboxSaveWritten(outboxEntry, written);
+    if (outbox) outboxSaveWritten(outbox.entry, written);
     // Stash the written content (may be formatted) so the WS echo handler
     // can use it directly instead of fetching via HTTP.
     if (result.content !== undefined) {
@@ -202,15 +223,15 @@ export async function writeEditorContent(
         useEditorStateStore.getState().handleSaveError(editorKey, nonce);
       }
     }, 10_000);
-    return true;
+    return { ok: true };
   } catch (err) {
     frontendLog
       .child("files")
       .error("Failed to save file", { filePath, error: err instanceof Error ? err : undefined });
     useEditorStateStore.getState().handleSaveError(editorKey, nonce);
-    if (outboxEntry) outboxSaveFailed(outboxEntry, err);
-    return false;
+    if (outbox) outboxSaveFailed(outbox.entry, err);
+    return { ok: false, error: err };
   } finally {
-    if (wtKey) decrementPending(wtKey);
+    if (wtKey) releaseWorktree(wtKey);
   }
 }

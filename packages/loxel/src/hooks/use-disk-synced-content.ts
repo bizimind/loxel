@@ -19,8 +19,8 @@ import { type SaveOptions, type SaveReason, saveEditorContent } from "@/lib/save
 import {
   adoptOutboxEntry,
   findAdoptableEntry,
-  forgetOutboxEntry,
   type OutboxEntry,
+  outboxEditorClosing,
 } from "@/lib/save-outbox";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
@@ -189,9 +189,10 @@ export function useDiskSyncedContent<T>(
     useEditorStateStore.getState().openFile(editorKey, filePath);
     if (adopted) adoptOutboxEntry(editorKey, adopted);
     return () => {
-      // Edits carried over by a move, or of a file deleted from disk, are not saved here.
+      // Edits carried over by a move, or of a file deleted from disk, are not saved here; the
+      // outbox keeps the latter for review.
       const closing = useEditorStateStore.getState().files.get(editorKey);
-      if (closing && (closing.movedTo || closing.deleted)) forgetOutboxEntry(closing.instanceId);
+      if (closing) outboxEditorClosing(closing);
       // Flush pending save before closing — handles unmount.
       // On scope change, the render-phase flush above already clears the timer,
       // so this is a no-op in that case.
