@@ -1,6 +1,6 @@
 import * as api from "@/api/client";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
-import type { OpenFilePanel, OpenTerminalPanel } from "@/api/ws-protocol";
+import type { OpenFilePanel, OpenRequestMessage, OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
@@ -24,13 +24,63 @@ let openChain: Promise<void> = Promise.resolve();
 /**
  * Run an open after those before it, so the targets of one command keep their order even when one
  * has to refresh a worktree list. A failure is reported and does not stop the ones after it.
+ * Resolves to what the open resolved to, undefined for a failure.
  */
-function inOrder(open: () => Promise<void>): Promise<void> {
-  openChain = openChain.then(open).catch((err: unknown) => {
+function inOrder<T>(open: () => Promise<T>): Promise<T | undefined> {
+  const run = openChain.then(open).catch((err: unknown) => {
     log.error("Failed to open", { error: err instanceof Error ? err : undefined });
     showToast(err instanceof Error ? err.message : "Failed to open");
+    return undefined;
   });
-  return openChain;
+  openChain = run.then(() => {});
+  return run;
+}
+
+/** The open inbox requests this window has had, by id: whether it is done with each. */
+const inboxOpens = new Map<string, boolean>();
+
+function inboxOpenDone(inboxId: string): void {
+  if (inboxOpens.get(inboxId) === true) return;
+  inboxOpens.set(inboxId, true);
+  api.wsClient.send({ type: "inbox_open_done", inboxId });
+}
+
+/**
+ * Open a request the server kept in its open inbox while no window was connected. The server keeps
+ * it until this window is done with it: once its panel is placed, which for a panel queued in a
+ * worktree not shown is when the user goes there, or at once for a folder or an open that failed.
+ * A request this window already had (the server sends them again after a reconnect) is not opened
+ * twice, but done with again, in case the server missed that.
+ */
+export async function openFromInbox(inboxId: string, message: OpenRequestMessage): Promise<void> {
+  const done = inboxOpens.get(inboxId);
+  if (done !== undefined) {
+    if (done) api.wsClient.send({ type: "inbox_open_done", inboxId });
+    return;
+  }
+  inboxOpens.set(inboxId, false);
+  if ((await openRequest(message, inboxId)) !== true) inboxOpenDone(inboxId);
+}
+
+/** Open what `POST /api/open` sent; resolves to true when its panel is queued for later. */
+export function openRequest(
+  message: OpenRequestMessage,
+  inboxId?: string,
+): Promise<boolean | undefined> {
+  switch (message.type) {
+    case "open_file":
+      return openFile(message.data, inboxId);
+    case "open_folder":
+      return openFolder(message.data.path);
+    case "open_terminal":
+      return openTerminal(message.data, inboxId);
+    case "open_url":
+      return openUrl(message.wtPath, message.data, inboxId);
+    default: {
+      const _exhaustive: never = message;
+      throw new Error(`Unknown open request: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 /**
@@ -38,8 +88,9 @@ function inOrder(open: () => Promise<void>): Promise<void> {
  * worktree, switching to it if needed; any other folder is opened in the active worktree's Others
  * section.
  */
-export function openFolder(rawPath: string): Promise<void> {
-  return inOrder(() => revealFolder(rawPath));
+export async function openFolder(rawPath: string): Promise<false> {
+  await inOrder(() => revealFolder(rawPath));
+  return false;
 }
 
 async function revealFolder(rawPath: string): Promise<void> {
@@ -92,11 +143,10 @@ async function revealFolder(rawPath: string): Promise<void> {
  * if needed, and any other file in the active worktree's Others section. `placement` is resolved in
  * that worktree's layout once it is mounted.
  */
-export function openFile({
-  filePath: path,
-  worktreePath,
-  ...options
-}: OpenFilePanel): Promise<void> {
+export function openFile(
+  { filePath: path, worktreePath, ...options }: OpenFilePanel,
+  inboxId?: string,
+): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
@@ -107,10 +157,10 @@ export function openFile({
       worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
     if (!target) {
       showToast("Open a project before opening other files");
-      return;
+      return false;
     }
 
-    await openInWorktree(target, { kind: "file", path, ...options });
+    return openInWorktree(target, { kind: "file", path, ...options, inboxId });
   });
 }
 
@@ -119,11 +169,14 @@ export function openFile({
  * The server has already started its shell and picked its worktree, or Home (null); the panel goes
  * there, switching to the worktree if the open has focus.
  */
-export function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
+export function openTerminal(
+  terminal: OpenTerminalPanel,
+  inboxId?: string,
+): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
     if (terminal.worktreePath) await refreshIfUnlisted(terminal.worktreePath);
-    await openInWorktree(terminal.worktreePath, { kind: "terminal", terminal });
+    return openInWorktree(terminal.worktreePath, { kind: "terminal", terminal, inboxId });
   });
 }
 
@@ -135,12 +188,13 @@ export function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
 export function openUrl(
   worktreePath: string | null,
   { url, ...options }: { url: string } & PanelOpenOptions,
-): Promise<void> {
+  inboxId?: string,
+): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
     const target = worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
-    await openInWorktree(target, { kind: "url", url, ...options });
+    return openInWorktree(target, { kind: "url", url, ...options, inboxId });
   });
 }
 
@@ -167,28 +221,31 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
  * in, or before it first mounts — queue the panel for it, behind anything already waiting there.
  * An open with focus switches to the target worktree; one without waits for the user to go there.
- * A null target is Home, which is only targeted while it is the layout shown.
+ * A null target is Home, which is only targeted while it is the layout shown. Resolves to true when
+ * the panel was queued.
  */
-async function openInWorktree(target: string | null, open: PendingOpen): Promise<void> {
+async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
   const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
   const layoutKey = target ?? HOME_LAYOUT_KEY;
   const ui = getWorktreeUI(layoutKey).getState();
   const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
   if (centerReady && ui.pendingOpens.length === 0) {
     dispatchPendingOpen(open);
-    return;
+    return false;
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
   if (focus && target !== null && target !== activeWorktreePath) await switchWorktree(target);
+  return true;
 }
 
 /**
  * Create the panel a {@link PendingOpen} describes in the mounted center layout. Creation goes
  * through the typed window events, like every other panel, so this module does not depend on the
- * panel creators.
+ * panel creators. The open inbox request it came from, if any, is done with.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
+  if (open.inboxId) inboxOpenDone(open.inboxId);
   switch (open.kind) {
     case "file":
       dispatchOpenFile(open.path, open.location, open);

@@ -122,7 +122,8 @@ describe("a server with no window connected", () => {
       current = await startServer(stateDir);
       const { ws, log } = await connectWindow(current.port);
       ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
-      expect(await received(log, "open_file")).toEqual({
+      const delivered = await received(log, "open_from_inbox");
+      expect(delivered.message).toEqual({
         type: "open_file",
         data: { filePath: file, focus: false },
       });
@@ -134,20 +135,31 @@ describe("a server with no window connected", () => {
       // Outside every worktree, the file opened in what the window showed.
       expect(added.data.source).toEqual({ kind: "inbox" });
       // The notification follows every delivery, so a terminal would have come before it.
-      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
+      expect(
+        log.entries.filter((message) => message.type === "open_from_inbox").map((m) => m.message),
+      ).toEqual([delivered.message]);
+      // The window reloads before it places the panel: the request is still there for its next
+      // load, which gets no second notification.
       ws.close();
+      const reloaded = await connectWindow(current.port);
+      reloaded.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
+      reloaded.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
+      // Answered in order: the reply comes after anything the messages before it brought.
+      reloaded.ws.send(JSON.stringify({ type: "subscribe_logs" }));
+      await received(reloaded.log, "log_error_snapshot");
+      expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
+      reloaded.ws.close();
       await stopServer(current.server);
 
-      // Delivered once, and the notification outlives another restart.
+      // Done with once placed, and the notification outlives another restart.
       current = await startServer(stateDir);
       const next = await connectWindow(current.port);
       next.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
       expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
-      // Nothing more was delivered: the server answers a window's messages in order, so the reply
-      // to one sent after the hello comes after anything the hello brought.
       next.ws.send(JSON.stringify({ type: "subscribe_logs" }));
       await received(next.log, "log_error_snapshot");
-      expect(next.log.entries.some((message) => message.type === "open_file")).toBe(false);
+      expect(next.log.entries.some((message) => message.type === "open_from_inbox")).toBe(false);
       next.ws.close();
     },
     TEST_TIMEOUT_MS,

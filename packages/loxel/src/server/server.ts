@@ -41,7 +41,7 @@ import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-s
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
-import { OpenInbox, deliveredNotices } from "./open-inbox";
+import { OpenInbox, deliveredNotices, sweepOrphans } from "./open-inbox";
 import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
@@ -387,15 +387,28 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 }
 
 /**
- * Hand the open inbox to a window that just said hello, the first after a time with none. Each
- * request opens as it would have then, focus included, and one notification per worktree says what
- * opened: a panel opened without focus waits unseen in its worktree.
+ * The inbox's requests sent to a window that has not placed their panels yet, by request id. Each
+ * stays in the inbox until its window says it is done (`inbox_open_done`): a window that reloads or
+ * closes first would lose it, so it goes to the next window to say hello.
+ */
+const inboxSentTo = new Map<string, ServerWebSocket<WsData>>();
+
+/**
+ * Hand the open inbox to a window that just said hello: the requests no other window holds. Each
+ * opens as it would have then, focus included, and one notification per worktree says what opened
+ * the first time a request is handed over: a panel opened without focus waits unseen in its
+ * worktree.
  */
 function deliverInbox(ws: ServerWebSocket<WsData>): void {
-  const entries = openInbox.takeAll();
+  const entries = openInbox.list().filter((entry) => !inboxSentTo.has(entry.id));
   if (entries.length === 0) return;
-  for (const { message } of entries) sendTo(ws, message);
-  for (const { worktreePath, title, body } of deliveredNotices(entries)) {
+  for (const { id, message } of entries) {
+    inboxSentTo.set(id, ws);
+    sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
+  }
+  const fresh = entries.filter((entry) => !entry.delivered);
+  openInbox.markDelivered(fresh.map((entry) => entry.id));
+  for (const { worktreePath, title, body } of deliveredNotices(fresh)) {
     const notification = notificationStore.add({
       source: { kind: "inbox", worktreePath },
       title,
@@ -405,6 +418,19 @@ function deliverInbox(ws: ServerWebSocket<WsData>): void {
     broadcastAll({ type: "notification_added", data: notification });
   }
   log.info(`Delivered ${entries.length} open(s) queued while no window was connected`);
+}
+
+/** The window `ws` went away: the requests it had not placed go to the window in use, if any. */
+function reclaimInbox(ws: ServerWebSocket<WsData>): void {
+  let reclaimed = false;
+  for (const [id, sentTo] of inboxSentTo) {
+    if (sentTo !== ws) continue;
+    inboxSentTo.delete(id);
+    reclaimed = true;
+  }
+  // A window that has not said hello yet gets them with its hello.
+  const [next] = reclaimed ? activeWindowSockets(null) : [];
+  if (next && clients.get(next)?.windowId) deliverInbox(next);
 }
 
 /**
@@ -1186,6 +1212,11 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       break;
     }
 
+    case "inbox_open_done":
+      inboxSentTo.delete(msg.inboxId);
+      openInbox.remove(msg.inboxId);
+      break;
+
     case "window_focused":
       lastFocusedClient = ws;
       break;
@@ -1644,6 +1675,7 @@ const server = Bun.serve<WsData>({
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
+      reclaimInbox(ws);
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
@@ -1697,8 +1729,9 @@ logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count",
 recoverOrphanLayoutSessions();
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
-// the last window closes gives them time to.
+// the last window closes gives them time to. Ones the open inbox holds wait for their requests.
 if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
+else if (config.parentPid !== null) cleanUpOrphans();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
@@ -1729,10 +1762,12 @@ function startIdleTimer(): void {
       `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
     );
     idleTimer = setTimeout(() => {
+      if (ownedByApp) {
+        cleanUpOrphans();
+        return;
+      }
       idleTimer = null;
-      const destroyed = terminalManager.destroyOrphans(queuedTerminal);
-      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-      if (ownedByApp) return;
+      terminalManager.destroyOrphans(queuedTerminal);
       log.info("Idle timeout reached, shutting down");
       shutdown();
     }, ORPHAN_CLEANUP_MS);
@@ -1743,6 +1778,19 @@ function startIdleTimer(): void {
     log.info("Idle timeout reached, shutting down");
     shutdown();
   }, IDLE_SHUTDOWN_MS);
+}
+
+/**
+ * Destroy the orphaned terminals, and, while the open inbox holds some, do it again once the first
+ * request holding one expires: its terminal is an ordinary orphan then.
+ */
+function cleanUpOrphans(): void {
+  idleTimer = null;
+  const { destroyed, nextSweepInMs } = sweepOrphans(openInbox, (kept) =>
+    terminalManager.destroyOrphans(kept),
+  );
+  if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+  if (nextSweepInMs !== null) idleTimer = setTimeout(cleanUpOrphans, nextSweepInMs);
 }
 
 // --- API requests in flight, drained before shutdown ---

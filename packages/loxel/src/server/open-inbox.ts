@@ -1,6 +1,6 @@
 /**
  * The open inbox: what `loxel` asked to open while no window was connected, kept until a window
- * connects and delivered to it then. See docs/TERMINALS.md#the-open-inbox.
+ * has placed its panel. See docs/TERMINALS.md#the-open-inbox.
  */
 import { basename } from "node:path";
 
@@ -75,6 +75,8 @@ const InboxEntrySchema = z.object({
   /** The worktree the panel opens in, null for Home, or absent for whatever the window shows. */
   worktreePath: z.string().nullable().optional(),
   message: InboxMessageSchema,
+  /** A window got it (and a notification said so), but has not placed its panel yet. */
+  delivered: z.boolean().optional(),
 });
 export type InboxEntry = z.infer<typeof InboxEntrySchema>;
 
@@ -124,13 +126,38 @@ export class OpenInbox {
     );
   }
 
-  /** Take every request still current, oldest first, emptying the inbox. */
-  takeAll(): InboxEntry[] {
+  /**
+   * How long until the first request holding a terminal has expired (it is expired once strictly
+   * older than the TTL), or null when none holds one.
+   */
+  msUntilTerminalExpires(): number | null {
     this.expire();
-    const taken = this.entries;
-    this.entries = [];
-    this.persisted.clear();
-    return taken;
+    const queuedAt = this.entries
+      .filter(({ message }) => message.type === "open_terminal")
+      .map((entry) => entry.queuedAt);
+    if (queuedAt.length === 0) return null;
+    return Math.min(...queuedAt) + ENTRY_TTL_MS + 1 - this.now();
+  }
+
+  /** Every request still current, oldest first. */
+  list(): readonly InboxEntry[] {
+    this.expire();
+    return this.entries;
+  }
+
+  /** Remember that a window got the requests `ids`, so they are not announced again. */
+  markDelivered(ids: readonly string[]): void {
+    const marked = new Set(ids);
+    for (const entry of this.entries) {
+      if (!marked.has(entry.id) || entry.delivered) continue;
+      entry.delivered = true;
+      this.persisted.insert(entry);
+    }
+  }
+
+  /** A window placed the request's panel: it is done with. */
+  remove(id: string): void {
+    this.dropWhere((entry) => entry.id === id);
   }
 
   /**
@@ -156,6 +183,19 @@ export class OpenInbox {
     const cutoff = this.now() - ENTRY_TTL_MS;
     this.dropWhere((entry) => entry.queuedAt < cutoff);
   }
+}
+
+/**
+ * Destroy the orphaned terminals no request in `inbox` holds, with `destroyOrphans` (the terminal
+ * manager's), and say when to sweep again: just after the first request holding one expires, which
+ * makes its terminal an ordinary orphan; null when no request holds one.
+ */
+export function sweepOrphans(
+  inbox: OpenInbox,
+  destroyOrphans: (kept: (id: string) => boolean) => number,
+): { destroyed: number; nextSweepInMs: number | null } {
+  const destroyed = destroyOrphans((id) => inbox.holdsTerminal(id));
+  return { destroyed, nextSweepInMs: inbox.msUntilTerminalExpires() };
 }
 
 /** What a request opens, for the notification that says it did. */

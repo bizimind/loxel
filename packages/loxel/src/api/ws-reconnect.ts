@@ -40,6 +40,7 @@ const SENT_AFTER_RECONNECT: Record<WsClientMessage["type"], boolean> = {
   register_external_files: false,
   window_hello: false,
   window_focused: false,
+  inbox_open_done: true,
   notification_dismiss: true,
   notification_dismiss_panel: true,
   notifications_clear: true,
