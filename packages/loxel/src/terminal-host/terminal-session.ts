@@ -393,8 +393,10 @@ export class TerminalSession {
     // Encoded once here: the frame goes to the renderer as is, and `data` is a view of it.
     const frame = encodeOutputFrame(this.id, offset, data);
     const payload = frame.subarray(BIN_OUTPUT_HEADER_SIZE);
-    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
+    // Counted before it is sent: an in-process client can acknowledge it before `emit` returns,
+    // and an ack applied first would be lost, pausing a client that keeps up.
     this.unacked += data.byteLength;
+    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
     if (this.unacked > this.highWater && !this.paused) {
       this.paused = true;
       this.log.info(
