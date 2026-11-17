@@ -9,6 +9,7 @@ import { isDirectory } from "@/fs-utils";
 import { getJavaOverride } from "./java-override-store";
 import { logger } from "./logger";
 import { isInside } from "./path-containment";
+import { isSameFileSync } from "./same-file";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 
@@ -443,15 +444,19 @@ async function pathJdks(wtPath: string, env: SpawnEnv): Promise<JavaRuntime[]> {
   return [];
 }
 
+const MACOS_JAVA_STUB = "/usr/bin/java";
+
 /**
  * The launcher macOS ships whether or not Java is installed. Running it may open a dialog offering
- * to install Java, so it is recognized by path and never run.
+ * to install Java, so it is recognized by path, or as the same file under another of its names, and
+ * never run.
  */
 export function isMacOsJavaStub(realJavaPath: string, platform = process.platform): boolean {
   return (
     platform === "darwin" &&
-    (realJavaPath === "/usr/bin/java" ||
-      realJavaPath.startsWith("/System/Library/Frameworks/JavaVM.framework/"))
+    (realJavaPath === MACOS_JAVA_STUB ||
+      realJavaPath.startsWith("/System/Library/Frameworks/JavaVM.framework/") ||
+      isSameFileSync(realJavaPath, MACOS_JAVA_STUB))
   );
 }
 
