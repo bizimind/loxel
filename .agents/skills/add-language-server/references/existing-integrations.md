@@ -9,7 +9,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | TypeScript (tsc)        | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
 | YAML                    | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
 | Docker                  | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
-| Terraform               | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
+| Terraform               | source-built  | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
 | Python (basedpyright)   | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
 | Python (ruff)           | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
 | Python (mypy)           | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
@@ -51,7 +51,7 @@ Also: serves two language IDs via array, overrides `resolveBinary()` for Windows
 
 ## Terraform
 
-Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. Spawned with a dead HTTP proxy (`NO_OUTBOUND_HTTP_ENV` from `shell-env.ts`), since it fetches registry module data and searches the Terraform Registry with no setting to turn either off; in a trusted repository a `terraform` shim first on its `PATH` gives the user's `terraform` back their own proxy settings. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
+Go binary built from source with Loxel's pinned toolchain (`build-terraform-ls.ts`, `terraform-ls-module/`), without the Algolia credentials that turn on registry search in HashiCorp's release builds. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. Spawned with a dead HTTP proxy (`NO_OUTBOUND_HTTP_ENV` from `shell-env.ts`), since it fetches registry module data with no setting to turn that off; in a trusted repository a `terraform` shim first on its `PATH` gives the user's `terraform` back their own proxy settings. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
 
 ## Python (basedpyright)
 

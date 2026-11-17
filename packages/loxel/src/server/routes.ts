@@ -104,6 +104,7 @@ import {
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { SchemaConsent } from "./schema-consent";
+import { serverIdentity } from "./server-identity";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
@@ -2975,13 +2976,15 @@ function handleGetVersion(_req: Request, ctx: RouteContext): Response {
 }
 
 /**
- * What `GET /api/version` answers. appOwned: started by the desktop app, so it exits with that
- * app. shuttingDown: about to exit, so clients wait for its replacement instead of using it (see
+ * What `GET /api/version` answers. serverId and bootEpoch: which server this is and which run of
+ * it (see `ServerIdentity`). appOwned: started by the desktop app, so it exits with that app.
+ * shuttingDown: about to exit, so clients wait for its replacement instead of using it (see
  * SHARED_SERVER.md).
  */
 export function versionInfo(shuttingDown: boolean) {
   return {
     version: getCurrentVersion(),
+    ...serverIdentity,
     isDev: config.isDev,
     appOwned: config.parentPid !== null,
     shuttingDown,

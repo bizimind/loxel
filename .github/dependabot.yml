@@ -38,9 +38,10 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The modules gopls and docker-language-server are built from (packages/loxel/scripts/*-module/),
-  # one entry and so one pull request each. Every requirement there is indirect, the server
-  # included, since only the `tool` directive names it, so `allow` has to include indirect ones.
+  # The modules gopls, docker-language-server and terraform-ls are built from
+  # (packages/loxel/scripts/*-module/), one entry and so one pull request each. Every requirement
+  # there is indirect, the server included, since only the `tool` directive names it, so `allow`
+  # has to include indirect ones.
   # Upgrading a server is a deliberate step (see its build script), and so are major versions,
   # which change APIs the server's own code calls.
   - package-ecosystem: gomod
@@ -79,4 +80,22 @@ updates:
       - dependency-name: github.com/docker/docker-language-server
     groups:
       docker-lsp-module:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /packages/loxel/scripts/terraform-ls-module
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: all
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: github.com/hashicorp/terraform-ls
+    groups:
+      terraform-ls-module:
         patterns: ["*"]
