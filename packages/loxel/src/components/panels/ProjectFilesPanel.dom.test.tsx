@@ -141,6 +141,12 @@ function emitDirChanged(dir: string) {
   }
 }
 
+function emitWorktreeFilesResynced(wtPath: string) {
+  for (const listener of eventListeners.get("loxel-worktree-files-resynced") ?? []) {
+    listener({ wtPath });
+  }
+}
+
 function emitRevealInExplorer(filePath: string) {
   for (const listener of eventListeners.get("loxel-reveal-in-explorer") ?? []) {
     listener({ filePath });
@@ -322,6 +328,41 @@ describe("ProjectFilesPanel", () => {
     );
   });
 
+  test("a worktree resync re-lists every expanded folder", async () => {
+    renderPanel(queryClient);
+    // `src` has a single folder child, so expanding it expands `components` too.
+    fireEvent.click(await screen.findByRole("button", { name: /src/ }));
+    expect(await screen.findByRole("button", { name: /Button\.tsx/ })).toBeInTheDocument();
+
+    // A file added while the window was disconnected: no dir-changed event announced it.
+    entriesByDir
+      .get("/repo/src/components")!
+      .push({
+        name: "Card.tsx",
+        path: "/repo/src/components/Card.tsx",
+        isDir: false,
+        status: "normal",
+      });
+    const getDirContents = api.getDirContents as ReturnType<typeof jest.fn>;
+    getDirContents.mockClear();
+    // What ws-bridge does with `worktree_files_resynced` before it dispatches the event.
+    await queryClient.invalidateQueries({ queryKey: ["dirContents", "/project"] });
+
+    await act(async () => emitWorktreeFilesResynced("/repo/.worktrees/other"));
+    expect(getDirContents).not.toHaveBeenCalled();
+
+    await act(async () => emitWorktreeFilesResynced("/repo"));
+
+    expect(await screen.findByRole("button", { name: /Card\.tsx/ })).toBeInTheDocument();
+    // Listing each expanded folder registers this window's watch on it again.
+    expect(
+      getDirContents.mock.calls
+        .map(([, dir]) => String(dir))
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["/repo", "/repo/src", "/repo/src/components"]);
+    expect(screen.getByRole("button", { name: /Button\.tsx/ })).toBeInTheDocument();
+  });
+
   test("reveal-in-explorer loads lazy ancestors, focuses the file, and scrolls it into view", async () => {
     const focus = spyOn(HTMLElement.prototype, "focus");
     const scrollIntoView = spyOn(Element.prototype, "scrollIntoView");
@@ -361,6 +402,37 @@ describe("ProjectFilesPanel", () => {
       expect(ui.pendingReveal).toBeNull();
       expect(ui.expandedProjectFolders.has("/repo/src/components/Button.tsx")).toBe(false);
     });
+  });
+
+  test("a pending reveal whose listing failed is retried on a worktree resync", async () => {
+    renderPanel(queryClient);
+    expect(await screen.findByRole("button", { name: /src/ })).toBeInTheDocument();
+    // The server has not created the worktree's resources yet.
+    let ready = false;
+    (api.getDirContents as ReturnType<typeof jest.fn>).mockImplementation(
+      async (_wt: string, dir: string) => {
+        if (!ready && dir === "/repo/src") throw new Error("Directory not in any active worktree");
+        return entriesByDir.get(dir) ?? [];
+      },
+    );
+
+    act(() =>
+      getCurrentWorktreeUI()
+        .getState()
+        .setPendingReveal({ path: "/repo/src/components/Button.tsx", expand: false }),
+    );
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["dirContents", "/project", "/repo/src"])?.status).toBe(
+        "error",
+      ),
+    );
+    expect(getCurrentWorktreeUI().getState().pendingReveal).not.toBeNull();
+
+    ready = true;
+    await act(async () => emitWorktreeFilesResynced("/repo"));
+
+    expect(await screen.findByRole("button", { name: /Button\.tsx/ })).toBeInTheDocument();
+    await waitFor(() => expect(getCurrentWorktreeUI().getState().pendingReveal).toBeNull());
   });
 
   test("Enter opens the focused file and F2 starts rename", async () => {

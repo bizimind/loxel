@@ -327,6 +327,9 @@ export function useWsBridge(): void {
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
             void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
           }
+          // The files tree reads its listings imperatively, so the invalidation above refreshes
+          // none of them: it re-lists its expanded folders, which also re-registers their watches.
+          dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: message.wtPath });
           break;
         }
 

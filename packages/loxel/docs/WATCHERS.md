@@ -56,7 +56,7 @@ Passes are coalesced per worktree: one runs at a time, and everything requested 
 
 The client refetches only working-tree diffs (staged, unstaged, uncommitted) on `status_changed` and ref/log events; commit and range diffs are keyed by full SHAs and never change. Full file contents are not refetched on `status_changed`: each `file_content_changed` invalidates that file's content queries, both an open editor's (keyed by absolute path) and the working-tree side of the side-by-side diff (keyed by worktree-relative path), whether or not the file is open in an editor.
 
-A client hears none of this while it is not subscribed to the worktree, so each `subscribe_worktree` answers that socket with `worktree_files_resynced`. The client refetches the worktree's status, diffs and file contents, and invalidates its directory listings, which are read again the next time the tree lists them (see [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)).
+A client hears none of this while it is not subscribed to the worktree, so each `subscribe_worktree` answers that socket with `worktree_files_resynced`. The client refetches the worktree's status, diffs and file contents, and the files tree lists each expanded folder again, which also has the server watch it again (see [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)).
 
 ## Working-tree file events
 

@@ -1,6 +1,6 @@
 import { describe, expect, jest, spyOn, test } from "bun:test";
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useState } from "react";
 
 import { FilesTree, type FilesTreeHandle, type TreeNode } from "./FilesTree";
@@ -176,6 +176,62 @@ describe("FilesTree", () => {
     children = [{ path: "/repo/new.ts", name: "new.ts", isDir: false }];
     treeRef.current?.reloadSubtree("/repo");
 
+    await screen.findByText("new.ts");
+    expect(screen.queryByText("old.ts")).toBeNull();
+  });
+
+  test("reloadExpanded re-lists shown expanded directories and keeps their rows meanwhile", async () => {
+    const treeRef = createRef<FilesTreeHandle>();
+    const listings = new Map<string, TreeNode[]>([
+      [
+        "/repo",
+        [
+          { path: "/repo/a", name: "a", isDir: true },
+          { path: "/repo/b", name: "b", isDir: true },
+        ],
+      ],
+      ["/repo/a", [{ path: "/repo/a/old.ts", name: "old.ts", isDir: false }]],
+      [
+        "/repo/b",
+        [
+          { path: "/repo/b/c", name: "c", isDir: true },
+          { path: "/repo/b/e.ts", name: "e.ts", isDir: false },
+        ],
+      ],
+      ["/repo/b/c", [{ path: "/repo/b/c/d.ts", name: "d.ts", isDir: false }]],
+    ]);
+    let release = () => {};
+    let held: Promise<void> = Promise.resolve();
+    const loadSubtree = jest.fn(async (path: string) => {
+      await held;
+      return listings.get(path) ?? [];
+    });
+
+    render(
+      <FilesTree
+        ref={treeRef}
+        nodes={[{ path: "/repo", name: "repo", isDir: true }]}
+        defaultExpandedPaths={["/repo", "/repo/a", "/repo/b", "/repo/b/c"]}
+        loadSubtree={loadSubtree}
+        onOpen={() => {}}
+        compactRoot={false}
+      />,
+    );
+    await screen.findByText("d.ts");
+    // `b/c` stays expanded but is no longer shown under the collapsed `b`.
+    fireEvent.click(screen.getByRole("button", { name: /^b/ }));
+    await waitFor(() => expect(screen.queryByText("d.ts")).toBeNull());
+
+    listings.set("/repo/a", [{ path: "/repo/a/new.ts", name: "new.ts", isDir: false }]);
+    held = new Promise((resolve) => {
+      release = resolve;
+    });
+    loadSubtree.mockClear();
+    act(() => treeRef.current?.reloadExpanded());
+
+    expect(loadSubtree.mock.calls.map(([path]) => path).toSorted()).toEqual(["/repo", "/repo/a"]);
+    expect(screen.getByText("old.ts")).toBeDefined();
+    await act(async () => release());
     await screen.findByText("new.ts");
     expect(screen.queryByText("old.ts")).toBeNull();
   });
