@@ -152,7 +152,7 @@ async function main(): Promise<void> {
         ? "No Loxel window is open: the next one to open asks the user."
         : "Loxel is asking the user now.";
     process.stderr.write(
-      `loxel: Loxel asks the user before a coding agent starts a terminal. ${where} The terminal has not started, and starts only if they choose Run. Do not retry: tell the user it waits for their answer in Loxel.\n`,
+      `loxel: Loxel asks the user before a coding agent starts a terminal. ${where} The terminal has not started, and starts only if they choose Run. Do not retry unless the user asks you to: tell them it waits for their answer in Loxel.\n`,
     );
     process.exitCode = ASKED_EXIT_CODE;
   } else if (queued > 0) {

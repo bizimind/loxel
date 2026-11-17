@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { type AgentTerminalAsk, EMPTY_AGENT_TERMINALS_STATE } from "@/api/agent-terminal-model";
 import { WINDOW_ID } from "@/lib/window-id";
@@ -44,7 +44,7 @@ describe("AgentTerminalPrompt", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  test("names the agent, the worktree and the command, and sends each answer", () => {
+  test("names the agent, the worktree and the command, and sends each answer", async () => {
     useAgentTerminalsStore.setState({ asks: [ask("a"), ask("b")] });
     render(<AgentTerminalPrompt />);
 
@@ -52,10 +52,12 @@ describe("AgentTerminalPrompt", () => {
       screen.getByText(/Claude Code wants to start a terminal in app \(1 of 2\)/),
     ).toBeTruthy();
     expect(screen.getByText("pnpm dev")).toBeTruthy();
+    expect(screen.queryByText(/Starts in/)).toBeNull();
     for (const name of ["Run", "Always in this worktree", "Don't run"]) {
-      cleanup();
-      render(<AgentTerminalPrompt />);
-      fireEvent.click(screen.getByRole("button", { name }));
+      const button = screen.getByRole("button", { name });
+      fireEvent.click(button);
+      // The buttons come back once the server has the answer.
+      await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
     }
 
     expect(answers).toEqual([
@@ -63,6 +65,13 @@ describe("AgentTerminalPrompt", () => {
       ["a", "always", WINDOW_ID],
       ["a", "decline", WINDOW_ID],
     ]);
+  });
+
+  test("says where the shell starts when it is not the worktree", () => {
+    useAgentTerminalsStore.setState({ asks: [ask("a", { cwd: "/tmp/elsewhere" })] });
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText("Starts in /tmp/elsewhere")).toBeTruthy();
   });
 
   test("offers no Always for Home, and names an unknown agent", () => {

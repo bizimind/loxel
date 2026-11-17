@@ -95,14 +95,14 @@ The CLI returns once the shell is running; it does not wait for the command. The
 When a coding agent runs `loxel terminal` (Loxel recognizes agents as described in [Focus](#focus)), the **When an Agent Starts a Terminal** setting in **Settings > Terminal** decides what happens:
 
 - **Run** (the default): the terminal starts at once, like one you start yourself.
-- **Ask**: nothing starts yet. A prompt in the window names the agent, the worktree and the command, with **Run**, **Always in this worktree** and **Don't run**. **Always in this worktree** runs this terminal and every later one an agent starts in that worktree without asking; **Settings > Terminal** lists those worktrees, and **Clear** makes Loxel ask in them again. The agent isn't kept waiting: `loxel` prints that Loxel is asking you, and exits with status 3. If no window is open, the next window you open asks, as with [When no window is open](#when-no-window-is-open).
+- **Ask**: nothing starts yet. A prompt in the window names the agent, the worktree and the command, and the folder the shell starts in when that isn't the worktree, with **Run**, **Always in this worktree** and **Don't run**. **Always in this worktree** runs this terminal, the ones already waiting for that worktree, and every later one an agent starts there, without asking; **Settings > Terminal** lists those worktrees, and **Clear** makes Loxel ask in them again. The agent isn't kept waiting: `loxel` prints that Loxel is asking you, and exits with status 3. If no window is open, the next window you open asks. A terminal that runs after you answer opens beside your active tab rather than replacing it, even if the agent asked to replace a tab. Requests still waiting when Loxel quits or restarts are dropped, and the agent has to ask again.
 - **Never**: `loxel` prints that the setting blocks it and exits with status 1.
 
 Your own `loxel terminal` commands always run, whatever the setting. Opening files, folders and URLs isn't affected either.
 
 Every terminal an agent started says so in its tab's tooltip: which agent, and, when the agent ran in a Loxel terminal, which terminal and worktree it came from.
 
-This setting keeps agents polite; it isn't a security boundary. Any program running as you can start a shell without asking Loxel. What it does give you: if your agents run their commands in a sandbox, **Never** (or **Ask**) keeps `loxel terminal` from starting a shell outside that sandbox.
+This setting keeps agents polite; it isn't a security boundary. It applies to agents that run `loxel terminal` as Loxel recognizes them, and any program running as you can start a shell without asking Loxel. If your agents run their commands in a sandbox and you let it reach Loxel's socket (see [Agents in a sandbox](#agents-in-a-sandbox)), **Never** (or **Ask**) keeps an agent's `loxel terminal` from starting a shell outside that sandbox; an agent set on getting out could still hide what it is, so where the sandbox must hold, don't let it reach the socket at all.
 
 ---
 

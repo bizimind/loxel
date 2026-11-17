@@ -51,6 +51,9 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
         {capitalized(agentName(ask.origin))} wants to start a terminal in {where}
         {waiting > 1 ? ` (1 of ${waiting})` : ""}
       </span>
+      {ask.cwd !== ask.worktreePath && (
+        <span className="text-muted-foreground text-xs break-all">Starts in {ask.cwd}</span>
+      )}
       {ask.command ? (
         <code className="text-foreground bg-muted max-h-24 overflow-y-auto rounded px-1.5 py-1 text-[11px] break-all whitespace-pre-wrap">
           {ask.command}

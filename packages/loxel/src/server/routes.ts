@@ -71,7 +71,7 @@ import { classifySchemaGlob, schemaFilePatterns } from "@/lib/schema-glob";
 import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
-import type { AgentTerminals } from "./agent-terminals";
+import type { AgentTerminals, StoredAsk } from "./agent-terminals";
 import { config } from "./config";
 import type { DetachedFilesService } from "./detached-files-service";
 import { getDiagnostics } from "./diagnostics";
@@ -3212,12 +3212,16 @@ async function launchTerminal(
  */
 function askForTerminal(
   ctx: RouteContext,
-  { origin: _origin, ...request }: TerminalLaunch,
+  { origin: _origin, placement, ...request }: TerminalLaunch,
   origin: AgentOrigin,
   window: ActiveWindow | null,
 ): Response {
+  // The answer may come hours later, when the active tab is whatever the user works in then: a
+  // `--replace` would close it. The terminal opens beside it instead.
+  const { replace: _replace, ...kept } = placement ?? {};
   const ask = ctx.agentTerminals.ask({
     ...request,
+    ...(Object.keys(kept).length > 0 ? { placement: kept } : {}),
     origin,
     ...(window?.windowId ? { windowId: window.windowId } : {}),
   });
@@ -3235,15 +3239,31 @@ async function handleAgentTerminalAnswer(req: Request, ctx: RouteContext): Promi
   const answer = AgentTerminalAnswerSchema.safeParse(body.answer);
   if (!answer.success) return error('answer must be "run", "always" or "decline"', 400);
   const windowId = typeof body.windowId === "string" ? body.windowId : null;
+  // Checked before the request is taken: with no window to open it in, it stays to answer again.
+  const window = answer.data === "decline" ? null : ctx.activeWindow(windowId);
+  if (answer.data !== "decline" && !window) return error(NO_WINDOW, 503);
   const ask = ctx.agentTerminals.take(body.id);
   if (!ask) return error("This terminal was already answered, or has expired", 404);
-  if (answer.data === "decline") return json({ ok: true });
-  if (answer.data === "always" && ask.worktreePath) {
-    ctx.agentTerminals.runAlways(ask.worktreePath);
+  if (!window) return json({ ok: true });
+  const response = await launchAsked(ctx, ask, window, windowId);
+  if (answer.data !== "always" || !ask.worktreePath || !response.ok) return response;
+  // "Always in this worktree": recorded once a terminal ran, and it covers the requests already
+  // waiting there too.
+  ctx.agentTerminals.runAlways(ask.worktreePath);
+  for (const waiting of ctx.agentTerminals.takeWorktree(ask.worktreePath)) {
+    const started = await launchAsked(ctx, waiting, window, windowId);
+    if (!started.ok) terminalLog.warn("An agent's terminal did not start", { cwd: waiting.cwd });
   }
-  const { id: _id, askedAt: _askedAt, windowId: _askedIn, ...request } = ask;
-  const window = ctx.activeWindow(windowId);
-  if (!window) return error(NO_WINDOW, 503);
+  return response;
+}
+
+/** Open the terminal of an answered request in `window`. */
+function launchAsked(
+  ctx: RouteContext,
+  { id: _id, askedAt: _askedAt, windowId: _askedIn, homeWindowId: _home, ...request }: StoredAsk,
+  window: ActiveWindow,
+  windowId: string | null,
+): Promise<Response> {
   return launchTerminal(ctx, request, window, windowId);
 }
 
@@ -3306,6 +3326,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       if (!parsed.success) return error("agent must be an object of strings", 400);
       origin = parsed.data;
     }
+    // A coding agent's terminal follows "When an Agent Starts a Terminal"; a person's always runs.
+    // Never is answered before waiting for a window, which would only delay the refusal.
+    const policy = origin ? ctx.agentTerminalPolicy() : "run";
+    if (policy === "never") return error(AGENT_TERMINALS_BLOCKED, 403);
 
     // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
     // window shows, else to Home (null), which a window shows with no worktree. With no window, the
@@ -3323,9 +3347,6 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       ...(origin ? { origin } : {}),
     };
 
-    // A coding agent's terminal follows "When an Agent Starts a Terminal"; a person's always runs.
-    const policy = origin ? ctx.agentTerminalPolicy() : "run";
-    if (policy === "never") return error(AGENT_TERMINALS_BLOCKED, 403);
     if (policy === "ask" && origin && !ctx.agentTerminals.runsAlways(worktreePath)) {
       return askForTerminal(ctx, request, origin, window);
     }

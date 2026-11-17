@@ -19,8 +19,11 @@ const MAX_ASKS = 100;
 /** Like the open inbox: an unanswered request older than this is stale, its agent long gone. */
 const ASK_TTL_MS = 72 * 60 * 60_000;
 
-/** A request as kept: what the window shows, plus where the panel goes once it runs. */
-export type StoredAsk = AgentTerminalAsk & PanelOpenOptions;
+/**
+ * A request as kept: what the window shows, plus where the panel goes once it runs, and the window
+ * it was first asked in (`homeWindowId`), which takes it back when it reconnects after a reload.
+ */
+export type StoredAsk = AgentTerminalAsk & PanelOpenOptions & { homeWindowId?: string };
 
 const AlwaysWorktreesSchema = z.array(z.string());
 
@@ -47,7 +50,9 @@ export class AgentTerminals {
   state(): AgentTerminalsState {
     this.expire();
     return {
-      asks: this.asks.map(({ placement: _placement, focus: _focus, ...ask }) => ask),
+      asks: this.asks.map(
+        ({ placement: _placement, focus: _focus, homeWindowId: _home, ...ask }) => ask,
+      ),
       alwaysWorktrees: [...this.always],
     };
   }
@@ -56,7 +61,12 @@ export class AgentTerminals {
   ask(request: Omit<StoredAsk, "id" | "askedAt">): StoredAsk | null {
     this.expire();
     if (this.asks.length >= MAX_ASKS) return null;
-    const ask: StoredAsk = { ...request, id: crypto.randomUUID(), askedAt: this.now() };
+    const ask: StoredAsk = {
+      ...request,
+      id: crypto.randomUUID(),
+      askedAt: this.now(),
+      ...(request.windowId ? { homeWindowId: request.windowId } : {}),
+    };
     this.asks.push(ask);
     this.publish();
     return ask;
@@ -97,19 +107,42 @@ export class AgentTerminals {
   }
 
   /**
-   * Give the requests whose window is gone, or that came while none was connected, to `windowId`:
-   * the window that just said hello, or, when one closes, the window in use. Without a window they
-   * wait for the next one to say hello.
+   * A window said hello: it takes back the requests first asked in it (moved to another window
+   * while it reloaded), and those whose window is gone or that came while none was connected.
    */
-  assignOrphans(isConnected: (windowId: string) => boolean, windowId: string | null): void {
-    const orphans = this.asks.filter((ask) => !ask.windowId || !isConnected(ask.windowId));
-    const reassigned = orphans.filter((ask) => ask.windowId !== (windowId ?? undefined));
-    if (reassigned.length === 0) return;
-    for (const ask of reassigned) {
-      if (windowId) ask.windowId = windowId;
-      else delete ask.windowId;
+  windowConnected(windowId: string, isConnected: (windowId: string) => boolean): void {
+    this.reassign(
+      (ask) => ask.homeWindowId === windowId || !ask.windowId || !isConnected(ask.windowId),
+      windowId,
+    );
+  }
+
+  /**
+   * A window closed: its requests move to `windowInUse`, or, with none, wait for the next window
+   * to say hello.
+   */
+  windowClosed(isConnected: (windowId: string) => boolean, windowInUse: string | null): void {
+    this.reassign((ask) => !ask.windowId || !isConnected(ask.windowId), windowInUse);
+  }
+
+  /** Requests for the same worktree as `worktreePath`, taken to run with it ("Always"). */
+  takeWorktree(worktreePath: string): StoredAsk[] {
+    this.expire();
+    const taken = this.asks.filter((ask) => ask.worktreePath === worktreePath);
+    if (taken.length > 0) this.drop(taken);
+    return taken;
+  }
+
+  /** A worktree moved (`wt mv`): its requests and its choice to always run follow it. */
+  moveWorktree(from: string, to: string): void {
+    const asks = this.asks.filter((ask) => ask.worktreePath === from);
+    for (const ask of asks) ask.worktreePath = to;
+    const wasAlways = this.always.delete(from);
+    if (wasAlways) {
+      this.always.add(to);
+      this.saveAlways();
     }
-    this.publish();
+    if (asks.length > 0 || wasAlways) this.publish();
   }
 
   /** Forget a removed worktree: its requests, and the choice to always run there. */
@@ -119,6 +152,20 @@ export class AgentTerminals {
     if (wasAlways) this.saveAlways();
     if (dropped.length > 0) this.drop(dropped);
     else if (wasAlways) this.publish();
+  }
+
+  private reassign(matches: (ask: StoredAsk) => boolean, windowId: string | null): void {
+    const moved = this.asks.filter(
+      (ask) => matches(ask) && ask.windowId !== (windowId ?? undefined),
+    );
+    if (moved.length === 0) return;
+    for (const ask of moved) {
+      if (windowId) ask.windowId = windowId;
+      else delete ask.windowId;
+      // The first window to ask is the one that takes it back after a reload.
+      if (!ask.homeWindowId && windowId) ask.homeWindowId = windowId;
+    }
+    this.publish();
   }
 
   private drop(asks: readonly StoredAsk[]): void {

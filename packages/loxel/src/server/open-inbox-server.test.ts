@@ -4,7 +4,6 @@
  * notification-store.ts and agent-terminals.ts. `LOXEL_DEV=1` keeps the server off the
  * keychain, and a temporary state directory off the user's projects.
  */
-import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -162,13 +161,6 @@ describe("an agent's terminal with Ask and no window connected", () => {
 
   beforeAll(() => {
     stateDir = realpathSync(mkdtempSync(path.join(tmpdir(), "loxel-agent-ask-")));
-    // "When an Agent Starts a Terminal" is Ask, as the settings store persists it.
-    const db = new Database(path.join(stateDir, "stores.db"));
-    db.exec("CREATE TABLE stores (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)");
-    db.prepare("INSERT INTO stores VALUES ('settings', ?, '')").run(
-      JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
-    );
-    db.close();
   });
 
   afterAll(() => {
@@ -180,6 +172,15 @@ describe("an agent's terminal with Ask and no window connected", () => {
     "waits for the next window to say hello, asks there, and runs once it says Run",
     async () => {
       current = await startServer(stateDir);
+      // "When an Agent Starts a Terminal" is Ask, as a window saves it.
+      const saved = await fetch(`http://127.0.0.1:${current.port}/api/stores/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value: JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
+        }),
+      });
+      expect(saved.ok).toBe(true);
       const agent = { agent: "Claude Code" };
       const res = await fetch("http://localhost/api/open", {
         method: "POST",

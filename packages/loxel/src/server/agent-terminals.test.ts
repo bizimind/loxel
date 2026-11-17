@@ -75,7 +75,7 @@ describe("AgentTerminals", () => {
     asks.ask(request("/b", "w1"));
     asks.ask(request("/c", "gone"));
 
-    asks.assignOrphans((windowId) => windowId === "w1", "w2");
+    asks.windowConnected("w2", (windowId) => windowId === "w1" || windowId === "w2");
 
     expect(asks.state().asks.map((ask) => [ask.worktreePath, ask.windowId])).toEqual([
       ["/a", "w2"],
@@ -89,13 +89,51 @@ describe("AgentTerminals", () => {
     asks.ask(request("/a", "w1"));
     const before = published.length;
 
-    asks.assignOrphans(() => false, null);
+    asks.windowClosed(() => false, null);
 
     expect(asks.state().asks[0]?.windowId).toBeUndefined();
     expect(published).toHaveLength(before + 1);
     // Nothing changed: nothing is published.
-    asks.assignOrphans(() => false, null);
+    asks.windowClosed(() => false, null);
     expect(published).toHaveLength(before + 1);
+  });
+
+  test("a window that reloads takes its requests back from the window they moved to", () => {
+    const asks = create();
+    asks.ask(request("/a", "w1"));
+    asks.ask(request("/b"));
+    asks.windowConnected("w1", (windowId) => windowId === "w1");
+
+    // w1 reloads while w2 is open: its requests go to w2, then come back.
+    asks.windowClosed((windowId) => windowId === "w2", "w2");
+    expect(asks.state().asks.map((ask) => ask.windowId)).toEqual(["w2", "w2"]);
+    asks.windowConnected("w1", () => true);
+
+    expect(asks.state().asks.map((ask) => ask.windowId)).toEqual(["w1", "w1"]);
+  });
+
+  test("hands over a worktree's waiting requests at once", () => {
+    const asks = create();
+    asks.ask(request("/wt"));
+    asks.ask(request("/other"));
+    asks.ask(request("/wt"));
+
+    expect(asks.takeWorktree("/wt")).toHaveLength(2);
+    expect(asks.state().asks.map((ask) => ask.worktreePath)).toEqual(["/other"]);
+  });
+
+  test("follows a moved worktree", () => {
+    const asks = create();
+    asks.ask(request("/old"));
+    asks.runAlways("/old");
+
+    asks.moveWorktree("/old", "/new");
+
+    expect(asks.state()).toEqual({
+      asks: [expect.objectContaining({ worktreePath: "/new" })],
+      alwaysWorktrees: ["/new"],
+    });
+    expect(always).toBe(JSON.stringify(["/new"]));
   });
 
   test("lets a request expire after 72 hours", () => {

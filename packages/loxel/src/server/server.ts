@@ -799,6 +799,7 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
   for (const { from, to } of moved) {
     log.info(`Worktree moved: ${from} -> ${to}`);
     terminalManager.retargetWorktree(from, to);
+    agentTerminals.moveWorktree(from, to);
     releaseWorktreeResources(from);
   }
   // Its directory is gone but nothing says it was removed (deleted by hand, say). Nothing is lost by
@@ -1100,7 +1101,7 @@ const agentTerminals = new AgentTerminals({
   onChange: (data) => broadcastAll({ type: "agent_terminals_changed", data }),
 });
 /** Whether a window with this ID is connected. */
-const windowConnected = (windowId: string) =>
+const isWindowConnected = (windowId: string) =>
   [...clients.values()].some((state) => state.windowId === windowId);
 /** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
 const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
@@ -1209,7 +1210,7 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       clientState.windowId = msg.windowId;
       deliverInbox(ws);
       // What waits for an answer with no window to ask in is asked in this one.
-      agentTerminals.assignOrphans(windowConnected, msg.windowId);
+      agentTerminals.windowConnected(msg.windowId, isWindowConnected);
       break;
     }
 
@@ -1674,7 +1675,7 @@ const server = Bun.serve<WsData>({
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
       // What this window was asking moves to the window in use, or waits for the next one.
-      agentTerminals.assignOrphans(windowConnected, activeWindow(null)?.windowId ?? null);
+      agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
