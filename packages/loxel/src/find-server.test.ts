@@ -133,6 +133,34 @@ describe("givenServerGone", () => {
     expect(await givenServerGone(socket, { productionSocket: socket, graceMs: 0 })).toBe(true);
   });
 
+  test("starts the grace period only once a draining server is gone", async () => {
+    const { socket } = stateDir();
+    serveOnSocket(socket, { shuttingDown: true });
+
+    const gone = await givenServerGone(socket, {
+      productionSocket: socket,
+      graceMs: 0,
+      maxWaitMs: 60_000,
+      // The draining server exits once the CLI is waiting for it, leaving no server.
+      onWaiting: () => servers.pop()?.stop(true),
+    });
+
+    expect(gone).toBe(true);
+  });
+
+  test("is false for a server that stays draining, which launching Loxel would not help", async () => {
+    const { socket } = stateDir();
+    serveOnSocket(socket, { shuttingDown: true });
+
+    const gone = await givenServerGone(socket, {
+      productionSocket: socket,
+      graceMs: 0,
+      maxWaitMs: 0,
+    });
+
+    expect(gone).toBe(false);
+  });
+
   test("is false for any other socket, which launching Loxel would not bring back", async () => {
     const { socket } = stateDir();
 

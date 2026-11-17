@@ -87,7 +87,8 @@ async function main(): Promise<void> {
   } else if (focus || !found) {
     launchLoxel({ background: !focus });
   }
-  const socket = found?.socket ?? (await waitForServer(process.env));
+  const socket =
+    found?.socket ?? (await waitForServer(process.env, { onWaiting: announceWaiting }));
 
   // The window in use: from a loxel terminal, that terminal's window; otherwise the focused one.
   const windowId = isInsideLoxel && envWindowId ? envWindowId : undefined;

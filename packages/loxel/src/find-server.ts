@@ -24,10 +24,13 @@ export interface FoundServer {
 const PROBE_TIMEOUT_MS = 1000;
 const WAIT_INTERVAL_MS = 200;
 /**
- * How long a given socket may have no server before the CLI launches Loxel for it: long enough for
- * Restart Loxel or an update install to bring the server back by itself.
+ * How long a given socket may have no server at all before the CLI launches Loxel for it: long
+ * enough, once the old server is gone, for Restart Loxel or an update install to bring the next one
+ * up by itself.
  */
 const GIVEN_GRACE_MS = 10_000;
+/** How long a server may stay draining before the CLI stops waiting for its replacement. */
+const HANDOVER_MAX_MS = 60_000;
 
 /**
  * The sockets a server for this user may be on, in the order to try: `LOXEL_STATE_DIR`'s, else
@@ -52,12 +55,16 @@ function outsideSandbox(path: string): string {
   return `Loxel's socket ${path} is outside this sandbox: allow it in the sandbox's settings`;
 }
 
-type Probe = { state: "up" } | { state: "down" } | { state: "blocked"; reason: string };
+type Probe =
+  | { state: "up" }
+  | { state: "draining" }
+  | { state: "down" }
+  | { state: "blocked"; reason: string };
 
 /**
- * Whether a Loxel server answers on the socket at `path`. A missing or stale socket file (a refused
- * connection) means none does, and so does one shutting down: its replacement is the one to talk
- * to.
+ * Whether a Loxel server answers on the socket at `path`, or one that is shutting down (`draining`),
+ * whose replacement is the one to talk to. A missing or stale socket file (a refused connection)
+ * means none does.
  */
 async function probe(path: string): Promise<Probe> {
   try {
@@ -69,7 +76,7 @@ async function probe(path: string): Promise<Probe> {
     const body: unknown = await res.json().catch(() => null);
     const shuttingDown =
       typeof body === "object" && body !== null && "shuttingDown" in body && body.shuttingDown;
-    return shuttingDown === true ? { state: "down" } : { state: "up" };
+    return shuttingDown === true ? { state: "draining" } : { state: "up" };
   } catch (err) {
     const reason = blockedReason(err, path);
     return reason ? { state: "blocked", reason } : { state: "down" };
@@ -123,38 +130,54 @@ interface GoneOptions {
   /** Called once when no server answers right away and the wait starts. */
   onWaiting?: () => void;
   graceMs?: number;
+  maxWaitMs?: number;
   /** The socket launching Loxel brings a server to; tests pass their own. */
   productionSocket?: string;
 }
 
 /**
  * Whether the CLI should launch Loxel for the socket `LOXEL_SOCKET` names: the production one, when
- * no server answers on it within the grace period. That is a terminal that outlived its Loxel
- * after a quit, where nothing else would bring the server back. A dev or demo server is not started
- * by launching the app.
+ * no server answers on it for the grace period. That is a terminal that outlived its Loxel after a
+ * quit, where nothing else would bring the server back. A dev or demo server is not started by
+ * launching the app. A draining server means a quit, restart or update is under way, so the grace
+ * period starts only once it is gone; launching would race an update's own relaunch. One draining
+ * for longer than `maxWaitMs` gets no launch either: launching would not help it.
  */
 export async function givenServerGone(
   socket: string,
   {
     onWaiting,
     graceMs = GIVEN_GRACE_MS,
+    maxWaitMs = HANDOVER_MAX_MS,
     productionSocket = cliSocketPath(DEFAULT_STATE_DIR.production),
   }: GoneOptions = {},
 ): Promise<boolean> {
   if (socket !== productionSocket) return false;
   const start = Date.now();
+  let goneSince = start;
   let waiting = false;
-  while ((await probe(socket)).state !== "up") {
-    if (Date.now() - start >= graceMs) return true;
+  for (;;) {
+    const { state } = await probe(socket);
+    if (state === "up") return false;
+    const now = Date.now();
+    if (state === "draining") goneSince = now;
+    else if (now - goneSince >= graceMs) return true;
+    if (now - start >= maxWaitMs) return false;
     if (!waiting) onWaiting?.();
     waiting = true;
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
-  return false;
 }
 
-/** Wait for a server Loxel is launching to answer on a well-known socket. */
-export async function waitForServer(env: Env, { timeoutMs = 15_000 } = {}): Promise<string> {
+/**
+ * Wait for a server Loxel is launching to answer on a well-known socket; `onWaiting` is called
+ * once, when the wait starts.
+ */
+export async function waitForServer(
+  env: Env,
+  { timeoutMs = 15_000, onWaiting }: { timeoutMs?: number; onWaiting?: () => void } = {},
+): Promise<string> {
+  onWaiting?.();
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const socket = await locate(env);

@@ -17,7 +17,10 @@ interface SocketServer {
 /** A server on the CLI socket, and how to stop it without removing a newer server's socket. */
 export interface CliSocket<S extends SocketServer> {
   server: S;
-  /** Stop the server, and remove the socket file if it is still this server's. */
+  /**
+   * Stop the server, and remove the socket file if it is still this server's. The server stops
+   * even when the file cannot be checked or removed, which then throws.
+   */
   stop: () => void;
 }
 
@@ -56,12 +59,15 @@ export function takeOverSocket<S extends SocketServer>(
   return {
     server,
     stop: () => {
-      // A newer server that took the name over owns the file now. Unlinking is not conditional,
-      // so one taking it over between the check and the unlink would lose it, but that window is
-      // two system calls wide.
-      const current = fileAt(path);
-      if (own && current?.dev === own.dev && current.ino === own.ino) unlinkSync(path);
-      server.stop();
+      try {
+        // A newer server that took the name over owns the file now. Unlinking is not
+        // conditional, so one taking it over between the check and the unlink would lose it, but
+        // that window is two system calls wide.
+        const current = fileAt(path);
+        if (own && current?.dev === own.dev && current.ino === own.ino) unlinkSync(path);
+      } finally {
+        server.stop();
+      }
     },
   };
 }

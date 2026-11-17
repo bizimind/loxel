@@ -1737,8 +1737,13 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
-  // Removes the socket file unless a newer server took it over.
-  cliSocket?.stop();
+  // Removes the socket file unless a newer server took it over. Nothing here may keep the process
+  // from exiting below.
+  try {
+    cliSocket?.stop();
+  } catch (err) {
+    log.warn(`Could not remove ${config.cliSocketPath}`, { error: err });
+  }
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
   void Promise.race([
