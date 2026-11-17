@@ -35,6 +35,30 @@ const THEME_VARIANTS = [
   { className: "loxel-mermaid-dark", theme: "dark" },
 ] as const satisfies readonly { className: string; theme: MermaidConfig["theme"] }[];
 
+/**
+ * Mermaid 12 lays most diagram types out with ELK, draws them in its `neo` look, and widens
+ * flowchart and state nodes, which changes how every existing diagram looks. Loxel keeps
+ * mermaid 11's appearance: the classic look, dagre, and 11's node sizing. The layout is set per
+ * diagram type rather than globally, as a global `layout` would also replace the engines mindmaps
+ * (cose-bilkent) and swimlanes choose for themselves. A diagram's own frontmatter or `%%{init}%%`
+ * config wins over all of this, so a diagram opts into `look: neo` or an ELK layout by itself.
+ * Types new in mermaid 12 (use case, agentflow) get the same defaults, so every diagram in a
+ * document shares one look until it asks for another. The sizing stays when a diagram picks
+ * `look: neo`; one that wants mermaid 12's wider nodes sets `minNodeWidth` itself.
+ */
+const DAGRE = { layout: "dagre" } as const;
+const CLASSIC_SIZING = { minNodeWidth: 0, wrappingWidth: 200 } as const;
+const CLASSIC_APPEARANCE = {
+  look: "classic",
+  flowchart: { ...DAGRE, ...CLASSIC_SIZING },
+  state: { ...DAGRE, ...CLASSIC_SIZING },
+  class: DAGRE,
+  er: DAGRE,
+  requirement: DAGRE,
+  usecase: DAGRE,
+  agentflow: DAGRE,
+} as const satisfies MermaidConfig;
+
 let mermaidPromise: Promise<Mermaid> | null = null;
 
 function loadMermaid(): Promise<Mermaid> {
@@ -64,9 +88,13 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
 
 let idCount = 0;
 
+/**
+ * Letters and digits only: mermaid derives some ids from the diagram's (flowchart step animations
+ * escape every other character), and `withFreshId` can only rewrite those that contain it verbatim.
+ */
 function nextId(): string {
   idCount += 1;
-  return `loxel-mermaid-${idCount}`;
+  return `loxelMermaid${idCount}`;
 }
 
 /** One theme's SVG and the id mermaid scoped its styles and marker references to. */
@@ -118,17 +146,35 @@ function viewBoxSize(svg: string): Dimensions | null {
 const diagramCache = new Map<string, RenderedSvg[]>();
 const DIAGRAM_CACHE_SIZE = 50;
 
+/**
+ * Whether the diagram uses the `flowchart-elk` keyword, which asks for ELK the way `layout: elk`
+ * does but which the per-type dagre default above would override. Needs a prior `initialize`,
+ * which registers the detectors; an unknown type is left for `render` to report.
+ */
+function isElkFlowchart(mermaid: Mermaid, source: string): boolean {
+  try {
+    return mermaid.detectType(source) === "flowchart-elk";
+  } catch {
+    return false;
+  }
+}
+
 async function renderSvg(
   mermaid: Mermaid,
   source: string,
   { className, theme }: (typeof THEME_VARIANTS)[number],
 ): Promise<RenderedSvg> {
-  mermaid.initialize({
+  const config: MermaidConfig = {
     startOnLoad: false,
     securityLevel: "strict",
     suppressErrorRendering: true,
     theme,
-  });
+    ...CLASSIC_APPEARANCE,
+  };
+  mermaid.initialize(config);
+  if (isElkFlowchart(mermaid, source)) {
+    mermaid.initialize({ ...config, flowchart: { ...config.flowchart, layout: "elk" } });
+  }
   const id = nextId();
   try {
     const { svg } = await mermaid.render(id, source);

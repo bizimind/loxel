@@ -43,6 +43,8 @@ void mock.module("mermaid", () => ({
       renderCalls.push({ id, source, config: currentConfig });
       return renderImpl(id, source);
     },
+    detectType: (source: string) =>
+      source.trimStart().startsWith("flowchart-elk") ? "flowchart-elk" : "flowchart-v2",
   },
 }));
 
@@ -97,16 +99,41 @@ describe("renderCodeBlockPreview routing", () => {
 });
 
 describe("mermaid rendering", () => {
+  test("the flowchart-elk keyword gets ELK instead of the dagre default", async () => {
+    await renderAsync("mermaid", "flowchart-elk LR; A-->B");
+    await renderAsync("mermaid", "flowchart LR; A-->B");
+    const withLayout = (layout: string) =>
+      expect.objectContaining({ flowchart: expect.objectContaining({ layout }) });
+    expect(renderCalls.map((c) => c.config)).toEqual([
+      withLayout("elk"),
+      withLayout("elk"),
+      withLayout("dagre"),
+      withLayout("dagre"),
+    ]);
+  });
+
   test("renders a light and a dark variant with strict security and unique ids", async () => {
     const preview = await renderAsync("mermaid", "graph TD; A-->B");
+    // Mermaid 11's appearance by default: the classic look, dagre and 11's node sizing, for every
+    // type mermaid 12 would lay out with ELK instead. A diagram's own config overrides it.
+    const dagre = { layout: "dagre" };
+    const sized = { ...dagre, minNodeWidth: 0, wrappingWidth: 200 };
+    const base = {
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      look: "classic",
+      flowchart: sized,
+      state: sized,
+      class: dagre,
+      er: dagre,
+      requirement: dagre,
+      usecase: dagre,
+      agentflow: dagre,
+    };
     expect(renderCalls.map((c) => c.config)).toEqual([
-      {
-        startOnLoad: false,
-        securityLevel: "strict",
-        suppressErrorRendering: true,
-        theme: "default",
-      },
-      { startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: "dark" },
+      { ...base, theme: "default" },
+      { ...base, theme: "dark" },
     ]);
     if (typeof preview !== "string") throw new Error("expected an SVG preview");
     const host = document.createElement("div");
