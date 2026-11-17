@@ -60,8 +60,8 @@ async function linkFromStore(file: string, script: string): Promise<boolean> {
     await rm(file);
   }
   await addToStore(entry, script);
-  await link(entry, file);
-  return true;
+  // A missing entry names no file system, so another one shows only now.
+  return (await tryLink(entry, file)) === "linked";
 }
 
 async function tryLink(

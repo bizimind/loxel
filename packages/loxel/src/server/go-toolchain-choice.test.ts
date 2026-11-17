@@ -1,5 +1,4 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -20,8 +19,14 @@ import { repeatUntil } from "@/test/repeat-until";
 // Choices live in the store database; keep the tests' state out of the real one.
 const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "loxel-go-choice-")));
 process.env.LOXEL_STATE_DIR = join(stateRoot, "state");
-const { cachedToolchainDirName, cachedToolchainVersion, getGoEnv, goSpawnEnv, subscribeGoEnv } =
-  await import("./go-env");
+const {
+  cachedToolchainDirName,
+  cachedToolchainVersion,
+  getGoEnv,
+  goSpawnEnv,
+  realpathOr,
+  subscribeGoEnv,
+} = await import("./go-env");
 const { goFormatterWith } = await import("./go-formatter");
 const { listGoToolchains, normalizeGoChoice } = await import("./go-toolchain-candidates");
 const { goToolchainEnv } = await import("./go-toolchain-env");
@@ -55,14 +60,6 @@ async function makeDir(prefix: string): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   roots.push(dir);
   return dir;
-}
-
-function realpathOr(file: string): string {
-  try {
-    return realpathSync(file);
-  } catch {
-    return file;
-  }
 }
 
 interface FakeGo {
