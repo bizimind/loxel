@@ -1,0 +1,12 @@
+{
+  "version": "1.27.4",
+  "download": "https://go.dev/dl/go{version}.{target}",
+  "sha256": {
+    "darwin-amd64.tar.gz": "2b799377704ef12db39bd254995d5c348c9cc8d86562ca817724390e56c38f43",
+    "darwin-arm64.tar.gz": "91a44a2b8a716600ad94a4f143e156116620db8828086a6e3602291be9bd0bb4",
+    "linux-amd64.tar.gz": "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840",
+    "linux-arm64.tar.gz": "3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92",
+    "windows-amd64.zip": "178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e",
+    "windows-arm64.zip": "9e7a72565792b8ab370b37ac9ac109799237abacb39ff2f541c438b963c0cc64"
+  }
+}

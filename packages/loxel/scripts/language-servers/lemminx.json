@@ -3,5 +3,13 @@
   "resources": ["lemminx/lemminx"],
   "version": "0.29.3",
   "purl": "pkg:github/redhat-developer/vscode-xml@{version}",
-  "license": "EPL-2.0"
+  "license": "EPL-2.0",
+  "download": "https://github.com/redhat-developer/vscode-xml/releases/download/{version}/lemminx-{target}",
+  "sha256": {
+    "osx-aarch_64.zip": "185db5630ce85be43ea0fab034e7841b1327c2793db05ab481e029cf493d86ce",
+    "osx-x86_64.zip": "9e56123194b5c1fdc7d87f1bd21c83cc996ba7be913def3a2836a13305bcd273",
+    "linux-x86_64.zip": "1acc44e24201c1d2f5ccb4e43e7426ed0df6909207a81ff199810e2808104d89",
+    "linux-aarch_64.zip": "0b88a49e83c2611282672f5123ce33abf1371c8e3c55cad6ee45ea00626ffa1b",
+    "win32.zip": "7eaefaac68253b0ec8e0ad1f1c0f2d0755423d4e99e52497428b52f80df28eb7"
+  }
 }

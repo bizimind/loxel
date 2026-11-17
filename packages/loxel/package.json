@@ -23,6 +23,7 @@
     "build:electron": "bun scripts/build-electron.ts",
     "build:app:local": "pnpm run build:server:standalone && ELECTRON=1 vite build && bun scripts/build-app.ts --mac --dir --arm64",
     "build:language-servers": "bun scripts/language-server-binaries.ts build",
+    "pin-hashes": "bun scripts/pin-hashes.ts",
     "build:cli": "bun build src/cli.ts --compile --outfile build/loxel",
     "build:server:standalone": "bun scripts/build-server.ts compile && pnpm run build:language-servers",
     "typecheck": "tsc --noEmit",
