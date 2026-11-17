@@ -41,7 +41,7 @@ At startup the server loads `projects.db`, registers `process.argv[2]` as a proj
 
 `teardownProject` tears down every `WorktreeResources` of the project, stops the watcher and status tracker and closes both databases.
 
-Worktree resources (status watcher for linked worktrees, files service, drafts, external files, Others folders, file-operation history) are created by `subscribeWorktree` on the first `subscribe_worktree` WebSocket message and torn down when a grace period after the last subscriber left has passed with nobody subscribing again ([SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)). Removal-specific teardown (`suspendWorktreeWatchers`, `completeWorktreeRemoval`, `reconcileWorktrees`) is described in [WATCHERS.md](WATCHERS.md#worktree-lifecycle).
+Worktree resources (status watcher for linked worktrees, files service, drafts, external files, Others folders, file-operation history) are created by `subscribeWorktree` on the first `subscribe_worktree` WebSocket message (a subscribe that arrives while they are being created waits for them, `wtResourcesCreating`, so windows subscribing together share one set) and torn down when a grace period after the last subscriber left has passed with nobody subscribing again ([SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)). Removal-specific teardown (`suspendWorktreeWatchers`, `completeWorktreeRemoval`, `reconcileWorktrees`) is described in [WATCHERS.md](WATCHERS.md#worktree-lifecycle).
 
 The project watcher's `worktrees` event broadcasts `worktrees_changed` to the project's subscribers, then cleans up after the worktrees git no longer has registered and follows the ones that moved, then invalidates the status tracker.
 

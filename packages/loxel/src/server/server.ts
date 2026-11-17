@@ -198,6 +198,12 @@ if (config.parentPid !== null) {
 
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
+/**
+ * The worktrees whose resources a first subscribe is creating: a subscribe meanwhile joins them,
+ * rather than create a second set that would replace the first, leaking its watchers and leaving
+ * its subscriber out.
+ */
+const wtResourcesCreating = new Map<string, Promise<WorktreeResources>>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
 /** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
@@ -656,6 +662,12 @@ function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectP
 }
 
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
+  const creating = wtResourcesCreating.get(wtPath);
+  if (creating) {
+    // Subscribed to what it creates; one that failed is tried again here.
+    await creating.catch(() => {});
+    return subscribeWorktree(ws, wtPath);
+  }
   const existing = wtResources.get(wtPath);
   if (existing) {
     // Within its grace period the worktree is adopted as it is, undo history included.
@@ -679,6 +691,51 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     return;
   }
 
+  const creation = createWorktreeResources(ws, wtPath, project);
+  wtResourcesCreating.set(wtPath, creation);
+  let resources: WorktreeResources;
+  try {
+    resources = await creation;
+  } finally {
+    wtResourcesCreating.delete(wtPath);
+  }
+  const clientState = clients.get(ws);
+  if (clientState) clientState.subscribedWorktrees.add(wtPath);
+  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
+  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
+  project.worktreeStatuses.invalidate();
+
+  // Push initial root directory listing so the file tree isn't empty.
+  // The client may have already requested GET /api/files before resources existed
+  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
+  resources.filesService
+    .getDirContents("", wtPath)
+    .then((entries) => {
+      broadcastToSubscribers(wtPath, {
+        type: "files_dir_changed",
+        wtPath,
+        data: { dir: wtPath, entries },
+      });
+    })
+    .catch(() => {});
+
+  // Push initial detached files listing (same race condition as above).
+  broadcastToSubscribers(wtPath, {
+    type: "detached_files_changed",
+    wtPath,
+    data: { entries: resources.detachedFilesService.listFiles() },
+  });
+  // Same for the Others section, which starts with the folders restored from the last session.
+  broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
+}
+
+/** Create the resources of `wtPath`, with `ws` as their first subscriber. */
+async function createWorktreeResources(
+  ws: ServerWebSocket<WsData>,
+  wtPath: string,
+  project: ProjectState,
+): Promise<WorktreeResources> {
   log.info(`Creating worktree resources for ${wtPath}`);
 
   // A linked worktree keeps its own index/HEAD under <common>/worktrees/<name>, which the
@@ -741,35 +798,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   };
 
   wtResources.set(wtPath, resources);
-  const clientState = clients.get(ws);
-  if (clientState) clientState.subscribedWorktrees.add(wtPath);
-  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
-  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
-  project.worktreeStatuses.invalidate();
-
-  // Push initial root directory listing so the file tree isn't empty.
-  // The client may have already requested GET /api/files before resources existed
-  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
-  filesService
-    .getDirContents("", wtPath)
-    .then((entries) => {
-      broadcastToSubscribers(wtPath, {
-        type: "files_dir_changed",
-        wtPath,
-        data: { dir: wtPath, entries },
-      });
-    })
-    .catch(() => {});
-
-  // Push initial detached files listing (same race condition as above).
-  broadcastToSubscribers(wtPath, {
-    type: "detached_files_changed",
-    wtPath,
-    data: { entries: detachedFilesService.listFiles() },
-  });
-  // Same for the Others section, which starts with the folders restored from the last session.
-  broadcastOthers(wtPath);
-  sendFilesResynced(ws, wtPath, project.cwd);
+  return resources;
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
