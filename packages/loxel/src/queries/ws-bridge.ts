@@ -463,6 +463,7 @@ export function useWsBridge(): void {
           void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
           break;
 
+        case "server_hello": // handled by wsClient itself
         case "terminal_exit":
         case "terminal_notice":
         case "terminal_state":
@@ -478,11 +479,30 @@ export function useWsBridge(): void {
       }
     });
 
+    const unsubscribeReconnect = wsClient.onReconnect(resyncAfterReconnect);
+
     return () => {
       unsubscribe();
+      unsubscribeReconnect();
       wsClient.disconnect();
     };
   }, []);
+}
+
+/**
+ * Catch up after the socket came back. Whether the server restarted or only the socket dropped,
+ * every push sent while it was down is lost, and the cache trusts pushes (`staleTime: Infinity`),
+ * so it all goes stale: TanStack refetches the queries on screen now and the rest when next used.
+ * File contents are the exception: an editor with unsaved changes must take new disk content
+ * through its state machine, not as a bare refetch, so they are left to the
+ * `worktree_files_resynced` the server sends each re-subscribed worktree. The project and
+ * worktree lists live in stores, so they are fetched again.
+ */
+function resyncAfterReconnect(): void {
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) => queryKey[0] !== "fileContent",
+  });
+  void useProjectStore.getState().fetchProjects();
 }
 
 /** Derive project path from a worktree path using the project store. */

@@ -37,7 +37,7 @@ The server lives as long as the app:
 
 A server started without `LOXEL_PARENT_PID`, such as `pnpm run dev` in a browser or a test server, shuts itself down instead. That happens 30 seconds after the last app client disconnects, or at the end of the 5-minute grace period when detached sessions are alive.
 
-The renderer's WebSocket client reconnects on its own, so windows survive a server restart. On reconnect it compares the server version with the one it first saw and reloads the page when it changed.
+The renderer's WebSocket client reconnects on its own, with backoff, so windows survive a server restart, and shows that it is reconnecting in the top bar. On reconnect the server's hello tells it whether this is the same server, version and process: a new version reloads the page, and otherwise the window re-subscribes its worktrees and refetches what it may have missed (see [ARCHITECTURE.md](ARCHITECTURE.md#websocket)).
 
 ## State scopes
 

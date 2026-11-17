@@ -21,6 +21,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { LoxelLogo } from "../ui/loxel-logo";
 import { WorktreeIcon } from "../worktrees/WorktreeIcon";
+import { ConnectionIndicator } from "./ConnectionIndicator";
 
 const isDev = import.meta.env.DEV;
 const isElectron = navigator.userAgent.includes("Electron");
@@ -109,8 +110,9 @@ export function TopBar() {
         </>
       )}
 
-      {/* Right side — notifications + settings */}
+      {/* Right side — connection, update, notifications + settings */}
       <div className="ml-auto flex items-center gap-1.5">
+        <ConnectionIndicator />
         <UpdateIndicator />
         <NotificationBell />
         <button

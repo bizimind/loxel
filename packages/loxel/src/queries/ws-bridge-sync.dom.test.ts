@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } f
 import type { Query } from "@tanstack/react-query";
 import { cleanup, renderHook } from "@testing-library/react";
 
-import { wsClient } from "@/api/client";
+import { type ReconnectInfo, wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
@@ -25,7 +25,9 @@ const WT = "/repo/.worktrees/wt";
 const setQueryData = spyOn(queryClient, "setQueryData");
 const invalidateQueries = spyOn(queryClient, "invalidateQueries");
 const refreshProjectWorktrees = mock(async () => {});
+const fetchProjects = mock(async () => {});
 let deliver: (message: WsMessage) => void = () => {};
+let reconnect: (info: ReconnectInfo) => void = () => {};
 
 beforeAll(() => {
   spyOn(wsClient, "connect").mockImplementation(() => {});
@@ -34,7 +36,11 @@ beforeAll(() => {
     deliver = handler;
     return () => {};
   });
-  useProjectStore.setState({ projects: [{ path: PROJECT } as EnrichedProject] });
+  spyOn(wsClient, "onReconnect").mockImplementation((handler) => {
+    reconnect = handler;
+    return () => {};
+  });
+  useProjectStore.setState({ projects: [{ path: PROJECT } as EnrichedProject], fetchProjects });
   useWorktreeStore.setState({ refreshProjectWorktrees });
   renderHook(() => useWsBridge());
 });
@@ -43,6 +49,7 @@ afterEach(() => {
   setQueryData.mockClear();
   invalidateQueries.mockClear();
   refreshProjectWorktrees.mockClear();
+  fetchProjects.mockClear();
 });
 
 afterAll(() => {
@@ -114,6 +121,26 @@ describe("useWsBridge git messages", () => {
     expect(setQueryData).not.toHaveBeenCalled();
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
+});
+
+describe("useWsBridge after a reconnect", () => {
+  test.each([false, true])(
+    "refetches everything but file contents, and the projects (server restarted: %p)",
+    (serverRestarted) => {
+      reconnect({ serverRestarted });
+
+      const keys = [
+        queryKeys.status(PROJECT, WT),
+        ["commits", PROJECT],
+        COMMIT_DIFF,
+        queryKeys.runningTerminals(),
+        queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
+      ];
+      // Editors with unsaved changes take new content through worktree_files_resynced instead.
+      expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
+      expect(fetchProjects).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe("useWsBridge file messages", () => {

@@ -34,8 +34,20 @@ export type TerminalNotice =
   | { notice: "attach_failed"; message: string }
   | { notice: "host_unresponsive" };
 
+/**
+ * Which server a client is talking to. `serverId` is generated once per state directory and kept
+ * across restarts; `bootEpoch` is new with every server process, so a changed epoch under the
+ * same `serverId` means the server restarted.
+ */
+export interface ServerIdentity {
+  serverId: string;
+  bootEpoch: string;
+}
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
+  // First message on every connection; the client resyncs from it (see `WsClient`)
+  | ({ type: "server_hello"; version: string } & ServerIdentity)
   // Worktree-scoped (sent to worktree subscribers only)
   | { type: "status_changed"; wtPath: string; data: StatusInfo }
   | { type: "files_dir_changed"; wtPath: string; data: { dir: string; entries: DirEntry[] } }
