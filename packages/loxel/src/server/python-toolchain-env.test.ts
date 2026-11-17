@@ -57,6 +57,7 @@ describe("pythonToolchainEnv", () => {
           sendExit: () => {},
           sendNotice: () => {},
           sendSize: () => {},
+          sendActive: () => {},
         },
         {
           cols: 80,

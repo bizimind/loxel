@@ -24,8 +24,13 @@ export interface TerminalSink {
   sendOutput(output: TerminalOutput): void;
   sendExit(end: TerminalEnd): void;
   sendNotice(notice: TerminalNotice): void;
-  /** The PTY's size, set by another client; every client but the active one renders at it. */
+  /**
+   * The PTY's size, which another client set or joined at: every client but the active one renders
+   * at it.
+   */
   sendSize(size: TerminalSize): void;
+  /** The active client left and this one, which claimed before it (or joined), took its place. */
+  sendActive(): void;
 }
 
 /** A client's flow-control budget: unacknowledged bytes that pause it, and that resync it. */
@@ -105,16 +110,15 @@ export class TerminalFanout {
 
   /**
    * Add `sink`, replacing any earlier attach of it, as a client waiting for its state, from
-   * `since` if its xterm is current to that point. With no other client attached (or replacing the
-   * active one) it becomes the active client, at `size`. Otherwise it joins passive, at the PTY's
-   * size, which it is sent: opening a terminal another window uses must not reflow it there, so it
-   * claims only on its user's input. Returns whether the PTY's size changed.
+   * `since` if its xterm is current to that point. With no other client attached it becomes the
+   * active client, at `size`. Otherwise it joins passive, at the PTY's size, which it is sent:
+   * opening a terminal another window uses must not reflow it there, so it claims only on its
+   * user's input. Returns whether the PTY's size changed.
    */
   attach(sink: TerminalSink, size: TerminalSize, since?: StreamPoint): boolean {
-    const claims = this.clients.size === 0 || this.isActive(sink);
     this.clients.delete(sink);
     const client: Client = { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 };
-    if (claims) {
+    if (this.clients.size === 0) {
       this.clients.set(sink, client);
       return this.setSize(size, true);
     }
@@ -144,12 +148,15 @@ export class TerminalFanout {
 
   /**
    * Remove `sink`; returns whether it was attached. The client that claimed the terminal before
-   * it becomes the active one, at the size the PTY has, which it already renders at. Once the
-   * last client is gone the stream starts over with the next attach.
+   * it (or the first to join) becomes the active one, at the size the PTY has, which it already
+   * renders at, and is told so: it refits from then on. Once the last client is gone the stream
+   * starts over with the next attach.
    */
   detach(sink: TerminalSink): boolean {
+    const wasActive = this.isActive(sink);
     if (!this.clients.delete(sink)) return false;
     if (this.clients.size === 0) this.offset = null;
+    else if (wasActive) [...this.clients.keys()].at(-1)?.sendActive();
     return true;
   }
 

@@ -28,15 +28,18 @@ function createRecordingSink() {
   const exits: TerminalEnd[] = [];
   const notices: TerminalNotice[] = [];
   const sizes: TerminalSize[] = [];
+  let actives = 0;
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: ({ data }) => output.push(data),
     sendExit: (end) => exits.push(end),
     sendNotice: (notice) => notices.push(notice),
     sendSize: (size) => sizes.push(size),
+    sendActive: () => void actives++,
   };
   return {
     sink,
+    actives: () => actives,
     states,
     exits,
     notices,
@@ -1023,7 +1026,7 @@ describe("TerminalManager with several clients", () => {
     expect(host.resizes).toHaveLength(1);
   });
 
-  test("the active client attaching again stays active, at its new size", async () => {
+  test("a window attaching again next to another joins passive, and takes over once it leaves", async () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
@@ -1031,9 +1034,18 @@ describe("TerminalManager with several clients", () => {
     const second = createRecordingSink();
     await manager.attach(id, first.sink, attachOptions);
     await manager.attach(id, second.sink, attachOptions);
-    void manager.attach(id, first.sink, { ...attachOptions, cols: 90, rows: 20 });
-    expect(host.resizes).toEqual([{ cols: 90, rows: 20 }]);
-    expect(second.sizes.at(-1)).toEqual({ cols: 90, rows: 20 });
+
+    // As the server does on a re-attach or a reconnect: the old sink goes, a new one attaches.
+    const again = createRecordingSink();
+    manager.detach(id, first.sink);
+    expect(second.actives()).toBe(1);
+    void manager.attach(id, again.sink, { ...attachOptions, cols: 90, rows: 20 });
+    expect(host.resizes).toEqual([]);
+    expect(again.sizes).toEqual([{ cols: 80, rows: 24 }]);
+
+    // A passive client leaving promotes nobody.
+    manager.detach(id, again.sink);
+    expect(second.actives()).toBe(1);
   });
 
   test("a client detaching leaves the others attached; the last one leaves an orphan", async () => {

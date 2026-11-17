@@ -300,7 +300,8 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
   /**
    * Whether this view is the terminal's active one, as far as it knows: it is once it attaches or
    * claims the terminal, and stops being when the server sends the size another view set, which
-   * it does at once for an attach that joins another view's.
+   * it does at once for an attach that joins another view's. The server says when the view in use
+   * left and this one took its place (`terminal_active`).
    */
   const activeRef = useRef(false);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -547,6 +548,12 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         if (msg.cols !== terminal.cols || msg.rows !== terminal.rows) {
           terminal.resize(msg.cols, msg.rows);
         }
+        return;
+      }
+      if (msg.type === "terminal_active" && msg.id === terminalId) {
+        // The view in use left: this one is now, and fits its own container again.
+        activeRef.current = true;
+        if (isOnScreen(panelApi)) fitAndSendResize(terminalId, terminal, fitAddon);
         return;
       }
       if (msg.type === "terminal_notice" && msg.id === terminalId) {

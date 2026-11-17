@@ -191,6 +191,7 @@ describe("nodeToolchainEnv", () => {
           sendExit: () => {},
           sendNotice: () => {},
           sendSize: () => {},
+          sendActive: () => {},
         },
         {
           cols: 80,
