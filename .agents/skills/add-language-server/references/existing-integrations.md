@@ -23,7 +23,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | JVM flags       | import once trusted (pushed)  |
 | ESLint                  | bundled JS    | worktree | lazy       | n/a             | `--stdio`       | settings per file (pulled)    |
 | oxlint                  | project's own | worktree | lazy       | n/a             | `--lsp`         | none                          |
-| Biome                   | project's own | worktree | lazy       | n/a             | no              | `lsp-proxy`                   | settings (pulled) |
+| Biome                   | project's own | worktree | lazy       | n/a             | `lsp-proxy`     | settings (pulled)             |
 
 ## TypeScript — Do Not Use as Template
 
