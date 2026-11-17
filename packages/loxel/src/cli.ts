@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { isCodingAgent } from "./coding-agent-env";
-import { findServer, waitForServer } from "./find-server";
+import { SOCKET_URL, findServer, givenServerGone, waitForServer } from "./find-server";
 import { requestOpenAll } from "./open-request";
 import { isHttpUrl } from "./url-utils";
 
@@ -70,11 +70,24 @@ async function main(): Promise<void> {
     }
   }
 
+  let announced = false;
+  const announceWaiting = () => {
+    if (!announced) process.stderr.write("loxel: waiting for a Loxel window...\n");
+    announced = true;
+  };
+
   // Find the server, and bring Loxel to the front or launch it; without focus, only launch it, in
-  // the background. A server a Loxel terminal names belongs to the window the terminal is in.
+  // the background. A server a Loxel terminal names belongs to the window the terminal is in, so
+  // it is not focused, and is launched (in the background) only when it is gone for good (#1387).
   const found = await findServer(process.env);
-  if (!found?.given && (focus || !found)) launchLoxel({ background: !focus });
-  const server = found?.address ?? (await waitForServer(process.env));
+  if (found?.given) {
+    if (await givenServerGone(found.socket, { onWaiting: announceWaiting })) {
+      launchLoxel({ background: true });
+    }
+  } else if (focus || !found) {
+    launchLoxel({ background: !focus });
+  }
+  const socket = found?.socket ?? (await waitForServer(process.env));
 
   // The window in use: from a loxel terminal, that terminal's window; otherwise the focused one.
   const windowId = isInsideLoxel && envWindowId ? envWindowId : undefined;
@@ -101,12 +114,9 @@ async function main(): Promise<void> {
   const sendable = opens.flatMap(({ label, request }) => (request ? [{ label, request }] : []));
 
   const { warnings, failures } = await requestOpenAll(
-    server.url,
+    SOCKET_URL,
     sendable.map((open) => open.request),
-    {
-      unix: server.unix,
-      onWaiting: () => process.stderr.write("loxel: waiting for a Loxel window...\n"),
-    },
+    { unix: socket, onWaiting: announceWaiting },
   );
   for (const warning of warnings) process.stderr.write(`loxel: warning: ${warning}\n`);
   for (const { index, message } of failures) {

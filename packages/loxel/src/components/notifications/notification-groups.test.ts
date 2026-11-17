@@ -50,7 +50,7 @@ describe("groupNotifications", () => {
   test("never stacks terminals' or the server's notifications", () => {
     const t1 = terminal();
     const t2 = terminal();
-    const host = notification({ kind: "terminal_host" });
+    const host = notification({ kind: "server" });
 
     expect(shape([host, t2, t1])).toEqual([[host.id], [t2.id], [t1.id]]);
   });

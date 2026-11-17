@@ -52,9 +52,9 @@ describe("NotificationStore", () => {
     const store = new NotificationStore();
     store.add({ source: terminal, urgency: "normal" });
     store.add({ source: browser("a"), urgency: "normal" });
-    store.add({ source: { kind: "terminal_host" }, urgency: "normal" });
+    store.add({ source: { kind: "server" }, urgency: "normal" });
     expect(store.dismissByWorktree("/wt").toSorted()).toEqual(["browser-1", "t1"]);
-    expect(store.getAll().map((n) => n.source.kind)).toEqual(["terminal_host"]);
+    expect(store.getAll().map((n) => n.source.kind)).toEqual(["server"]);
   });
 
   test("tag replacement stays within one worktree", () => {
