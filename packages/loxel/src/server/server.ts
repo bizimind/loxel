@@ -402,6 +402,19 @@ function deliverInbox(ws: ServerWebSocket<WsData>): void {
   log.info(`Delivered ${entries.length} open(s) queued while no window was connected`);
 }
 
+/**
+ * Drop the queued terminals that did not outlive the last server: a panel for one would only show
+ * a new shell. Only once every terminal host has listed its sessions: one that did not answer at
+ * startup may still hold them, and is adopted once it does.
+ */
+function dropGoneQueuedTerminals(): void {
+  if (!terminalHosts.sessionsKnown) return;
+  openInbox.dropWhere(
+    ({ message }) =>
+      message.type === "open_terminal" && !terminalManager.get(message.data.terminalId),
+  );
+}
+
 /** The terminal's session is gone: a panel for it would only show a new shell. */
 function dropQueuedTerminal(id: string): void {
   openInbox.dropWhere(
@@ -1014,6 +1027,8 @@ const terminalHosts = new TerminalHostPool({
   log: logger.child("terminal"),
   perfLog: logger.child("perf"),
 });
+// A host that did not answer at startup has answered, or is gone: what it holds is known now.
+terminalHosts.onSessionsKnown(() => dropGoneQueuedTerminals());
 terminalHosts.onEvent((event) => {
   if (event.type === "output") stress.track("pty-output");
 });
@@ -1445,11 +1460,7 @@ try {
 // Terminals that outlived the previous server are this one's before any client can attach to them.
 try {
   const { ended } = await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
-  // A queued terminal that did not outlive the last server would get a new shell, not its own.
-  openInbox.dropWhere(
-    ({ message }) =>
-      message.type === "open_terminal" && !terminalManager.get(message.data.terminalId),
-  );
+  dropGoneQueuedTerminals();
   const notice = endedHostsNotice(ended);
   // Kept in the store, so the first window to connect gets it with notifications_sync.
   if (notice) {
