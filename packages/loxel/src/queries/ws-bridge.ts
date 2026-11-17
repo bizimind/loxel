@@ -477,6 +477,7 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_notice":
         case "terminal_state":
+        case "terminal_size":
         case "error":
           break;
 
