@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
+import { worktreeRef } from "@/api/worktree-ref";
 import { ChangesFileMenu } from "@/components/menus/ChangesFileMenu";
 import { BranchCommitDropdown } from "@/components/panels/BranchCommitDropdown";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
@@ -18,6 +19,7 @@ import { revealInProjectExplorer } from "@/lib/reveal-in-explorer";
 import { cn } from "@/lib/utils";
 import { useRevertToHeadMutation } from "@/queries/use-git-mutations";
 import { useDiffQuery } from "@/queries/use-repo-queries";
+import { getQueryScope } from "@/queries/use-scope";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -127,8 +129,12 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
       });
       // A discarded file is no longer the one being edited: once it leaves the diff, the viewer
       // moves on to another file.
-      const ui = getWorktreeUI(discardTarget.worktree).getState();
-      if (discardTarget.files.some((f) => fileDiffPath(f) === ui.editedDiffFile)) {
+      // The discarded worktree is one of the active worktree's repository, on its server.
+      const { activeWorktree } = getQueryScope();
+      const ui = activeWorktree
+        ? getWorktreeUI(worktreeRef(activeWorktree.server, discardTarget.worktree)).getState()
+        : null;
+      if (ui && discardTarget.files.some((f) => fileDiffPath(f) === ui.editedDiffFile)) {
         ui.setEditedDiffFile(null);
       }
     } catch (err) {

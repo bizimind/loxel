@@ -42,7 +42,7 @@ import { ExcalidrawEditorTab } from "./excalidraw-editor-tab";
 import { LocalDbTab } from "./localdb-tab";
 import { MarkdownEditorTab } from "./markdown-editor-tab";
 import { MediaTab } from "./media-tab";
-import { PanelContext } from "./panel-context";
+import { PanelWorktreeProvider } from "./panel-context";
 import { PanelErrorBoundary } from "./panel-error-boundary";
 import { TerminalTab } from "./terminal-tab";
 import { VirtualDocumentTab } from "./virtual-document-tab";
@@ -121,13 +121,13 @@ function CompareFilesPanelComponent(
   props: IDockviewPanelProps<{ oldPath: string; newPath: string; worktreePath?: string }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <CompareFilesPanel
         panelId={props.api.id}
         oldPath={props.params.oldPath}
         newPath={props.params.newPath}
       />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }
 
@@ -136,7 +136,7 @@ function TerminalPanelComponent(
   props: IDockviewPanelProps<{ terminalId: string; worktreePath?: string; cwd?: string }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <Terminal
         terminalId={props.params.terminalId}
         cwd={props.params.cwd}
@@ -146,7 +146,7 @@ function TerminalPanelComponent(
         }}
         panelApi={props.api}
       />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }
 
@@ -177,7 +177,7 @@ function ExcalidrawPanelComponent(
   props: IDockviewPanelProps<{ filePath: string; worktreePath?: string; movedFrom?: string }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <ExcalidrawEditor
         filePath={props.params.filePath}
         movedFrom={props.params.movedFrom}
@@ -187,7 +187,7 @@ function ExcalidrawPanelComponent(
         }}
         panelApi={props.api}
       />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }
 
@@ -202,7 +202,7 @@ function CodeEditorPanelComponent(
   }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <CodeEditorPanel
         filePath={props.params.filePath}
         line={props.params.line}
@@ -211,7 +211,7 @@ function CodeEditorPanelComponent(
         onClose={() => props.api.close()}
         panelApi={props.api}
       />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }
 
@@ -240,9 +240,9 @@ function MediaViewerPanelComponent(
   props: IDockviewPanelProps<{ filePath: string; worktreePath?: string }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <MediaViewerPanel filePath={props.params.filePath} panelApi={props.api} />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }
 

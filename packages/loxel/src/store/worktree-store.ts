@@ -1,42 +1,34 @@
 /**
  * Worktree store factory — creates per-worktree Zustand store instances.
  *
- * Each worktree gets its own store instance, keyed by the active worktree path.
- * Switching worktrees changes which instance the hooks return.
+ * Each worktree gets its own store instance, keyed by its `WorktreeRef` (in its string form), so
+ * the same path on two servers gets two. Switching worktrees changes which instance the hooks
+ * return.
  *
  * When no worktree is active, hooks return a static no-op store with initial
  * state values. Mutations to the no-op store log a warning.
  *
- * Hooks and imperative code (store actions, event handlers) both resolve the instance from
- * `useWorktreeStore`'s `activeWorktreePath`, so they always agree on the active worktree.
+ * Hooks and imperative code (store actions, event handlers) both resolve the instance from the
+ * active worktree of the query scope (`useQueryScope` / `getQueryScope`), so they always agree on
+ * it.
  */
 
 import { useStore } from "zustand/react";
 import type { StateCreator, StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
 
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { frontendLog } from "@/lib/frontend-logger";
-
-import { useWorktreeStore } from "./worktrees";
+import { getQueryScope, useQueryScope } from "@/queries/use-scope";
 
 const log = frontendLog.child("worktrees");
 
-/**
- * The active worktree's scope key for imperative access (store actions, event handlers). It is the
- * same state the hooks subscribe to, never a copy: a copy can lag behind (as it did while
- * `activeWorktreePath` was restored from session storage on reload), and then a component writing
- * through a hook and reading through `getCurrent()` sees two different stores.
- */
-export function getActiveWorktreeKey(): string | null {
-  return useWorktreeStore.getState().activeWorktreePath;
-}
-
 /** Registry of all worktree store factories for bulk operations (purge, etc.). */
-const registry: Array<{ purge: (scopeKey: string) => void }> = [];
+const registry: Array<{ purge: (worktree: WorktreeRef) => void }> = [];
 
-/** Purge all worktree store instances for a given worktree key (worktree removal). */
-export function purgeWorktreeStores(scopeKey: string): void {
-  for (const entry of registry) entry.purge(scopeKey);
+/** Purge all worktree store instances of a worktree (worktree removal). */
+export function purgeWorktreeStores(worktree: WorktreeRef): void {
+  for (const entry of registry) entry.purge(worktree);
 }
 
 /**
@@ -46,7 +38,10 @@ export function purgeWorktreeStores(scopeKey: string): void {
  * @returns Hook, imperative accessor, and lifecycle methods
  */
 export function createWorktreeStore<T>(stateCreator: StateCreator<T>) {
+  /** By `formatWorktreeRef`. */
   const instances = new Map<string, StoreApi<T>>();
+  /** Home's own instance, for what is queued for its editor area (`getStore(null)`). */
+  let homeStore: StoreApi<T> | null = null;
 
   /** Static no-op store returned when no worktree is active. Logs on mutation. */
   let noopStore: StoreApi<T> | null = null;
@@ -68,35 +63,41 @@ export function createWorktreeStore<T>(stateCreator: StateCreator<T>) {
     return noopStore;
   }
 
-  function getStore(scopeKey: string): StoreApi<T> {
-    let store = instances.get(scopeKey);
+  /** The instance of `worktree`, created on first use; null is Home's, a real one. */
+  function getStore(worktree: WorktreeRef | null): StoreApi<T> {
+    if (worktree === null) {
+      homeStore ??= createStore<T>(stateCreator);
+      return homeStore;
+    }
+    const key = formatWorktreeRef(worktree);
+    let store = instances.get(key);
     if (!store) {
       store = createStore<T>(stateCreator);
-      instances.set(scopeKey, store);
+      instances.set(key, store);
     }
     return store;
   }
 
-  /** React hook: derives scope key from active worktree path, subscribes to correct instance. */
+  /** React hook: subscribes to the active worktree's instance, the no-op store with none. */
   function usePerWorktreeStore<R>(selector: (state: T) => R): R {
-    const scopeKey = useWorktreeStore((s) => s.activeWorktreePath);
-    const store = scopeKey ? getStore(scopeKey) : getNoopStore();
+    const { activeWorktree } = useQueryScope();
+    const store = activeWorktree ? getStore(activeWorktree) : getNoopStore();
     return useStore(store, selector);
   }
 
   /** Imperative: get the current scope's store (for actions, event handlers). */
   function getCurrent(): StoreApi<T> {
-    const scopeKey = getActiveWorktreeKey();
-    if (!scopeKey) {
+    const { activeWorktree } = getQueryScope();
+    if (!activeWorktree) {
       log.warn("getCurrent called with no active worktree, returning no-op store");
       return getNoopStore();
     }
-    return getStore(scopeKey);
+    return getStore(activeWorktree);
   }
 
-  /** Delete a scope's store instance (worktree removal cleanup). */
-  function purge(scopeKey: string): void {
-    instances.delete(scopeKey);
+  /** Delete a worktree's store instance (worktree removal cleanup). */
+  function purge(worktree: WorktreeRef): void {
+    instances.delete(formatWorktreeRef(worktree));
   }
 
   registry.push({ purge });

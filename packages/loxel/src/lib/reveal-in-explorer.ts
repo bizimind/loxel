@@ -1,4 +1,4 @@
-import { getPanelWorktreePath } from "@/components/dockview/panel-context";
+import { getPanelWorktree } from "@/components/dockview/panel-context";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { getCenterApi, showPanel } from "@/store/tools-bar";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
@@ -23,7 +23,7 @@ export function getActiveEditorFile(): ActiveEditorFile | null {
   if (!def || !FILE_PANEL_TYPES.has(def.type)) return null;
   return {
     filePath: active.id.slice(def.idPrefix.length),
-    worktreePath: getPanelWorktreePath(active),
+    worktreePath: getPanelWorktree(active)?.path ?? null,
   };
 }
 

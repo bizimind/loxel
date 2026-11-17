@@ -6,7 +6,7 @@ How file-backed panels load, edit, save and reconcile files with disk, and how t
 
 A file opens in one of four center panel types, chosen by extension in `filePanelType()` ([open-file.ts](../src/lib/open-file.ts)): `.md` opens the markdown editor, `.excalidraw` the drawing editor, media extensions ([media-extensions.ts](../src/lib/media-extensions.ts)) the media viewer, and everything else the code editor. `dispatchOpenFile()` turns that into a `loxel-open-*` event, and `openFileBacked()` ([panel-creators.ts](../src/lib/panel-creators.ts)) creates or focuses the panel.
 
-The absolute file path is the identity of an open file everywhere: the panel id (`${idPrefix}${filePath}`, so a center layout holds at most one panel per path and type), the key of its tab's entry in the editor state store (other editors of the file, the editable sides of diff views, have keys of their own; see [Several editors of one file](#several-editors-of-one-file)), the key of every content cache, and, with the worktree's ref (see [Query keys](ARCHITECTURE.md#query-keys)), the React Query `fileContent` key. Relative paths only appear in legacy routes and in search/Quick Open payloads relative to the worktree.
+The absolute file path is the identity of an open file everywhere: the panel id (`${idPrefix}${filePath}`, so a center layout holds at most one panel per path and type), with its server, the key of its tab's entry in the editor state store (other editors of the file, the editable sides of diff views, have keys of their own; see [Several editors of one file](#several-editors-of-one-file)), the key of every content cache, and, with the worktree's ref (see [Query keys](ARCHITECTURE.md#query-keys)), the React Query `fileContent` key. Relative paths only appear in legacy routes and in search/Quick Open payloads relative to the worktree.
 
 Where to look:
 
@@ -24,11 +24,11 @@ Every file-backed editor (code, markdown, drawing, and each editable side of a d
 
 ### Editor file state
 
-[editor-state.ts](../src/store/editor-state.ts) is a Zustand store with one `EditorFileEntry` per open editor, keyed by editor key: the file path for a file's own tab, `<panel id>:old` or `:new` for a compare panel side, `working-tree:<abs path>:new` for the working-tree side of a git diff (`openFile(key, filePath?)` is idempotent; `closeFile` drops the entry). Every action takes the editor key:
+[editor-state.ts](../src/store/editor-state.ts) is a Zustand store with one `EditorFileEntry` per open editor, keyed by editor key, a branded `EditorKey` that only its builders make, so a bare path cannot address an editor: `fileEditorKey(server, filePath)` for a file's own tab, and `viewEditorKey` for another view, `<panel id>:old` or `:new` for a compare panel side and `working-tree:<server>:<abs path>:new` for the working-tree side of a git diff (`editableSideKey` and `workingTreeSideKey` in [use-editable-side.ts](../src/components/diff/use-editable-side.ts)). The server is the one holding the panel's file, `usePanelServer()` (the panel's worktree's, or the window's in Home), so the same path on two servers gets two tabs. `openFile(key, server, filePath)` is idempotent; `closeFile` drops the entry. Every action takes the editor key:
 
 | Field                                     | Purpose                                                                           |
 | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `filePath`                                | the file the editor shows; equal to the key for a file's own tab                  |
+| `server` / `filePath`                     | the file the editor shows; `fileEditorKey` of them for a file's own tab           |
 | `instanceId`                              | new for every `openFile`; ties an outbox save to the editor that made it          |
 | `state`                                   | `clean`, `dirty`, `saving` or `diverged`                                          |
 | `queued`                                  | a save of this editor waits in the [outbox](#save-outbox); `state` stays `dirty`  |
@@ -52,7 +52,7 @@ Every file-backed editor (code, markdown, drawing, and each editable side of a d
 
 ### Several editors of one file
 
-A file can be open in its tab and in any number of editable diff sides (compare panel sides and the working-tree side of a git diff, [use-editable-side.ts](../src/components/diff/use-editable-side.ts)) at once. Each is an independent editor with its own entry, Monaco model, autosave timers and nonces, passed to `useDiskSyncedContent` as `editorKey`. `saveEditorContent` takes the editor key, so a save's echo is matched to the editor that made it, and the bridge runs `file_content_changed` through every entry whose `filePath` matches: to the other editors the save is an ordinary external change, which a clean editor reloads and a dirty one merges (or shows as a conflict). They share the React Query `fileContent` query, which is keyed by path.
+A file can be open in its tab and in any number of editable diff sides (compare panel sides and the working-tree side of a git diff, [use-editable-side.ts](../src/components/diff/use-editable-side.ts)) at once. Each is an independent editor with its own entry, Monaco model, autosave timers and nonces, passed to `useDiskSyncedContent` as `editorKey`. `saveEditorContent` takes the editor key, so a save's echo is matched to the editor that made it, and the bridge runs `file_content_changed` through every entry whose `server` and `filePath` match: to the other editors the save is an ordinary external change, which a clean editor reloads and a dirty one merges (or shows as a conflict). They share the React Query `fileContent` query, which is keyed by path.
 
 Only a file's own tab is moved or closed by `handleFileMoved` and `handleFileDeleted` ([panel-creators.ts](../src/lib/panel-creators.ts)). Both first mark the path's other editors `deleted`, before their queries notice, so a pending autosave cannot re-create the old path; an editable diff side stays open on it with the deleted banner. Code that needs the set of open files (re-registering external files on reconnect, closing an Others folder) reads `filePath` from the entries (`openEditorPaths`), not the keys.
 
@@ -301,7 +301,7 @@ Quick Open, Go to Symbol and the command palette render through [picker-dialog.t
 
 ## Invariants
 
-- One open file is one absolute path: one panel per path and type in a layout, one cache key, and one editor-state entry per editor showing it, the tab's keyed by the path. Paths from the server and the client must be normalized the same way (`resolve`, `canonicalPath`).
+- One open file is one absolute path: one panel per path and type in a layout, one cache key, and one editor-state entry per editor showing it, the tab's keyed by the path and its server (`fileEditorKey`). Paths from the server and the client must be normalized the same way (`resolve`, `canonicalPath`).
 - Editor writes go only through `saveEditorContent` (or the outbox retrying one), which always sends a fresh nonce (`/api/file-write` requires one). A write without a nonce is seen as an external change by every editor, including the one that made it.
 - A save the server did not confirm is never written without reading the file first: a queued save is merged with the disk or shown as a conflict, never written over a newer disk version.
 - Completion of a save is the nonce echo, not the HTTP response. Do not mark files clean elsewhere.

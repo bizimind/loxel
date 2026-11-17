@@ -12,8 +12,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import { localRef } from "@/api/local-server";
-import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { type SaveOptions, type SaveReason, saveEditorContent } from "@/lib/save-editor-content";
@@ -25,7 +24,12 @@ import {
 } from "@/lib/save-outbox";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
-import { type EditorFileState, useEditorStateStore } from "@/store/editor-state";
+import {
+  type EditorFileState,
+  type EditorKey,
+  fileEditorKey,
+  useEditorStateStore,
+} from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 
 export const AUTOSAVE_DEBOUNCE_MS = 250;
@@ -47,11 +51,11 @@ export interface MergeCallbacks {
 export interface UseDiskSyncedContentOptions<T> {
   filePath: string;
   /**
-   * Editor-state key for this editor. Defaults to `filePath`, which is right for a file's own tab;
-   * other views of a file (a compare panel side) pass a key of their own so they get their own
-   * state entry.
+   * Editor-state key for this editor. Defaults to the file's tab key (`fileEditorKey`), which is
+   * right for a file's own tab; other views of a file (a compare panel side) pass a key of their
+   * own (`viewEditorKey`) so they get their own state entry.
    */
-  editorKey?: string;
+  editorKey?: EditorKey;
   /** Parse raw file content string into typed content T. */
   deserialize: (raw: string) => T;
   /** External content cache (Map<cacheKey, T>). null = no cache (e.g. CodeEditor). */
@@ -69,6 +73,8 @@ export interface DiskSyncedContent<T> {
   isDeleted: boolean;
   /** Cache key (absolute file path). */
   cacheKey: string;
+  /** This editor's key in `useEditorStateStore`. */
+  editorKey: EditorKey;
   /** Whether the active query errored. */
   isError: boolean;
   /** Run the file's content query again, after a failed load. */
@@ -114,11 +120,14 @@ export function useDiskSyncedContent<T>(
   options: UseDiskSyncedContentOptions<T>,
 ): DiskSyncedContent<T> {
   const { filePath, deserialize, contentCache, mergeCallbacks } = options;
-  const editorKey = options.editorKey ?? filePath;
 
   // --- Scope ---
   const { activeProject } = useQueryScope();
-  const panelWorktreePath = usePanelWorktreePath();
+  const panelWorktree = usePanelWorktree();
+  const panelWorktreePath = panelWorktree?.path ?? null;
+  const server = usePanelServer();
+  const tabKey = fileEditorKey(server, filePath);
+  const editorKey = options.editorKey ?? tabKey;
 
   // Absolute file path IS the cache key — no scoping needed
   const cacheKey = filePath;
@@ -179,15 +188,15 @@ export function useDiskSyncedContent<T>(
   // A file's own tab opening while a save of the file waits in the outbox (its tab was closed
   // before the server took it, or the app quit) shows that save's content instead of the disk's
   // and takes the save over, until the editor is clean again.
-  const [adoption, setAdoption] = useState<{ key: string; entry: OutboxEntry } | null>(() => {
-    const entry = editorKey === filePath ? findAdoptableEntry(filePath) : null;
+  const [adoption, setAdoption] = useState<{ key: EditorKey; entry: OutboxEntry } | null>(() => {
+    const entry = editorKey === tabKey ? findAdoptableEntry(filePath) : null;
     return entry ? { key: editorKey, entry } : null;
   });
   const adopted = adoption?.key === editorKey ? adoption.entry : null;
 
   // --- File registration ---
   useEffect(() => {
-    useEditorStateStore.getState().openFile(editorKey, filePath);
+    useEditorStateStore.getState().openFile(editorKey, server, filePath);
     if (adopted) adoptOutboxEntry(editorKey, adopted);
     return () => {
       // Edits carried over by a move, or of a file deleted from disk, are not saved here; the
@@ -210,7 +219,7 @@ export function useDiskSyncedContent<T>(
           const content = fn("auto");
           if (content !== null) {
             // A moved file's flush goes to its new path, whose tab is keyed by that path.
-            const key = target === filePath ? editorKey : target;
+            const key = target === filePath ? editorKey : fileEditorKey(server, target);
             saveEditorContent(
               target,
               content,
@@ -225,7 +234,7 @@ export function useDiskSyncedContent<T>(
       contentCache?.delete(cacheKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, editorKey, cacheKey]);
+  }, [filePath, editorKey, server, cacheKey]);
 
   // --- Unsaved edits, taken over by a move ---
   useEffect(() => {
@@ -256,12 +265,7 @@ export function useDiskSyncedContent<T>(
 
   // --- Query ---
   const { data, dataUpdatedAt, isError, error, refetch } = useQuery({
-    queryKey: queryKeys.fileContent(
-      activeProject,
-      filePath,
-      undefined,
-      localRef(panelWorktreePath ?? undefined),
-    ),
+    queryKey: queryKeys.fileContent(activeProject, filePath, undefined, panelWorktree ?? undefined),
     queryFn: ({ signal }) => api.getFileContentByPath(filePath, panelWorktreePath, signal),
     // Force a background refetch on every mount so editors pick up external changes
     // that occurred while the worktree was unsubscribed (e.g. switched to another tab).
@@ -473,6 +477,7 @@ export function useDiskSyncedContent<T>(
     editorFileState,
     isDeleted,
     cacheKey,
+    editorKey,
     isError,
     retryLoad,
     getSerializedContentRef,
@@ -507,11 +512,11 @@ export function useFormatOnSave({
       : undefined;
 }
 
-function isFileDeleted(editorKey: string): boolean {
+function isFileDeleted(editorKey: EditorKey): boolean {
   return useEditorStateStore.getState().files.get(editorKey)?.deleted ?? false;
 }
 
-function isFileMoving(editorKey: string): boolean {
+function isFileMoving(editorKey: EditorKey): boolean {
   return Boolean(useEditorStateStore.getState().files.get(editorKey)?.movedTo);
 }
 
@@ -519,7 +524,7 @@ function isFileMoving(editorKey: string): boolean {
  * Where an unmounting editor writes its pending edit: the new path of a moved file, nothing for
  * a deleted file or one whose entry a delete or move handler already closed, else the file.
  */
-function flushTarget(editorKey: string): string | null {
+function flushTarget(editorKey: EditorKey): string | null {
   const entry = useEditorStateStore.getState().files.get(editorKey);
   if (!entry) return null;
   if (entry.movedTo) return entry.movedTo;

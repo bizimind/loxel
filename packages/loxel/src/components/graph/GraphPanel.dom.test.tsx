@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, tes
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { SerializedDockview } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
 import {
   getWorktreeInnerLayout,
   purgeWorktreeCache,
@@ -85,8 +86,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  purgeWorktreeStores("/repo");
-  purgeWorktreeCache("/repo");
+  purgeWorktreeStores(localRef("/repo"));
+  purgeWorktreeCache(localRef("/repo"));
 });
 
 function nextFrame(): Promise<void> {
@@ -141,7 +142,7 @@ describe("GraphPanel", () => {
     await openGraphPanel();
 
     expect(branchesWidth()).toBe(BRANCHES_DEFAULT_WIDTH);
-    expect(getWorktreeUI("/repo").getState().branchesPanelSide).toBe("left");
+    expect(getWorktreeUI(localRef("/repo")).getState().branchesPanelSide).toBe("left");
   });
 
   test("restores the default width when a saved layout has a zero-width branches column", async () => {
@@ -197,10 +198,10 @@ describe("GraphPanel", () => {
       await openGraphPanel();
 
       for (let i = 0; i < 2; i++) {
-        act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
+        act(() => getWorktreeUI(localRef("/repo")).getState().toggleBranchesPanel());
         expect(branchesWidth()).toBe(COLLAPSED_WIDTH);
         await act(nextFrame);
-        act(() => getWorktreeUI("/repo").getState().toggleBranchesPanel());
+        act(() => getWorktreeUI(localRef("/repo")).getState().toggleBranchesPanel());
         expect(branchesWidth()).toBe(width);
         // Let Dockview's layout notification record the settled width before toggling again.
         await act(nextFrame);

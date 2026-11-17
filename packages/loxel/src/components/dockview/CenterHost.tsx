@@ -15,7 +15,7 @@ import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
-import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { activeLayoutKey, HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
 import { closeBrowserPage } from "@/store/browser-pages";
 import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { getCenterPanelDef } from "@/store/panel-config";
@@ -96,7 +96,7 @@ function CenterLayout({
     // A swap's groups come back with their ids when the layout is restored; these are gone for good.
     api.onDidRemoveGroup((group) => {
       if (!swappingRef.current && !isOuterSwapping()) {
-        forgetClosedTabGroup(layoutKeyRef.current, group.id);
+        forgetClosedTabGroup(layoutWorktree(layoutKeyRef.current), group.id);
       }
     });
 
@@ -147,7 +147,7 @@ function CenterLayout({
     queueMicrotask(() => {
       const key = layoutKeyRef.current;
       if (getCenterApi() !== api || activeLayoutKey() !== key) return;
-      for (const open of getWorktreeUI(key).getState().takePendingOpens()) {
+      for (const open of getWorktreeUI(layoutWorktree(key)).getState().takePendingOpens()) {
         dispatchPendingOpen(open);
       }
     });
