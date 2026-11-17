@@ -30,3 +30,26 @@ export function classifySchemaGlob(glob: string): Record<SchemaLanguage, boolean
   if (languages.size === 0) return { json: true, yaml: true, toml: true };
   return { json: languages.has("json"), yaml: languages.has("yaml"), toml: languages.has("toml") };
 }
+
+/** The files a schema mapping applies to: those `glob` matches, less those `exclude` matches. */
+export interface SchemaFileMatch {
+  glob: string;
+  /** One glob, without the `!`; empty or absent for none. */
+  exclude?: string;
+}
+
+/** The exclusion glob of a mapping, or null for none. A leading `!` the user typed is dropped. */
+export function schemaExcludeGlob({ exclude }: SchemaFileMatch): string | null {
+  // Persisted settings are not validated, so a hand-edited value may be anything.
+  const glob = typeof exclude === "string" ? exclude.trim().replace(/^!+/, "") : "";
+  return glob ? glob : null;
+}
+
+/**
+ * A mapping's patterns for Monaco's JSON `fileMatch` and yaml-language-server's `yaml.schemas`,
+ * where a leading `!` excludes. Tombi has no exclusions, so TOML gets only `glob`.
+ */
+export function schemaFilePatterns(match: SchemaFileMatch): string[] {
+  const exclude = schemaExcludeGlob(match);
+  return exclude ? [match.glob, `!${exclude}`] : [match.glob];
+}

@@ -1,4 +1,5 @@
 import type { FormattingSettings } from "@/lib/formatting-model";
+import type { SchemaFileMatch } from "@/lib/schema-glob";
 import type { OpenRequest, OpenResult } from "@/open-request";
 
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
@@ -638,7 +639,9 @@ export async function convertProject(req: ConvertProjectRequest) {
 
 // --- Schema API ---
 
-export async function syncSchemas(schemas: Array<{ glob: string; url: string }>): Promise<void> {
+export async function syncSchemas(
+  schemas: Array<SchemaFileMatch & { url: string }>,
+): Promise<void> {
   await fetchJson("/schemas/sync", { method: "POST", body: JSON.stringify({ schemas }) });
 }
 

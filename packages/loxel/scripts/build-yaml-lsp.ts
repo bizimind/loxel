@@ -1,66 +1,55 @@
 /**
  * Builds the yaml-language-server into a standalone Bun binary.
  *
- * Several dependencies (vscode-json-languageservice, jsonc-parser, vscode-languageserver-textdocument)
- * use UMD module format with dynamic require() inside factory functions that Bun's bundler cannot
- * statically analyze. This build script redirects those packages to their ESM entry points so the
- * bundler can trace all imports correctly.
- *
  * Two-step process:
- *   1. Bun.build() with a plugin that rewrites UMD → ESM imports → single JS bundle
+ *   1. Bun.build() of the package's ESM server entry → single JS bundle
  *   2. bun build --compile on the resulting bundle → standalone binary
  */
 
 import path from "node:path";
 
+import { resolvePackage } from "./resolve-package";
+
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build");
 
-import { resolvePackage } from "./resolve-package";
-
 const yamlLspDir = resolvePackage("yaml-language-server");
-// These are transitive deps of yaml-language-server — resolve from its directory
-const jsonLsDir = resolvePackage("vscode-json-languageservice", yamlLspDir);
-const jsoncParserDir = resolvePackage("jsonc-parser", yamlLspDir);
-const textDocDir = resolvePackage("vscode-languageserver-textdocument", yamlLspDir);
 
-// Step 1: Bundle with UMD → ESM redirects
-console.log("Step 1: Bundling yaml-language-server with ESM redirects...");
+console.log("Step 1: Bundling yaml-language-server...");
 
 const result = await Bun.build({
-  entrypoints: [path.join(yamlLspDir, "out/server/src/server.js")],
+  entrypoints: [path.join(yamlLspDir, "out/src/server.js")],
   target: "bun",
   outdir: path.join(OUTDIR, ".yaml-lsp-intermediate"),
   plugins: [
     {
-      name: "umd-to-esm",
+      name: "stub-l10n",
       setup(build) {
-        // Stub l10n setup — the bundle path gets baked as an absolute CI path
-        // by bun --compile. Translations are non-essential (English fallback).
+        // The translations' path gets baked in as an absolute CI path by bun --compile.
+        // Translations are non-essential (English fallback).
         build.onLoad({ filter: /nodeTranslationSetup/ }, () => ({
           contents: "export async function setupl10nBundle() {}",
           loader: "js",
         }));
 
-        // vscode-json-languageservice: redirect bare and deep UMD imports to ESM
-        build.onResolve({ filter: /vscode-json-languageservice/ }, (args) => {
-          const esmPath = args.path.replace("/lib/umd/", "/lib/esm/");
-          if (esmPath === "vscode-json-languageservice") {
-            return { path: path.join(jsonLsDir, "lib/esm/jsonLanguageService.js") };
-          }
-          const subpath = esmPath.replace("vscode-json-languageservice/", "");
-          return { path: path.join(jsonLsDir, subpath + ".js") };
-        });
-
-        // jsonc-parser: UMD → ESM
-        build.onResolve({ filter: /^jsonc-parser$/ }, () => {
-          return { path: path.join(jsoncParserDir, "lib/esm/main.js") };
-        });
-
-        // vscode-languageserver-textdocument: UMD → ESM
-        build.onResolve({ filter: /^vscode-languageserver-textdocument$/ }, () => {
-          return { path: path.join(textDocDir, "lib/esm/main.js") };
-        });
+        // 2.0 matches `yaml.schemas` globs with picomatch's defaults (1.24 passed `bash: true`), so
+        // `**` and `*` skip dot segments: `**/*.yaml` would miss every file in a worktree under
+        // `.worktrees/`, in `.github/`, or named `.something.yaml`. `dot: true` matches them, as
+        // Loxel's own `schemaGlobMatches` does for JSON and TOML.
+        build.onLoad(
+          { filter: /languageservice\/services\/yamlSchemaService\.js$/ },
+          async (args) => {
+            const source = await Bun.file(args.path).text();
+            const options = "noglobstar: false,";
+            const matchers = source.split(options).length - 1;
+            if (matchers !== 2) {
+              throw new Error(
+                `Expected 2 picomatch calls with "${options}" in ${args.path}, found ${matchers}: update the dot-segment patch`,
+              );
+            }
+            return { contents: source.replaceAll(options, `${options} dot: true,`), loader: "js" };
+          },
+        );
       },
     },
   ],
@@ -74,7 +63,6 @@ if (!result.success) {
 
 console.log("Step 1 complete.");
 
-// Step 2: Compile to standalone binary
 console.log("Step 2: Compiling to standalone binary...");
 
 const intermediateJs = path.join(OUTDIR, ".yaml-lsp-intermediate/server.js");

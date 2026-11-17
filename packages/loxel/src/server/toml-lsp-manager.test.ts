@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
+import { builtBinaryExists } from "@/test/built-binary";
+
 import { tombiCachePath } from "./schema-downloads";
 import { TomlLspManager, tombiSettings, toTombiPatterns } from "./toml-lsp-manager";
 
@@ -136,6 +138,29 @@ class FakeClient {
     return report.items.map((item) => item.message);
   }
 
+  /**
+   * Pulls the document's diagnostics until `accept` takes them. Tombi can answer a pull before it
+   * has read the file's schema, and sends nothing once it has, so the first pull after a refresh
+   * may still be empty. Fails after `timeoutMs`, like `until`.
+   */
+  async diagnosticsUntil(
+    uri: string,
+    accept: (messages: string[]) => boolean,
+    timeoutMs = 20_000,
+  ): Promise<string[]> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const messages = await this.diagnostics(uri);
+      if (accept(messages)) return messages;
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Timed out waiting for diagnostics; the last were ${JSON.stringify(messages)}`,
+        );
+      }
+      await Bun.sleep(20);
+    }
+  }
+
   /** How many times the server has asked the client to pull diagnostics again. */
   refreshCount(): number {
     return this.serverRequests.filter((m) => m === "workspace/diagnostic/refresh").length;
@@ -199,7 +224,7 @@ async function setup(): Promise<{ root: string; appToml: string; schemaUrl: stri
   return { root: wt, appToml, schemaUrl: pathToFileURL(schemaPath).href };
 }
 
-describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with Tombi", () => {
+describe.skipIf(!(await builtBinaryExists(BUNDLED_TOMBI)))("TomlLspManager with Tombi", () => {
   test(
     "applies the pushed schema mappings and follows their updates",
     async () => {
@@ -214,7 +239,7 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
 
       const uri = client.open(appToml, "name = 5\nextra = true\n");
       await client.refreshedAfter(0);
-      const mapped = await client.diagnostics(uri);
+      const mapped = await client.diagnosticsUntil(uri, (messages) => messages.length > 0);
       expect(mapped).toHaveLength(2);
       expect(mapped.join("\n")).toContain("String");
 
@@ -222,13 +247,13 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
       let before = client.refreshCount();
       manager.updateSchemas({});
       await client.refreshedAfter(before);
-      expect(await client.diagnostics(uri)).toEqual([]);
+      expect(await client.diagnosticsUntil(uri, (messages) => messages.length === 0)).toEqual([]);
 
       before = client.refreshCount();
       // A wildcard glob, which reaches Tombi anchored at the worktree.
       manager.updateSchemas({ [schemaUrl]: ["app*.toml"] });
       await client.refreshedAfter(before);
-      expect(await client.diagnostics(uri)).toHaveLength(2);
+      expect(await client.diagnosticsUntil(uri, (messages) => messages.length > 0)).toHaveLength(2);
 
       // Tombi asks for the workspace folders; the manager answers instead of the client.
       expect(client.serverRequests).not.toContain("workspace/workspaceFolders");
@@ -261,7 +286,8 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
       await cached.start(root);
       const uri = cached.open(appToml, text);
       await cached.refreshedAfter(0);
-      expect((await cached.diagnostics(uri)).join("\n")).toContain("String");
+      const fromCache = await cached.diagnosticsUntil(uri, (messages) => messages.length > 0);
+      expect(fromCache.join("\n")).toContain("String");
     },
     TEST_TIMEOUT_MS,
   );
@@ -276,7 +302,8 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
       const directive = join(root, "directive.toml");
       const uri = client.open(directive, "#:schema ./schema.json\nname = 5\n");
       await client.refreshedAfter(0);
-      expect((await client.diagnostics(uri)).join("\n")).toContain("String");
+      const fromDirective = await client.diagnosticsUntil(uri, (messages) => messages.length > 0);
+      expect(fromDirective.join("\n")).toContain("String");
     },
     TEST_TIMEOUT_MS,
   );

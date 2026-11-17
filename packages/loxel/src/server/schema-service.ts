@@ -11,6 +11,35 @@ const MAX_REMOTE_BYTES = 64 * 1024 * 1024; // 64 MB
 /** What goes inline to Monaco's JSON worker. */
 const MAX_INLINE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** A schema download that failed, with a message for the user saying why. */
+class SchemaFetchError extends Error {}
+
+function tooLarge(): SchemaFetchError {
+  return new SchemaFetchError(`It is larger than ${MAX_REMOTE_BYTES / 1024 / 1024} MB`);
+}
+
+/** Why `fetch` (or reading its body) threw, in words: a timeout, or what the connection reported. */
+function networkError(url: string, err: unknown): SchemaFetchError {
+  const options = { cause: err };
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return new SchemaFetchError(`No answer within ${FETCH_TIMEOUT_MS / 1000} seconds`, options);
+  }
+  const { host } = new URL(url);
+  const code =
+    err instanceof Error && "code" in err && typeof err.code === "string" ? err.code : "";
+  if (code === "ECONNREFUSED")
+    return new SchemaFetchError(`${host} refused the connection`, options);
+  if (code === "ENOTFOUND") return new SchemaFetchError(`${host} was not found`, options);
+  if (code === "ECONNRESET") return new SchemaFetchError(`${host} closed the connection`, options);
+  if (code.includes("CERT")) {
+    return new SchemaFetchError(`${host} has an invalid certificate (${code})`, options);
+  }
+  // The server adds a period of its own after the reason.
+  const detail = (err instanceof Error ? err.message : String(err)).replace(/[.?!\s]+$/, "");
+  return new SchemaFetchError(`Download failed: ${detail}`, options);
+}
 
 interface CacheEntry {
   schema: unknown;
@@ -48,13 +77,15 @@ export class SchemaService {
     return this.resolveLocal(absPath);
   }
 
-  /** Download a remote schema's text, whatever its format, cached for an hour. */
-  async fetchText(url: string): Promise<string | null> {
+  /**
+   * Download a remote schema's text, whatever its format, cached for an hour. Throws an error whose
+   * message says why it could not, which a language server shows the user.
+   */
+  async fetchText(url: string): Promise<string> {
     const cached = this.remoteCache.get(url);
     if (cached && Date.now() - cached.fetchedAt < REMOTE_TTL_MS) return cached.text;
 
     const text = await this.download(url);
-    if (text === null) return null;
     this.remoteCache.set(url, { text, fetchedAt: Date.now() });
     log.debug("Cached remote schema", { url });
     return text;
@@ -75,8 +106,12 @@ export class SchemaService {
   // ---------------------------------------------------------------------------
 
   private async resolveRemote(url: string): Promise<unknown> {
-    const text = await this.fetchText(url);
-    if (text === null) return null;
+    let text: string;
+    try {
+      text = await this.fetchText(url);
+    } catch {
+      return null;
+    }
     if (text.length > MAX_INLINE_BYTES) {
       log.warn("Schema body too large, skipping", { url, bytes: text.length });
       return null;
@@ -89,39 +124,29 @@ export class SchemaService {
     }
   }
 
-  private async download(url: string): Promise<string | null> {
+  private async download(url: string): Promise<string> {
     try {
       const res = await this.fetchFollowing(url);
-      if (!res) return null;
       if (!res.ok) {
-        log.warn("Schema fetch failed", { url, status: res.status });
-        return null;
+        throw new SchemaFetchError(
+          `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`,
+        );
       }
-
       const contentLength = res.headers.get("content-length");
-      if (contentLength && parseInt(contentLength, 10) > MAX_REMOTE_BYTES) {
-        log.warn("Schema too large, skipping", { url, bytes: contentLength });
-        return null;
-      }
-
+      if (contentLength && parseInt(contentLength, 10) > MAX_REMOTE_BYTES) throw tooLarge();
       const text = await res.text();
-      if (text.length > MAX_REMOTE_BYTES) {
-        log.warn("Schema body too large, skipping", { url, bytes: text.length });
-        return null;
-      }
+      if (text.length > MAX_REMOTE_BYTES) throw tooLarge();
       return text;
     } catch (err) {
-      log.warn("Failed to resolve remote schema", {
-        url,
-        error: err instanceof Error ? err : undefined,
-      });
-      return null;
+      const reason = err instanceof SchemaFetchError ? err : networkError(url, err);
+      log.warn("Schema download failed", { url, reason: reason.message });
+      throw reason;
     }
   }
 
-  /** Fetch `url`, following only the redirects allowed; null when one is not. */
-  private async fetchFollowing(url: string): Promise<Response | null> {
-    const signal = AbortSignal.timeout(10_000);
+  /** Fetch `url`, following only the redirects allowed. */
+  private async fetchFollowing(url: string): Promise<Response> {
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
     let current = url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const res = await fetch(current, {
@@ -133,13 +158,11 @@ export class SchemaService {
       if (res.status < 300 || res.status >= 400 || !location) return res;
       const next = new URL(location, current).href;
       if (!this.mayFollowRedirect(current, next)) {
-        log.info("Not following a schema redirect", { from: current, to: next });
-        return null;
+        throw new SchemaFetchError(`It redirects to ${next}, which you haven't allowed`);
       }
       current = next;
     }
-    log.warn("Too many schema redirects", { url });
-    return null;
+    throw new SchemaFetchError(`More than ${MAX_REDIRECTS} redirects`);
   }
 
   private async resolveLocal(absPath: string): Promise<unknown> {

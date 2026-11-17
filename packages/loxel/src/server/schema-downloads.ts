@@ -90,7 +90,8 @@ export interface SchemaDownloadsOptions {
   tombiCacheDir: string;
   /** LemMinX's `xml.server.workDir`. */
   lemminxWorkDir: string;
-  fetchText: (url: string) => Promise<string | null>;
+  /** Rejects with an error saying why the schema could not be downloaded. */
+  fetchText: (url: string) => Promise<string>;
   request: (url: string) => SchemaVerdict;
   addReferences: (root: string, references: readonly string[]) => void;
   /** Servers that read a schema once must start over to see one that just arrived. */
@@ -114,11 +115,13 @@ export class SchemaDownloads {
 
   constructor(private readonly options: SchemaDownloadsOptions) {}
 
-  /** A schema's content for a server that asks for it; an empty schema when it may not have it. */
+  /**
+   * A schema's content for a server that asks for it; an empty schema when it may not have it.
+   * Rejects with why a download failed, which the server reports on the file.
+   */
   async contentFor(url: string): Promise<string> {
     if (this.options.request(url) !== "allowed") return EMPTY_SCHEMA;
     const text = await this.options.fetchText(url);
-    if (text === null) throw new Error(`Could not download ${url}`);
     if (this.options.request(url) !== "allowed") return EMPTY_SCHEMA;
     this.options.addReferences(url, schemaReferences(text, url));
     return text;
@@ -184,8 +187,13 @@ export class SchemaDownloads {
       const age = await cacheAge(paths);
       if (age !== null && age < CACHE_TTL_MS) continue;
 
-      const text = await this.options.fetchText(url);
-      if (text === null) continue;
+      let text: string;
+      try {
+        text = await this.options.fetchText(url);
+      } catch {
+        // Already logged; the next use tries again.
+        continue;
+      }
       if (generation !== this.generation || this.options.request(url) !== "allowed") {
         return arrived;
       }

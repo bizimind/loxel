@@ -26,6 +26,7 @@ import {
   type ThemeSettings,
 } from "@/lib/loxel-theme";
 import { DEFAULT_WHEN_QUITTING, parseWhenQuitting, type WhenQuitting } from "@/lib/quit-terminals";
+import type { SchemaFileMatch } from "@/lib/schema-glob";
 import type { ParsedTheme } from "@/lib/theme-file";
 import { parseThemePreference, type ThemePreference } from "@/lib/theme-preference";
 
@@ -443,9 +444,8 @@ export const selectEffectiveFileAssociations = createBuiltinMergeSelector(
 // JSON / YAML / TOML Schema Mappings
 // ---------------------------------------------------------------------------
 
-export interface SchemaMapping {
+export interface SchemaMapping extends SchemaFileMatch {
   id: string;
-  glob: string;
   url: string;
   enabled: boolean;
 }
@@ -667,7 +667,7 @@ export interface SettingsState {
   addSchema: (glob: string, url: string) => void;
   updateSchema: (
     id: string,
-    updates: Partial<Pick<SchemaMapping, "glob" | "url" | "enabled">>,
+    updates: Partial<Pick<SchemaMapping, "glob" | "exclude" | "url" | "enabled">>,
   ) => void;
   removeSchema: (id: string) => void;
   toggleSchema: (id: string) => void;

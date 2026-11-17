@@ -1,6 +1,13 @@
+import path from "node:path";
+
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import { isRecord } from "@/lib/is-record";
+
 import { type BaseLspSession, StdioLspManager } from "./stdio-lsp-manager";
+
+/** The server's command behind its schema CodeLens, which needs `window/showDocument`. */
+const JUMP_TO_SCHEMA = "jumpToSchema";
 
 interface ContentRequest {
   id: number | string;
@@ -24,6 +31,30 @@ function parseContentRequest(body: string): ContentRequest | null {
   // The server sends the URL alone or as a one-element array, depending on the transport.
   const url = Array.isArray(params) ? (params as unknown[])[0] : params;
   return typeof url === "string" ? { id, url } : null;
+}
+
+/**
+ * The server's frame with each schema CodeLens made a label: the lens names the schema each YAML
+ * document uses, and its command would open the schema with `window/showDocument`, which Loxel does
+ * not answer. A command with an empty id is one Monaco shows but does not run.
+ */
+export function withSchemaLensesAsLabels(body: string): string {
+  if (!body.includes(`"${JUMP_TO_SCHEMA}"`)) return body;
+  let frame: unknown;
+  try {
+    frame = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isRecord(frame) || !Array.isArray(frame.result)) return body;
+  let changed = false;
+  for (const lens of frame.result) {
+    if (!isRecord(lens) || !isRecord(lens.command)) continue;
+    if (lens.command.command !== JUMP_TO_SCHEMA || !("range" in lens)) continue;
+    lens.command = { title: lens.command.title, command: "" };
+    changed = true;
+  }
+  return changed ? JSON.stringify(frame) : body;
 }
 
 /**
@@ -58,7 +89,12 @@ export class YamlLspManager extends StdioLspManager<BaseLspSession> {
   // ---------------------------------------------------------------------------
 
   protected resolveBinary(): string | null {
-    return this.resolveBundledBinary("yaml-language-server");
+    // The compiled bundle, also in development: the npm package's own bin lacks what the build
+    // script patches in (see scripts/build-yaml-lsp.ts).
+    return this.resolveBundledBinary(
+      "yaml-language-server",
+      path.resolve(import.meta.dir, "../../build/yaml-language-server"),
+    );
   }
 
   protected buildSession(ws: ServerWebSocket<unknown>, proc: Subprocess): BaseLspSession {
@@ -95,7 +131,7 @@ export class YamlLspManager extends StdioLspManager<BaseLspSession> {
   protected override handleServerFrame(session: BaseLspSession, body: string): void {
     const request = parseContentRequest(body);
     if (!request) {
-      super.handleServerFrame(session, body);
+      super.handleServerFrame(session, withSchemaLensesAsLabels(body));
       return;
     }
     void this.answerContentRequest(session, request);

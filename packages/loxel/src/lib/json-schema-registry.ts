@@ -9,7 +9,8 @@
 import * as monaco from "monaco-editor";
 
 interface ResolvedSchema {
-  glob: string;
+  /** Monaco's `fileMatch`, where a leading `!` excludes. */
+  fileMatch: string[];
   url: string;
   schema: unknown;
 }
@@ -46,7 +47,7 @@ function applyToMonaco(): void {
 
   // Glob-based schemas from settings
   for (const s of configuredSchemas) {
-    schemas.push({ uri: s.url, fileMatch: [s.glob], schema: s.schema });
+    schemas.push({ uri: s.url, fileMatch: s.fileMatch, schema: s.schema });
   }
 
   // Per-file $schema overrides — use exact file URI as fileMatch

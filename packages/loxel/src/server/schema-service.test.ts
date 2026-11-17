@@ -22,7 +22,7 @@ afterEach(() => {
   stop = undefined;
 });
 
-/** Serves `/schema.json`; `/moved` redirects to it and `/loop` to itself. */
+/** Serves `/schema.json`; `/moved` redirects to it, `/loop` to itself, and `/gone` is not found. */
 function serve(): { base: string; hits: string[] } {
   const hits: string[] = [];
   const server = Bun.serve({
@@ -33,6 +33,7 @@ function serve(): { base: string; hits: string[] } {
       hits.push(pathname);
       if (pathname === "/moved") return Response.redirect("/schema.json", 302);
       if (pathname === "/loop") return Response.redirect("/loop", 302);
+      if (pathname === "/gone") return new Response("", { status: 404 });
       return Response.json(SCHEMA);
     },
   });
@@ -65,5 +66,38 @@ describe("SchemaService redirects", () => {
     const service = new SchemaService(() => true);
     expect(await service.resolve(`${base}/loop`)).toBeNull();
     expect(hits).toHaveLength(6);
+  });
+});
+
+describe("SchemaService download errors say why", () => {
+  test("the status of a failed request", async () => {
+    const { base } = serve();
+    const service = new SchemaService(() => true);
+    await expect(service.fetchText(`${base}/gone`)).rejects.toThrow("HTTP 404 Not Found");
+  });
+
+  test("a redirect it may not follow", async () => {
+    const { base } = serve();
+    const service = new SchemaService(() => false);
+    await expect(service.fetchText(`${base}/moved`)).rejects.toThrow(
+      `It redirects to ${base}/schema.json, which you haven't allowed`,
+    );
+  });
+
+  test("a redirect loop", async () => {
+    const { base } = serve();
+    const service = new SchemaService(() => true);
+    await expect(service.fetchText(`${base}/loop`)).rejects.toThrow("More than 5 redirects");
+  });
+
+  test("a host that does not answer", async () => {
+    const { base } = serve();
+    stop?.();
+    stop = undefined;
+    const service = new SchemaService(() => true);
+    const { host } = new URL(base);
+    await expect(service.fetchText(`${base}/schema.json`)).rejects.toThrow(
+      `${host} refused the connection`,
+    );
   });
 });

@@ -94,7 +94,9 @@ describe("SchemaDownloads", () => {
       lemminxWorkDir: join(root, "lemminx"),
       fetchText: async (url) => {
         fetched.push(url);
-        return responses.get(url) ?? null;
+        const text = responses.get(url);
+        if (text === undefined) throw new Error("HTTP 404 Not Found");
+        return text;
       },
       request: (url) => verdicts.get(url) ?? "undecided",
       addReferences: (rootUrl, references) => {
@@ -133,9 +135,9 @@ describe("SchemaDownloads", () => {
     expect(fetched).toEqual([A]);
   });
 
-  test("a failed download is an error, not an empty schema", async () => {
+  test("a failed download is an error saying why, not an empty schema", async () => {
     verdicts.set(A, "allowed");
-    await expect(downloads.contentFor(A)).rejects.toThrow("Could not download");
+    await expect(downloads.contentFor(A)).rejects.toThrow("HTTP 404 Not Found");
   });
 
   test("ensure caches an allowed schema for both servers and restarts them once", async () => {
