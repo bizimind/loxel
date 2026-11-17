@@ -234,7 +234,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: packages/loxel/build/eslint-language-server-source
-          key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts') }}
+          key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts', 'packages/loxel/scripts/language-servers/eslint-language-server.json') }}
       # gopls, docker-language-server and terraform-ls compile from the pinned modules that Dependabot
       # bumps. The binaries are cached on everything that goes into them, so they only compile when one
       # of those changed, and their build skips a binary the cache restored (its `.source` record

@@ -108,3 +108,13 @@ test("withPins replaces only the sha256 object, keeping the file's layout", () =
     `{\n  "version": "1.0.0",\n  "resources": ["x"],\n  "sha256": {\n    "a": "${hex("2")}",\n    "b": "${hex("3")}"\n  }\n}\n`,
   );
 });
+
+test("withPins puts an object that fits in the formatter's width on one line", () => {
+  const before = `{\n  "sha256": {\n    "mac": "${hex("1")}"\n  }\n}\n`;
+  expect(withPins(before, { mac: hex("2") })).toBe(`{\n  "sha256": { "mac": "${hex("2")}" }\n}\n`);
+  // Back to one entry per line once it no longer fits.
+  const collapsed = `{\n  "sha256": { "mac": "${hex("1")}" }\n}\n`;
+  expect(withPins(collapsed, { mac: hex("2"), linux: hex("3") })).toBe(
+    `{\n  "sha256": {\n    "mac": "${hex("2")}",\n    "linux": "${hex("3")}"\n  }\n}\n`,
+  );
+});

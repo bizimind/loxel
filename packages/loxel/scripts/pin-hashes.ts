@@ -16,7 +16,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-import { type PinnedDownload, downloadUrl, readPinnedDownload } from "./pinned-download";
+import {
+  type PinnedDownload,
+  SHA256_HEX,
+  downloadUrl,
+  isRecord,
+  readPinnedDownload,
+} from "./pinned-download";
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -24,11 +30,6 @@ const GITHUB_ASSET =
   /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/([^/]+)\/([^/]+)$/;
 const GO_ARCHIVE = /^https:\/\/go\.dev\/dl\/([^/?]+)$/;
 const ECLIPSE_HOST = "https://download.eclipse.org/";
-const SHA256_HEX = /^[0-9a-f]{64}$/;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 async function fetchOk(fetchFn: Fetch, url: string, init?: RequestInit): Promise<Response> {
   const res = await fetchFn(url, init);
@@ -137,16 +138,27 @@ export async function resolvePins(
   return pins;
 }
 
-/** `json` (a pinned download's file) with its `"sha256"` object replaced by `pins`. */
+// The repository's formatter (.oxfmtrc.jsonc): an object that fits in this width goes on one line.
+const PRINT_WIDTH = 100;
+
+/**
+ * `json` (a pinned download's file) with its `"sha256"` object replaced by `pins`, laid out as the
+ * repository's formatter would: on one line when that fits, else one entry per line.
+ */
 export function withPins(json: string, pins: Record<string, string>): string {
-  const block = /^([ \t]*)"sha256": \{[^}]*\}/m;
+  const block = /^([ \t]*)"sha256": \{[^}]*\}(.*)$/m;
   const match = block.exec(json);
   if (!match) throw new Error('no "sha256" object to replace');
-  const indent = match[1] ?? "";
-  const entries = Object.entries(pins).map(([target, digest]) => {
-    return `${indent}  ${JSON.stringify(target)}: "${digest}"`;
-  });
-  return json.replace(block, `${indent}"sha256": {\n${entries.join(",\n")}\n${indent}}`);
+  const [, indent = "", rest = ""] = match;
+  const entries = Object.entries(pins).map(
+    ([target, digest]) => `${JSON.stringify(target)}: "${digest}"`,
+  );
+  const oneLine = `${indent}"sha256": { ${entries.join(", ")} }`;
+  const replaced =
+    (oneLine + rest).length <= PRINT_WIDTH
+      ? oneLine
+      : `${indent}"sha256": {\n${entries.map((entry) => `${indent}  ${entry}`).join(",\n")}\n${indent}}`;
+  return json.replace(block, () => replaced + rest);
 }
 
 /** The file an argument names: a path to a .json, `go-toolchain`, or a manifest name. */

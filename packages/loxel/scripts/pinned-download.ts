@@ -19,9 +19,10 @@ export interface PinnedDownload {
   sha256: Record<string, string>;
 }
 
-const SHA256_HEX = /^[0-9a-f]{64}$/;
+/** A SHA256 digest as pins hold it: 64 lowercase hex digits. */
+export const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
