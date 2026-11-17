@@ -12,6 +12,7 @@ import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
 import type { WsMessage } from "@/api/ws-protocol";
+import { onLoxelEvent } from "@/lib/loxel-events";
 import { queryClient } from "@/query-client";
 import { useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -175,6 +176,19 @@ describe("useWsBridge file messages", () => {
       ...ownDirs,
     ]);
     expect(setQueryData).not.toHaveBeenCalled();
+  });
+
+  test("worktree_files_resynced tells the files tree once its listings are invalidated", () => {
+    const ownDir = queryKeys.dirContents(PROJECT, `${WT}/src`);
+    const seen: Array<{ wtPath: string; dirInvalidated: boolean }> = [];
+    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
+      seen.push({ wtPath, dirInvalidated: matchedByPredicates([ownDir]).length === 1 });
+    });
+
+    deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: PROJECT });
+    unsubscribe();
+
+    expect(seen).toEqual([{ wtPath: WT, dirInvalidated: true }]);
   });
 
   test("files_dir_changed writes that directory's listing", () => {

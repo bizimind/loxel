@@ -327,6 +327,10 @@ export function useWsBridge(): void {
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
             void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
           }
+          // For what the cache does not hold: the files tree reads its listings imperatively, so
+          // the invalidation above refreshes none of them, and the open files outside the
+          // worktree are registered with the server again.
+          dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: message.wtPath });
           break;
         }
 

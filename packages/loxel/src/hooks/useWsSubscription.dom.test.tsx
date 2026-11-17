@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { cleanup, renderHook } from "@testing-library/react";
 
 import { wsClient } from "@/api/client";
-import type { WsClientMessage, WsMessage } from "@/api/ws-protocol";
+import type { WsClientMessage } from "@/api/ws-protocol";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -13,16 +14,11 @@ const WT = "/repo/.worktrees/wt";
 const EXTERNAL = "/elsewhere/notes.md";
 
 const sent: WsClientMessage[] = [];
-let deliver: (message: WsMessage) => void = () => {};
 
 beforeAll(() => {
   spyOn(wsClient, "subscribeWorktree").mockImplementation(() => {});
   spyOn(wsClient, "send").mockImplementation((message) => {
     sent.push(message);
-  });
-  spyOn(wsClient, "subscribe").mockImplementation((handler) => {
-    deliver = handler;
-    return () => {};
   });
   useWorktreeStore.setState({ activeWorktreePath: WT });
   useEditorStateStore.getState().openFile(EXTERNAL);
@@ -37,14 +33,10 @@ afterAll(() => {
 
 describe("useWsSubscription", () => {
   test("registers open files outside the worktree once the server has resynced it", () => {
-    deliver({
-      type: "worktree_files_resynced",
-      wtPath: "/repo/.worktrees/other",
-      projectPath: "/repo",
-    });
+    dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: "/repo/.worktrees/other" });
     expect(sent).toEqual([]);
 
-    deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: "/repo" });
+    dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: WT });
 
     expect(sent).toEqual([
       { type: "register_external_files", worktreePath: WT, filePaths: [EXTERNAL] },
