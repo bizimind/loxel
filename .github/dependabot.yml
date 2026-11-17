@@ -37,3 +37,28 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # The modules gopls and docker-language-server are built from (packages/loxel/scripts/*-module/).
+  # Every requirement there but the server is indirect, so `allow` has to include indirect ones.
+  # The servers themselves are pinned in their language server manifests too, so their own bumps
+  # stay manual; the Go toolchain they build with is GO_VERSION in scripts/go-toolchain.ts.
+  - package-ecosystem: gomod
+    directories:
+      - /packages/loxel/scripts/gopls-module
+      - /packages/loxel/scripts/docker-lsp-module
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: all
+    ignore:
+      - dependency-name: golang.org/x/tools/gopls
+      - dependency-name: github.com/docker/docker-language-server
+    groups:
+      # Without `group-by`, a group gets one pull request per directory: one per server.
+      go-modules:
+        patterns: ["*"]
