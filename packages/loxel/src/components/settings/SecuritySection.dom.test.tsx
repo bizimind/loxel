@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:t
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
+import { localServerId } from "@/api/local-server";
 import type { RepoTrustEntry } from "@/api/repo-trust-model";
 import { queryKeys } from "@/queries/query-keys";
 
@@ -43,7 +44,7 @@ const REPOSITORIES: RepoTrustEntry[] = [
 function renderSection() {
   const client = new QueryClient();
   // Rendered from the cache, so no assertion waits on the fetch.
-  client.setQueryData(queryKeys.repoTrustList(), { repositories: REPOSITORIES });
+  client.setQueryData(queryKeys.repoTrustList(localServerId()), { repositories: REPOSITORIES });
   render(
     <QueryClientProvider client={client}>
       <SecuritySection />

@@ -60,7 +60,7 @@ Collapsed directory paths remain recorded inside `FilesTree` as user-collapsed p
 `loadSubtree(path)` treats `path` as an absolute directory path, normalizes it with `toAbsoluteDir(path, activeWorktreePath)`, and fetches:
 
 ```ts
-queryKeys.dirContents(activeProjectPath, absDir);
+queryKeys.dirContents(activeProject, absDir);
 ```
 
 The returned `DirEntry.path` values are already absolute and become `TreeNode.path` values.

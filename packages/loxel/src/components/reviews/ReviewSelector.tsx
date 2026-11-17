@@ -17,7 +17,7 @@ interface ReviewSelectorProps {
 }
 
 export function ReviewSelector({ defaultContext, defaultName }: ReviewSelectorProps) {
-  const { activeProjectPath } = useQueryScope();
+  const activeProjectPath = useQueryScope().activeProject?.path ?? null;
   const reviews = useReviewStore((s) => s.reviews);
   const selectedIds = useReviewStore((s) => s.selectedReviewIds);
   const activeId = useReviewStore((s) => s.activeReviewId);

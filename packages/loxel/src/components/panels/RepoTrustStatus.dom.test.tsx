@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:t
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { localRef } from "@/api/local-server";
 import type { RepoTrustStatus as Status } from "@/api/repo-trust-model";
 import { queryKeys } from "@/queries/query-keys";
 
@@ -17,7 +18,7 @@ const WT = "/repo/wt";
 
 function renderStatus(status: Status) {
   const client = new QueryClient();
-  client.setQueryData(queryKeys.repoTrust(null, WT), status);
+  client.setQueryData(queryKeys.repoTrust(null, localRef(WT)), status);
   return render(
     <QueryClientProvider client={client}>
       <RepoTrustStatus />

@@ -5,6 +5,7 @@ import {
   getFileCompileDatabase,
 } from "@/api/c-cpp-compile-database-client";
 import { cCppToolchain } from "@/api/c-cpp-compile-database-model";
+import { localRef } from "@/api/local-server";
 import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import {
   compileDatabaseSummary,
@@ -13,8 +14,8 @@ import {
 } from "@/lib/c-cpp-compile-database";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { queryKeys } from "@/queries/query-keys";
+import { useProjectRef } from "@/queries/use-scope";
 import { useActiveToolchainStatus } from "@/queries/use-toolchain-status";
-import { deriveProject, useProjectStore } from "@/store/projects";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 
 import { ToolchainStatusButton } from "./ToolchainStatusButton";
@@ -28,10 +29,11 @@ export function CompileDatabaseStatusItem() {
   const filePath = useActiveEditorFile()?.filePath ?? null;
   const associations = useSettingsStore(selectEffectiveFileAssociations);
   const worktreePath = active?.wtPath ?? null;
-  const projectPath = useProjectStore((s) => deriveProject(worktreePath, s.projects)?.path ?? null);
+  const wt = localRef(worktreePath);
+  const project = useProjectRef(wt);
   const { data: file } = useQuery({
     // Extends the status's key, so that its changed message refreshes this too.
-    queryKey: [...queryKeys.toolchainStatus(cCppToolchain.id, projectPath, worktreePath), filePath],
+    queryKey: queryKeys.toolchainFileStatus(cCppToolchain.id, project, wt, filePath),
     queryFn:
       worktreePath && filePath
         ? () => getFileCompileDatabase({ worktreePath, filePath })

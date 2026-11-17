@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 
 import type { AddWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
+import { localRef } from "@/api/local-server";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
 
 const PROJECT = "/repo";
@@ -375,9 +377,22 @@ describe("a worktree removed outside the app", () => {
     const unregister = registerLayoutCache(layoutCache);
     useFileSearchStore.getState().setFiles(WT_PATH, ["a.ts"], false);
     useFileSearchStore.getState().recordOpen(WT_PATH, "a.ts");
-    queryClient.setQueryData(queryKeys.status(PROJECT, WT_PATH), { stale: true });
-    queryClient.setQueryData(queryKeys.dirContents(PROJECT, `${WT_PATH}/src`), []);
-    queryClient.setQueryData(queryKeys.status(PROJECT, OTHER_WT), { kept: true });
+    queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH)), {
+      stale: true,
+    });
+    queryClient.setQueryData(queryKeys.dirContents(localRef(PROJECT), `${WT_PATH}/src`), []);
+    queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(OTHER_WT)), {
+      kept: true,
+    });
+    // The same paths on another server are that server's worktree, not this one.
+    const elsewhere = toServerId("other-server");
+    const elsewhereDir = queryKeys.dirContents(worktreeRef(elsewhere, PROJECT), `${WT_PATH}/src`);
+    const elsewhereStatus = queryKeys.status(
+      worktreeRef(elsewhere, PROJECT),
+      worktreeRef(elsewhere, WT_PATH),
+    );
+    queryClient.setQueryData(elsewhereDir, ["kept"]);
+    queryClient.setQueryData(elsewhereStatus, { kept: true });
     const unsubscribe = spyOn(actualClient.wsClient, "unsubscribeWorktree").mockImplementation(
       () => {},
     );
@@ -391,12 +406,18 @@ describe("a worktree removed outside the app", () => {
       expect(layoutCache.has(OTHER_WT)).toBe(true);
       expect(useFileSearchStore.getState().indexByWorktree.has(WT_PATH)).toBe(false);
       expect(useFileSearchStore.getState().mruByWorktree.has(WT_PATH)).toBe(false);
-      expect(queryClient.getQueryData(queryKeys.status(PROJECT, WT_PATH))).toBeUndefined();
       expect(
-        queryClient.getQueryData(queryKeys.dirContents(PROJECT, `${WT_PATH}/src`)),
+        queryClient.getQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH))),
       ).toBeUndefined();
-      const kept: unknown = queryClient.getQueryData(queryKeys.status(PROJECT, OTHER_WT));
+      expect(
+        queryClient.getQueryData(queryKeys.dirContents(localRef(PROJECT), `${WT_PATH}/src`)),
+      ).toBeUndefined();
+      const kept: unknown = queryClient.getQueryData(
+        queryKeys.status(localRef(PROJECT), localRef(OTHER_WT)),
+      );
       expect(kept).toEqual({ kept: true });
+      expect(queryClient.getQueryData(elsewhereDir)).toEqual(["kept"]);
+      expect(queryClient.getQueryData(elsewhereStatus)).toEqual({ kept: true });
       expect(unsubscribe).toHaveBeenCalledWith(WT_PATH);
       expect(isListedWorktree(WT_PATH)).toBe(false);
       expect(isListedWorktree(OTHER_WT)).toBe(true);

@@ -3,8 +3,10 @@ import { useEffect } from "react";
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import { HOME_KEY } from "@/api/home-model";
+import { localRef, localServerId } from "@/api/local-server";
 import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
@@ -17,7 +19,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { useProjectStore } from "@/store/projects";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
@@ -26,10 +28,14 @@ import { useWorktreeStore } from "@/store/worktrees";
 
 import {
   isDirContentsKeyBelow,
+  isEditorConfigKeyBelow,
+  isFileContentKey,
   isWorkingTreeDiffKey,
+  isWorktreeDiskContentKey,
   queryKeys,
   workingTreeFileContentKey,
 } from "./query-keys";
+import { projectRefOf } from "./use-scope";
 
 const log = frontendLog.child("files");
 const serverLog = frontendLog.child("server");
@@ -39,10 +45,7 @@ const EDITORCONFIG_SUFFIX = "/.editorconfig";
 /** Refetch the `.editorconfig` properties of open files under `dir` (ending in `/`; "" for all). */
 function invalidateEditorConfigBelow(dir: string): void {
   queryClient.invalidateQueries({
-    predicate: ({ queryKey }) =>
-      queryKey[0] === "editorConfig" &&
-      typeof queryKey[1] === "string" &&
-      queryKey[1].startsWith(dir),
+    predicate: ({ queryKey }) => isEditorConfigKeyBelow(queryKey, dir),
   });
 }
 
@@ -52,8 +55,8 @@ function invalidateEditorConfigBelow(dir: string): void {
  * go through the state machine.
  */
 export function refreshOpenFile(
-  projectPath: string | null,
-  wtPath: string | undefined,
+  project: WorktreeRef | null,
+  wt: WorktreeRef | undefined,
   editorKey: string,
   nonces: string[],
 ): void {
@@ -63,7 +66,7 @@ export function refreshOpenFile(
   if (!entry || entry.movedTo) return;
   const path = entry.filePath;
 
-  const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
+  const queryKey = queryKeys.fileContent(project, path, undefined, wt);
   // Content from the file-write response (matched by nonce) saves an HTTP round-trip.
   let stashedContent: string | undefined;
   for (const n of nonces) {
@@ -82,7 +85,7 @@ export function refreshOpenFile(
       queryClient.setQueryData(queryKey, { content: stashedContent });
     } else {
       // The refetch also tells the editor whether the file still exists (404 → deleted).
-      queryClient.invalidateQueries({ queryKey: queryKeys.fileContentPrefix(projectPath, path) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.fileContentPrefix(project, path) });
     }
     return;
   }
@@ -98,7 +101,7 @@ export function refreshOpenFile(
     return;
   }
 
-  void fetchIntoOpenFile(projectPath, wtPath, editorKey, path, nonces);
+  void fetchIntoOpenFile(project, wt, editorKey, path, nonces);
 }
 
 /**
@@ -107,16 +110,16 @@ export function refreshOpenFile(
  * event for the path (restore or re-create) brings it back through the same function.
  */
 async function fetchIntoOpenFile(
-  projectPath: string | null,
-  wtPath: string | undefined,
+  project: WorktreeRef | null,
+  wt: WorktreeRef | undefined,
   editorKey: string,
   path: string,
   nonces: string[],
 ): Promise<void> {
   const editorStore = useEditorStateStore.getState();
-  const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
+  const queryKey = queryKeys.fileContent(project, path, undefined, wt);
   try {
-    const data = await api.getFileContentByPath(path, wtPath);
+    const data = await api.getFileContentByPath(path, wt?.path);
     editorStore.handleDiskChange(editorKey, nonces, data.content);
     await applyFetchedContent(queryKey, data);
   } catch (error: unknown) {
@@ -127,8 +130,8 @@ async function fetchIntoOpenFile(
     log.error("Failed to refresh editor after external file change", {
       error,
       path,
-      projectPath,
-      worktreePath: wtPath,
+      projectPath: project?.path ?? null,
+      worktreePath: wt?.path,
     });
   }
 }
@@ -139,21 +142,21 @@ async function fetchIntoOpenFile(
  * machine like an external restore. A file that exists and was not deleted is left alone.
  */
 export async function checkOpenFileExists(
-  projectPath: string | null,
-  wtPath: string | undefined,
+  project: WorktreeRef | null,
+  wt: WorktreeRef | undefined,
   editorKey: string,
 ): Promise<void> {
   const initial = useEditorStateStore.getState().files.get(editorKey);
   if (!initial || initial.movedTo) return;
   const path = initial.filePath;
   try {
-    const data = await api.getFileContentByPath(path, wtPath);
+    const data = await api.getFileContentByPath(path, wt?.path);
     // Read the entry after the fetch: another request (e.g. the editor's own refetch) may have
     // marked it deleted, or a move may have started, while this one was in flight.
     const entry = useEditorStateStore.getState().files.get(editorKey);
     if (!entry?.deleted || entry.movedTo) return;
     useEditorStateStore.getState().handleDiskChange(editorKey, [], data.content);
-    await applyFetchedContent(queryKeys.fileContent(projectPath, path, undefined, wtPath), data);
+    await applyFetchedContent(queryKeys.fileContent(project, path, undefined, wt), data);
   } catch (error: unknown) {
     if (api.isFileMissingError(error)) {
       useEditorStateStore.getState().setDeleted(editorKey, true);
@@ -162,8 +165,8 @@ export async function checkOpenFileExists(
     log.error("Failed to check an open file after its directory changed", {
       error,
       path,
-      projectPath,
-      worktreePath: wtPath,
+      projectPath: project?.path ?? null,
+      worktreePath: wt?.path,
     });
   }
 }
@@ -185,7 +188,8 @@ async function applyFetchedContent(
  *
  * Messages carry their scope (wtPath or projectPath) so the bridge
  * routes updates to the correct cache entries without relying on
- * any global "active" state.
+ * any global "active" state. Their paths are on this window's server
+ * (`localRef`), the one the socket connects to.
  */
 export function useWsBridge(): void {
   useEffect(() => {
@@ -203,12 +207,9 @@ export function useWsBridge(): void {
       if (isToolchainChangedMessage(message)) {
         const toolchain = toolchainStatuses.find((t) => t.changedMessage === message.type);
         if (!toolchain) return;
+        const wt = localRef(message.wtPath);
         void queryClient.invalidateQueries({
-          queryKey: queryKeys.toolchainStatus(
-            toolchain.id,
-            deriveProjectPath(message.wtPath),
-            message.wtPath,
-          ),
+          queryKey: queryKeys.toolchainStatus(toolchain.id, projectRefOf(wt), wt),
         });
         return;
       }
@@ -216,23 +217,23 @@ export function useWsBridge(): void {
         // --- Worktree-scoped events (carry wtPath) ---
 
         case "status_changed": {
-          const projectPath = deriveProjectPath(message.wtPath);
-          queryClient.setQueryData(queryKeys.status(projectPath, message.wtPath), message.data);
+          const wt = localRef(message.wtPath);
+          const project = projectRefOf(wt);
+          queryClient.setQueryData(queryKeys.status(project, wt), message.data);
           // Refetch working-tree diffs (uncommitted changes may have changed). This fires on
           // every edit, so commit/range diffs — immutable — are deliberately left alone.
           // File content (editors and the diff view's working-tree side) is handled per-file
           // by file_content_changed events — no need to invalidate all fileContent queries on
           // every status change.
           queryClient.invalidateQueries({
-            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, projectPath),
+            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, project),
           });
           break;
         }
 
         case "files_dir_changed": {
-          const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(
-            queryKeys.dirContents(projectPath, message.data.dir),
+            queryKeys.dirContents(projectRefOf(localRef(message.wtPath)), message.data.dir),
             message.data.entries,
           );
           dispatchLoxelEvent("loxel-dir-changed", { dir: message.data.dir });
@@ -241,15 +242,12 @@ export function useWsBridge(): void {
 
         case "file_content_changed": {
           const { path: changedPath, nonces } = message.data;
-          const projectPath = deriveProjectPath(message.wtPath);
+          const wt = localRef(message.wtPath);
+          const project = projectRefOf(wt);
 
           // The diff view reads the new side of an uncommitted diff from disk, keyed by the
           // worktree-relative path, whether or not the file is open in an editor.
-          const diffContentKey = workingTreeFileContentKey(
-            projectPath,
-            message.wtPath,
-            changedPath,
-          );
+          const diffContentKey = workingTreeFileContentKey(project, wt, changedPath);
           if (diffContentKey) {
             queryClient.invalidateQueries({ queryKey: diffContentKey, exact: true });
           }
@@ -259,16 +257,16 @@ export function useWsBridge(): void {
           }
 
           // Home's drafts belong to no worktree, like the editors that show them.
-          const editorWtPath = message.wtPath === HOME_KEY ? undefined : message.wtPath;
+          const editorWt = message.wtPath === HOME_KEY ? undefined : wt;
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
             if (entry.filePath === changedPath) {
-              refreshOpenFile(projectPath, editorWtPath, editorKey, nonces);
+              refreshOpenFile(project, editorWt, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
               // file reports itself), so just re-check that, and re-read the `.editorconfig`s
               // that may have come or gone with it.
-              void checkOpenFileExists(projectPath, editorWtPath, editorKey);
+              void checkOpenFileExists(project, editorWt, editorKey);
               queryClient.invalidateQueries({
                 queryKey: queryKeys.editorConfigPrefix(entry.filePath),
               });
@@ -287,35 +285,22 @@ export function useWsBridge(): void {
         }
 
         case "worktree_files_resynced": {
-          const { projectPath } = message;
+          const wt = localRef(message.wtPath);
+          const project = localRef(message.projectPath);
           const editorStore = useEditorStateStore.getState();
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.status(projectPath, message.wtPath),
-          });
-          queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(projectPath) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.status(project, wt) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(project) });
           // Only this worktree's: commit and range diffs are keyed by SHA, so they cannot be stale.
           queryClient.invalidateQueries({
             predicate: ({ queryKey }) =>
-              isWorkingTreeDiffKey(queryKey, projectPath, message.wtPath) ||
-              isDirContentsKeyBelow(queryKey, projectPath, message.wtPath),
+              isWorkingTreeDiffKey(queryKey, project, wt) ||
+              isDirContentsKeyBelow(queryKey, project, wt.path),
           });
           queryClient.invalidateQueries({
-            predicate: (query) => {
-              const key = query.queryKey;
-              return (
-                key[0] === "fileContent" &&
-                key[1] === projectPath &&
-                key[3] === undefined &&
-                key[4] === message.wtPath
-              );
-            },
+            predicate: ({ queryKey }) => isWorktreeDiskContentKey(queryKey, project, wt),
           });
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.detachedFiles(projectPath, message.wtPath),
-          });
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.externalFiles(projectPath, message.wtPath),
-          });
+          queryClient.invalidateQueries({ queryKey: queryKeys.detachedFiles(project, wt) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.externalFiles(project, wt) });
           // Covers the worktree's Others folders too, whose paths share no prefix with it.
           invalidateEditorConfigBelow("");
 
@@ -325,9 +310,9 @@ export function useWsBridge(): void {
           for (const [editorKey, entry] of editorStore.files) {
             if (entry.state === "clean" || entry.queued) continue;
             const path = entry.filePath;
-            const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
+            const queryKey = queryKeys.fileContent(project, path, undefined, wt);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
-            void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
+            void fetchIntoOpenFile(project, wt, editorKey, path, []);
           }
           // For what the cache does not hold: the files tree reads its listings imperatively, so
           // the invalidation above refreshes none of them, and the open files outside the
@@ -337,18 +322,18 @@ export function useWsBridge(): void {
         }
 
         case "detached_files_changed": {
-          const projectPath = deriveProjectPath(message.wtPath);
+          const wt = localRef(message.wtPath);
           queryClient.setQueryData(
-            queryKeys.detachedFiles(projectPath, message.wtPath),
+            queryKeys.detachedFiles(projectRefOf(wt), wt),
             message.data.entries,
           );
           break;
         }
 
         case "external_files_changed": {
-          const projectPath = deriveProjectPath(message.wtPath);
+          const wt = localRef(message.wtPath);
           queryClient.setQueryData(
-            queryKeys.externalFiles(projectPath, message.wtPath),
+            queryKeys.externalFiles(projectRefOf(wt), wt),
             message.data.entries,
           );
           break;
@@ -372,21 +357,26 @@ export function useWsBridge(): void {
         // --- Project-scoped events (carry projectPath) ---
 
         case "worktree_status_changed":
-          queryClient.setQueryData(queryKeys.worktreeStatuses(message.projectPath), message.data);
+          queryClient.setQueryData(
+            queryKeys.worktreeStatuses(localRef(message.projectPath)),
+            message.data,
+          );
           break;
 
         case "refs_changed":
-        case "log_changed":
-          queryClient.invalidateQueries({ queryKey: ["commits", message.projectPath] });
-          queryClient.invalidateQueries({ queryKey: ["branchCommits", message.projectPath] });
+        case "log_changed": {
+          const project = localRef(message.projectPath);
+          queryClient.invalidateQueries({ queryKey: queryKeys.projectCommits(project) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.projectBranchCommits(project) });
           // A commit or reset moves what uncommitted/staged diffs compare against. Commit and
           // range diffs are keyed by SHA; an amend or rebase yields new SHAs, hence new keys.
           queryClient.invalidateQueries({
-            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, message.projectPath),
+            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, project),
           });
           // Worktree statuses need no refetch here: the server re-sweeps them on the same git
           // event and pushes the result as worktree_status_changed.
           break;
+        }
 
         case "worktrees_changed": {
           // Refresh worktrees for the specific project that changed
@@ -395,20 +385,20 @@ export function useWsBridge(): void {
         }
 
         case "localdb_changed": {
-          const { projectPath } = message;
-          queryClient.invalidateQueries({ queryKey: ["localdb", projectPath, "tables"] });
+          const project = localRef(message.projectPath);
+          queryClient.invalidateQueries({ queryKey: queryKeys.localdbTables(project) });
           if (message.data.tableName) {
             queryClient.invalidateQueries({
-              queryKey: ["localdb", projectPath, "schema", message.data.tableName],
+              queryKey: queryKeys.localdbSchema(project, message.data.tableName),
             });
           }
           if (message.data.tableId !== undefined) {
             queryClient.invalidateQueries({
-              queryKey: ["localdb", projectPath, "views", message.data.tableId],
+              queryKey: queryKeys.localdbViews(project, message.data.tableId),
             });
           }
           // The rows too, which every view of the project's tables shows.
-          queryClient.invalidateQueries({ queryKey: ["localdb", projectPath] });
+          queryClient.invalidateQueries({ queryKey: queryKeys.localdb(project) });
           break;
         }
 
@@ -474,7 +464,9 @@ export function useWsBridge(): void {
           break;
 
         case "terminals_changed":
-          void queryClient.invalidateQueries({ queryKey: queryKeys.runningTerminals() });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.runningTerminals(localServerId()),
+          });
           break;
 
         case "server_hello": // handled by wsClient itself
@@ -515,9 +507,7 @@ export function useWsBridge(): void {
  * meanwhile.
  */
 async function resyncAfterReconnect(): Promise<void> {
-  void queryClient.invalidateQueries({
-    predicate: ({ queryKey }) => queryKey[0] !== "fileContent",
-  });
+  void queryClient.invalidateQueries({ predicate: ({ queryKey }) => !isFileContentKey(queryKey) });
   try {
     await useProjectStore.getState().fetchProjects();
     const { refreshProjectWorktrees } = useWorktreeStore.getState();
@@ -527,10 +517,4 @@ async function resyncAfterReconnect(): Promise<void> {
   } catch (error: unknown) {
     serverLog.error("Failed to refresh projects after reconnecting", { error });
   }
-}
-
-/** Derive project path from a worktree path using the project store. */
-function deriveProjectPath(wtPath: string): string | null {
-  const projects = useProjectStore.getState().projects;
-  return deriveProject(wtPath, projects)?.path ?? null;
 }

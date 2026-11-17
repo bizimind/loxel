@@ -59,9 +59,9 @@ const uiLog = frontendLog.child("ui");
 const filesLog = frontendLog.child("files");
 
 function invalidateDetachedFiles(): void {
-  const { activeProjectPath, activeWorktreePath } = getQueryScope();
+  const { activeProject, activeWorktree } = getQueryScope();
   queryClient.invalidateQueries({
-    queryKey: queryKeys.detachedFiles(activeProjectPath, activeWorktreePath),
+    queryKey: queryKeys.detachedFiles(activeProject, activeWorktree),
   });
 }
 

@@ -5,7 +5,9 @@ import { QueryClientProvider, QueryClient as ReactQueryClient } from "@tanstack/
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+import { localRef } from "@/api/local-server";
 import type { DirEntry } from "@/api/project-files-model";
+import { isDirContentsKeyBelow, queryKeys } from "@/queries/query-keys";
 
 const eventListeners = new Map<string, Array<(data: unknown) => void>>();
 const dispatchedEvents = new Map<string, unknown[]>();
@@ -114,8 +116,10 @@ mock.module("@/queries/use-repo-queries", () => ({
   useExternalFilesQuery: () => ({ data: [] }),
 }));
 
+const PROJECT = localRef("/project");
+
 mock.module("@/queries/use-scope", () => ({
-  getQueryScope: () => ({ activeProjectPath: "/project", activeWorktreePath: "/repo" }),
+  getQueryScope: () => ({ activeProject: PROJECT, activeWorktree: localRef("/repo") }),
 }));
 
 const api = await import("@/api/client");
@@ -318,7 +322,7 @@ describe("ProjectFilesPanel", () => {
     expect(await screen.findByRole("button", { name: /src/ })).toBeInTheDocument();
 
     entriesByDir.set("/repo", [{ name: "app", path: "/repo/app", isDir: true, status: "normal" }]);
-    queryClient.setQueryData(["dirContents", "/project", "/repo"], entriesByDir.get("/repo"));
+    queryClient.setQueryData(queryKeys.dirContents(PROJECT, "/repo"), entriesByDir.get("/repo"));
 
     await act(async () => emitDirChanged("/repo"));
 
@@ -346,7 +350,9 @@ describe("ProjectFilesPanel", () => {
     const getDirContents = api.getDirContents as ReturnType<typeof jest.fn>;
     getDirContents.mockClear();
     // What ws-bridge does with `worktree_files_resynced` before it dispatches the event.
-    await queryClient.invalidateQueries({ queryKey: ["dirContents", "/project"] });
+    await queryClient.invalidateQueries({
+      predicate: ({ queryKey }) => isDirContentsKeyBelow(queryKey, PROJECT, "/repo"),
+    });
 
     await act(async () => emitWorktreeFilesResynced("/repo/.worktrees/other"));
     expect(getDirContents).not.toHaveBeenCalled();
@@ -422,7 +428,7 @@ describe("ProjectFilesPanel", () => {
         .setPendingReveal({ path: "/repo/src/components/Button.tsx", expand: false }),
     );
     await waitFor(() =>
-      expect(queryClient.getQueryState(["dirContents", "/project", "/repo/src"])?.status).toBe(
+      expect(queryClient.getQueryState(queryKeys.dirContents(PROJECT, "/repo/src"))?.status).toBe(
         "error",
       ),
     );

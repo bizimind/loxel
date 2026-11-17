@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { localRef } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type {
   InboxOpenMessage,
@@ -8,6 +9,7 @@ import type {
 } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
+import { projectRefOf } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
@@ -148,10 +150,8 @@ async function revealFolder(rawPath: string): Promise<void> {
     showToast(err instanceof Error ? err.message : "Failed to open folder");
     return;
   }
-  const projectPath = deriveProject(activeWorktreePath, projects)?.path ?? null;
-  await queryClient.invalidateQueries({
-    queryKey: queryKeys.externalFiles(projectPath, activeWorktreePath),
-  });
+  const wt = localRef(activeWorktreePath);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.externalFiles(projectRefOf(wt), wt) });
   showPanel("projectFiles");
   getWorktreeUI(activeWorktreePath).getState().setPendingReveal({ path, expand: true });
 }

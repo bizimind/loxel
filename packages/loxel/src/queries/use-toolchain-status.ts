@@ -1,11 +1,12 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 
+import { localRef } from "@/api/local-server";
 import type { ToolchainStatusDescriptor } from "@/api/toolchain-status-model";
 import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { queryKeys } from "@/queries/query-keys";
+import { projectRefOf, useProjectRef } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { deriveProject, useProjectStore } from "@/store/projects";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 
 /**
@@ -22,9 +23,10 @@ export function useActiveToolchainStatus<Status>(
   const language = active && resolveLanguage(active.filePath, associations);
   const wtPath =
     active && language && toolchain.languageIds.includes(language) ? active.worktreePath : null;
-  const projectPath = useProjectStore((s) => deriveProject(wtPath, s.projects)?.path ?? null);
+  const wt = localRef(wtPath);
+  const project = useProjectRef(wt);
   const { data } = useQuery({
-    queryKey: queryKeys.toolchainStatus(toolchain.id, projectPath, wtPath),
+    queryKey: queryKeys.toolchainStatus(toolchain.id, project, wt),
     queryFn: wtPath ? () => fetchStatus(wtPath) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on the toolchain's changed message
   });
@@ -37,6 +39,6 @@ export function setToolchainStatusData(
   wtPath: string,
   status: unknown,
 ): void {
-  const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
-  queryClient.setQueryData(queryKeys.toolchainStatus(toolchain.id, projectPath, wtPath), status);
+  const wt = localRef(wtPath);
+  queryClient.setQueryData(queryKeys.toolchainStatus(toolchain.id, projectRefOf(wt), wt), status);
 }

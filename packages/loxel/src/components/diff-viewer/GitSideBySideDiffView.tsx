@@ -6,6 +6,7 @@ import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
+import { localRef } from "@/api/local-server";
 import {
   computeFileDiff,
   splitGitLines,
@@ -74,7 +75,7 @@ function workingTreeModelUri(absPath: string) {
  * uncommitted diff the new side is the working-tree file itself, and is editable.
  */
 export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
-  const { activeWorktreePath } = useQueryScope();
+  const activeWorktreePath = useQueryScope().activeWorktree?.path ?? null;
   const { file, newRef, worktreePath } = props;
   const absPath = worktreePath ? `${worktreePath}/${fileDiffPath(file)}` : null;
   // Open while the file is shown editable here, so a file deleted meanwhile stays editable, like
@@ -99,14 +100,15 @@ export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
 
 /** Both sides read from git, or the new side read from the working tree, neither editable. */
 function ReadOnlyGitDiffView({ file, oldRef, newRef, worktreePath }: GitSideBySideDiffViewProps) {
-  const { activeProjectPath, activeWorktreePath } = useQueryScope();
+  const { activeProject, activeWorktree } = useQueryScope();
+  const activeWorktreePath = activeWorktree?.path ?? null;
 
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
 
   const { lines: oldLines, isLoading: loadingOld } = useOldSideLines(file, oldRef, worktreePath);
   const { data: newFile, isLoading: loadingNew } = useQuery({
-    queryKey: queryKeys.fileContent(activeProjectPath, filePath, newRef, worktreePath),
+    queryKey: queryKeys.fileContent(activeProject, filePath, newRef, localRef(worktreePath)),
     queryFn: () => {
       // When viewing uncommitted changes, read new side from disk
       if (worktreePath && !newRef) {
@@ -284,10 +286,11 @@ function useKeepEditedFileSelected(worktreePath: string, filePath: string, edito
 
 /** The old side of a git diff: the file at `oldRef` (none for an added file). */
 function useOldSideLines(file: FileDiff, oldRef: string | undefined, worktreePath?: string) {
-  const { activeProjectPath, activeWorktreePath } = useQueryScope();
+  const { activeProject, activeWorktree } = useQueryScope();
+  const activeWorktreePath = activeWorktree?.path ?? null;
   const oldPath = file.oldPath || file.newPath;
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.fileContent(activeProjectPath, oldPath, oldRef, worktreePath),
+    queryKey: queryKeys.fileContent(activeProject, oldPath, oldRef, localRef(worktreePath)),
     queryFn: () =>
       oldRef
         ? api.getFileContent({ path: oldPath, ref: oldRef, wt: activeWorktreePath ?? undefined })
@@ -304,12 +307,13 @@ function useGitDiffDiagnostics(
   newRef: string | undefined,
   worktreePath: string | undefined,
 ) {
-  const { activeProjectPath, activeWorktreePath } = useQueryScope();
+  const { activeProject, activeWorktree } = useQueryScope();
+  const activeWorktreePath = activeWorktree?.path ?? null;
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
 
   const { data: oldDiagData } = useQuery({
-    queryKey: queryKeys.diagnostics(activeProjectPath, oldRef, undefined),
+    queryKey: queryKeys.diagnostics(activeProject, oldRef, undefined),
     queryFn: () =>
       oldRef && activeWorktreePath
         ? api.getDiagnostics(activeWorktreePath, oldRef)
@@ -317,7 +321,7 @@ function useGitDiffDiagnostics(
     enabled: !!oldRef && !!activeWorktreePath && hasTypeScriptDiagnostics(oldPath),
   });
   const { data: newDiagData } = useQuery({
-    queryKey: queryKeys.diagnostics(activeProjectPath, newRef, worktreePath),
+    queryKey: queryKeys.diagnostics(activeProject, newRef, localRef(worktreePath)),
     queryFn: () => {
       if (!activeWorktreePath) return Promise.resolve({ diagnostics: [] });
       if (worktreePath && !newRef)

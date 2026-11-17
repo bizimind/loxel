@@ -7,11 +7,13 @@ import {
   type CompileDatabaseFileResponse,
   type CompileDatabaseStatus,
 } from "@/api/c-cpp-compile-database-model";
+import { localRef } from "@/api/local-server";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
+import { projectRefOf } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
@@ -165,9 +167,9 @@ export async function selectCompileDatabase(wtPath: string): Promise<void> {
   try {
     await setCompileDatabaseChoice({ worktreePath: wtPath, path: chosen });
     // The status and each file's answer, whose keys extend it.
-    const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
+    const wt = localRef(wtPath);
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.toolchainStatus(cCppToolchain.id, projectPath, wtPath),
+      queryKey: queryKeys.toolchainStatus(cCppToolchain.id, projectRefOf(wt), wt),
     });
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the compile database");

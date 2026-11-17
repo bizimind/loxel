@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { getPathInfo } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -56,7 +57,7 @@ export function ChangesFileMenu({
 }: ChangesFileMenuProps) {
   // Checked afresh each time the menu opens: discards and agents add and remove files.
   const { data: onDisk = false } = useQuery({
-    queryKey: queryKeys.pathExists(absolutePath),
+    queryKey: queryKeys.pathExists(localServerId(), absolutePath),
     queryFn: () =>
       getPathInfo(absolutePath).then(
         () => true,

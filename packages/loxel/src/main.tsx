@@ -4,6 +4,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { fetchLocalServerId } from "./api/client";
+import { setLocalServerId } from "./api/local-server";
 import App from "./App";
 import { frontendLog } from "./lib/frontend-logger";
 import { startPerfMonitor } from "./lib/perf-monitor";
@@ -44,12 +46,15 @@ if (!root) throw new Error("Root element not found");
 // Rendered once the save outbox has loaded, so a tab restored with the layout can take over a
 // save of its file that an earlier run left unsent. Never holds the app back for long.
 const OUTBOX_INIT_WAIT_MS = 2_000;
+// Every query key names the server, so the app also waits until it knows which one it talks to.
+const serverKnown = fetchLocalServerId().then(setLocalServerId);
 void Promise.race([
   initSaveOutbox(),
   new Promise((resolve) => {
     setTimeout(resolve, OUTBOX_INIT_WAIT_MS);
   }),
-]).finally(() => {
+]).finally(async () => {
+  await serverKnown;
   createRoot(root).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

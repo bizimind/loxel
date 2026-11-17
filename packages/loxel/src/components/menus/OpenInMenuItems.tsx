@@ -3,6 +3,7 @@ import { AppWindowIcon, FolderOpenIcon } from "lucide-react";
 import { Fragment } from "react";
 
 import { getOpenInAppIconUrl, getOpenInApps, openWithApp, revealInFinder } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { OpenInApp } from "@/api/open-in-model";
 import {
   ContextMenuItem,
@@ -64,7 +65,7 @@ export function OpenInMenuItems({ path, disabled = false }: { path: string; disa
 /** Mounted only while the submenu is open, so the app list is fetched on demand. */
 function OpenInAppList({ path }: { path: string }) {
   const { data, error, isPending } = useQuery({
-    queryKey: queryKeys.openInApps(path),
+    queryKey: queryKeys.openInApps(localServerId(), path),
     queryFn: () => getOpenInApps(path),
     staleTime: APP_LIST_STALE_TIME_MS,
   });

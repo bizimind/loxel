@@ -215,10 +215,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         for (let i = 0; i < segments.length - 1; i++) {
           ancestors.push(`${root}/${segments.slice(0, i + 1).join("/")}`);
         }
-        const { activeProjectPath } = getQueryScope();
+        const { activeProject } = getQueryScope();
         for (const dir of ancestors) {
           await queryClient.fetchQuery({
-            queryKey: queryKeys.dirContents(activeProjectPath, dir),
+            queryKey: queryKeys.dirContents(activeProject, dir),
             queryFn: () => api.getDirContents(wt, dir),
             staleTime: Infinity,
           });
@@ -362,10 +362,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     async (path: string): Promise<TreeNode[]> => {
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (!wt) return [];
-      const { activeProjectPath } = getQueryScope();
+      const { activeProject } = getQueryScope();
       const absDir = toAbsoluteDir(path, wt);
       const entries = await queryClient.fetchQuery({
-        queryKey: queryKeys.dirContents(activeProjectPath, absDir),
+        queryKey: queryKeys.dirContents(activeProject, absDir),
         queryFn: () => api.getDirContents(wt, path),
         // An Others folder may have changed while no worktree listing it was active, so its
         // directories are re-read instead of served from a cache last pushed to another worktree.
@@ -382,10 +382,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     (path: string): ProjectFileStatus | undefined => {
       if (isTreeRoot(path)) return undefined;
       const dir = fileParentDir(path, activeWorktreePath);
-      const { activeProjectPath } = getQueryScope();
+      const { activeProject } = getQueryScope();
       const absDir = toAbsoluteDir(dir, activeWorktreePath);
       const entries = queryClient.getQueryData<DirEntry[]>(
-        queryKeys.dirContents(activeProjectPath, absDir),
+        queryKeys.dirContents(activeProject, absDir),
       );
       const name = pathName(path);
       return entries?.find((e) => e.name === name)?.status;
@@ -618,10 +618,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         } else {
           const parentDirPath = fileParentDir(selected, activeWorktreePath);
           const entryName = pathName(selected);
-          const { activeProjectPath: projectPath } = getQueryScope();
+          const { activeProject } = getQueryScope();
           const absDirPath = toAbsoluteDir(parentDirPath, activeWorktreePath);
           const parentEntries = queryClient.getQueryData<DirEntry[]>(
-            queryKeys.dirContents(projectPath, absDirPath),
+            queryKeys.dirContents(activeProject, absDirPath),
           );
           const isDir = parentEntries?.find((entry) => entry.name === entryName)?.isDir ?? false;
           handleRequestDelete(selected, isDir);

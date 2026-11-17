@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function SchemaBuilder({ schema, adapter: _adapter, onSchemaChange }: Props) {
-  const { activeProjectPath } = useQueryScope();
+  const activeProjectPath = useQueryScope().activeProject?.path ?? null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCol, setEditingCol] = useState<ColumnMeta | null>(null);
   const [saving, setSaving] = useState(false);
