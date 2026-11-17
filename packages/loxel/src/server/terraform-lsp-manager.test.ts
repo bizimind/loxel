@@ -43,7 +43,8 @@ class ManagerWith extends TerraformLspManager {
 
 /**
  * Starts a session for a worktree with a `terraform` on `PATH`, and returns the `terraform` the
- * server would find, written by a stand-in terraform-ls into a FIFO, so reading it waits for it.
+ * server would find and its HTTPS proxy, written by a stand-in terraform-ls into a FIFO, so reading
+ * it waits for it.
  */
 async function terraformSeenByServer(trusted: boolean): Promise<{ wt: string; seen: string }> {
   root = await realpath(await mkdtemp(join(tmpdir(), "terraform-lsp-")));
@@ -58,7 +59,7 @@ async function terraformSeenByServer(trusted: boolean): Promise<{ wt: string; se
   const server = join(root, "terraform-ls");
   await writeFile(
     server,
-    `#!/bin/sh\necho "found=$(command -v terraform) tfenv=$TFENV_AUTO_INSTALL" > '${fifo}'\ncat > /dev/null\n`,
+    `#!/bin/sh\necho "found=$(command -v terraform) tfenv=$TFENV_AUTO_INSTALL proxy=$HTTPS_PROXY" > '${fifo}'\ncat > /dev/null\n`,
   );
   await chmod(server, 0o755);
   process.env.PATH = `${tools}:/usr/bin:/bin`;
@@ -71,16 +72,20 @@ async function terraformSeenByServer(trusted: boolean): Promise<{ wt: string; se
   return { wt, seen: (await readFile(fifo, "utf8")).trim() };
 }
 
+// Trusted or not, the server's registry lookups go to a proxy that leads nowhere.
 describe.skipIf(!canRun)("TerraformLspManager and repository trust", () => {
   test("an untrusted repository's server finds no terraform, and says so", async () => {
     const { wt, seen } = await terraformSeenByServer(false);
     expect(seen).toStartWith("found= ");
+    expect(seen).toEndWith(" proxy=http://127.0.0.1:9");
     expect(getRepoTrustStatus(wt).restrictions).toEqual([RESTRICTION]);
   });
 
   test("a trusted repository's server finds the user's terraform, which installs nothing", async () => {
     const { wt, seen } = await terraformSeenByServer(true);
-    expect(seen).toBe(`found=${join(root, "tools", "terraform")} tfenv=false`);
+    expect(seen).toBe(
+      `found=${join(root, "tools", "terraform")} tfenv=false proxy=http://127.0.0.1:9`,
+    );
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });

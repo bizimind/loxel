@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { buildSpawnEnv, pathWithoutCommand } from "./shell-env";
+import { buildSpawnEnv, NO_OUTBOUND_HTTP_ENV, pathWithoutCommand } from "./shell-env";
 import {
   type SpawnOptions,
   type SuppressibleFeature,
@@ -28,18 +28,6 @@ const DOCKER_LSP_SETTINGS = {
 };
 
 const DOCKER = process.platform === "win32" ? "docker.exe" : "docker";
-
-/**
- * Sends the server's HTTP clients to a closed loopback port. Nothing should reach it: this is the
- * failsafe for the moment before a document's configuration pull is answered, when the server's
- * defaults still have Scout on. Go reads `no_proxy` when `NO_PROXY` is empty, so both are cleared.
- */
-const NO_OUTBOUND_HTTP_ENV = {
-  HTTP_PROXY: "http://127.0.0.1:9",
-  HTTPS_PROXY: "http://127.0.0.1:9",
-  NO_PROXY: "",
-  no_proxy: "",
-};
 
 /**
  * Manages Docker's official `docker-language-server` binary (Dockerfile +
@@ -87,6 +75,8 @@ export class DockerLspManager extends WorktreeLspManager {
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     const PATH = pathWithoutCommand(buildSpawnEnv().PATH ?? "", DOCKER);
+    // Nothing should reach the dead-end proxy: it is the failsafe for the moment before a
+    // document's configuration pull is answered, when the server's defaults still have Scout on.
     return { ...super.spawnOptions(context), env: { ...NO_OUTBOUND_HTTP_ENV, PATH } };
   }
 

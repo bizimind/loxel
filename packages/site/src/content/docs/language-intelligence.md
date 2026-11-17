@@ -94,7 +94,7 @@ YAML starts with Loxel and stays running. The others start the first time you op
 
 The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile checks are local only: Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries, so Dockerfiles keep the language server's other features but get no lint warnings. Run `docker build --check` in a terminal for those.
 
-Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed.
+Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed. The Terraform language server doesn't contact the Terraform Registry, so modules from the registry get completion and hover only once `terraform init` has installed them, and completing a module's `source` doesn't search the registry.
 
 ---
 

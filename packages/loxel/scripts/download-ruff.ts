@@ -11,16 +11,16 @@ import path from "node:path";
 
 import { BUILD_DIR, downloadReleaseBinary, rustTarget } from "./download-release-binary";
 
-const VERSION = "0.17.2";
+const VERSION = "0.17.5";
 
-/** Pinned SHA256 digests of the archives from the 0.17.2 release, by Rust target. */
+/** Pinned SHA256 digests of the archives from the 0.17.5 release, by Rust target. */
 const SHA256: Record<string, string> = {
-  "aarch64-apple-darwin": "94fbca85f19e8b6bb068adb7cbc9a74e3e6c01004cc67c6b00246a094ad4ccd9",
-  "x86_64-apple-darwin": "db57a84e385435a2c4a7c8946e588f79b9de0851d8618a1b5d4431edfff0bf01",
-  "aarch64-unknown-linux-gnu": "468f29d64949574f0d28442c02f0b4fb680cff7ba8fc26b6287a73b945308e1c",
-  "x86_64-unknown-linux-gnu": "7b2e6a6e132ecf7b5fe726163b186d5d209befe93bb25f83767b2d97fbdf14e5",
-  "aarch64-pc-windows-msvc": "16035dc0195c32d37c9684880024902f74e86854d59c11e65be30620afac6eb4",
-  "x86_64-pc-windows-msvc": "6f4de58abd7c8de2e8702a89fc0f221e6ca858ad23e25c658c707d83a48c79a0",
+  "aarch64-apple-darwin": "4ffadabec5c5fee1ddb2eecac0787ffe6fa18c665b73da9258b84211f40c5829",
+  "x86_64-apple-darwin": "892f70854ebcd70d873b1bee8358cfd3a1e3180388e3851e3fd3e4a1d5a4dfdd",
+  "aarch64-unknown-linux-gnu": "4d959d4322a8cd3effe11e9fc6743da1dbb41cd0b2476e433b6e6bfd9a69b626",
+  "x86_64-unknown-linux-gnu": "7d261fc981a784668e19e9fa6ad437bfd95b67f2dc263fc1eab87d54d72fcc90",
+  "aarch64-pc-windows-msvc": "037fee4b6a171e81c910f30a6067857d254b78d4ca57eafaeead30854c15c543",
+  "x86_64-pc-windows-msvc": "6e1284ce4e2fa0ea7b4a28d0947f59c63e6983aa8b2e5b04402b0e59376405ca",
 };
 
 const target = rustTarget("gnu");

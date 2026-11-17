@@ -263,6 +263,18 @@ export function buildSpawnEnv(): Env {
 }
 
 /**
+ * Sends a spawned process's HTTP clients to a closed loopback port, for language servers that would
+ * otherwise contact a service on their own. Go reads `no_proxy` when `NO_PROXY` is empty, so both
+ * are cleared.
+ */
+export const NO_OUTBOUND_HTTP_ENV = {
+  HTTP_PROXY: "http://127.0.0.1:9",
+  HTTPS_PROXY: "http://127.0.0.1:9",
+  NO_PROXY: "",
+  no_proxy: "",
+};
+
+/**
  * `path` without its relative entries and the directories holding an executable `command`, so a
  * process spawned with it cannot run that command by name.
  */

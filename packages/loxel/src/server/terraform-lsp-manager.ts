@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { reportRepoRestriction } from "./repo-trust";
-import { buildSpawnEnv, pathWithoutCommand } from "./shell-env";
+import { buildSpawnEnv, NO_OUTBOUND_HTTP_ENV, pathWithoutCommand } from "./shell-env";
 import { type SpawnOptions, WorktreeLspManager, type WtLspContext } from "./stdio-lsp-manager";
 
 const TERRAFORM = "terraform";
@@ -26,6 +26,10 @@ const TRUST_RESTRICTION =
  * provider schemas that way starts the provider binaries under the module's `.terraform`. So in a
  * repository that isn't trusted, the server's `PATH` holds no `terraform`, and terraform-ls uses
  * its built-in schemas.
+ *
+ * terraform-ls also fetches the inputs and outputs of registry modules a file names from the
+ * Terraform Registry, and searches the registry's modules while completing a module `source`, with
+ * no setting to turn either off. Both go through its HTTP proxy, so it gets one that leads nowhere.
  */
 export class TerraformLspManager extends WorktreeLspManager {
   protected override readonly disableSemanticTokens = true;
@@ -54,8 +58,11 @@ export class TerraformLspManager extends WorktreeLspManager {
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     const options = super.spawnOptions(context);
-    if (context.repoTrusted) return { ...options, env: NO_AUTO_INSTALL_ENV };
-    return { ...options, env: { PATH: pathWithoutCommand(buildSpawnEnv().PATH ?? "", TERRAFORM) } };
+    if (context.repoTrusted) {
+      return { ...options, env: { ...NO_OUTBOUND_HTTP_ENV, ...NO_AUTO_INSTALL_ENV } };
+    }
+    const PATH = pathWithoutCommand(buildSpawnEnv().PATH ?? "", TERRAFORM);
+    return { ...options, env: { ...NO_OUTBOUND_HTTP_ENV, PATH } };
   }
 
   protected override getInitializationOptions(): Record<string, unknown> {
