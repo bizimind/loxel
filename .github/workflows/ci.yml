@@ -205,8 +205,9 @@ jobs:
     needs: discover
     if: needs.discover.outputs.test != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    # Healthy loxel runs take up to ~4 min including ~1 min of setup; leave room for slow runners.
-    timeout-minutes: 7
+    # Healthy loxel runs take up to ~4 min including ~1 min of setup, plus a minute or two when the
+    # terraform-ls build is not cached; leave room for slow runners.
+    timeout-minutes: 9
     strategy:
       fail-fast: false
       matrix:
@@ -224,7 +225,9 @@ jobs:
       # loxel's suites that run a real language server fail in CI without its build
       # (src/test/built-binary.ts), so a bump that breaks a build fails here, not in the next release.
       # The ESLint server's bundle runs under Node, and its build fetches the server's source, which
-      # the cache keeps; the others take a few seconds.
+      # the cache keeps. terraform-ls compiles with the pinned Go toolchain, a minute or two on a
+      # cache miss, so the cache keeps the binary, keyed on what its build stamp hashes. The others
+      # take a few seconds.
       - if: matrix.package.name == 'loxel'
         uses: actions/setup-node@v7
         with:
@@ -235,8 +238,15 @@ jobs:
           path: packages/loxel/build/eslint-language-server-source
           key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts') }}
       - if: matrix.package.name == 'loxel'
+        uses: actions/cache@v6
+        with:
+          path: |
+            packages/loxel/build/terraform-ls
+            packages/loxel/build/terraform-ls.source
+          key: terraform-ls-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/build-terraform-ls.ts', 'packages/loxel/scripts/terraform-ls-module/go.*') }}
+      - if: matrix.package.name == 'loxel'
         name: Build the language servers the tests run
-        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff tombi
+        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff terraform-ls tombi
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
 
