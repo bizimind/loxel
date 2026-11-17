@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import { writeExecutable } from "@/test/executable";
+
 import { fileUri } from "./lsp-file-uri";
 
 // The tools run on the worktree's JDK, whose override lives in the store database.
@@ -199,8 +201,7 @@ async function write(files: Record<string, string>): Promise<void> {
 }
 
 async function writeTool(name: string, script: string): Promise<void> {
-  await writeFile(join(bin, name), script);
-  await chmod(join(bin, name), 0o755);
+  await writeExecutable(join(bin, name), script);
 }
 
 /** A directory laid out like a JDK home, in the tools' directory, outside the worktree. */

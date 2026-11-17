@@ -8,7 +8,7 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -16,6 +16,7 @@ import type { ServerWebSocket } from "bun";
 
 import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { writeExecutable } from "@/test/executable";
 
 // Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -67,11 +68,6 @@ async function makeDir(prefix: string): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   roots.push(dir);
   return dir;
-}
-
-async function writeExecutable(file: string, script: string): Promise<void> {
-  await writeFile(file, script);
-  await chmod(file, 0o755);
 }
 
 /** Stands in for rust-analyzer: answers `--version`, and reports what it was started with. */

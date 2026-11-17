@@ -10,16 +10,23 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
+import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
 
 // Choices live in the store database; keep the tests' state out of the real one.
 const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "loxel-go-choice-")));
 process.env.LOXEL_STATE_DIR = join(stateRoot, "state");
-const { cachedToolchainDirName, cachedToolchainVersion, getGoEnv, goSpawnEnv, subscribeGoEnv } =
-  await import("./go-env");
+const {
+  cachedToolchainDirName,
+  cachedToolchainVersion,
+  getGoEnv,
+  goSpawnEnv,
+  realpathOr,
+  subscribeGoEnv,
+} = await import("./go-env");
 const { goFormatterWith } = await import("./go-formatter");
 const { listGoToolchains, normalizeGoChoice } = await import("./go-toolchain-candidates");
 const { goToolchainEnv } = await import("./go-toolchain-env");
@@ -40,6 +47,8 @@ afterEach(async () => {
   process.env.HOME = originalHome;
   process.env.GOROOT = originalGoroot;
   if (originalGoroot === undefined) delete process.env.GOROOT;
+  delete process.env.GO_FAKE_LOG;
+  delete process.env.GO_FAKE_MODCACHE;
   await Promise.all(roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -56,25 +65,25 @@ async function makeDir(prefix: string): Promise<string> {
 interface FakeGo {
   version: string;
   goroot: string;
-  modcache: string;
-  log: string;
 }
 
 /**
- * Stands in for `go`, and logs each run with its cwd, arguments and environment. Reports the GOROOT
- * of the environment when one is set, as `go` does.
+ * Stands in for `go`, and logs each run with its cwd, arguments and environment to `GO_FAKE_LOG`.
+ * Reports the GOROOT of the environment when one is set, as `go` does, and `GO_FAKE_MODCACHE` as
+ * its module cache. A GOROOT that is the stand-in's own root is read from where it lies, so the
+ * stand-ins for one version are one script; `newFile` is for a test that changes the file.
  */
-async function installFakeGo(file: string, { version, goroot, modcache, log }: FakeGo) {
-  await mkdir(join(file, ".."), { recursive: true });
-  await writeFile(
+async function installFakeGo(file: string, { version, goroot }: FakeGo, { newFile = false } = {}) {
+  const root = goroot === dirname(dirname(file)) ? "${0%/bin/go}" : goroot;
+  await writeExecutable(
     file,
     `#!/bin/sh
-echo "${file}|$PWD|$*|GOROOT=$GOROOT|$GOTOOLCHAIN" >> "${log}"
+echo "$0|$PWD|$*|GOROOT=$GOROOT|$GOTOOLCHAIN" >> "$GO_FAKE_LOG"
 if [ "$1" = version ]; then echo "go version go${version} testos/testarch"; exit 0; fi
-echo "{\\"GOVERSION\\":\\"go${version}\\",\\"GOROOT\\":\\"\${GOROOT:-${goroot}}\\",\\"GOPATH\\":\\"/gopath\\",\\"GOMODCACHE\\":\\"${modcache}\\",\\"GOHOSTOS\\":\\"testos\\",\\"GOHOSTARCH\\":\\"testarch\\"}"
+echo "{\\"GOVERSION\\":\\"go${version}\\",\\"GOROOT\\":\\"\${GOROOT:-${root}}\\",\\"GOPATH\\":\\"/gopath\\",\\"GOMODCACHE\\":\\"$GO_FAKE_MODCACHE\\",\\"GOHOSTOS\\":\\"testos\\",\\"GOHOSTARCH\\":\\"testarch\\"}"
 `,
+    { newFile },
   );
-  await chmod(file, 0o755);
 }
 
 async function setup(goVersion = "1.20.0") {
@@ -90,18 +99,28 @@ async function setup(goVersion = "1.20.0") {
   const bin = join(installed, "bin");
   process.env.PATH = [bin, gitDir].join(delimiter);
   delete process.env.GOROOT;
-  await installFakeGo(join(bin, "go"), { version: goVersion, goroot: installed, modcache, log });
+  process.env.GO_FAKE_LOG = log;
+  process.env.GO_FAKE_MODCACHE = modcache;
+  await installFakeGo(join(bin, "go"), { version: goVersion, goroot: installed });
 
-  const cacheToolchain = async (version: string, name?: string) => {
+  const cacheToolchain = async (version: string, name?: string, { newFile = false } = {}) => {
     const dir = join(modcache, "golang.org", name ?? `toolchain@v0.0.1-go${version}.${PLATFORM}`);
-    await installFakeGo(join(dir, "bin", "go"), { version, goroot: dir, modcache, log });
+    await installFakeGo(join(dir, "bin", "go"), { version, goroot: dir }, { newFile });
     return dir;
   };
   const installGo = async (version: string, root: string) => {
-    await installFakeGo(join(root, "bin", "go"), { version, goroot: root, modcache, log });
+    await installFakeGo(join(root, "bin", "go"), { version, goroot: root });
     return join(root, "bin", "go");
   };
-  const calls = async () => (await readFile(log, "utf8")).split("\n").filter(Boolean);
+  // A stand-in logs the path it was run by; a run through a symlink is a run of the file it names.
+  const calls = async () =>
+    (await readFile(log, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((call) => {
+        const [ran = "", ...rest] = call.split("|");
+        return [realpathOr(ran), ...rest].join("|");
+      });
   cleanups.push(() => setGoChoice(wt, null));
   return { wt, home, bin, gitDir, installed, modcache, log, calls, cacheToolchain, installGo };
 }
@@ -191,7 +210,7 @@ describe("a toolchain in the module cache", () => {
 
   test("is not used before go has made it executable", async () => {
     const { wt, cacheToolchain } = await setup();
-    const dir = await cacheToolchain("1.26.3");
+    const dir = await cacheToolchain("1.26.3", undefined, { newFile: true });
     await chmod(join(dir, "bin", "go"), 0o444);
     await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
     expect(await getGoEnv(wt)).toMatchObject({ source: "path", version: "1.20.0" });
@@ -205,10 +224,10 @@ describe("a toolchain in the module cache", () => {
   });
 
   test("is not used when its directory or binary lead out of the cache", async () => {
-    const { wt, modcache, log, calls } = await setup();
+    const { wt, modcache, calls } = await setup();
     const outside = await makeDir("go-outside-");
     const outsideGo = join(outside, "bin", "go");
-    await installFakeGo(outsideGo, { version: "1.26.3", goroot: outside, modcache, log });
+    await installFakeGo(outsideGo, { version: "1.26.3", goroot: outside });
     await mkdir(join(modcache, "golang.org"), { recursive: true });
     const name = `toolchain@v0.0.1-go1.26.3.${PLATFORM}`;
     await symlink(outside, join(modcache, "golang.org", name));
@@ -223,11 +242,12 @@ describe("a toolchain in the module cache", () => {
   });
 
   test("is not used from a cache in the worktree", async () => {
-    const { wt, bin, log } = await setup();
+    const { wt, bin } = await setup();
     const modcache = join(wt, "cache");
-    await installFakeGo(join(bin, "go"), { version: "1.20.0", goroot: bin, modcache, log });
+    process.env.GO_FAKE_MODCACHE = modcache;
+    await installFakeGo(join(bin, "go"), { version: "1.20.0", goroot: bin });
     const dir = join(modcache, "golang.org", `toolchain@v0.0.1-go1.26.3.${PLATFORM}`);
-    await installFakeGo(join(dir, "bin", "go"), { version: "1.26.3", goroot: dir, modcache, log });
+    await installFakeGo(join(dir, "bin", "go"), { version: "1.26.3", goroot: dir });
     await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
     expect(await getGoEnv(wt)).toMatchObject({ source: "path" });
   });
@@ -245,14 +265,9 @@ describe("a toolchain in the module cache", () => {
     "go 1.20.0\ntoolchain go1.99.0/../../../planted\n",
     "go 1.20.0\ntoolchain go../../planted\n",
   ])("does not follow the hostile go.mod line %j", async (line) => {
-    const { wt, modcache, log, calls, bin } = await setup();
+    const { wt, modcache, calls, bin } = await setup();
     const planted = join(modcache, "planted");
-    await installFakeGo(join(planted, "bin", "go"), {
-      version: "1.99.0",
-      goroot: planted,
-      modcache,
-      log,
-    });
+    await installFakeGo(join(planted, "bin", "go"), { version: "1.99.0", goroot: planted });
     await writeFile(join(wt, "go.mod"), `module x\n\n${line}`);
     expect(await getGoEnv(wt)).toMatchObject({
       binary: join(bin, "go"),
@@ -265,7 +280,7 @@ describe("a toolchain in the module cache", () => {
 
   test("is picked up once go has made it executable", async () => {
     const { wt, cacheToolchain } = await setup();
-    const dir = await cacheToolchain("1.26.3");
+    const dir = await cacheToolchain("1.26.3", undefined, { newFile: true });
     await chmod(join(dir, "bin", "go"), 0o444);
     await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
     const found = untilUpdate(wt, (env) => (env?.source === "module-cache" ? env : undefined));
@@ -407,26 +422,21 @@ describe("a chosen Go", () => {
   }, 60_000);
 
   test("does not run when stored for a path in the worktree", async () => {
-    const { wt, log, modcache, calls } = await setup();
+    const { wt, calls } = await setup();
     const go = join(wt, "tools", "bin", "go");
-    await installFakeGo(go, { version: "1.24.1", goroot: join(wt, "tools"), modcache, log });
+    await installFakeGo(go, { version: "1.24.1", goroot: join(wt, "tools") });
     setGoChoice(wt, go);
     expect(await getGoEnv(wt)).toMatchObject({ source: "path" });
     expect((await calls()).some((call) => call.startsWith(go))).toBe(false);
   });
 
   test("does not count when the GOROOT it reports is in the worktree", async () => {
-    const { wt, modcache, log } = await setup();
+    const { wt } = await setup();
     const root = await makeDir("go-chosen-");
     const go = join(root, "bin", "go");
     const inWorktree = join(wt, "goroot");
-    await installFakeGo(go, { version: "1.24.1", goroot: inWorktree, modcache, log });
-    await installFakeGo(join(inWorktree, "bin", "go"), {
-      version: "1.24.1",
-      goroot: inWorktree,
-      modcache,
-      log,
-    });
+    await installFakeGo(go, { version: "1.24.1", goroot: inWorktree });
+    await installFakeGo(join(inWorktree, "bin", "go"), { version: "1.24.1", goroot: inWorktree });
     setGoChoice(wt, go);
     expect(await getGoEnv(wt)).toMatchObject({ source: "path" });
   });
@@ -467,9 +477,9 @@ describe("normalizeGoChoice", () => {
   });
 
   test("refuses a binary in the worktree, directly or by symlink, without running it", async () => {
-    const { wt, modcache, log, calls } = await setup();
+    const { wt, calls } = await setup();
     const go = join(wt, "bin", "go");
-    await installFakeGo(go, { version: "1.24.1", goroot: wt, modcache, log });
+    await installFakeGo(go, { version: "1.24.1", goroot: wt });
     expect(normalizeGoChoice(wt, go)).rejects.toThrow("in the worktree");
     expect(normalizeGoChoice(wt, wt)).rejects.toThrow("in the worktree");
     const link = join(await makeDir("go-link-"), "go");
@@ -492,9 +502,9 @@ describe("normalizeGoChoice", () => {
   });
 
   test("refuses a link in the worktree to a Go elsewhere, without running it", async () => {
-    const { wt, modcache, log, calls } = await setup();
+    const { wt, calls } = await setup();
     const elsewhere = join(await makeDir("go-elsewhere-"), "bin", "go");
-    await installFakeGo(elsewhere, { version: "1.24.1", goroot: "/x", modcache, log });
+    await installFakeGo(elsewhere, { version: "1.24.1", goroot: "/x" });
     await mkdir(join(wt, "tools"));
     await symlink(elsewhere, join(wt, "tools", "go"));
     expect(normalizeGoChoice(wt, join(wt, "tools", "go"))).rejects.toThrow("in the worktree");
@@ -502,11 +512,11 @@ describe("normalizeGoChoice", () => {
   });
 
   test("never runs a link to a shim in the worktree", async () => {
-    const { wt, home, installGo, modcache, log, calls } = await setup();
+    const { wt, home, installGo, calls } = await setup();
     const root = join(home, "installs", "go", "1.24.1");
     const go = await installGo("1.24.1", root);
     const shim = join(home, "shims", "go");
-    await installFakeGo(shim, { version: "1.24.1", goroot: root, modcache, log });
+    await installFakeGo(shim, { version: "1.24.1", goroot: root });
     const link = join(await makeDir("go-link-"), "go");
     await symlink(shim, link);
     expect(await normalizeGoChoice(wt, link)).toBe(go);
@@ -517,11 +527,11 @@ describe("normalizeGoChoice", () => {
   });
 
   test("stores the Go behind a shim, which runs only from the filesystem root", async () => {
-    const { wt, home, installGo, modcache, log, calls } = await setup();
+    const { wt, home, installGo, calls } = await setup();
     const root = join(home, "installs", "go", "1.24.1");
     const go = await installGo("1.24.1", root);
     const shim = join(home, "shims", "go");
-    await installFakeGo(shim, { version: "1.24.1", goroot: root, modcache, log });
+    await installFakeGo(shim, { version: "1.24.1", goroot: root });
     expect(await normalizeGoChoice(wt, shim)).toBe(go);
     const shimCalls = (await calls()).filter((call) => call.startsWith(shim));
     expect(shimCalls.length).toBeGreaterThan(0);
@@ -567,10 +577,10 @@ describe("listGoToolchains", () => {
 
 describe("listGoToolchains and the trust rule", () => {
   test("does not run a shim on the PATH that a repository tracks", async () => {
-    const { wt, bin, gitDir, modcache, log, calls } = await setup();
+    const { wt, bin, gitDir, calls } = await setup();
     const repo = await makeDir("go-dotfiles-");
     const shim = join(repo, "shims", "go");
-    await installFakeGo(shim, { version: "1.24.1", goroot: "/x", modcache, log });
+    await installFakeGo(shim, { version: "1.24.1", goroot: "/x" });
     const git = (...args: string[]) =>
       Bun.spawnSync(["git", "-C", repo, ...args], { env: { ...process.env, PATH: gitDir } });
     git("init", "-q");

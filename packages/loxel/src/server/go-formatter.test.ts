@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import { writeExecutable } from "@/test/executable";
 
 import { FormatService } from "./format-service";
 import { GO_ENV } from "./go-env";
@@ -41,10 +42,9 @@ async function addFiles(files: Record<string, string>): Promise<void> {
   }
 }
 
-/** Installs a fake tool in `dir`. Each is written once, executable from creation (see `makeFakeVenv`). */
+/** Installs a fake tool in `dir`. */
 async function install(dir: string, name: string, script = reportScript(name)): Promise<void> {
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, name), script, { mode: 0o755 });
+  await writeExecutable(join(dir, name), script);
 }
 
 function save(name: string): Promise<{ content: string | null; notice?: string }> {

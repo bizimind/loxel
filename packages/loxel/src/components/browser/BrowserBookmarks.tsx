@@ -99,7 +99,7 @@ export function BookmarksMenu({ onOpen }: { onOpen: OpenBookmark }) {
               }}
               className="group/bookmark"
             >
-              <Favicon url={bookmark.faviconUrl} />
+              <Favicon url={bookmark.faviconUrl} pageUrl={bookmark.url} />
               <span className="min-w-0 flex-1 truncate">{bookmark.title || bookmark.url}</span>
               <RemoveButton bookmark={bookmark} tabIndex={-1} className="-mr-1" />
             </DropdownMenuItem>
@@ -195,7 +195,7 @@ export function BookmarksStartPage({ onOpen }: { onOpen: OpenBookmark }) {
                   }}
                   className="border-border hover:bg-muted flex w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 pr-8 text-left transition-colors"
                 >
-                  <Favicon url={bookmark.faviconUrl} className="size-4" />
+                  <Favicon url={bookmark.faviconUrl} pageUrl={bookmark.url} className="size-4" />
                   <span className="flex min-w-0 flex-col">
                     <span className="text-foreground truncate text-xs">
                       {bookmark.title || bookmark.url}

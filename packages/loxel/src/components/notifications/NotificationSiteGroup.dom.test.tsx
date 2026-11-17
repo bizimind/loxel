@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
 import { wsClient } from "@/api/client";
@@ -29,12 +29,18 @@ function build(n: number, faviconUrl?: string): ServerNotification {
 }
 
 const SITE = [build(3), build(2), build(1)] as const;
+/** The inline image main answers for favicon `url`. */
+const inlineFavicon = (url: string) => `data:image/png;base64,${btoa(url)}`;
 const clickBrowserNotification = jest.fn();
 let send: ReturnType<typeof spyOn<typeof wsClient, "send">>;
 
 beforeEach(() => {
   clickBrowserNotification.mockClear();
-  window.electronAPI = stubElectronAPI({ clickBrowserNotification });
+  window.electronAPI = stubElectronAPI({
+    clickBrowserNotification,
+    // Main loads web favicons and answers inline images.
+    loadFavicon: async (url) => inlineFavicon(url),
+  });
   send = spyOn(wsClient, "send").mockImplementation(() => {});
   // The site's page, shown in Home's layout: a click reaches it at once.
   attachBrowserPage("panel-1", {
@@ -89,15 +95,15 @@ describe("a site's stacked notifications", () => {
     expect(screen.queryByText("Build 2 finished")).toBeNull();
   });
 
-  test("show the site's newest favicon once: on the stack, then on the expanded header", () => {
+  test("show the site's newest favicon once: on the stack, then on the expanded header", async () => {
     const icon = (n: number) => `http://localhost:5173/icon-${n}.png`;
     const site = [build(3, icon(3)), build(2, icon(2)), build(1, icon(1))] as const;
     const { container } = render(<NotificationSiteGroup notifications={site} />);
     const icons = () => [...container.querySelectorAll("img")].map((img) => img.src);
-    expect(icons()).toEqual([icon(3)]);
+    await waitFor(() => expect(icons()).toEqual([inlineFavicon(icon(3))]));
 
     fireEvent.click(screen.getByRole("button", { name: /^\+2 more/ }));
-    expect(icons()).toEqual([icon(3)]);
+    await waitFor(() => expect(icons()).toEqual([inlineFavicon(icon(3))]));
   });
 
   test("dismiss one when expanded, or all of them collapsed or expanded", () => {

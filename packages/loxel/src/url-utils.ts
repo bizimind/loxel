@@ -13,6 +13,13 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
+/** Whether `a` and `b` are URLs of the same web origin (never an opaque one, such as `data:`). */
+export function isSameOrigin(a: string, b: string): boolean {
+  if (!URL.canParse(a) || !URL.canParse(b)) return false;
+  const origin = new URL(a).origin;
+  return origin !== "null" && origin === new URL(b).origin;
+}
+
 /**
  * A host of this machine (`localhost`, `*.localhost`, `127.x.x.x`, `[::1]`), where dev servers run.
  * Plain `http` counts as secure there, as browsers do.

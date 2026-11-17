@@ -67,6 +67,8 @@ export default async function globalSetup() {
       LOXEL_DEV: "1",
       LOXEL_STATE_DIR: stateDir,
       LOXEL_SERVE_PORT: String(port),
+      // Serve the renderer built above, not one a Loxel terminal's environment points at.
+      LOXEL_STATIC_DIR: resolve(LOXEL_ROOT, "dist"),
     },
     stdio: "ignore",
     detached: false,

@@ -1,11 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 import { EXT_TO_LANG } from "@/lib/highlighter";
 import "@/test/temp-state-dir";
+import { writeExecutable } from "@/test/executable";
 
 import { clangFormatter } from "./clang-formatter";
 import { FormatService } from "./format-service";
@@ -32,9 +33,7 @@ async function addFiles(files: Record<string, string>): Promise<void> {
 /** A fake clang-format that reports how it ran, using only shell builtins. */
 async function installFake(dir = tools, script?: string): Promise<void> {
   const report = 'echo "fake cwd=$PWD args=$*"\n';
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "clang-format"), `#!/bin/sh\n${script ?? report}`);
-  await chmod(join(dir, "clang-format"), 0o755);
+  await writeExecutable(join(dir, "clang-format"), `#!/bin/sh\n${script ?? report}`);
 }
 
 function save(name: string): Promise<{ content: string | null; notice?: string }> {
@@ -184,8 +183,7 @@ describe("clangFormatter spawning", () => {
 
   test("a manual override of another command keeps the default directory", async () => {
     await addFiles({ ".clang-format": "" });
-    await writeFile(join(tools, "my-fmt"), '#!/bin/sh\necho "other cwd=$PWD"\n');
-    await chmod(join(tools, "my-fmt"), 0o755);
+    await writeExecutable(join(tools, "my-fmt"), '#!/bin/sh\necho "other cwd=$PWD"\n');
     const result = await new FormatService().format("x", join(wt, "a.c"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
       overrides: [{ id: "override", extensions: "c", command: "my-fmt", args: "" }],

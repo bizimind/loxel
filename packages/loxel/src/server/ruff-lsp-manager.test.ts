@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -8,6 +8,7 @@ import { $, type ServerWebSocket } from "bun";
 import type { PythonEnv } from "@/api/python-env-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { builtBinaryExists } from "@/test/built-binary";
+import { writeExecutable } from "@/test/executable";
 
 // The shared environment resolution reads interpreter overrides from the store database; keep
 // the tests' state out of the real one.
@@ -39,9 +40,7 @@ async function makeDir(prefix: string): Promise<string> {
 
 /** An executable that prints `ruff <version>` like `ruff --version`. */
 async function fakeRuff(file: string, version: string): Promise<string> {
-  await writeFile(file, `#!/bin/sh\necho "ruff ${version}"\n`);
-  await chmod(file, 0o755);
-  return file;
+  return writeExecutable(file, `#!/bin/sh\necho "ruff ${version}"\n`);
 }
 
 /** A worktree whose `.venv` holds a fake interpreter and a fake ruff of `version`. */

@@ -60,7 +60,7 @@ export default async function worktreesAgents(s: Shot): Promise<void> {
     "down",
     "--no-focus",
     "--",
-    "cd packages/loxel && clear && bun test src/components/dockview/maximized-group-actions.dom.test.tsx src/components/dockview/drop-unregistered-panels.test.ts --preload ./src/test/dom-preload.ts --preload ./src/test/jest-dom-preload.ts; echo",
+    "cd packages/loxel && clear && bun test src/components/dockview/maximized-group-actions.dom.test.tsx src/components/dockview/drop-unregistered-panels.test.ts; echo",
   );
   // The PR's new tab menu entry: its lines fit the editor, where the new header button's don't.
   const editor = `${DOCKVIEW}/tab.tsx`;

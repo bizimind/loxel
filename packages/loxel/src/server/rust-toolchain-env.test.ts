@@ -1,7 +1,9 @@
 import { afterAll, afterEach, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
-import { chmod, link, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+
+import { writeExecutable } from "@/test/executable";
 
 // Each test spawns fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -41,11 +43,6 @@ afterEach(async () => {
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
 });
-
-async function writeExecutable(filePath: string, script: string): Promise<void> {
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-}
 
 /** A worktree, with process.env pointing at an empty bin directory first and at empty homes. */
 async function setup(): Promise<{ wt: string; bin: string; rustupHome: string; log: string }> {
@@ -145,6 +142,9 @@ case "$1 $2" in
 esac
 `,
     );
+    // A new rustup replaces its proxies too.
+    await rm(join(fixture.bin, "rustc"));
+    await link(join(fixture.bin, "rustup"), join(fixture.bin, "rustc"));
     setRustChoice(fixture.wt, "linked");
     expect((await resolveRustToolchain(fixture.wt)).status).toBe("refused");
     expect(await rustToolchainEnv.resolveForTerminal(fixture.wt)).toBeNull();

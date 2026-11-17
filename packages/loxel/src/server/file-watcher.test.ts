@@ -100,14 +100,6 @@ describe("classifyGitChange", () => {
     expect(classifyGitChange(file)).toEqual(["worktrees"]);
   });
 
-  test("worktree lock file emits nothing", () => {
-    expect(classifyGitChange("worktrees/my-worktree/index.lock")).toEqual([]);
-  });
-
-  test("worktree non-gitdir file emits nothing", () => {
-    expect(classifyGitChange("worktrees/my-worktree/HEAD")).not.toContain("worktrees");
-  });
-
   // Seen through the PARENT repo's common-dir watch these are noise: the linked worktree has
   // its own FileWatcher rooted at `worktrees/<name>/`, where the same files arrive
   // start-anchored as `index`/`HEAD`/`logs/HEAD` and classify correctly.

@@ -8,7 +8,7 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +16,7 @@ import type {
   RustToolchainCandidatesResponse,
   RustToolchainResponse,
 } from "@/api/rust-toolchain-model";
+import { writeExecutable } from "@/test/executable";
 
 // Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -50,12 +51,6 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
   await rm(stateDir, { recursive: true, force: true });
 });
-
-async function writeExecutable(filePath: string, script: string): Promise<void> {
-  await mkdir(join(filePath, ".."), { recursive: true });
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-}
 
 function toolchainDir(name: string): string {
   return join(root, "toolchains", name);

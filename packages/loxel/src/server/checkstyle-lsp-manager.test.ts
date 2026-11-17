@@ -5,6 +5,8 @@ import { basename, dirname, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import { writeExecutable } from "@/test/executable";
+
 import { fileUri } from "./lsp-file-uri";
 
 // Repository trust and the JDK choice live in the store database.
@@ -214,9 +216,7 @@ async function write(files: Record<string, string>): Promise<void> {
 }
 
 async function writeTool(file: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, FAKE_CHECKSTYLE);
-  await chmod(file, 0o755);
+  await writeExecutable(file, FAKE_CHECKSTYLE);
 }
 
 /** A directory laid out like a JDK home, outside the worktree. */

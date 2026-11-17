@@ -1,9 +1,10 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { JavaEnv } from "@/api/java-env-model";
+import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
 
 // JDK overrides live in the store database; keep the tests' state out of the real one.
@@ -51,13 +52,6 @@ async function setup(): Promise<void> {
   ranMarker = join(root, "ran");
   await Promise.all([mkdir(wt), mkdir(home)]);
   Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
-}
-
-async function writeExecutable(filePath: string, script: string): Promise<string> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-  return filePath;
 }
 
 interface JdkFixture {

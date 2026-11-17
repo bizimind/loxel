@@ -1,16 +1,9 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import {
-  chmod,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+import { writeExecutable } from "@/test/executable";
 
 // Each test spawns tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -45,10 +38,7 @@ async function makeBin(): Promise<{
 }
 
 async function writeScript(filePath: string, canary: string): Promise<string> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `#!/bin/sh\ntouch "${canary}"\necho "rustc 9.9.9"\n`);
-  await chmod(filePath, 0o755);
-  return filePath;
+  return writeExecutable(filePath, `#!/bin/sh\ntouch "${canary}"\necho "rustc 9.9.9"\n`);
 }
 
 describe("isVersionManagerShim", () => {
