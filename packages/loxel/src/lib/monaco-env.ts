@@ -111,7 +111,7 @@ wsClient.onReconnect(resumeLanguageServers);
 
 // Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
 // the worktree path so project-level features (cross-file refs, module
-// resolution, relative Dockerfile paths in bake) resolve correctly.
+// resolution) resolve correctly.
 // Reconnect whenever the active worktree changes.
 {
   const reconnectPerWorktree = (wtPath: string) => {

@@ -25,8 +25,7 @@ Resolve these with the user before starting:
 | **Settings**        | None                                      | Init options, pushed after `initialized`, or pulled with `workspace/configuration`                     |
 | **Overlap**         | Only server for its languages             | A second server on the same languages (ruff next to basedpyright): suppress the features it duplicates |
 | **Semantic tokens** | Enabled                                   | Disabled (`disableSemanticTokens = true`) if buggy or TextMate is better                               |
-| **Text sync**       | Incremental                               | Full-text (`requiresFullTextSync = true`) if the server mishandles incremental                         |
-| **Spawn args**      | `["--stdio"]`                             | `["serve"]` (terraform-ls), `["start", "--stdio"]` (docker-ls), `["server"]` (ruff), `["lsp"]` (Tombi) |
+| **Spawn args**      | `["--stdio"]`                             | `["serve"]` (terraform-ls), `["server"]` (ruff), `["lsp"]` (Tombi)                                     |
 
 ## Trust policy
 

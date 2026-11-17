@@ -41,7 +41,6 @@ describe("registerLoxelLanguages", () => {
     expect(loxelLanguages.toSorted()).toEqual([
       "astro",
       "cmake",
-      "dockerbake",
       "go.mod",
       "go.sum",
       "go.work",
