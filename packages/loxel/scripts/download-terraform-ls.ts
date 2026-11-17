@@ -11,18 +11,20 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
-const VERSION = "0.36.3";
+import { installedFrom, recordInstalledFrom } from "./download-release-binary";
+
+const VERSION = "0.39.1";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build");
 
-/** Pinned SHA256 digests from the v0.36.3 HashiCorp SHA256SUMS. */
+/** Pinned SHA256 digests from the v0.39.1 HashiCorp SHA256SUMS. */
 const SHA256: Record<string, string> = {
-  darwin_amd64: "3dfd12536e0c5ec5eb25362e3c092666effafc4c61f5630406ccf8f7715a0eb5",
-  darwin_arm64: "542ae3b59dc15d7404fd0d732480485ec3c68b258bb74e4e95d1239afca8b426",
-  linux_amd64: "3cc5498dc37668ca005d957e85c8be9e5b2100fcfecb7f3d9b70cd8d69a5f654",
-  linux_arm64: "bbf70fc9ea4bf19c23b56286d98d029a303a6648cf5009762e68b90c5ab9114d",
-  windows_amd64: "0592ee4237975bf8453462944f65be05fb20a5cf4d50c707811a0dd841b58d34",
-  windows_arm64: "6dfde7b4abfe8c244ebaf8acae4e9c4bd5a5314a73c73f129a26653f18fdd0d9",
+  darwin_amd64: "25814afdbec9163de4ad8db58960195b9fc65ddc5405a5df7163bbdbd08b5325",
+  darwin_arm64: "07748aa989fc3b9f6e4538ff83bc2e607ebc20c7587ce6556ae555d631e70b1b",
+  linux_amd64: "fe2a158e4a1a8ec8047dae9e06c439b468412aa579929ba28b2e1258cedef9c0",
+  linux_arm64: "a72a6d9f72580cfc30cc06d3c973fd5f55790f62e3ddb195998435070d9af36d",
+  windows_amd64: "bb8523b2e109c2ad719dbf6245c4be035386e322cb44e8f01c74b1caa4680efb",
+  windows_arm64: "0b6fe711414f29eeaaa09509fcb073e1f3269705e2de87a8b8ce7e77bc43fb6c",
 };
 
 function platformSlug(): string {
@@ -49,7 +51,7 @@ const url = `https://releases.hashicorp.com/terraform-ls/${VERSION}/terraform-ls
 const binaryName = process.platform === "win32" ? "terraform-ls.exe" : "terraform-ls";
 const outBinary = path.join(OUTDIR, binaryName);
 
-if (existsSync(outBinary)) {
+if (installedFrom(outBinary, expectedHash)) {
   console.log(`terraform-ls already present at ${outBinary}, skipping download`);
   process.exit(0);
 }
@@ -98,5 +100,6 @@ if (!existsSync(extracted)) {
 
 renameSync(extracted, outBinary);
 chmodSync(outBinary, 0o755);
+recordInstalledFrom(outBinary, expectedHash);
 rmSync(tmpDir, { recursive: true, force: true });
 console.log(`Installed: ${outBinary}`);

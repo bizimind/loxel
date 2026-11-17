@@ -52,7 +52,7 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   mypyLspManager,
   new RuffLspManager(),
   new RustLspManager(),
-  new TerraformLspManager(),
+  new TerraformLspManager(config.terraformShimDir),
   tomlLspManager,
   new TsLspManager(),
   xmlLspManager,

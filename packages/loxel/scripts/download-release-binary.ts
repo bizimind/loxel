@@ -6,7 +6,16 @@
  */
 
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 export const BUILD_DIR = path.resolve(import.meta.dir, "..", "build");
@@ -25,6 +34,24 @@ export function rustTarget(linuxLibc: "gnu" | "musl"): string {
   return `${arch}-${os}`;
 }
 
+/**
+ * Whether `out` is installed from `source`, as recorded by {@link recordInstalledFrom}: a pinned
+ * digest or build input, so a binary left by an older checkout is replaced. When it is not, `out`
+ * and its record are removed, ready for a fresh install.
+ */
+export function installedFrom(out: string, source: string): boolean {
+  const record = `${out}.source`;
+  if (existsSync(out) && existsSync(record) && readFileSync(record, "utf8") === source) return true;
+  rmSync(record, { force: true });
+  rmSync(out, { recursive: true, force: true });
+  return false;
+}
+
+/** Records that `out` is installed from `source`; written last, so it marks a finished install. */
+export function recordInstalledFrom(out: string, source: string): void {
+  writeFileSync(`${out}.source`, source);
+}
+
 export interface ReleaseBinary {
   /** Tool name, for messages and the scratch directory. */
   name: string;
@@ -36,7 +63,7 @@ export interface ReleaseBinary {
   outBinary: string;
 }
 
-/** Download, verify and extract `member`, unless `outBinary` already exists. Throws on failure. */
+/** Download, verify and extract `member`, unless `outBinary` is from this archive. Throws on failure. */
 export async function downloadReleaseBinary({
   name,
   url,
@@ -44,7 +71,7 @@ export async function downloadReleaseBinary({
   member,
   outBinary,
 }: ReleaseBinary): Promise<void> {
-  if (existsSync(outBinary)) {
+  if (installedFrom(outBinary, sha256)) {
     console.log(`${name} already present at ${outBinary}, skipping download`);
     return;
   }
@@ -83,5 +110,6 @@ export async function downloadReleaseBinary({
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+  recordInstalledFrom(outBinary, sha256);
   console.log(`Installed: ${outBinary}`);
 }

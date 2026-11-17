@@ -11,16 +11,16 @@ import path from "node:path";
 
 import { BUILD_DIR, downloadReleaseBinary, rustTarget } from "./download-release-binary";
 
-const VERSION = "1.9.6";
+const VERSION = "1.11.3";
 
-/** Pinned SHA256 digests of the archives from the v1.9.6 release, by Rust target. */
+/** Pinned SHA256 digests of the archives from the v1.11.3 release, by Rust target. */
 const SHA256: Record<string, string> = {
-  "aarch64-apple-darwin": "e3e29db219a07e2e8534735a61c340f1bb3ec1bee845a4fcd6d72f59e0e9383e",
-  "x86_64-apple-darwin": "8f9b2e3ba04f2d2773b15211024233a89d6ba0e1732c6b9d0b5f98a06ab2bd75",
-  "aarch64-unknown-linux-musl": "e29f2af283d9c090c7da16468406ffa5b7183d06cefeae19da40ac6d70ffc42c",
-  "x86_64-unknown-linux-musl": "a845f9275c83ee8ce408cc16fee11a7dbe5009214a4b92f2bbac5c0aa3afafe3",
-  "aarch64-pc-windows-msvc": "c86f4926776c251f9d82946c470f6c33d61a597d055bf1861d3630a38cab9f59",
-  "x86_64-pc-windows-msvc": "6080696714182be2e35bd89e3bbe4f301f92fb2cb888088fd282c341a4f1e5c1",
+  "aarch64-apple-darwin": "4e7daae9197910fe3717d241e5ca85cafd0f7f0ead988056fdd0b2cf2a447600",
+  "x86_64-apple-darwin": "642900713c3cb04adf45264117649e5f4731395b62cbafee8a9a2824fa479684",
+  "aarch64-unknown-linux-musl": "083614471a69e15f147ba68c96fe1e3ea02e8efe38d6bcdb4606b5a37ab8758a",
+  "x86_64-unknown-linux-musl": "36672279d05f093455f01fa5a2799a8cc2162a9195cbbb23f0f8d1107d0de497",
+  "aarch64-pc-windows-msvc": "621bf39b23546ecf9b2b4759f4203d6c5040a40ccd2abe17fa731999de1f81f0",
+  "x86_64-pc-windows-msvc": "b6b2d9e6419216aaa0b8e74a5c81c48335cb193d6eb87f50a7d77468bce10073",
 };
 
 // Tombi publishes only static musl builds for Linux.

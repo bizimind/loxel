@@ -11,17 +11,19 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
-const VERSION = "0.29.2";
+import { installedFrom, recordInstalledFrom } from "./download-release-binary";
+
+const VERSION = "0.29.3";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");
 
-/** Pinned SHA256 digests of the zip archives from the v0.29.2 release. */
+/** Pinned SHA256 digests of the zip archives from the v0.29.3 release. */
 const SHA256: Record<string, string> = {
-  "osx-aarch_64": "346be4069662adda81d17f184bea148d6dda25057fc809178b3a888327e8cda8",
-  "osx-x86_64": "45a5789fc9ec5b293db541b94f14966d3355cc4e146d1bbc40feb482c1e85cd0",
-  "linux-x86_64": "fb98f6fbf254068ec49d36a1f8c5163121011dd7d27f09dd7acfa5546fb58b63",
-  "linux-aarch_64": "6937912614d6950497d1f8ffada56b03237e7b6f30e384102f485b3d0b359d74",
-  win32: "3acc10086d0b231ac16345122c1299c409cd635dc1bada54351dddec3e122724",
+  "osx-aarch_64": "185db5630ce85be43ea0fab034e7841b1327c2793db05ab481e029cf493d86ce",
+  "osx-x86_64": "9e56123194b5c1fdc7d87f1bd21c83cc996ba7be913def3a2836a13305bcd273",
+  "linux-x86_64": "1acc44e24201c1d2f5ccb4e43e7426ed0df6909207a81ff199810e2808104d89",
+  "linux-aarch_64": "0b88a49e83c2611282672f5123ce33abf1371c8e3c55cad6ee45ea00626ffa1b",
+  win32: "7eaefaac68253b0ec8e0ad1f1c0f2d0755423d4e99e52497428b52f80df28eb7",
 };
 
 function platformKey(): string {
@@ -43,7 +45,7 @@ const isWindows = process.platform === "win32";
 const binaryName = isWindows ? `lemminx-${key}.exe` : `lemminx-${key}`;
 const outBinary = path.join(OUTDIR, isWindows ? "lemminx.exe" : "lemminx");
 
-if (existsSync(outBinary)) {
+if (installedFrom(outBinary, expectedHash)) {
   console.log(`lemminx already present at ${outBinary}, skipping download`);
   process.exit(0);
 }
@@ -95,5 +97,6 @@ if (extractedPath !== outBinary) {
 }
 
 chmodSync(outBinary, 0o755);
+recordInstalledFrom(outBinary, expectedHash);
 rmSync(zipPath);
 console.log(`Installed: ${outBinary}`);

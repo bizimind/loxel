@@ -23,7 +23,7 @@ const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 /** Shell session state rather than configuration; never copied from the captured environment. */
 const SESSION_VARS = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
 
-type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined>;
 
 export interface LoginShellEnvOptions {
   /** The shell to run; defaults to `$SHELL` (else `/bin/zsh`) at capture time. */
@@ -261,6 +261,21 @@ export function refreshLoginShellEnv(): Promise<void> {
 export function buildSpawnEnv(): Env {
   return withSpawnDefaults({ ...process.env, ...loginShellEnv.captured });
 }
+
+/**
+ * Sends a spawned process's HTTP clients to a closed loopback port, for language servers that would
+ * otherwise contact a service on their own. Go reads `no_proxy` when `NO_PROXY` is empty, so both
+ * are cleared.
+ */
+export const NO_OUTBOUND_HTTP_ENV = {
+  HTTP_PROXY: "http://127.0.0.1:9",
+  HTTPS_PROXY: "http://127.0.0.1:9",
+  // Windows names are case-insensitive, so a user's lowercase ones must not survive beside these.
+  http_proxy: "http://127.0.0.1:9",
+  https_proxy: "http://127.0.0.1:9",
+  NO_PROXY: "",
+  no_proxy: "",
+};
 
 /**
  * `path` without its relative entries and the directories holding an executable `command`, so a

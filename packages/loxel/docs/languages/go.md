@@ -11,7 +11,7 @@ Go files are served by gopls, formatted by gofmt or golangci-lint, and linted by
 
 ## Binary
 
-gopls publishes no release binaries, so [build-gopls.ts](../../scripts/build-gopls.ts) compiles it with the pinned toolchain from [go-toolchain.ts](../../scripts/go-toolchain.ts), in a temporary copy of [scripts/gopls-module/](../../scripts/gopls-module/), whose `go.mod` and full `go.sum` pin every dependency. `GOENV=off`, `GOWORK=off`, a private `HOME`, `GOPATH` and `GOCACHE`, and `GOTOOLCHAIN=local` keep the build out of the machine's own Go setup. The binary is `CGO_ENABLED=0 -trimpath -ldflags='-s -w'`, 27-30 MiB. Upgrading is described at the top of the script.
+gopls publishes no release binaries, so [build-gopls.ts](../../scripts/build-gopls.ts) compiles it with the pinned toolchain through `buildPinnedGoModule` in [go-toolchain.ts](../../scripts/go-toolchain.ts), in a temporary copy of [scripts/gopls-module/](../../scripts/gopls-module/), whose `go.mod` and full `go.sum` pin every dependency. `GOENV=off`, `GOWORK=off`, a private `HOME`, `GOPATH` and `GOCACHE`, and `GOTOOLCHAIN=local` keep the build out of the machine's own Go setup. The binary is `CGO_ENABLED=0 -trimpath -ldflags='-s -w'`, 27-30 MiB. Upgrading is described at the top of the script.
 
 `GoEnv.gopls` names a `gopls` on the toolchain `PATH`, found by `trustedGoTool`, and the manager runs it at any version; the bundled binary is the fallback when there is none. A binary in the worktree through a symlink, a shim, or one tracked by a repository (`isShippedByRepo`) counts as none. Nothing asks gopls its version: a reinstall at the same path is told by the file's identity.
 

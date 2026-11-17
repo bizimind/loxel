@@ -51,7 +51,7 @@ Also: serves two language IDs via array, overrides `resolveBinary()` for Windows
 
 ## Terraform
 
-Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
+Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. Spawned with a dead HTTP proxy (`NO_OUTBOUND_HTTP_ENV` from `shell-env.ts`), since it fetches registry module data and searches the Terraform Registry with no setting to turn either off; in a trusted repository a `terraform` shim first on its `PATH` gives the user's `terraform` back their own proxy settings. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
 
 ## Python (basedpyright)
 
