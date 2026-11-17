@@ -50,7 +50,6 @@ const SESSION_ENV_VARS = [
   // A Loxel terminal (src/server/server.ts gives its shells these)
   "LOXEL",
   "LOXEL_SOCKET",
-  "LOXEL_PORT",
   "LOXEL_WORKTREE",
   "LOXEL_WINDOW_ID",
 ];

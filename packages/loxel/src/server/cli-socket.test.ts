@@ -5,17 +5,18 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { leaveStaleSocket } from "@/test/stale-socket";
 
-import { clearSocketPath, listenOnPrivateSocket } from "./cli-socket";
+import { takeOverSocket } from "./cli-socket";
 
 // The package's test preload replaces `fetch` with a browser one, which has no `unix` option.
 if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -33,83 +34,98 @@ function socketPath(): string {
   return join(base, "run", "cli.sock");
 }
 
-function serveText(text: string) {
-  return (path: string) => {
-    const server = Bun.serve({ unix: path, fetch: () => new Response(text) });
+/** Take the socket at `path` over with a server that answers `text`. */
+function takeOver(path: string, text: string) {
+  return takeOverSocket(path, (unix) => {
+    const server = Bun.serve({ unix, fetch: () => new Response(text) });
     servers.push(server);
     return server;
-  };
+  });
 }
 
-/** What the server does at startup. */
-async function listen(path: string, text: string) {
-  return (await clearSocketPath(path)) ? listenOnPrivateSocket(path, serveText(text)) : null;
-}
-
+/** What a new connection to `path` gets: not a pooled one, which would reach an older server. */
 async function answer(path: string): Promise<string> {
-  const response = await fetch("http://localhost/", { unix: path });
-  return response.text();
+  try {
+    const response = await fetch("http://localhost/", { unix: path, keepalive: false });
+    return await response.text();
+  } catch (err) {
+    return err instanceof Error && "code" in err ? String(err.code) : String(err);
+  }
 }
 
 describe("the CLI socket", () => {
   test("listens on a socket only this user can open, in a private directory", async () => {
     const path = socketPath();
-    const server = await listen(path, "hello");
+    takeOver(path, "hello");
 
-    expect(server).not.toBeNull();
     expect(lstatSync(path).isSocket()).toBe(true);
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
+    expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
     expect(await answer(path)).toBe("hello");
+    // The temporary name it listened on is gone.
+    expect(readdirSync(dirname(path))).toEqual(["cli.sock"]);
   });
 
-  test("makes an existing directory private", async () => {
+  test("makes an existing directory private", () => {
     const path = socketPath();
-    mkdirSync(join(path, ".."), { recursive: true });
-    chmodSync(join(path, ".."), 0o755);
+    mkdirSync(dirname(path), { recursive: true });
+    chmodSync(dirname(path), 0o755);
 
-    await listen(path, "hello");
+    takeOver(path, "hello");
 
-    expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
+    expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
   });
 
-  test("replaces a stale socket a dead server left", async () => {
+  test("takes over a stale socket a killed server left", async () => {
     const path = socketPath();
-    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     await leaveStaleSocket(path);
-    expect(lstatSync(path).isSocket()).toBe(true);
+    expect(await answer(path)).toBe("ECONNREFUSED");
 
-    const server = await listen(path, "new");
+    takeOver(path, "new");
 
-    expect(server).not.toBeNull();
     expect(await answer(path)).toBe("new");
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
-  test("replaces a file that is not a socket", async () => {
+  test("takes over a file that is not a socket", async () => {
     const path = socketPath();
-    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     await Bun.write(path, "not a socket");
 
-    expect(await listen(path, "new")).not.toBeNull();
+    takeOver(path, "new");
+
     expect(await answer(path)).toBe("new");
   });
 
-  test("leaves a socket a live server answers on to that server", async () => {
+  test("takes over a live server's socket, which keeps it from removing the new one", async () => {
     const path = socketPath();
-    await listen(path, "draining");
+    const older = takeOver(path, "older");
 
-    expect(await clearSocketPath(path)).toBe(false);
+    takeOver(path, "newer");
+    expect(await answer(path)).toBe("newer");
 
-    expect(await answer(path)).toBe("draining");
+    older.stop();
+    expect(await answer(path)).toBe("newer");
   });
 
-  test("stopping the server removes its socket", async () => {
+  test("stopping the server removes its socket", () => {
     const path = socketPath();
-    const server = await listen(path, "hello");
+    const socket = takeOver(path, "hello");
 
-    server?.stop();
+    socket.stop();
 
     expect(existsSync(path)).toBe(false);
+  });
+
+  test("leaves the path as it was when the socket cannot take its name", () => {
+    const path = socketPath();
+    // A directory with something in it cannot be renamed over.
+    mkdirSync(join(path, "inside"), { recursive: true });
+
+    expect(() => takeOver(path, "new")).toThrow();
+
+    expect(readdirSync(dirname(path))).toEqual(["cli.sock"]);
+    expect(lstatSync(path).isDirectory()).toBe(true);
   });
 });

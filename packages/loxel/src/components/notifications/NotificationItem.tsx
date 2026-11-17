@@ -28,7 +28,7 @@ function placeName(worktreePath: string | null): string {
 /** Where the notification came from: the worktree or Home, and the site for a browser page. */
 export function sourceLabel({ source }: ServerNotification): string {
   switch (source.kind) {
-    case "terminal_host":
+    case "server":
       return "Loxel";
     case "terminal":
       return placeName(source.worktreePath);
@@ -44,7 +44,7 @@ export function sourceLabel({ source }: ServerNotification): string {
 const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
   terminal: "Terminal notification",
   browser: "Browser notification",
-  terminal_host: "Terminal host notification",
+  server: "Loxel notification",
 };
 
 /** A collapsed site group shown through its newest notification. */
