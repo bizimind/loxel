@@ -1,0 +1,1 @@
+{ "script": "build-dockerfile-lsp.ts", "resources": ["docker-langserver"] }

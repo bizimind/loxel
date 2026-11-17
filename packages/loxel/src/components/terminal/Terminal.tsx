@@ -109,11 +109,11 @@ function isOnScreen(panelApi: DockviewPanelApi): boolean {
   return panelApi.isVisible && panelApi.group.api.isVisible;
 }
 
-/** Fit the terminal to its container and sync changed dimensions to the PTY. */
-function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon) {
-  const { cols, rows } = terminal;
-  fitAddon.fit();
-  if (terminal.cols === cols && terminal.rows === rows) return;
+/**
+ * Send the xterm's size, which makes this view the terminal's active one when other windows show
+ * it too: the PTY takes the size, and only this view's input is written.
+ */
+function sendResize(terminalId: string, terminal: XTerm) {
   wsClient.send({
     type: "terminal_resize",
     id: terminalId,
@@ -121,6 +121,25 @@ function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddo
     rows: terminal.rows,
   });
 }
+
+/**
+ * Fit the terminal to its container and sync changed dimensions to the PTY. Returns whether they
+ * changed, and so were sent.
+ */
+function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon): boolean {
+  const { cols, rows } = terminal;
+  fitAddon.fit();
+  if (terminal.cols === cols && terminal.rows === rows) return false;
+  sendResize(terminalId, terminal);
+  return true;
+}
+
+/**
+ * The user's events that make a view the terminal's active one. Listened for in the capture phase,
+ * so the claim goes out before the input xterm sends for the same event.
+ */
+const CLAIM_EVENTS = ["keydown", "paste", "mousedown", "compositionstart", "focus"] as const;
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
 
 /** Output bytes parsed between flow-control acks to the server. */
 const ACK_BYTES = 64 * 1024;
@@ -278,6 +297,11 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const exitedRef = useRef(false);
   const attachedRef = useRef(false);
+  /**
+   * Whether this view is the terminal's active one, as far as it knows: it is once it attaches or
+   * claims the terminal, and stops being when the server sends the size another view set.
+   */
+  const activeRef = useRef(false);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const { barProps: findBarProps, setMatches: setFindMatches } = usePanelFind(rootRef, {
@@ -428,7 +452,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // WebGL only while visible: hidden tabs don't count against Chromium's context cap. Switching
     // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
-      if (attachedRef.current && isOnScreen(panelApi)) {
+      if (attachedRef.current && activeRef.current && isOnScreen(panelApi)) {
         fitAndSendResize(terminalId, terminal, fitAddon);
       }
     });
@@ -464,9 +488,22 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
           output.expectState();
           sendAttach(terminalId, terminal, spawnTargetRef.current);
           attachedRef.current = true;
+          activeRef.current = true;
         }
       });
     });
+
+    // Typing, clicking or focusing here takes the terminal over from another window showing it,
+    // at this view's size.
+    const claim = (event: Event) => {
+      if (!attachedRef.current || exitedRef.current) return;
+      // A modifier on its own sends nothing; it only starts a shortcut, which may not be for here.
+      if (event instanceof KeyboardEvent && MODIFIER_KEYS.has(event.key)) return;
+      if (!activeRef.current && isOnScreen(panelApi)) fitAddon.fit();
+      activeRef.current = true;
+      sendResize(terminalId, terminal);
+    };
+    for (const type of CLAIM_EVENTS) container.addEventListener(type, claim, true);
 
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -497,13 +534,16 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
           snapshotBytes: msg.snapshot?.length,
         });
         // A fit may have changed the xterm between the attach request and this state.
+        if (activeRef.current && (msg.cols !== terminal.cols || msg.rows !== terminal.rows)) {
+          sendResize(terminalId, terminal);
+        }
+        return;
+      }
+      if (msg.type === "terminal_size" && msg.id === terminalId) {
+        // Another window showing this terminal is in use: render at its size until this is.
+        activeRef.current = false;
         if (msg.cols !== terminal.cols || msg.rows !== terminal.rows) {
-          wsClient.send({
-            type: "terminal_resize",
-            id: terminalId,
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
+          terminal.resize(msg.cols, msg.rows);
         }
         return;
       }
@@ -525,8 +565,11 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const unsubReconnect = wsClient.onReconnect(() => {
       // Before the initial attach, the pending open sends terminal_attach itself.
       if (exitedRef.current || !attachedRef.current || !spawnTargetRef.current) return;
+      // The attach makes this view the active one: at its own size, not one another view set.
+      if (isOnScreen(panelApi)) fitAddon.fit();
       output.expectState();
       sendAttach(terminalId, terminal, spawnTargetRef.current, output.since);
+      activeRef.current = true;
       termLog.info("Terminal reconnected", { terminalId });
     });
 
@@ -534,6 +577,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       disposed = true;
       cancelAnimationFrame(rafId);
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      for (const type of CLAIM_EVENTS) container.removeEventListener(type, claim, true);
       if (attachedRef.current && !exitedRef.current) {
         wsClient.send({ type: "terminal_detach", id: terminalId });
       }
@@ -590,7 +634,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         // A group hidden behind a maximized one has no size to fit, and the program running here
         // must keep its dimensions. Showing the group resizes the container, which refits.
         if (!isOnScreen(panelApi)) return;
-        fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
+        if (fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current)) {
+          activeRef.current = true;
+        }
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
     };
@@ -641,7 +687,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const terminal = xtermRef.current;
     if (!terminal) return;
     Object.assign(terminal.options, terminalFontOptions(font));
-    if (!fitAddonRef.current || !attachedRef.current || !isOnScreen(panelApi)) return;
+    // A view another window's use sized keeps that size.
+    if (!fitAddonRef.current || !attachedRef.current || !activeRef.current) return;
+    if (!isOnScreen(panelApi)) return;
     fitAndSendResize(terminalId, terminal, fitAddonRef.current);
   }, [font, terminalId, panelApi]);
 

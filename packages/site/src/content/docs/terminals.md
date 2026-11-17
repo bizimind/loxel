@@ -31,6 +31,10 @@ A program that ends while Loxel is away, an agent finishing its task for example
 
 In the rare case that the process keeping your terminals running stops unexpectedly, its terminals end with it, and each one's panel says **[Terminal ended: Loxel's terminal host stopped unexpectedly]** instead of an exit code. If it only stops responding for a while, its terminals keep running: each panel says **[Loxel's terminal host is not responding; this terminal continues once it does]**, new terminals start fine meanwhile, and the output picks up where it left off once it answers again. A terminal that cannot be opened at all says why in its panel.
 
+### One terminal in several windows
+
+A terminal can be open in more than one window at a time. Every window shows it live, and you can type in any of them. The window you last typed in, clicked, switched to, resized or opened it in sets the terminal's size, and the others show it at that size until you use them. Closing the terminal's tab in one window leaves it running in the others; it ends when you close it in the last one.
+
 ### Quitting without ending your terminals
 
 Your terminals can keep running while Loxel is closed, so agents and long-running commands go on working. When you open Loxel again, each panel reconnects to its terminal, scrollback included.

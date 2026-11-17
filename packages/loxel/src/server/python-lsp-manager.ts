@@ -156,7 +156,6 @@ export class PythonLspManager extends WorktreeSessionLspManager<PythonLspSession
       wtPath: context.wtPath,
       repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
       unsubscribeEnv: null,
       answeredEnv: undefined,
       initialized: false,

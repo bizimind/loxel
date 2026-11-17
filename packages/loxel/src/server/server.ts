@@ -85,7 +85,8 @@ import { measureSpawn } from "./spawn-metrics";
 import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
 import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
-import type { TerminalSink, TerminalSpawnOptions } from "./terminal-manager";
+import type { TerminalSink } from "./terminal-fanout";
+import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
@@ -845,9 +846,7 @@ function releaseWorktreeResources(wtPath: string): void {
 function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
   releaseWorktreeResources(wtPath);
   terminalManager.endWorktreeSessions(wtPath, terminalDelayMs, (id) => {
-    const owner = terminalOwners.get(id);
-    if (owner) clients.get(owner)?.terminals.delete(id);
-    terminalOwners.delete(id);
+    forgetTerminal(id);
     // Anything it raised during the delay; the rest went with the worktree.
     if (notificationStore.dismissByPanel(id)) {
       broadcastAll({ type: "notification_panel_dismissed", panelId: id });
@@ -1055,7 +1054,6 @@ let shuttingDown = false;
 // --- Stable infrastructure ---
 
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
-const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 /** The terminal hosts, which run every terminal in processes that outlive this server. */
 const terminalHosts = new TerminalHostPool({
@@ -1084,10 +1082,8 @@ const terminalManager = new TerminalManager(terminalHosts, {
   },
   onSessionsChanged: () => broadcastAll({ type: "terminals_changed" }),
   onExit: (id) => {
-    // The manager already sent terminal_exit to the attached client.
-    const owner = terminalOwners.get(id);
-    if (owner) clients.get(owner)?.terminals.delete(id);
-    terminalOwners.delete(id);
+    // The manager already sent terminal_exit to the attached clients.
+    forgetTerminal(id);
     dropQueuedTerminal(id);
   },
 });
@@ -1213,16 +1209,15 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       const clientState = clients.get(ws);
       if (!clientState) return;
 
-      // Take ownership before attaching: the session delivers through the sink immediately.
-      const previousOwner = terminalOwners.get(msg.id);
-      if (previousOwner && previousOwner !== ws) {
-        clients.get(previousOwner)?.terminals.delete(msg.id);
-      }
-      clientState.terminals.add(msg.id);
-      terminalOwners.set(msg.id, ws);
+      // Several sockets can be attached to one terminal, each streaming to its own sink; an
+      // attach again from this one replaces its earlier sink.
+      const previous = clientState.terminals.get(msg.id);
+      if (previous) terminalManager.detach(msg.id, previous);
+      const sink = createTerminalSink(ws, msg.id);
+      clientState.terminals.set(msg.id, sink);
 
       terminalManager
-        .attach(msg.id, createTerminalSink(ws, msg.id), {
+        .attach(msg.id, sink, {
           ...terminalSpawnTarget(msg),
           cols: msg.cols,
           rows: msg.rows,
@@ -1232,8 +1227,10 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         })
         .catch((err: unknown) => {
           log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
-          clientState.terminals.delete(msg.id);
-          if (terminalOwners.get(msg.id) === ws) terminalOwners.delete(msg.id);
+          if (clientState.terminals.get(msg.id) === sink) {
+            clientState.terminals.delete(msg.id);
+            terminalManager.detach(msg.id, sink);
+          }
           // The panel says why, a terminal host that did not answer in time for one.
           const message = err instanceof Error ? err.message : String(err);
           sendTo(ws, { type: "terminal_notice", id: msg.id, notice: "attach_failed", message });
@@ -1242,36 +1239,27 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     }
 
     case "terminal_detach":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.detach(msg.id);
-        clients.get(ws)?.terminals.delete(msg.id);
-        terminalOwners.delete(msg.id);
-      }
+      detachTerminal(ws, msg.id);
       break;
 
-    case "terminal_resize":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.resize(msg.id, msg.cols, msg.rows);
-      }
-      break;
-
-    case "terminal_ack":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.ack(msg.id, msg.syncOffset, msg.bytes);
-      }
-      break;
-
-    case "terminal_destroy": {
-      // The panel may already have detached (unmount runs before the panel-removed handler), so
-      // an ownerless session is destroyable too; only another window's session is protected.
-      const owner = terminalOwners.get(msg.id);
-      if (owner === undefined || owner === ws) {
-        terminalManager.destroy(msg.id);
-        clients.get(ws)?.terminals.delete(msg.id);
-        terminalOwners.delete(msg.id);
-      }
+    case "terminal_resize": {
+      const sink = clients.get(ws)?.terminals.get(msg.id);
+      if (sink) terminalManager.resize(msg.id, sink, msg.cols, msg.rows);
       break;
     }
+
+    case "terminal_ack": {
+      const sink = clients.get(ws)?.terminals.get(msg.id);
+      if (sink) terminalManager.ack(msg.id, sink, msg.syncOffset, msg.bytes);
+      break;
+    }
+
+    case "terminal_destroy":
+      // The panel has usually detached already (unmount runs before the panel-removed handler).
+      // A terminal another window still shows keeps running there; the last one to close ends it.
+      detachTerminal(ws, msg.id);
+      if (!terminalManager.hasClients(msg.id)) terminalManager.destroy(msg.id);
+      break;
 
     // --- Notifications ---
 
@@ -1330,32 +1318,41 @@ function handleBinaryMessage(ws: ServerWebSocket<WsData>, data: Buffer) {
   const { type, terminalId } = parseBinaryHeader(
     new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
   );
-  if (type === BIN_MSG_INPUT) {
-    if (terminalOwners.get(terminalId) !== ws) return;
-    terminalManager.write(terminalId, data.subarray(BIN_HEADER_SIZE));
-  }
+  if (type !== BIN_MSG_INPUT) return;
+  const sink = clients.get(ws)?.terminals.get(terminalId);
+  if (sink) terminalManager.write(terminalId, sink, data.subarray(BIN_HEADER_SIZE));
+}
+
+/** Detach this socket from terminal `id`; the session keeps running, for any other client too. */
+function detachTerminal(ws: ServerWebSocket<WsData>, id: string): void {
+  const clientState = clients.get(ws);
+  const sink = clientState?.terminals.get(id);
+  if (!sink) return;
+  clientState?.terminals.delete(id);
+  terminalManager.detach(id, sink);
 }
 
 /**
- * Detach (not destroy) all terminals owned by this client.
+ * Detach (not destroy) all terminals this client is attached to.
  * Sessions stay alive so they can be reattached on reconnect.
  */
 function detachClientTerminals(ws: ServerWebSocket<WsData>) {
-  const clientState = clients.get(ws);
-  if (!clientState) return;
-  terminalManager.detachAll(clientState.terminals);
-  for (const id of clientState.terminals) {
-    terminalOwners.delete(id);
-  }
+  for (const id of [...(clients.get(ws)?.terminals.keys() ?? [])]) detachTerminal(ws, id);
 }
 
-/** Deliver a terminal session's messages to the socket that attached it. */
+/** A session that ended: no socket is attached to it any more. */
+function forgetTerminal(id: string): void {
+  for (const clientState of clients.values()) clientState.terminals.delete(id);
+}
+
+/** Deliver a terminal session's messages to one socket attached to it. */
 function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSink {
   return {
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
     sendOutput: ({ frame }) => ws.send(frame),
     sendExit: (end) => sendTo(ws, { type: "terminal_exit", id, ...end }),
     sendNotice: (notice) => sendTo(ws, { type: "terminal_notice", id, ...notice }),
+    sendSize: (size) => sendTo(ws, { type: "terminal_size", id, ...size }),
   };
 }
 
@@ -1659,7 +1656,7 @@ const server = Bun.serve<WsData>({
         idleTimer = null;
         log.info("Idle timer cancelled — client connected");
       }
-      clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
+      clients.set(ws, { terminals: new Map(), subscribedWorktrees: new Set() });
       // First, so the client knows whether this is the server it saw before (see WsClient).
       sendTo(ws, { type: "server_hello", version: getCurrentVersion(), ...serverIdentity });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });

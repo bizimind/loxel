@@ -75,6 +75,8 @@ Directory invalidation helpers (`src/queries/query-helpers.ts`) accept either re
 
 For root updates, the event path is `activeWorktreePath`, matching the root row path and the cache entry used by rendering.
 
+The server pushes directory changes only while the window is subscribed to the worktree, and only for directories it has been asked to list since it created the worktree's resources. When it answers a subscription with `worktree_files_resynced` (after a reconnect, for example), [ws-bridge.ts](../src/queries/ws-bridge.ts) invalidates the worktree's directory queries and dispatches `loxel-worktree-files-resynced`. For the active worktree the panel calls `treeRef.current.reloadExpanded()`, which lists every shown expanded folder again, Others folders included: the listings pick up changes made meanwhile, and listing them registers them with the server again, so their later changes are pushed. The Drafts section and the Others list are queries that refetch on the invalidation by themselves.
+
 ## Reveal In Explorer
 
 There are four reveal entry points:
@@ -82,7 +84,7 @@ There are four reveal entry points:
 - reveal event: `loxel-reveal-in-explorer`, dispatched by Quick Open and search results, and by the `file.revealInExplorer` command (which also shows the panel), to select a file if the panel is mounted. Unlike the pending reveal it also reaches individually opened Others files
 - auto reveal: reacts to active editor tab changes when the `autoRevealInExplorer` setting is enabled
 - header button: reveals the active editor's file
-- pending reveal: `pendingReveal` in the per-worktree UI store (`{ path, expand }`). `revealInProjectExplorer(path)` (`src/lib/reveal-in-explorer.ts`) shows the panel and sets it — used by the Changes panel's **Reveal in Project Explorer** — and `openFolder` sets it with `expand: true` (across a worktree switch, or before a new Others folder is listed). The panel retries it on directory changes until the tree can show the path, then clears it
+- pending reveal: `pendingReveal` in the per-worktree UI store (`{ path, expand }`). `revealInProjectExplorer(path)` (`src/lib/reveal-in-explorer.ts`) shows the panel and sets it — used by the Changes panel's **Reveal in Project Explorer** — and `openFolder` sets it with `expand: true` (across a worktree switch, or before a new Others folder is listed). The panel retries it on directory changes and worktree resyncs until the tree can show the path, then clears it
 
 All of them call the same `revealFileInTree(filePath)` helper.
 

@@ -26,17 +26,16 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { RunningTerminalsSchema } from "@/api/running-terminals-model";
-import { encodeInputFrame, parseOutputFrame } from "@/api/terminal-stream";
-import type { WsMessage } from "@/api/ws-protocol";
 import { bearer, newSessionSecret, readSessionToken } from "@/app-session";
 import {
   PARENT_CHANNEL_FD,
   type ShutdownTerminals,
   encodeParentMessage,
 } from "@/parent-channel-protocol";
-import { bunWebSocket, sessionAuthorization } from "@/session-client";
+import { sessionAuthorization } from "@/session-client";
 import { hostLogsDir, hostRunDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
+import { freePort, openPanel } from "@/test/terminal-panel";
 import { until } from "@/test/until";
 
 // The package's test preload replaces `fetch` and `WebSocket` with browser ones that enforce CORS.
@@ -45,13 +44,6 @@ if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 const LOXEL_ROOT = path.resolve(import.meta.dir, "../..");
 const TEST_TIMEOUT_MS = 60_000;
 
-function freePort(): number {
-  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: () => {} } });
-  const { port } = listener;
-  listener.stop(true);
-  return port;
-}
-
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -59,55 +51,6 @@ function isAlive(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-/** A panel's view of one terminal over its own socket: states, output, exits and its offset. */
-async function openPanel(baseUrl: string, auth: Record<string, string>) {
-  const states: Array<Extract<WsMessage, { type: "terminal_state" }>> = [];
-  const exits: Array<Extract<WsMessage, { type: "terminal_exit" }>> = [];
-  let text = "";
-  let offset: number | null = null;
-  const socket = bunWebSocket(baseUrl.replace("http", "ws") + "/ws", auth);
-  socket.binaryType = "arraybuffer";
-  socket.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") {
-      const frame = parseOutputFrame(new Uint8Array(event.data as ArrayBuffer));
-      if (!frame) return;
-      text += new TextDecoder().decode(frame.payload);
-      offset = frame.offset + frame.payload.byteLength;
-      return;
-    }
-    const message = JSON.parse(event.data) as WsMessage;
-    if (message.type === "terminal_exit") exits.push(message);
-    if (message.type !== "terminal_state") return;
-    states.push(message);
-    offset = message.offset;
-  });
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve);
-    socket.addEventListener("error", reject);
-  });
-  return {
-    states,
-    exits,
-    text: () => text,
-    offset: () => offset,
-    attach: (id: string, since?: { epoch: string; offset: number }) =>
-      socket.send(
-        JSON.stringify({
-          type: "terminal_attach",
-          id,
-          cols: 80,
-          rows: 24,
-          cwd: "/tmp",
-          worktreePath: "/tmp",
-          ...(since && { sinceEpoch: since.epoch, sinceOffset: since.offset }),
-        }),
-      ),
-    type: (id: string, line: string) =>
-      socket.send(new Uint8Array(encodeInputFrame(id, new TextEncoder().encode(`${line}\n`)))),
-    close: () => socket.close(),
-  };
 }
 
 describe("terminals across server restarts", () => {

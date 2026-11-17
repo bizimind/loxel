@@ -190,6 +190,7 @@ describe("nodeToolchainEnv", () => {
           },
           sendExit: () => {},
           sendNotice: () => {},
+          sendSize: () => {},
         },
         {
           cols: 80,

@@ -19,4 +19,5 @@ export type {
 export { OSC_NOTIFICATION_CODES } from "./terminal-host";
 export type { EndedHost } from "./terminal-host-pool";
 export { TerminalHostPool } from "./terminal-host-pool";
+export { FLOW_HIGH_WATER_BYTES, FLOW_LOW_WATER_BYTES } from "./terminal-session";
 export type { TerminalSessionRuntime } from "./terminal-session";
