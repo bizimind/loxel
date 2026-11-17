@@ -416,11 +416,11 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 
 /**
  * Hand the open inbox to a window that just said hello: every request no window has placed yet,
- * oldest first. Each opens as it would have then, focus included, until a window says it placed
- * the panel (`inbox_open_done`), which tells every window to drop its copy. A window that reloads
- * or closes first gets it again, or leaves it for the next. One notification per worktree says
- * what opened the first time a request is handed over: a panel opened without focus waits unseen
- * in its worktree.
+ * oldest first, each without focus (the inbox keeps them so), so it waits in its worktree and
+ * switches no window there, until a window says it placed the panel (`inbox_open_done`), which
+ * tells every window to drop its copy. A window that reloads or closes first gets it again, or
+ * leaves it for the next. One notification per worktree says what opened the first time a request
+ * is handed over, since the panel waits unseen in a worktree the user may not be on.
  */
 function deliverInbox(ws: ServerWebSocket<WsData>): void {
   const entries = openInbox.list();

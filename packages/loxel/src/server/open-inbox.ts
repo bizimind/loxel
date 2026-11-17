@@ -8,15 +8,12 @@ import { z } from "zod";
 
 import { AgentOriginSchema } from "@/api/agent-terminal-model";
 import { parsePanelPlacement } from "@/api/panel-placement-model";
-import type { WsMessage } from "@/api/ws-protocol";
+import type { InboxOpenMessage } from "@/api/ws-protocol";
 
 import { PersistedList } from "./persisted-list";
 
-/**
- * The requests the inbox holds: the messages `POST /api/open` sends a window, but a folder's, which
- * is only revealed in the window in use.
- */
-export type InboxMessage = Extract<WsMessage, { type: "open_file" | "open_terminal" | "open_url" }>;
+/** The requests the inbox holds; see `InboxOpenMessage`. */
+export type InboxMessage = InboxOpenMessage;
 
 /**
  * Enough for a burst of agents' requests over a night away, while a runaway loop cannot grow the

@@ -55,6 +55,9 @@ export type OpenRequestMessage =
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel };
 
+/** What the open inbox keeps for a window to come: any open request but a folder's. */
+export type InboxOpenMessage = Exclude<OpenRequestMessage, { type: "open_folder" }>;
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // First message on every connection; the client resyncs from it (see `WsClient`)
@@ -79,7 +82,7 @@ export type WsMessage =
    * answers `inbox_open_done` once it has placed the panel (or the open failed); until then the
    * server keeps the request, and gives it to every window that says hello.
    */
-  | { type: "open_from_inbox"; inboxId: string; message: OpenRequestMessage }
+  | { type: "open_from_inbox"; inboxId: string; message: InboxOpenMessage }
   /** A window placed the panel of an `open_from_inbox` request: the others drop their copy. */
   | { type: "inbox_open_placed"; inboxId: string }
   // Project-scoped (sent to all subscribers under project)

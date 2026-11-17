@@ -1,6 +1,11 @@
 import * as api from "@/api/client";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
-import type { OpenFilePanel, OpenRequestMessage, OpenTerminalPanel } from "@/api/ws-protocol";
+import type {
+  InboxOpenMessage,
+  OpenFilePanel,
+  OpenRequestMessage,
+  OpenTerminalPanel,
+} from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
@@ -57,19 +62,19 @@ export function dropInboxOpen(inboxId: string): void {
 /**
  * Open a request the server kept in its open inbox while no window was connected. The server keeps
  * it until a window is done with it: once its panel is placed, which for a panel queued in a
- * worktree not shown is when the user goes there, or at once for a folder. An open that fails here
- * is left to the other windows.
+ * worktree not shown is when the user goes there. An open that fails here is left to the other
+ * windows.
  * A request this window already had (the server sends them again after a reconnect) is not opened
  * twice, but done with again, in case the server missed that.
  */
-export async function openFromInbox(inboxId: string, message: OpenRequestMessage): Promise<void> {
+export async function openFromInbox(inboxId: string, message: InboxOpenMessage): Promise<void> {
   const done = inboxOpens.get(inboxId);
   if (done !== undefined) {
     if (done) api.wsClient.send({ type: "inbox_open_done", inboxId });
     return;
   }
   inboxOpens.set(inboxId, false);
-  // Placed (or a folder revealed): done. A failed open leaves it to the other windows, or expiry.
+  // Open here: done. A failed open leaves it to the other windows, or to its expiry.
   if ((await openRequest(message, inboxId)) === false) inboxOpenDone(inboxId);
 }
 
