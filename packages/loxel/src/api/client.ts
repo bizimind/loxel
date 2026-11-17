@@ -972,14 +972,18 @@ export class WsClient {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
+    // Only the latest socket counts: one a disconnect left closing (as React's StrictMode does
+    // with its double effect) must not retry or deliver beside it.
+    this.ws = ws;
 
     ws.onopen = () => {
-      postLogEntry({ level: "info", cat: "server", msg: "WebSocket connected" });
+      if (this.ws !== ws) return;
       // Nothing is sent until the server's hello (its first message) says which server this is.
-      this.ws = ws;
+      postLogEntry({ level: "info", cat: "server", msg: "WebSocket connected" });
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       if (typeof event.data === "string") {
         // JSON text frame — control/git messages
         try {
@@ -1014,8 +1018,9 @@ export class WsClient {
     };
 
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       postLogEntry({ level: "warn", cat: "server", msg: "WebSocket disconnected" });
-      if (this.ws === ws) this.ws = null;
+      this.ws = null;
       if (this.closed) return;
       if (this.state === "connected") this.setState("reconnecting");
       this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
@@ -1112,7 +1117,18 @@ export class WsClient {
   private setState(state: ConnectionState): void {
     if (state === this.state) return;
     this.state = state;
-    for (const listener of this.stateListeners) listener();
+    for (const listener of this.stateListeners) {
+      try {
+        listener();
+      } catch (err) {
+        postLogEntry({
+          level: "error",
+          cat: "server",
+          msg: "Connection state listener failed",
+          ctx: { error: err instanceof Error ? { message: err.message } : undefined },
+        });
+      }
+    }
   }
 
   /** The connection state, for `useSyncExternalStore` with {@link onConnectionStateChange}. */
@@ -1195,6 +1211,8 @@ export class WsClient {
     this.ws?.close();
     this.ws = null;
     this.pendingMessages = [];
+    // A later connect waits for its hello again, and treats it as a reconnect if one came before.
+    this.setState(this.server ? "reconnecting" : "connecting");
   }
 }
 

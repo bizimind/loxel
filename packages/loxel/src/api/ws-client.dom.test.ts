@@ -176,6 +176,27 @@ describe("WsClient", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  test("ignores a socket it already replaced", () => {
+    // React's StrictMode runs the bridge's effect twice: connect, disconnect, connect.
+    const client = new WsClient();
+    client.connect();
+    const stale = lastSocket();
+    client.disconnect();
+    client.connect();
+    const current = lastSocket();
+
+    stale.open();
+    stale.receive(hello());
+    stale.onclose?.();
+    client.retryNow();
+
+    expect(FakeSocket.instances).toEqual([stale, current]);
+    expect(client.getConnectionState()).toBe("connecting");
+    current.open();
+    current.receive(hello());
+    expect(client.getConnectionState()).toBe("connected");
+  });
+
   test("reports each state change to its subscribers", () => {
     const { client } = connected();
     const states: string[] = [];

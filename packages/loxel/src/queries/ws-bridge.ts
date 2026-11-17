@@ -26,6 +26,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./query-keys";
 
 const log = frontendLog.child("files");
+const serverLog = frontendLog.child("server");
 
 const EDITORCONFIG_SUFFIX = "/.editorconfig";
 
@@ -479,7 +480,7 @@ export function useWsBridge(): void {
       }
     });
 
-    const unsubscribeReconnect = wsClient.onReconnect(resyncAfterReconnect);
+    const unsubscribeReconnect = wsClient.onReconnect(() => void resyncAfterReconnect());
 
     return () => {
       unsubscribe();
@@ -495,14 +496,23 @@ export function useWsBridge(): void {
  * so it all goes stale: TanStack refetches the queries on screen now and the rest when next used.
  * File contents are the exception: an editor with unsaved changes must take new disk content
  * through its state machine, not as a bare refetch, so they are left to the
- * `worktree_files_resynced` the server sends each re-subscribed worktree. The project and
- * worktree lists live in stores, so they are fetched again.
+ * `worktree_files_resynced` the server sends each re-subscribed worktree. The projects and their
+ * worktree lists live in stores, so they are fetched again, which also releases worktrees removed
+ * meanwhile.
  */
-function resyncAfterReconnect(): void {
+async function resyncAfterReconnect(): Promise<void> {
   void queryClient.invalidateQueries({
     predicate: ({ queryKey }) => queryKey[0] !== "fileContent",
   });
-  void useProjectStore.getState().fetchProjects();
+  try {
+    await useProjectStore.getState().fetchProjects();
+    const { refreshProjectWorktrees } = useWorktreeStore.getState();
+    await Promise.all(
+      useProjectStore.getState().projects.map((p) => refreshProjectWorktrees(p.path)),
+    );
+  } catch (error: unknown) {
+    serverLog.error("Failed to refresh projects after reconnecting", { error });
+  }
 }
 
 /** Derive project path from a worktree path using the project store. */

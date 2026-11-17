@@ -36,10 +36,13 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
   }, [activeWorktreePath]);
 
   useEffect(() => {
-    // The server forgets a socket's open external files with it; tell the new one again.
-    return wsClient.onReconnect(() => {
+    // The server forgets a worktree's open external files with its resources (after a reconnect,
+    // say), so tell it again once it confirms the subscription: sent right after the subscribe, the
+    // list would arrive before the resources exist and be dropped.
+    return wsClient.subscribe((message) => {
+      if (message.type !== "worktree_files_resynced") return;
       const wt = useWorktreeStore.getState().activeWorktreePath;
-      if (!wt) return;
+      if (message.wtPath !== wt) return;
       const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
         (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
       );
