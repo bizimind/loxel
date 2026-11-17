@@ -102,7 +102,8 @@ export type WsMessage =
   | ({ type: "terminal_state" } & TerminalState)
   /**
    * The terminal's PTY size, sent to every client attached to it but the active one (the one that
-   * last attached, resized, or had its user type, click or focus it), which render at that size.
+   * last claimed it, or attached with no other client attached), which render at that size; also
+   * sent to a client whose attach joined other clients, which does not claim the terminal.
    */
   | { type: "terminal_size"; id: string; cols: number; rows: number }
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
@@ -176,8 +177,9 @@ export type WsClientMessage =
   | ({
       /**
        * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
-       * exist. The {@link TerminalSpawnTarget} fields apply only when spawning, except
-       * `scrollbackLines`, which is applied on every attach like `cols` and `rows`.
+       * exist. It claims the terminal only when no other client is attached to it. The
+       * {@link TerminalSpawnTarget} fields apply only when spawning, except `scrollbackLines`,
+       * which is applied on every attach like `cols` and `rows`.
        * `sinceEpoch`/`sinceOffset` identify the session and stream offset the client's xterm is
        * already current to (a reconnect with a live xterm); omit them for a fresh xterm.
        */

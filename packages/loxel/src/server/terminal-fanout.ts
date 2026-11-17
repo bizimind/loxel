@@ -105,13 +105,26 @@ export class TerminalFanout {
 
   /**
    * Add `sink`, replacing any earlier attach of it, as a client waiting for its state, from
-   * `since` if its xterm is current to that point. It becomes the active client, at `size`.
-   * Returns whether the PTY's size changed.
+   * `since` if its xterm is current to that point. With no other client attached (or replacing the
+   * active one) it becomes the active client, at `size`. Otherwise it joins passive, at the PTY's
+   * size, which it is sent: opening a terminal another window uses must not reflow it there, so it
+   * claims only on its user's input. Returns whether the PTY's size changed.
    */
   attach(sink: TerminalSink, size: TerminalSize, since?: StreamPoint): boolean {
+    const claims = this.clients.size === 0 || this.isActive(sink);
     this.clients.delete(sink);
-    this.clients.set(sink, { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 });
-    return this.setSize(size, true);
+    const client: Client = { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 };
+    if (claims) {
+      this.clients.set(sink, client);
+      return this.setSize(size, true);
+    }
+    // First in claim order: once the active client leaves, a client that claimed takes over.
+    const others = [...this.clients];
+    this.clients.clear();
+    this.clients.set(sink, client);
+    for (const [other, state] of others) this.clients.set(other, state);
+    sink.sendSize(this.size);
+    return false;
   }
 
   /**

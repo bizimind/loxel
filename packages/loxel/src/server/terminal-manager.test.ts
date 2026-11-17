@@ -991,34 +991,49 @@ describe("TerminalManager with several clients", () => {
     const first = createRecordingSink();
     const second = createRecordingSink();
     await manager.attach(id, first.sink, attachOptions);
+    // Joining a terminal another client uses does not resize it: it renders at the PTY's size.
     await manager.attach(id, second.sink, { ...attachOptions, cols: 100, rows: 30 });
-    expect(host.resizes).toEqual([{ cols: 100, rows: 30 }]);
-    expect(first.sizes).toEqual([{ cols: 100, rows: 30 }]);
+    expect(host.resizes).toEqual([]);
+    expect(second.sizes).toEqual([{ cols: 80, rows: 24 }]);
+    expect(first.sizes).toEqual([]);
 
-    // The first client's xterm answers the program's queries too; only the active one counts.
+    // The second client's xterm answers the program's queries too; only the active one counts.
     const type = (client: TerminalSink, text: string) =>
       manager.write(id, client, new TextEncoder().encode(text));
     type(first.sink, "from-first");
     type(second.sink, "from-second");
-    expect(host.writes).toEqual(["from-second"]);
+    expect(host.writes).toEqual(["from-first"]);
 
-    // Its user typing claims the terminal back, at its own size.
-    manager.resize(id, first.sink, 90, 20);
-    type(first.sink, "typed");
-    type(second.sink, "reply");
-    expect(host.writes).toEqual(["from-second", "typed"]);
-    expect(host.resizes.at(-1)).toEqual({ cols: 90, rows: 20 });
-    expect(second.sizes).toEqual([{ cols: 90, rows: 20 }]);
+    // Its user typing claims the terminal, at its own size.
+    manager.resize(id, second.sink, 100, 30);
+    type(second.sink, "typed");
+    type(first.sink, "reply");
+    expect(host.writes).toEqual(["from-first", "typed"]);
+    expect(host.resizes).toEqual([{ cols: 100, rows: 30 }]);
+    expect(first.sizes).toEqual([{ cols: 100, rows: 30 }]);
     // A claim that changes nothing sends nothing.
-    manager.resize(id, first.sink, 90, 20);
-    expect(host.resizes).toHaveLength(2);
-    expect(second.sizes).toHaveLength(1);
+    manager.resize(id, second.sink, 100, 30);
+    expect(host.resizes).toHaveLength(1);
+    expect(first.sizes).toHaveLength(1);
 
     // The active client leaving hands input to the other, at the size it already renders at.
-    manager.detach(id, first.sink);
-    type(second.sink, "now-second");
-    expect(host.writes.at(-1)).toBe("now-second");
-    expect(host.resizes).toHaveLength(2);
+    manager.detach(id, second.sink);
+    type(first.sink, "now-first");
+    expect(host.writes.at(-1)).toBe("now-first");
+    expect(host.resizes).toHaveLength(1);
+  });
+
+  test("the active client attaching again stays active, at its new size", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    await manager.attach(id, second.sink, attachOptions);
+    void manager.attach(id, first.sink, { ...attachOptions, cols: 90, rows: 20 });
+    expect(host.resizes).toEqual([{ cols: 90, rows: 20 }]);
+    expect(second.sizes.at(-1)).toEqual({ cols: 90, rows: 20 });
   });
 
   test("a client detaching leaves the others attached; the last one leaves an orphan", async () => {
@@ -1160,6 +1175,7 @@ describe("TerminalManager with several clients", () => {
         },
       };
       await manager.attach(id, acking, attachOptions);
+      manager.resize(id, acking, attachOptions.cols, attachOptions.rows);
       manager.write(id, acking, new TextEncoder().encode("\n"));
 
       await until(() => slow.exits.length > 0 && fast.exits.length > 0, 30_000);

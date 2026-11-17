@@ -263,7 +263,8 @@ export class TerminalManager {
 
   /**
    * Attach a client to the session, spawning the shell first if the session does not exist. It
-   * joins the clients already attached and becomes the active one, so the PTY takes its size.
+   * joins the clients already attached, as the active one (the PTY takes its size) only when no
+   * other is attached; see `TerminalFanout.attach`.
    * Resolves once the host has sent the state that syncs it, or rejects if the host failed to.
    */
   async attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {

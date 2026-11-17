@@ -299,7 +299,8 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
   const attachedRef = useRef(false);
   /**
    * Whether this view is the terminal's active one, as far as it knows: it is once it attaches or
-   * claims the terminal, and stops being when the server sends the size another view set.
+   * claims the terminal, and stops being when the server sends the size another view set, which
+   * it does at once for an attach that joins another view's.
    */
   const activeRef = useRef(false);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -566,8 +567,11 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const unsubReconnect = wsClient.onReconnect(() => {
       // Before the initial attach, the pending open sends terminal_attach itself.
       if (exitedRef.current || !attachedRef.current || !spawnTargetRef.current) return;
-      // The attach makes this view the active one: at its own size, not one another view set.
-      if (isOnScreen(panelApi)) fitAddon.fit();
+      // Alone, the attach makes this view the active one, at its own size; joining another view, it
+      // gets that view's size back and renders at it until its user claims the terminal. A passive
+      // view attaches at the size it renders at, the PTY's: after a server restart the first view
+      // to attach claims, and a passive one must not reflow the window in use.
+      if (activeRef.current && isOnScreen(panelApi)) fitAddon.fit();
       output.expectState();
       sendAttach(terminalId, terminal, spawnTargetRef.current, output.since);
       activeRef.current = true;
@@ -633,11 +637,10 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       resizeTimerRef.current = setTimeout(() => {
         if (!fitAddonRef.current || !xtermRef.current) return;
         // A group hidden behind a maximized one has no size to fit, and the program running here
-        // must keep its dimensions. Showing the group resizes the container, which refits.
-        if (!isOnScreen(panelApi)) return;
-        if (fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current)) {
-          activeRef.current = true;
-        }
+        // must keep its dimensions. Showing the group resizes the container, which refits. A view
+        // another window's use sized keeps that size: only its user's input claims the terminal.
+        if (!isOnScreen(panelApi) || !activeRef.current) return;
+        fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
     };
