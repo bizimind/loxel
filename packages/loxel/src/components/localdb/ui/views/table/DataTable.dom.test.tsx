@@ -5,7 +5,9 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import type { InsertResult, TableSchema } from "@bizimind/localdb-sdk";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type React from "react";
 
 // Imported through the package barrel so the built-in field components get registered,
 // exactly as in the app.
@@ -21,13 +23,31 @@ const schema: TableSchema = {
   ],
 };
 
-function makeAdapter(insertResult: InsertResult<Record<string, unknown>>) {
+function makeAdapter(
+  insertResult: InsertResult<Record<string, unknown>>,
+  rows: Array<Record<string, unknown>> = [],
+) {
   const insert = mock(() => Promise.resolve(insertResult));
   const adapter = {
-    query: () => Promise.resolve({ rows: [], total: 0, page: 1, pageSize: 50, hasNext: false }),
+    queryKey: ["localdb", "/repo"],
+    query: () =>
+      Promise.resolve({
+        rows: [...rows],
+        total: rows.length,
+        page: 1,
+        pageSize: 50,
+        hasNext: false,
+      }),
     insert,
   } as unknown as DataAdapter;
   return { adapter, insert };
+}
+
+/** Render with a query client of its own, as the app's provider gives the views. */
+function renderWithQueries(ui: React.ReactElement): QueryClient {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+  return queryClient;
 }
 
 async function startAddingRow() {
@@ -41,7 +61,7 @@ describe("DataTable add row", () => {
       ok: false,
       issues: [{ path: ["title"], code: "required", message: '"title" is required' }],
     });
-    render(<DataTable schema={schema} adapter={adapter} />);
+    renderWithQueries(<DataTable schema={schema} adapter={adapter} />);
     const [titleInput, notesInput] = await startAddingRow();
     fireEvent.change(notesInput!, { target: { value: "draft notes" } });
 
@@ -71,7 +91,7 @@ describe("DataTable add row", () => {
       ok: false,
       issues: [{ path: ["owner"], code: "type", message: '"owner" must be a number' }],
     });
-    render(<DataTable schema={refSchema} adapter={adapter} />);
+    renderWithQueries(<DataTable schema={refSchema} adapter={adapter} />);
     const [ownerInput] = await startAddingRow();
     fireEvent.change(ownerInput!, { target: { value: "bob" } });
 
@@ -87,7 +107,7 @@ describe("DataTable add row", () => {
       ok: false,
       issues: [{ path: [], code: "unique", message: "Row must be unique" }],
     });
-    render(<DataTable schema={schema} adapter={adapter} />);
+    renderWithQueries(<DataTable schema={schema} adapter={adapter} />);
     await startAddingRow();
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -97,7 +117,7 @@ describe("DataTable add row", () => {
 
   test("a successful insert closes the add-row form", async () => {
     const { adapter } = makeAdapter({ ok: true, row: { id: 1, title: "x" } });
-    render(<DataTable schema={schema} adapter={adapter} />);
+    renderWithQueries(<DataTable schema={schema} adapter={adapter} />);
     const [titleInput] = await startAddingRow();
     fireEvent.change(titleInput!, { target: { value: "x" } });
 
@@ -105,5 +125,21 @@ describe("DataTable add row", () => {
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save" })).toBeNull());
     expect(screen.getByRole("button", { name: "+ Add row" })).toBeInTheDocument();
+  });
+});
+
+describe("DataTable rows", () => {
+  test("follow a change made elsewhere once the project's localdb queries are invalidated", async () => {
+    const rows: Array<Record<string, unknown>> = [{ id: 1, title: "first", notes: "" }];
+    const { adapter } = makeAdapter({ ok: true, row: {} }, rows);
+    const queryClient = renderWithQueries(<DataTable schema={schema} adapter={adapter} />);
+    await screen.findByText("first");
+
+    // What a localdb_changed push or a resync after a reconnect does.
+    rows.push({ id: 2, title: "added by an agent", notes: "" });
+    await act(() => queryClient.invalidateQueries({ queryKey: ["localdb", "/repo"] }));
+
+    expect(await screen.findByText("added by an agent")).toBeInTheDocument();
+    expect(screen.getByText("first")).toBeInTheDocument();
   });
 });

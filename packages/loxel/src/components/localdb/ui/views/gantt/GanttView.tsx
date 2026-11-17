@@ -2,14 +2,13 @@ import type { TableSchema, GanttViewDef } from "@bizimind/localdb-sdk";
 import { useState, useEffect, useRef, useCallback } from "react";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
+import { type Row, useTableRows } from "../use-table-rows.ts";
 
 interface Props {
   schema: TableSchema;
   viewDef: GanttViewDef;
   adapter: DataAdapter;
 }
-
-type Row = Record<string, unknown>;
 
 interface DragState {
   rowId: number;
@@ -39,27 +38,15 @@ export function GanttView({ schema, viewDef, adapter }: Props) {
   const { startColumn, endColumn, labelColumn, groupByColumn } = viewDef;
   const tableName = schema.table.name;
 
-  const [localRows, setLocalRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
+  const tableRows = useTableRows(adapter, tableName, { pageSize: 500 });
+  /** The rows as the drag in progress shows them; null when not dragging. */
+  const [dragRows, setDragRows] = useState<Row[] | null>(null);
+  const localRows = dragRows ?? tableRows.page?.rows ?? [];
   const [dragging, setDragging] = useState<DragState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Always reflects the latest localRows without stale closure issues in event handlers
   const localRowsRef = useRef<Row[]>(localRows);
   localRowsRef.current = localRows;
-
-  async function fetchRows() {
-    setLoading(true);
-    try {
-      const page = await adapter.query<Row>(tableName, { pageSize: 500 });
-      setLocalRows(page.rows);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void fetchRows();
-  }, [tableName]);
 
   // Compute time range
   const validRows = localRows.filter((r) => parseDate(r[startColumn]) && parseDate(r[endColumn]));
@@ -97,8 +84,8 @@ export function GanttView({ schema, viewDef, adapter }: Props) {
       const pxPerMs = containerWidth / totalMs;
       const deltaMs = dx / pxPerMs;
 
-      setLocalRows((prev) =>
-        prev.map((r) => {
+      setDragRows((prev) =>
+        (prev ?? localRowsRef.current).map((r) => {
           if (r.id !== dragging.rowId) return r;
           if (dragging.kind === "move") {
             return {
@@ -119,19 +106,21 @@ export function GanttView({ schema, viewDef, adapter }: Props) {
     // Read from ref to get the post-drag state, not the stale closure value
     const current = localRowsRef.current;
     const row = current.find((r) => r.id === dragging.rowId);
+    const snapshot = tableRows.page;
+    if (row) tableRows.setPage((page) => ({ ...page, rows: current }));
+    setDragRows(null);
     if (row) {
-      const snapshot = current;
       try {
         await adapter.update<Row>(tableName, dragging.rowId, {
           [startColumn]: row[startColumn],
           [endColumn]: row[endColumn],
         });
       } catch {
-        setLocalRows(snapshot);
+        if (snapshot) tableRows.setPage(() => snapshot);
       }
     }
     setDragging(null);
-  }, [dragging, adapter, tableName, startColumn, endColumn]);
+  }, [dragging, adapter, tableName, startColumn, endColumn, tableRows.page, tableRows.setPage]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -146,7 +135,7 @@ export function GanttView({ schema, viewDef, adapter }: Props) {
     };
   }, [dragging, onMouseMove, onMouseUp]);
 
-  if (loading) {
+  if (tableRows.loading) {
     return <div className="text-muted-foreground p-4 text-xs">Loading…</div>;
   }
 

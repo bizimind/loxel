@@ -1,10 +1,11 @@
 import type { TableSchema, KanbanViewDef, InlineOption, ColumnDef } from "@bizimind/localdb-sdk";
 import type React from "react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 import { dayjs } from "@/lib/dayjs";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
+import { type Row, useTableRows } from "../use-table-rows.ts";
 
 interface Props {
   schema: TableSchema;
@@ -12,32 +13,17 @@ interface Props {
   adapter: DataAdapter;
 }
 
-type Row = Record<string, unknown>;
 type Group = { key: string; label: string; value: unknown };
 
 export function KanbanBoard({ schema, viewDef, adapter }: Props) {
   const { groupByColumn, cardTitleColumn, cardColumns } = viewDef;
   const tableName = schema.table.name;
 
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
+  const tableRows = useTableRows(adapter, tableName, { pageSize: 500 });
+  const rows = tableRows.page?.rows ?? [];
   const [dragging, setDragging] = useState<{ rowId: number; fromGroup: string | null } | null>(
     null,
   );
-
-  async function fetchRows() {
-    setLoading(true);
-    try {
-      const page = await adapter.query<Row>(tableName, { pageSize: 500 });
-      setRows(page.rows);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void fetchRows();
-  }, [tableName]);
 
   // Compute group buckets from column options or unique row values.
   const groupCol = schema.columns.find((c) => c.name === groupByColumn);
@@ -69,22 +55,23 @@ export function KanbanBoard({ schema, viewDef, adapter }: Props) {
   const columnByName = new Map(schema.columns.map((column) => [column.name, column]));
 
   async function handleMove(rowId: number, newGroup: unknown) {
-    const snapshot = rows;
+    const snapshot = tableRows.page;
     const optimisticGroup =
       groupCol?.def && "options" in groupCol.def && groupCol.def.options?.source === "inline"
         ? (groupCol.def.options.items.find((o) => groupKey(o.value) === groupKey(newGroup)) ?? null)
         : newGroup;
-    setRows((prev) =>
-      prev.map((r) => (r.id === rowId ? { ...r, [groupByColumn]: optimisticGroup } : r)),
-    );
+    tableRows.setPage((page) => ({
+      ...page,
+      rows: page.rows.map((r) => (r.id === rowId ? { ...r, [groupByColumn]: optimisticGroup } : r)),
+    }));
     try {
       await adapter.update<Row>(tableName, rowId, { [groupByColumn]: newGroup });
     } catch {
-      setRows(snapshot);
+      if (snapshot) tableRows.setPage(() => snapshot);
     }
   }
 
-  if (loading) {
+  if (tableRows.loading) {
     return <div className="text-muted-foreground p-4 text-xs">Loading…</div>;
   }
 

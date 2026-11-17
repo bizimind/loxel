@@ -35,12 +35,6 @@ export interface LoxelEventMap {
   /** The server confirmed a worktree subscription; listings shown for it may have missed changes. */
   "loxel-worktree-files-resynced": { wtPath: string };
   "loxel-reveal-in-explorer": { filePath: string };
-  "loxel-localdb-changed": {
-    projectPath: string;
-    tableName?: string;
-    tableId?: number;
-    scope: "schema" | "data" | "views";
-  };
 }
 
 /** Type-safe event dispatch. */
