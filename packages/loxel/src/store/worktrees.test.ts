@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import type { AddWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import { localRef } from "@/api/local-server";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
 
 const PROJECT = "/repo";
@@ -383,6 +384,15 @@ describe("a worktree removed outside the app", () => {
     queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(OTHER_WT)), {
       kept: true,
     });
+    // The same paths on another server are that server's worktree, not this one.
+    const elsewhere = toServerId("other-server");
+    const elsewhereDir = queryKeys.dirContents(worktreeRef(elsewhere, PROJECT), `${WT_PATH}/src`);
+    const elsewhereStatus = queryKeys.status(
+      worktreeRef(elsewhere, PROJECT),
+      worktreeRef(elsewhere, WT_PATH),
+    );
+    queryClient.setQueryData(elsewhereDir, ["kept"]);
+    queryClient.setQueryData(elsewhereStatus, { kept: true });
     const unsubscribe = spyOn(actualClient.wsClient, "unsubscribeWorktree").mockImplementation(
       () => {},
     );
@@ -406,6 +416,8 @@ describe("a worktree removed outside the app", () => {
         queryKeys.status(localRef(PROJECT), localRef(OTHER_WT)),
       );
       expect(kept).toEqual({ kept: true });
+      expect(queryClient.getQueryData(elsewhereDir)).toEqual(["kept"]);
+      expect(queryClient.getQueryData(elsewhereStatus)).toEqual({ kept: true });
       expect(unsubscribe).toHaveBeenCalledWith(WT_PATH);
       expect(isListedWorktree(WT_PATH)).toBe(false);
       expect(isListedWorktree(OTHER_WT)).toBe(true);

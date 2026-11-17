@@ -32,7 +32,8 @@ function key<const T extends readonly unknown[]>(...parts: T): BuiltQueryKey<T> 
 
 /**
  * Every query's key. Data about a project or a worktree is keyed by its {@link WorktreeRef} (a
- * project's is its root's), which names the server; other server data names the server by id.
+ * project's is its root's), which names the server; other server data by `{ server }`, so a key's
+ * server is the `server` of whichever part has one ({@link keyServer}).
  * A project ref leads where there is one, so a project's repo-wide data (branches) is shared by
  * its worktrees and a prefix reaches all of the project's. Home's keys carry no ref, as Home has
  * no server. Prefix builders whose name ends in `All` reach every server's keys.
@@ -86,16 +87,16 @@ export const queryKeys = {
   toolchainStatusAll: () => key("toolchainStatus"),
   repoTrust: (project: WorktreeRef | null, wt: WorktreeRef | null) => key("repoTrust", project, wt),
   /** Every repository's answer, for Settings > Security; under {@link repoTrustAll}. */
-  repoTrustList: (server: ServerId) => key("repoTrust", "list", server),
+  repoTrustList: (server: ServerId) => key("repoTrust", "list", { server }),
   /** Prefix key for every worktree's repository trust, and the list of every repository's. */
   repoTrustAll: () => key("repoTrust"),
   /** `GET /api/terminals`; invalidated by `terminals_changed`. */
-  runningTerminals: (server: ServerId) => key("runningTerminals", server),
+  runningTerminals: (server: ServerId) => key("runningTerminals", { server }),
   /** The app update's state, which Electron main keeps, not a server. */
   updateStatus: () => key("updateStatus"),
-  version: (server: ServerId) => key("version", server),
-  openInApps: (server: ServerId, path: string) => key("openInApps", server, path),
-  pathExists: (server: ServerId, path: string) => key("pathExists", server, path),
+  version: (server: ServerId) => key("version", { server }),
+  openInApps: (server: ServerId, path: string) => key("openInApps", { server }, path),
+  pathExists: (server: ServerId, path: string) => key("pathExists", { server }, path),
   /** Prefix key for all of `project`'s local database: its tables, schemas, views and rows. */
   localdb: (project: WorktreeRef | null): LocalDbKey => key("localdb", project),
   localdbTables: (project: WorktreeRef | null) => key("localdb", project, "tables"),
@@ -180,15 +181,32 @@ export function isWorktreeDiskContentKey(
   );
 }
 
+/** The server a key's data comes from: the `server` of its ref or `{ server }` part. */
+export function keyServer(queryKey: readonly unknown[]): ServerId | null {
+  for (const part of queryKey) {
+    if (typeof part === "object" && part !== null && "server" in part) {
+      // Only refs and `{ server }` parts have a `server`, typed `ServerId` by the builders above.
+      return typeof part.server === "string" ? (part.server as ServerId) : null;
+    }
+  }
+  return null;
+}
+
 /**
- * Whether a query key reaches into `wt`: names it, a worktree or project inside it on its server,
- * or a path inside it (a listed directory, a file). A plain path matches on any server, which only
- * costs another server's query a refetch.
+ * Whether a query key reaches into `wt`: a key of `wt`'s server that names `wt`, a worktree or
+ * project inside it, or a path inside it (a listed directory, a file). A key naming no server
+ * (Home's, or one built before its project was known) is the window's own: it counts as
+ * `homeServer`'s.
  */
-export function isKeyWithinWorktree(queryKey: readonly unknown[], wt: WorktreeRef): boolean {
+export function isKeyWithinWorktree(
+  queryKey: readonly unknown[],
+  wt: WorktreeRef,
+  homeServer: ServerId,
+): boolean {
+  if ((keyServer(queryKey) ?? homeServer) !== wt.server) return false;
   return queryKey.some((part) =>
     isWorktreeRef(part)
-      ? part.server === wt.server && isWithin(part.path, wt.path)
+      ? isWithin(part.path, wt.path)
       : typeof part === "string" && isWithin(part, wt.path),
   );
 }
