@@ -1,7 +1,7 @@
 {
   "script": "build-terraform-ls.ts",
   "resources": ["terraform-ls"],
-  "goModule": "terraform-ls-module",
+  "version": "0.39.1",
   "purl": "pkg:golang/github.com/hashicorp/terraform-ls@v{version}",
   "license": "MPL-2.0",
   "source": "https://github.com/hashicorp/terraform-ls/tree/v{version}",
