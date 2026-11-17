@@ -11,11 +11,11 @@
  * which require a commit of its main branch and raise the dependencies its own go.mod leaves at
  * vulnerable versions.
  *
- * To upgrade: in a module with a `tools.go` importing
- * `github.com/docker/docker-language-server/cmd/docker-language-server`, run
- * `go get github.com/docker/docker-language-server/cmd/docker-language-server@<version or commit>`,
- * raise any dependency a scan of the built binary flags with `go get <module>@<version>`, then
- * `go mod tidy`.
+ * The module names the server in a `tool` directive, so `go mod tidy` keeps its requirements, and
+ * Dependabot raises its dependencies (.github/dependabot.yml). To upgrade the server itself, run
+ * `go get github.com/docker/docker-language-server/cmd/docker-language-server@<version or commit>`
+ * in the module directory, raise any dependency a scan of the built binary flags with
+ * `go get <module>@<version>`, then `go mod tidy`.
  */
 
 import path from "node:path";
@@ -26,9 +26,12 @@ import { buildPinnedGoModule } from "./go-toolchain";
 const MODULE = "github.com/docker/docker-language-server";
 const MODULE_DIR = path.join(import.meta.dir, "docker-lsp-module");
 
-// The version the module pins, which the server reports as its own.
+// The version the module pins, which the server reports as its own. `go mod tidy` lists it in the
+// require block, marked `// indirect` since only the `tool` directive names it.
 const goMod = await Bun.file(path.join(MODULE_DIR, "go.mod")).text();
-const version = new RegExp(`^require ${MODULE} (\\S+)\\r?$`, "m").exec(goMod)?.[1];
+const version = new RegExp(`^(?:require)?[ \\t]+${MODULE.replaceAll(".", "\\.")} (\\S+)`, "m").exec(
+  goMod,
+)?.[1];
 if (!version) throw new Error(`docker-lsp-module/go.mod does not require ${MODULE}`);
 
 await buildPinnedGoModule({

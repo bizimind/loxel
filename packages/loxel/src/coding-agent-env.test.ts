@@ -26,7 +26,7 @@ describe("withoutAgentEnv", () => {
       CODEX_THREAD_ID: "t",
       CODEX_SANDBOX: "seatbelt",
       LOXEL: "1",
-      LOXEL_PORT: "7433",
+      LOXEL_SOCKET: "/state/run/cli.sock",
       CLAUDE_CONFIG_DIR: "/c",
       CLAUDE_CODE_OAUTH_TOKEN: "token",
       CLAUDE_CODE_USE_BEDROCK: "1",

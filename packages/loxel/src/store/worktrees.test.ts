@@ -378,10 +378,9 @@ describe("a worktree removed outside the app", () => {
     queryClient.setQueryData(queryKeys.status(PROJECT, WT_PATH), { stale: true });
     queryClient.setQueryData(queryKeys.dirContents(PROJECT, `${WT_PATH}/src`), []);
     queryClient.setQueryData(queryKeys.status(PROJECT, OTHER_WT), { kept: true });
-    const sent: unknown[] = [];
-    const send = spyOn(actualClient.wsClient, "send").mockImplementation((message) => {
-      sent.push(message);
-    });
+    const unsubscribe = spyOn(actualClient.wsClient, "unsubscribeWorktree").mockImplementation(
+      () => {},
+    );
 
     try {
       await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
@@ -398,11 +397,11 @@ describe("a worktree removed outside the app", () => {
       ).toBeUndefined();
       const kept: unknown = queryClient.getQueryData(queryKeys.status(PROJECT, OTHER_WT));
       expect(kept).toEqual({ kept: true });
-      expect(sent).toContainEqual({ type: "unsubscribe_worktree", worktreePath: WT_PATH });
+      expect(unsubscribe).toHaveBeenCalledWith(WT_PATH);
       expect(isListedWorktree(WT_PATH)).toBe(false);
       expect(isListedWorktree(OTHER_WT)).toBe(true);
     } finally {
-      send.mockRestore();
+      unsubscribe.mockRestore();
       unregister();
       queryClient.clear();
     }

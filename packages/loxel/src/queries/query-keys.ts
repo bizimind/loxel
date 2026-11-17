@@ -64,12 +64,13 @@ const WORKING_TREE_DIFF_TYPES: ReadonlySet<unknown> = new Set<DiffSource["type"]
 
 /**
  * Whether a query key is a diff of `projectPath` whose content follows the working tree or the
- * index. Commit and range diffs are keyed by full SHAs, so their content never changes and a
- * status or ref change has no reason to refetch them.
+ * index, of the worktree `wtPath` when given. Commit and range diffs are keyed by full SHAs, so
+ * their content never changes and a status or ref change has no reason to refetch them.
  */
 export function isWorkingTreeDiffKey(
   queryKey: readonly unknown[],
   projectPath: string | null,
+  wtPath?: string,
 ): boolean {
   if (queryKey[0] !== "diff" || queryKey[1] !== projectPath) return false;
   const source = queryKey[2];
@@ -77,8 +78,20 @@ export function isWorkingTreeDiffKey(
     typeof source === "object" &&
     source !== null &&
     "type" in source &&
-    WORKING_TREE_DIFF_TYPES.has(source.type)
+    WORKING_TREE_DIFF_TYPES.has(source.type) &&
+    (wtPath === undefined || ("worktree" in source && source.worktree === wtPath))
   );
+}
+
+/** Whether a query key is the listing of `dir` or a directory below it, in `projectPath`. */
+export function isDirContentsKeyBelow(
+  queryKey: readonly unknown[],
+  projectPath: string | null,
+  dir: string,
+): boolean {
+  if (queryKey[0] !== "dirContents" || queryKey[1] !== projectPath) return false;
+  const listed = queryKey[2];
+  return typeof listed === "string" && (listed === dir || listed.startsWith(`${dir}/`));
 }
 
 /**

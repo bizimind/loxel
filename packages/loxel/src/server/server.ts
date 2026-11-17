@@ -4,7 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
-import type { Server, ServerWebSocket } from "bun";
+import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
@@ -21,7 +21,7 @@ import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channe
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
-import { clearSocketPath, listenOnPrivateSocket } from "./cli-socket";
+import { type CliSocket, takeOverSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { endedHostsNotice } from "./ended-hosts-notice";
@@ -56,6 +56,7 @@ import { SchemaConsent } from "./schema-consent";
 import { SchemaDownloads } from "./schema-downloads";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
+import { serverIdentity } from "./server-identity";
 import { createServerPerfMonitor } from "./server-perf-monitor";
 import {
   externalFolderConflict,
@@ -335,12 +336,7 @@ function terminalSpawnTarget(
   TerminalSpawnOptions,
   "cwd" | "worktreePath" | "windowId" | "envOverrides" | "activatePythonEnv"
 > {
-  const envOverrides: Record<string, string> = {
-    LOXEL: "1",
-    LOXEL_SOCKET: config.cliSocketPath,
-    // For `loxel` CLIs from before the socket, which find the server by its port.
-    LOXEL_PORT: String(config.port),
-  };
+  const envOverrides: Record<string, string> = { LOXEL: "1", LOXEL_SOCKET: config.cliSocketPath };
   // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
   if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
@@ -1425,7 +1421,7 @@ try {
   const notice = endedHostsNotice(ended);
   // Kept in the store, so the first window to connect gets it with notifications_sync.
   if (notice) {
-    notificationStore.add({ source: { kind: "terminal_host" }, ...notice, urgency: "high" });
+    notificationStore.add({ source: { kind: "server" }, ...notice, urgency: "high" });
   }
 } catch (err) {
   log.error("Could not reach the running terminal hosts", { error: err });
@@ -1436,33 +1432,19 @@ terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminal
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 
-// Async, so before the stretch below that must not wait; listened on once the port is.
-const cliSocketFree = await clearCliSocketPath();
-
 // Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
 // from here to `serving = true` waits, so a stop cannot arrive in between.
 if (stoppingInStartup) await new Promise<never>(() => {});
 
 /**
- * Remove a stale CLI socket. False when a live server answers on it, or it cannot be cleared: the
- * CLI then cannot reach this server, but the app can.
+ * Listen for the `loxel` CLI, taking the socket over from any older server. Null when that fails:
+ * the app still works over TCP, and the user is told the CLI cannot reach it. There is no fallback
+ * to the TCP port, which the CLI never uses.
  */
-async function clearCliSocketPath(): Promise<boolean> {
+function listenForCli(): CliSocket | null {
   const path = config.cliSocketPath;
   try {
-    if (await clearSocketPath(path)) return true;
-    log.error(`Another server listens on ${path}, so the loxel CLI reaches it, not this one`);
-  } catch (err) {
-    log.error(`Could not prepare ${path}, so the loxel CLI cannot reach this server`, {
-      error: err,
-    });
-  }
-  return false;
-}
-
-function listenForCli(): Server<undefined> | null {
-  try {
-    return listenOnPrivateSocket(config.cliSocketPath, (unix) =>
+    return takeOverSocket(path, (unix) =>
       Bun.serve({
         unix,
         // No WebSockets: the CLI's routes have none, and checkRequest refuses the others.
@@ -1471,7 +1453,14 @@ function listenForCli(): Server<undefined> | null {
       }),
     );
   } catch (err) {
-    log.error(`Could not listen on ${config.cliSocketPath} for the loxel CLI`, { error: err });
+    log.error(`Could not listen on ${path} for the loxel CLI`, { error: err });
+    // Kept in the store, so the first window to connect gets it with notifications_sync.
+    notificationStore.add({
+      source: { kind: "server" },
+      title: "The loxel command cannot reach Loxel",
+      body: `Loxel could not listen on ${path}: ${err instanceof Error ? err.message : String(err)}`,
+      urgency: "high",
+    });
     return null;
   }
 }
@@ -1570,6 +1559,8 @@ const server = Bun.serve<WsData>({
         log.info("Idle timer cancelled — client connected");
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
+      // First, so the client knows whether this is the server it saw before (see WsClient).
+      sendTo(ws, { type: "server_hello", version: getCurrentVersion(), ...serverIdentity });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
       sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
       log.debug(`Client connected (${clients.size} total)`);
@@ -1623,7 +1614,7 @@ const server = Bun.serve<WsData>({
 });
 
 /** The `loxel` CLI's socket (see cli-socket.ts), or null when this server could not listen there. */
-const cliServer = cliSocketFree ? listenForCli() : null;
+const cliSocket = listenForCli();
 
 // Wire logger broadcast now that the server and broadcastAll are available.
 // log_entries is subscription-gated — only clients that sent `subscribe_logs`
@@ -1647,8 +1638,8 @@ recoverOrphanLayoutSessions();
 if (terminalManager.hasOrphanSessions()) startIdleTimer();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
-if (cliServer) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
-if (cliServer && dirname(config.cliSocketPath) !== join(config.stateDir, "run")) {
+if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
+if (cliSocket && dirname(config.cliSocketPath) !== join(config.stateDir, "run")) {
   log.warn(
     `The state directory is too deep for a socket path; the loxel CLI's socket is in ${config.cliSocketPath}, where the system may purge it after a few days unused`,
   );
@@ -1773,8 +1764,13 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
-  // Stopping removes the socket file.
-  cliServer?.stop();
+  // Removes the socket file unless a newer server took it over. Nothing here may keep the process
+  // from exiting below.
+  try {
+    cliSocket?.stop();
+  } catch (err) {
+    log.warn(`Could not remove ${config.cliSocketPath}`, { error: err });
+  }
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).
   void Promise.race([

@@ -1,66 +1,44 @@
 /**
  * How the `loxel` CLI finds the Loxel server: on the server's Unix socket, which only the user's
- * own account can open (see src/server/cli-socket.ts). Servers from before the socket are still
- * found on their loopback port, for one release. See docs/TERMINALS.md#the-loxel-cli.
+ * own account can open (see src/server/cli-socket.ts). The CLI never uses the server's TCP port.
+ * See docs/TERMINALS.md#the-loxel-cli.
  */
 import { statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
-import { DEFAULT_SERVER_PORT } from "./app-ports";
-import { demoPort, demoStateName } from "./demo-instance";
 import { cliSocketPath } from "./socket-paths";
-import { DEFAULT_STATE_DIR, STATE_BASE_DIR } from "./state-dir";
+import { DEFAULT_STATE_DIR } from "./state-dir";
 
 type Env = Record<string, string | undefined>;
 
-/** Where a server answers: a base URL, and the Unix socket to send requests over, if any. */
-export interface ServerAddress {
-  url: string;
-  unix?: string;
-}
+/** The base URL of a request sent over a socket: the socket is the address, the host fills in. */
+export const SOCKET_URL = "http://localhost";
 
-/** A server to talk to, and whether the environment named it rather than the CLI finding it up. */
+/** A server's socket, and whether the environment named it rather than the CLI finding it. */
 export interface FoundServer {
-  address: ServerAddress;
-  /** From a Loxel terminal's environment: it may be restarting, and is not launched or focused. */
+  socket: string;
+  /** `LOXEL_SOCKET`'s: the Loxel of the terminal the CLI runs in, which it does not focus. */
   given: boolean;
 }
 
-interface FindOptions {
-  /** Ports of servers from before the socket, probed in order; tests pass their own. */
-  legacyPorts?: readonly number[];
-}
-
-const LEGACY_PORTS = [DEFAULT_SERVER_PORT.production, DEFAULT_SERVER_PORT.dev];
 const PROBE_TIMEOUT_MS = 1000;
 const WAIT_INTERVAL_MS = 200;
-
-/** On a socket the path is the address; the host only fills the URL. */
-const socketAddress = (path: string): ServerAddress => ({ url: "http://localhost", unix: path });
-const portAddress = (port: number): ServerAddress => ({ url: `http://127.0.0.1:${port}` });
+/**
+ * How long a given socket may have no server at all before the CLI launches Loxel for it: long
+ * enough, once the old server is gone, for Restart Loxel or an update install to bring the next one
+ * up by itself.
+ */
+const GIVEN_GRACE_MS = 10_000;
+/** How long a server may stay draining before the CLI stops waiting for its replacement. */
+const HANDOVER_MAX_MS = 60_000;
 
 /**
  * The sockets a server for this user may be on, in the order to try: `LOXEL_STATE_DIR`'s, else
- * production's, then dev's. A Loxel terminal names its server's in `LOXEL_SOCKET`, but terminals
- * outlive servers, so a shell's may be stale.
+ * production's, then dev's.
  */
 export function wellKnownSockets(env: Env): string[] {
   if (env.LOXEL_STATE_DIR) return [cliSocketPath(env.LOXEL_STATE_DIR)];
   return [cliSocketPath(DEFAULT_STATE_DIR.production), cliSocketPath(DEFAULT_STATE_DIR.dev)];
-}
-
-/**
- * The socket of the server a Loxel terminal from before the socket belongs to, which knows its
- * server only by `LOXEL_PORT`: `LOXEL_STATE_DIR`'s if the terminal inherited one, else that of the
- * mode the port is the well-known port of. Null for any other port.
- */
-export function terminalSocket(env: Env, port: number): string | null {
-  if (env.LOXEL_STATE_DIR) return cliSocketPath(env.LOXEL_STATE_DIR);
-  if (port === DEFAULT_SERVER_PORT.production) return cliSocketPath(DEFAULT_STATE_DIR.production);
-  if (port === DEFAULT_SERVER_PORT.dev) return cliSocketPath(DEFAULT_STATE_DIR.dev);
-  const demoInstance = port - demoPort(0);
-  if (demoInstance < 0) return null;
-  return cliSocketPath(join(STATE_BASE_DIR, demoStateName(demoInstance)));
 }
 
 /** Why the socket at `path` cannot be opened from here, or null when nothing listens there. */
@@ -77,46 +55,44 @@ function outsideSandbox(path: string): string {
   return `Loxel's socket ${path} is outside this sandbox: allow it in the sandbox's settings`;
 }
 
-type Probe = { state: "up" } | { state: "down" } | { state: "blocked"; reason: string };
+type Probe =
+  | { state: "up" }
+  | { state: "draining" }
+  | { state: "down" }
+  | { state: "blocked"; reason: string };
 
 /**
- * Whether a Loxel server answers at `address`. One shutting down does not count: its replacement
- * is the one to talk to.
+ * Whether a Loxel server answers on the socket at `path`, or one that is shutting down (`draining`),
+ * whose replacement is the one to talk to. A missing or stale socket file (a refused connection)
+ * means none does.
  */
-async function probe(address: ServerAddress): Promise<Probe> {
+async function probe(path: string): Promise<Probe> {
   try {
-    const res = await fetch(`${address.url}/api/version`, {
+    const res = await fetch(`${SOCKET_URL}/api/version`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      ...(address.unix ? { unix: address.unix } : {}),
+      unix: path,
     });
     if (!res.ok) return { state: "down" };
     const body: unknown = await res.json().catch(() => null);
     const shuttingDown =
       typeof body === "object" && body !== null && "shuttingDown" in body && body.shuttingDown;
-    return shuttingDown === true ? { state: "down" } : { state: "up" };
+    return shuttingDown === true ? { state: "draining" } : { state: "up" };
   } catch (err) {
-    const reason = address.unix ? blockedReason(err, address.unix) : null;
+    const reason = blockedReason(err, path);
     return reason ? { state: "blocked", reason } : { state: "down" };
   }
 }
 
 /**
- * The first server that answers on a well-known socket, else, from before the socket, on a legacy
- * port. Null when none does. Throws when a socket cannot be opened from here, saying why, since
- * launching Loxel would not help.
+ * The first well-known socket a server answers on, or null. Throws when a socket cannot be opened
+ * from here, saying why, since launching Loxel would not help.
  */
-async function locate(env: Env, legacyPorts: readonly number[]): Promise<ServerAddress | null> {
+async function locate(env: Env): Promise<string | null> {
   let blocked: string | null = null;
   for (const path of wellKnownSockets(env)) {
-    const address = socketAddress(path);
-    const result = await probe(address);
-    if (result.state === "up") return address;
+    const result = await probe(path);
+    if (result.state === "up") return path;
     if (result.state === "blocked") blocked ??= result.reason;
-  }
-  // Servers from before the socket; remove once every supported server listens on one.
-  for (const port of legacyPorts) {
-    const address = portAddress(port);
-    if ((await probe(address)).state === "up") return address;
   }
   if (blocked) throw new Error(blocked);
   return null;
@@ -134,52 +110,78 @@ async function givenSocket(path: string): Promise<FoundServer> {
       `cannot find Loxel's socket ${path}: if this runs in a sandbox, allow the path in its settings`;
     throw new Error(reason, { cause: err });
   }
-  const result = await probe(socketAddress(path));
+  const result = await probe(path);
   if (result.state === "blocked") throw new Error(result.reason);
-  return { address: socketAddress(path), given: true };
+  return { socket: path, given: true };
 }
 
 /**
- * The server of a Loxel terminal from before the socket (`LOXEL_PORT`), as given: the one that now
- * answers on its mode's socket, as after an update, else the one on its port, which may be
- * restarting. Never another mode's.
+ * The server to talk to: `LOXEL_SOCKET`'s, else the first found on a well-known socket (see
+ * {@link wellKnownSockets}). Null when no server is up. Throws when a socket cannot be opened from
+ * here, saying why.
  */
-async function terminalServer(env: Env, port: number): Promise<FoundServer> {
-  const socket = terminalSocket(env, port);
-  if (socket) {
-    const result = await probe(socketAddress(socket));
-    if (result.state === "up") return { address: socketAddress(socket), given: true };
-    if (result.state === "blocked") throw new Error(result.reason);
-  }
-  return { address: portAddress(port), given: true };
-}
-
-/**
- * The server to talk to: `LOXEL_SOCKET`'s; else a Loxel terminal's from before the socket (see
- * {@link terminalServer}); else the first found on a well-known socket (see
- * {@link wellKnownSockets}) or, from before the socket, on 7433, then 7434. Null when no server is
- * up. Throws when a socket cannot be opened from here, saying why.
- */
-export async function findServer(
-  env: Env,
-  { legacyPorts = LEGACY_PORTS }: FindOptions = {},
-): Promise<FoundServer | null> {
+export async function findServer(env: Env): Promise<FoundServer | null> {
   if (env.LOXEL_SOCKET) return givenSocket(env.LOXEL_SOCKET);
-  const terminalPort = env.LOXEL === "1" ? Number(env.LOXEL_PORT) : Number.NaN;
-  if (Number.isInteger(terminalPort) && terminalPort > 0) return terminalServer(env, terminalPort);
-  const address = await locate(env, legacyPorts);
-  return address ? { address, given: false } : null;
+  const socket = await locate(env);
+  return socket ? { socket, given: false } : null;
 }
 
-/** Wait for a server Loxel is launching to answer, on its socket or, for older ones, its port. */
+interface GoneOptions {
+  /** Called once when no server answers right away and the wait starts. */
+  onWaiting?: () => void;
+  graceMs?: number;
+  maxWaitMs?: number;
+  /** The socket launching Loxel brings a server to; tests pass their own. */
+  productionSocket?: string;
+}
+
+/**
+ * Whether the CLI should launch Loxel for the socket `LOXEL_SOCKET` names: the production one, when
+ * no server answers on it for the grace period. That is a terminal that outlived its Loxel after a
+ * quit, where nothing else would bring the server back. A dev or demo server is not started by
+ * launching the app. A draining server means a quit, restart or update is under way, so the grace
+ * period starts only once it is gone; launching would race an update's own relaunch. One draining
+ * for longer than `maxWaitMs` gets no launch either: launching would not help it.
+ */
+export async function givenServerGone(
+  socket: string,
+  {
+    onWaiting,
+    graceMs = GIVEN_GRACE_MS,
+    maxWaitMs = HANDOVER_MAX_MS,
+    productionSocket = cliSocketPath(DEFAULT_STATE_DIR.production),
+  }: GoneOptions = {},
+): Promise<boolean> {
+  if (socket !== productionSocket) return false;
+  const start = Date.now();
+  let goneSince = start;
+  let waiting = false;
+  for (;;) {
+    const { state } = await probe(socket);
+    if (state === "up") return false;
+    const now = Date.now();
+    if (state === "draining") goneSince = now;
+    else if (now - goneSince >= graceMs) return true;
+    if (now - start >= maxWaitMs) return false;
+    if (!waiting) onWaiting?.();
+    waiting = true;
+    await Bun.sleep(WAIT_INTERVAL_MS);
+  }
+}
+
+/**
+ * Wait for a server Loxel is launching to answer on a well-known socket; `onWaiting` is called
+ * once, when the wait starts.
+ */
 export async function waitForServer(
   env: Env,
-  { legacyPorts = LEGACY_PORTS, timeoutMs = 15_000 }: FindOptions & { timeoutMs?: number } = {},
-): Promise<ServerAddress> {
+  { timeoutMs = 15_000, onWaiting }: { timeoutMs?: number; onWaiting?: () => void } = {},
+): Promise<string> {
+  onWaiting?.();
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const address = await locate(env, legacyPorts);
-    if (address) return address;
+    const socket = await locate(env);
+    if (socket) return socket;
     await Bun.sleep(WAIT_INTERVAL_MS);
   }
   throw new Error(`Loxel server did not start within ${timeoutMs / 1000}s`);

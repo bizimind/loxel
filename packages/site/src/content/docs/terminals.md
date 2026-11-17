@@ -134,7 +134,6 @@ Every Loxel terminal starts with these environment variables already set:
 | ----------------- | -------------------------------------------------------------------------- |
 | `LOXEL`           | `1`                                                                        |
 | `LOXEL_SOCKET`    | Socket of the running Loxel server, which the `loxel` CLI connects to      |
-| `LOXEL_PORT`      | Port of the running Loxel server, for older versions of the `loxel` CLI    |
 | `LOXEL_WORKTREE`  | Path of the worktree this terminal belongs to; not set in Home's terminals |
 | `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only)                                  |
 

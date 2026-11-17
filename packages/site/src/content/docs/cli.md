@@ -48,7 +48,9 @@ open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree
 
 `loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, `loxel` says so.
 
-Inside a Loxel terminal, `loxel` connects to the socket in `LOXEL_SOCKET`, the one of the Loxel that terminal belongs to. Elsewhere it looks for a running Loxel on its socket, the regular one first, then dev mode's, and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. A Loxel from before the socket is still found, on port 7433 (prod), then 7434 (dev). If no Loxel is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
+Inside a Loxel terminal, `loxel` connects to the socket in `LOXEL_SOCKET`, the one of the Loxel that terminal belongs to. While that Loxel restarts or installs an update, `loxel` waits for it to come back. If you quit Loxel and kept your terminals, `loxel` in one of them waits a few seconds, then launches Loxel in the background, and your file opens once Loxel is ready. Elsewhere it looks for a running Loxel on its socket, the regular one first, then dev mode's, and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. If no Loxel is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
+
+If Loxel can't set up its socket when it starts, a notification under the bell names the socket and the reason. Loxel itself works as usual, but `loxel` can't reach it until it restarts.
 
 ### Agents in a sandbox
 

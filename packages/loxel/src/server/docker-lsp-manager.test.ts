@@ -1,9 +1,11 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import type { ServerWebSocket } from "bun";
+
+import { builtBinaryExists } from "@/test/built-binary";
 
 // Before the imports that read it: trust is stored in the state directory.
 const stateDir = await mkdtemp(join(tmpdir(), "docker-lsp-state-"));
@@ -215,3 +217,65 @@ test("keeps the server from reaching Docker's services", async () => {
   // would then leave Scout on.
   expect(frames.some((candidate) => candidate.method === "workspace/configuration")).toBe(false);
 });
+
+// The server that ships, built from scripts/docker-lsp-module/ by
+// `build:language-servers docker-language-server`.
+const BUILT_SERVER = resolve(
+  import.meta.dir,
+  "../../build",
+  process.platform === "win32" ? "docker-language-server.exe" : "docker-language-server",
+);
+
+describe.skipIf(!(await builtBinaryExists(BUILT_SERVER)))(
+  "DockerLspManager with the built docker-language-server",
+  () => {
+    test("starts it and answers a hover in a Bake file", async () => {
+      wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
+      manager = new DockerLspManager();
+      const frames: Frame[] = [];
+      let wake = () => {};
+      const ws = {
+        send: (data: string) => {
+          frames.push(JSON.parse(data) as Frame);
+          wake();
+          return data.length;
+        },
+        close: () => {},
+      } as unknown as ServerWebSocket<unknown>;
+      const frame = async (matches: (candidate: Frame) => boolean): Promise<Frame> => {
+        for (;;) {
+          const found = frames.find(matches);
+          if (found) return found;
+          await new Promise<void>((resolveWake) => {
+            wake = resolveWake;
+          });
+        }
+      };
+      const send = (message: Record<string, unknown>) =>
+        manager?.handleMessage(ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
+
+      manager.createSession(ws, wt);
+      send({ id: 1, method: "initialize", params: { processId: null, capabilities: {} } });
+      expect((await frame((candidate) => candidate.id === 1)).result?.capabilities).toHaveProperty(
+        "hoverProvider",
+      );
+      send({ method: "initialized", params: {} });
+
+      // Bake files are answered from the server's own schema; a Dockerfile hover asks Docker Scout.
+      const uri = `file://${join(wt, "docker-bake.hcl")}`;
+      const text = 'target "app" {\n  dockerfile = "Dockerfile"\n}\n';
+      send({
+        method: "textDocument/didOpen",
+        params: { textDocument: { uri, languageId: "dockerbake", version: 1, text } },
+      });
+      await frame((candidate) => candidate.method === "textDocument/publishDiagnostics");
+      send({
+        id: 2,
+        method: "textDocument/hover",
+        params: { textDocument: { uri }, position: { line: 0, character: 1 } },
+      });
+      const hover = await frame((candidate) => candidate.id === 2);
+      expect(JSON.stringify(hover.result)).toContain("docker build");
+    });
+  },
+);
