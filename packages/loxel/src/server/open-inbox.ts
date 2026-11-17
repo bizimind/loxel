@@ -6,6 +6,7 @@ import { basename } from "node:path";
 
 import { z } from "zod";
 
+import { AgentOriginSchema } from "@/api/agent-terminal-model";
 import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type { WsMessage } from "@/api/ws-protocol";
 
@@ -51,6 +52,7 @@ const InboxMessageSchema = z.discriminatedUnion("type", [
       cwd: z.string(),
       worktreePath: z.string().nullable(),
       title: z.string().optional(),
+      origin: AgentOriginSchema.optional(),
       ...openOptions,
     }),
   }),

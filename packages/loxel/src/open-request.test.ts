@@ -157,7 +157,18 @@ describe("requestOpen", () => {
       queueAfterMs: 0,
     });
 
-    expect(result).toEqual({ warnings: [], queued: 2, failures: [] });
+    expect(result).toEqual({ warnings: [], queued: 2, asked: 0, failures: [] });
+  });
+
+  test("returns that an agent's terminal waits for the user's answer", async () => {
+    serve([{ status: 202, body: { ok: true, asked: true, queued: true } }]);
+
+    const result = await requestOpen(SERVER, {
+      terminal: { cwd: "/wt" },
+      agent: { agent: "Codex" },
+    });
+
+    expect(result).toEqual({ queued: true, asked: true });
   });
 
   test("gives up when no window connects in time", async () => {
@@ -198,6 +209,7 @@ describe("requestOpen", () => {
     expect(result).toEqual({
       warnings: [],
       queued: 0,
+      asked: 0,
       failures: [{ index: 1, message: "File not found" }],
     });
   });

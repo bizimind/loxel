@@ -1,6 +1,7 @@
 /**
- * The open inbox and the notifications across restarts of a real server process: what `server.ts`
- * wires up around open-inbox.ts and notification-store.ts. `LOXEL_DEV=1` keeps the server off the
+ * The open inbox and the notifications across restarts of a real server process, and an agent's
+ * terminal waiting for a window to ask in: what `server.ts` wires up around open-inbox.ts,
+ * notification-store.ts and agent-terminals.ts. `LOXEL_DEV=1` keeps the server off the
  * keychain, and a temporary state directory off the user's projects.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -161,6 +162,74 @@ describe("a server with no window connected", () => {
       await received(next.log, "log_error_snapshot");
       expect(next.log.entries.some((message) => message.type === "open_from_inbox")).toBe(false);
       next.ws.close();
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("an agent's terminal with Ask and no window connected", () => {
+  let stateDir: string;
+  let current: Awaited<ReturnType<typeof startServer>> | null = null;
+
+  beforeAll(() => {
+    stateDir = realpathSync(mkdtempSync(path.join(tmpdir(), "loxel-agent-ask-")));
+  });
+
+  afterAll(() => {
+    current?.server.kill("SIGKILL");
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  test(
+    "waits for the next window to say hello, asks there, and runs once it says Run",
+    async () => {
+      current = await startServer(stateDir);
+      // "When an Agent Starts a Terminal" is Ask, as a window saves it.
+      const saved = await fetch(`http://127.0.0.1:${current.port}/api/stores/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value: JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
+        }),
+      });
+      expect(saved.ok).toBe(true);
+      const agent = { agent: "Claude Code" };
+      const res = await fetch("http://localhost/api/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminal: { cwd: stateDir, command: "true" }, agent, queue: true }),
+        unix: cliSocketPath(stateDir),
+      });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ ok: true, asked: true, queued: true });
+
+      const { ws, log } = await connectWindow(current.port);
+      const windowId = crypto.randomUUID();
+      ws.send(JSON.stringify({ type: "window_hello", windowId }));
+      const seq = await log.waitFor(
+        (message) =>
+          message.type === "agent_terminals_changed" && message.data.asks[0]?.windowId === windowId,
+        { label: "the ask, in this window" },
+      );
+      const changed = log.entries[seq] as Extract<WsMessage, { type: "agent_terminals_changed" }>;
+      const [ask] = changed.data.asks;
+      expect(ask).toMatchObject({ origin: agent, cwd: stateDir, command: "true" });
+      // Nothing started while it waited.
+      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
+
+      const answer = await fetch(`http://127.0.0.1:${current.port}/api/agent-terminals/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: ask!.id, answer: "run", windowId }),
+      });
+      expect(answer.status).toBe(200);
+      expect((await received(log, "open_terminal")).data).toMatchObject({
+        cwd: stateDir,
+        origin: agent,
+      });
+      ws.close();
+      // SIGTERM ends the terminal it started; a killed server's terminal host would outlive it.
+      await stopServer(current.server);
     },
     TEST_TIMEOUT_MS,
   );

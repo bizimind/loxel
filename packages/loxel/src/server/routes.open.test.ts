@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { AgentTerminalPolicy, AgentTerminalsState } from "@/api/agent-terminal-model";
 import { createNoopLogger } from "@/api/log-entry-model";
 import type { WsMessage } from "@/api/ws-protocol";
 import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
+import { AgentTerminals } from "./agent-terminals";
 import type { InboxMessage } from "./open-inbox";
 import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
@@ -30,6 +32,8 @@ describe("POST /api/open terminals and placement", () => {
   let window: ActiveWindow | null;
   let queued: QueuedOpen[];
   let inboxRoom: number;
+  let policy: AgentTerminalPolicy;
+  let agentState: AgentTerminalsState;
 
   beforeEach(async () => {
     root = realpathSync(await mkdtemp(join(tmpdir(), "loxel-open-")));
@@ -39,6 +43,8 @@ describe("POST /api/open terminals and placement", () => {
     queued = [];
     inboxRoom = 10;
     window = { windowId: "w1", worktreePath: "/projects/app" };
+    policy = "run";
+    agentState = { asks: [], alwaysWorktrees: [] };
     ctx = {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
@@ -82,6 +88,14 @@ describe("POST /api/open terminals and placement", () => {
           ({ message }) => message.type !== "open_terminal" || message.data.terminalId !== id,
         );
       },
+      agentTerminals: new AgentTerminals({
+        loadAlways: () => null,
+        saveAlways: () => {},
+        onChange: (state) => {
+          agentState = state;
+        },
+      }),
+      agentTerminalPolicy: () => policy,
     };
   });
 
@@ -548,5 +562,209 @@ describe("POST /api/open terminals and placement", () => {
       400,
     );
     expect(sent).toEqual([]);
+  });
+
+  describe("a coding agent's terminal", () => {
+    const agent = { agent: "Claude Code", terminalId: "t0", worktreePath: "/projects/app" };
+
+    function answer(id: string, choice: string, windowId = "w1"): Promise<Response> {
+      const req = new Request("http://127.0.0.1:7434/api/agent-terminals/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, answer: choice, windowId }),
+      });
+      return handleRequest(req, ctx);
+    }
+
+    async function clearAlways(): Promise<void> {
+      const req = new Request("http://127.0.0.1:7434/api/agent-terminals/clear-always", {
+        method: "POST",
+      });
+      expect((await handleRequest(req, ctx)).status).toBe(200);
+    }
+
+    test("runs at once with Run, and its panel says which agent started it", async () => {
+      const res = await open({ terminal: { cwd: root, command: "make" }, agent });
+
+      expect(res.status).toBe(200);
+      expect(sentTerminal().origin).toEqual(agent);
+      expect(started).toEqual([
+        expect.objectContaining({ id: sentTerminal().terminalId, command: "make" }),
+      ]);
+    });
+
+    test("is refused with Never, starting nothing", async () => {
+      policy = "never";
+
+      const res = await open({ terminal: { cwd: root, command: "make" }, agent });
+
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toContain("is Never");
+      expect(sent).toEqual([]);
+      expect(started).toEqual([]);
+    });
+
+    test("with Ask, waits for the user's Run, then starts in the window that answered", async () => {
+      policy = "ask";
+      ctx.activeWindow = (id) => window && { ...window, windowId: id ?? window.windowId };
+
+      const res = await open({
+        terminal: { cwd: root, command: "make", title: "build" },
+        agent,
+        focus: false,
+      });
+
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ ok: true, asked: true });
+      expect(sent).toEqual([]);
+      expect(started).toEqual([]);
+      const [ask] = agentState.asks;
+      expect(ask).toEqual({
+        id: ask!.id,
+        askedAt: ask!.askedAt,
+        windowId: "w1",
+        origin: agent,
+        cwd: root,
+        worktreePath: "/projects/app",
+        command: "make",
+        title: "build",
+      });
+
+      expect((await answer(ask!.id, "run", "w2")).status).toBe(200);
+      expect(sent[0]!.windowId).toBe("w2");
+      expect(sentTerminal()).toEqual({
+        terminalId: sentTerminal().terminalId,
+        cwd: root,
+        worktreePath: "/projects/app",
+        title: "build",
+        focus: false,
+        origin: agent,
+      });
+      expect(started).toEqual([
+        {
+          id: sentTerminal().terminalId,
+          cwd: root,
+          worktreePath: "/projects/app",
+          windowId: "w2",
+          command: "make",
+        },
+      ]);
+      expect(agentState.asks).toEqual([]);
+      // Answered once: another window's answer finds nothing.
+      expect((await answer(ask!.id, "run")).status).toBe(404);
+      expect(started).toHaveLength(1);
+    });
+
+    test("with Ask, Don't Run starts nothing", async () => {
+      policy = "ask";
+      await open({ terminal: { cwd: root, command: "make" }, agent });
+
+      expect((await answer(agentState.asks[0]!.id, "decline")).status).toBe(200);
+      expect(agentState.asks).toEqual([]);
+      expect(sent).toEqual([]);
+      expect(started).toEqual([]);
+    });
+
+    test("Always in this worktree runs there from then on, and asks elsewhere", async () => {
+      policy = "ask";
+      await open({ terminal: { cwd: root, command: "make" }, agent });
+      expect((await answer(agentState.asks[0]!.id, "always")).status).toBe(200);
+      expect(started).toHaveLength(1);
+      expect(agentState.alwaysWorktrees).toEqual(["/projects/app"]);
+
+      expect((await open({ terminal: { cwd: root, command: "test" }, agent })).status).toBe(200);
+      expect(started).toHaveLength(2);
+
+      window = { windowId: "w1", worktreePath: "/projects/other" };
+      expect((await open({ terminal: { cwd: root, command: "test" }, agent })).status).toBe(202);
+      expect(started).toHaveLength(2);
+
+      // Cleared in Settings, it asks again.
+      window = { windowId: "w1", worktreePath: "/projects/app" };
+      await clearAlways();
+      expect(agentState.alwaysWorktrees).toEqual([]);
+      expect((await open({ terminal: { cwd: root, command: "test" }, agent })).status).toBe(202);
+      expect(started).toHaveLength(2);
+    });
+
+    test("Always in this worktree also runs the requests already waiting there", async () => {
+      policy = "ask";
+      await open({ terminal: { cwd: root, command: "a" }, agent });
+      await open({ terminal: { cwd: root, command: "b" }, agent });
+      window = { windowId: "w1", worktreePath: "/projects/other" };
+      await open({ terminal: { cwd: root, command: "c" }, agent });
+
+      expect((await answer(agentState.asks[0]!.id, "always")).status).toBe(200);
+
+      expect(started.map((terminal) => terminal.command)).toEqual(["a", "b"]);
+      expect(agentState.asks.map((ask) => ask.command)).toEqual(["c"]);
+    });
+
+    test("an answer with no window to open in leaves the request to answer again", async () => {
+      policy = "ask";
+      await open({ terminal: { cwd: root, command: "make" }, agent });
+      const { id } = agentState.asks[0]!;
+      window = null;
+
+      expect((await answer(id, "always")).status).toBe(503);
+      expect(agentState.asks).toHaveLength(1);
+      expect(agentState.alwaysWorktrees).toEqual([]);
+      expect(started).toEqual([]);
+    });
+
+    test("an answered request never replaces the tab the user is on by then", async () => {
+      policy = "ask";
+      const placement = { replace: true, group: { name: "dev" } };
+      await open({ terminal: { cwd: root }, agent, placement });
+
+      await answer(agentState.asks[0]!.id, "run");
+
+      expect(sentTerminal().placement).toEqual({ group: { name: "dev" } });
+    });
+
+    test("Never refuses before waiting for a window", async () => {
+      policy = "never";
+      window = null;
+
+      expect((await open({ terminal: { cwd: root }, agent })).status).toBe(403);
+    });
+
+    test("with Ask and no window, waits for the next window to ask in", async () => {
+      policy = "ask";
+      window = null;
+
+      // Without queue the CLI retries while a window may be coming.
+      expect((await open({ terminal: { cwd: root }, agent })).status).toBe(503);
+      const res = await open({ terminal: { cwd: root, command: "make" }, agent, queue: true });
+
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ ok: true, asked: true, queued: true });
+      expect(started).toEqual([]);
+      expect(queued).toEqual([]);
+      const [ask] = agentState.asks;
+      expect(ask?.windowId).toBeUndefined();
+      // Outside every worktree and with no window to say what it shows, the terminal is Home's.
+      expect(ask?.worktreePath).toBeNull();
+
+      ctx.agentTerminals.windowConnected("w9", (windowId) => windowId === "w9");
+      expect(agentState.asks[0]?.windowId).toBe("w9");
+    });
+
+    test("a person's terminal is never asked about", async () => {
+      policy = "ask";
+      expect((await open({ terminal: { cwd: root, command: "make" } })).status).toBe(200);
+      policy = "never";
+      expect((await open({ terminal: { cwd: root, command: "make" } })).status).toBe(200);
+
+      expect(started).toHaveLength(2);
+      expect(agentState.asks).toEqual([]);
+    });
+
+    test("rejects a malformed agent and answer", async () => {
+      expect((await open({ terminal: { cwd: root }, agent: "claude" })).status).toBe(400);
+      expect((await open({ terminal: { cwd: root }, agent: { agent: 1 } })).status).toBe(400);
+      expect((await answer("x", "maybe")).status).toBe(400);
+      expect(started).toEqual([]);
+    });
   });
 });

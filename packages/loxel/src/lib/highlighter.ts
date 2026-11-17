@@ -105,8 +105,6 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   pipfile: "toml",
   dockerfile: "dockerfile",
   containerfile: "dockerfile",
-  "docker-bake.hcl": "dockerbake",
-  "docker-bake.override.hcl": "dockerbake",
   makefile: "make",
   gnumakefile: "make",
   "cmakelists.txt": "cmake",

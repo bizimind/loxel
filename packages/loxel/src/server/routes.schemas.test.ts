@@ -175,6 +175,8 @@ describe("POST /api/schemas/sync", () => {
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: () => "full",
       dropQueuedTerminal: () => {},
+      agentTerminals: {} as never,
+      agentTerminalPolicy: () => "run",
     };
 
     const pyproject = "https://json.schemastore.org/pyproject.json";

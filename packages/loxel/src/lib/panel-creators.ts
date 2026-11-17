@@ -14,6 +14,7 @@ import type {
   PanelOptions,
 } from "dockview-react";
 
+import type { AgentOrigin } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
 import { HOME_KEY } from "@/api/home-model";
@@ -276,6 +277,8 @@ export interface CreateTerminalOptions extends PanelOpenOptions {
   /** Directory the shell starts in; the active worktree when absent. */
   cwd?: string;
   title?: string;
+  /** The coding agent that started it (`loxel terminal`), kept for its tab's tooltip. */
+  origin?: AgentOrigin;
 }
 
 export function createTerminal({
@@ -311,6 +314,7 @@ export function createTerminal({
         terminalId,
         ...(worktreePath ? { worktreePath } : {}),
         ...(cwd && cwd !== worktreePath ? { cwd } : {}),
+        ...(options.origin ? { origin: options.origin } : {}),
       },
     },
     focus,

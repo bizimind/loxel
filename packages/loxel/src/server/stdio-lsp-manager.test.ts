@@ -95,7 +95,6 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
       wtPath: context.wtPath,
       repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
     };
   }
 

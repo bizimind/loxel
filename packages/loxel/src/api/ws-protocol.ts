@@ -1,5 +1,6 @@
 import type { OpenTerminalRequest } from "@/open-request";
 
+import type { AgentOrigin, AgentTerminalsState } from "./agent-terminal-model";
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { BrowserNotificationSource, ServerNotification } from "./notification-model";
@@ -112,6 +113,8 @@ export type WsMessage =
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
   | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
   | { type: "schema_consent_changed"; data: SchemaConsentState }
+  /** Agents' terminals waiting for an answer, or the worktrees that always run them, changed. */
+  | { type: "agent_terminals_changed"; data: AgentTerminalsState }
   // Some repository's trust or restrictions changed (global, like the worktrees sharing it)
   | { type: "repo_trust_changed" };
 
@@ -141,6 +144,8 @@ export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelO
 export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
   terminalId: string;
   worktreePath: string | null;
+  /** The coding agent that started it (`loxel terminal`), for its tab's tooltip. */
+  origin?: AgentOrigin;
 } & PanelOpenOptions;
 
 /** A terminal session and where its shell starts, as the panel sends it when attaching. */

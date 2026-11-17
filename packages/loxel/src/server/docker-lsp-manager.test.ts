@@ -1,281 +1,223 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
 import { builtBinaryExists } from "@/test/built-binary";
 
-// Before the imports that read it: trust is stored in the state directory.
-const stateDir = await mkdtemp(join(tmpdir(), "docker-lsp-state-"));
-process.env.LOXEL_STATE_DIR = stateDir;
-const { DockerLspManager } = await import("./docker-lsp-manager");
-const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+import { DockerLspManager } from "./docker-lsp-manager";
 
-const ORIGINAL_PATH = process.env.PATH;
+// The server that ships, built by `pnpm run build:language-servers dockerfile-language-server`.
+const BUILT_SERVER = resolve(import.meta.dir, "../../build/docker-langserver");
 
-// A stand-in for docker-language-server: answers `initialize` with its capabilities, then reports
-// what it was started with and asks for its configuration, as the real one does on `didOpen`.
-const FAKE_SERVER = `
-let buf = Buffer.alloc(0);
-const write = (msg) => {
-  const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...msg }));
-  process.stdout.write("Content-Length: " + body.byteLength + "\\r\\n\\r\\n");
-  process.stdout.write(body);
-};
-for await (const chunk of process.stdin) {
-  buf = Buffer.concat([buf, chunk]);
-  while (true) {
-    const end = buf.indexOf("\\r\\n\\r\\n");
-    if (end < 0) break;
-    const length = Number(/Content-Length: (\\d+)/i.exec(buf.subarray(0, end).toString())[1]);
-    if (buf.byteLength < end + 4 + length) break;
-    const msg = JSON.parse(buf.subarray(end + 4, end + 4 + length).toString());
-    buf = buf.subarray(end + 4 + length);
-    if (msg.method === "initialize") {
-      write({
-        id: msg.id,
-        result: { capabilities: { hoverProvider: true, inlayHintProvider: {} } },
-      });
-      const { HTTP_PROXY, HTTPS_PROXY, NO_PROXY, no_proxy } = process.env;
-      write({
-        method: "test/started",
-        params: {
-          initializationOptions: msg.params.initializationOptions,
-          env: { HTTP_PROXY, HTTPS_PROXY, NO_PROXY, no_proxy },
-          docker: Bun.which("docker"),
-        },
-      });
-    } else if (msg.method === "textDocument/didOpen") {
-      write({
-        id: "config",
-        method: "workspace/configuration",
-        params: { items: [{ section: "docker.lsp" }, { section: "other" }] },
-      });
-    } else if (msg.id === "config") {
-      write({ method: "test/configured", params: { result: msg.result } });
-    }
-  }
+interface Diagnostic {
+  message: string;
+  source?: string;
 }
-`;
 
 interface Frame {
   id?: number | string;
   method?: string;
-  params?: Record<string, unknown>;
-  result?: { capabilities?: Record<string, unknown> };
+  params?: { uri?: string; diagnostics?: Diagnostic[] };
+  result?: unknown;
+  error?: unknown;
 }
 
-class TestDockerLspManager extends DockerLspManager {
-  constructor(private readonly script: string) {
-    super();
+/** Stands in for the WebSocket and the Monaco LSP client behind it. */
+class FakeClient {
+  readonly ws: ServerWebSocket<unknown>;
+  private readonly frames: Frame[] = [];
+  private readonly listeners = new Set<() => void>();
+  private nextId = 1;
+
+  constructor(private readonly manager: DockerLspManager) {
+    const ws = {
+      send: (data: string) => {
+        this.frames.push(JSON.parse(data) as Frame);
+        for (const listener of this.listeners) listener();
+        return data.length;
+      },
+      close: () => {},
+    };
+    this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
 
-  protected override resolveBinary(): string {
-    // The real one still runs, so anything it reports is seen here.
-    super.resolveBinary();
-    return process.execPath;
+  send(message: Record<string, unknown>): void {
+    this.manager.handleMessage(this.ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
   }
 
-  protected override spawnArgs(): readonly string[] {
-    return [this.script];
-  }
-}
-
-let wt: string | undefined;
-let manager: InstanceType<typeof DockerLspManager> | undefined;
-
-afterEach(async () => {
-  process.env.PATH = ORIGINAL_PATH;
-  manager?.destroy();
-  manager = undefined;
-  if (wt) await rm(wt, { recursive: true, force: true });
-  wt = undefined;
-});
-
-afterAll(async () => {
-  await rm(stateDir, { recursive: true, force: true });
-});
-
-/** The `docker` the server finds in a worktree with one on `PATH`, trusted or not. */
-async function dockerSeenByServer(trusted: boolean): Promise<unknown> {
-  wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
-  const script = join(wt, "fake-server.mjs");
-  await writeFile(script, FAKE_SERVER);
-  const tools = join(wt, "tools");
-  await mkdir(tools);
-  await writeFile(join(tools, "docker"), "#!/bin/sh\n");
-  await chmod(join(tools, "docker"), 0o755);
-  process.env.PATH = `${tools}:/usr/bin:/bin`;
-  if (trusted) setRepoTrusted(wt, true);
-  manager = new TestDockerLspManager(script);
-  let resolveStarted: (frame: Frame) => void = () => {};
-  const started = new Promise<Frame>((resolve) => {
-    resolveStarted = resolve;
-  });
-  const ws = {
-    send: (data: string) => {
-      const frame = JSON.parse(data) as Frame;
-      if (frame.method === "test/started") resolveStarted(frame);
-      return data.length;
-    },
-    close: () => {},
-  } as unknown as ServerWebSocket<unknown>;
-  manager.createSession(ws, wt);
-  manager.handleMessage(
-    ws,
-    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { capabilities: {} } }),
-  );
-  return (await started).params?.docker;
-}
-
-test.skipIf(process.platform === "win32")(
-  "never runs Docker's build checks, which contact registries, trusted or not",
-  async () => {
-    expect(await dockerSeenByServer(false)).toBeNull();
-    // Nothing waits for trust, so an untrusted repository has nothing to report.
-    expect(getRepoTrustStatus(wt!).restrictions).toEqual([]);
-    await manager?.destroy();
-    await rm(wt!, { recursive: true, force: true });
-    expect(await dockerSeenByServer(true)).toBeNull();
-  },
-);
-
-test("keeps the server from reaching Docker's services", async () => {
-  wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
-  const script = join(wt, "fake-server.mjs");
-  await writeFile(script, FAKE_SERVER);
-  manager = new TestDockerLspManager(script);
-
-  const frames: Frame[] = [];
-  const listeners = new Set<() => void>();
-  const ws = {
-    send: (data: string) => {
-      frames.push(JSON.parse(data) as Frame);
-      for (const listener of listeners) listener();
-      return data.length;
-    },
-    close: () => {},
-  } as unknown as ServerWebSocket<unknown>;
-  const frame = (matches: (candidate: Frame) => boolean): Promise<Frame> =>
-    new Promise((resolve) => {
+  /** The first frame `matches` takes, from those received or the next to arrive. */
+  frame(matches: (candidate: Frame) => boolean): Promise<Frame> {
+    return new Promise((resolveFrame) => {
       const check = () => {
-        const found = frames.find(matches);
+        const found = this.frames.find(matches);
         if (!found) return;
-        listeners.delete(check);
-        resolve(found);
+        this.listeners.delete(check);
+        resolveFrame(found);
       };
-      listeners.add(check);
+      this.listeners.add(check);
       check();
     });
-  const send = (message: Record<string, unknown>) =>
-    manager?.handleMessage(ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
+  }
 
-  manager.createSession(ws, wt);
-  send({ id: 1, method: "initialize", params: { processId: null, capabilities: {} } });
+  async request(method: string, params: unknown): Promise<unknown> {
+    const id = this.nextId++;
+    this.send({ id, method, params });
+    const reply = await this.frame((candidate) => candidate.id === id && !candidate.method);
+    if (reply.error) throw new Error(`${method} failed: ${JSON.stringify(reply.error)}`);
+    return reply.result;
+  }
 
-  // Monaco never asks for inlay hints, whose data the server fetches from Docker Hub.
-  const initialized = await frame((candidate) => candidate.id === 1);
-  expect(initialized.result?.capabilities).toEqual({ hoverProvider: true });
-
-  const started = await frame((candidate) => candidate.method === "test/started");
-  expect(started.params?.initializationOptions).toEqual({
-    dockercomposeExperimental: { composeSupport: false },
-    telemetry: "off",
-  });
-  expect(started.params?.env).toEqual({
-    HTTP_PROXY: "http://127.0.0.1:9",
-    HTTPS_PROXY: "http://127.0.0.1:9",
-    NO_PROXY: "",
-    no_proxy: "",
-  });
-
-  send({
-    method: "textDocument/didOpen",
-    params: {
-      textDocument: { uri: "file:///Dockerfile", languageId: "dockerfile", version: 1, text: "" },
-    },
-  });
-  const configured = await frame((candidate) => candidate.method === "test/configured");
-  expect(configured.params?.result).toEqual([
-    {
-      telemetry: "off",
-      experimental: {
-        vulnerabilityScanning: false,
-        scout: {
-          criticalHighVulnerabilities: false,
-          notPinnedDigest: false,
-          recommendedTag: false,
-          vulnerabilites: false,
-        },
-      },
-    },
-    null,
-  ]);
-  // Answered by the manager: Monaco's client errors on this request, and the server's defaults
-  // would then leave Scout on.
-  expect(frames.some((candidate) => candidate.method === "workspace/configuration")).toBe(false);
-});
-
-// The server that ships, built from scripts/docker-lsp-module/ by
-// `build:language-servers docker-language-server`.
-const BUILT_SERVER = resolve(
-  import.meta.dir,
-  "../../build",
-  process.platform === "win32" ? "docker-language-server.exe" : "docker-language-server",
-);
+  /** The diagnostics published for `uri` after the frames already received. */
+  nextDiagnostics(uri: string): Promise<Diagnostic[]> {
+    const seen = this.frames.length;
+    return this.frame(
+      (candidate) =>
+        this.frames.indexOf(candidate) >= seen &&
+        candidate.method === "textDocument/publishDiagnostics" &&
+        candidate.params?.uri === uri,
+    ).then((candidate) => candidate.params?.diagnostics ?? []);
+  }
+}
 
 describe.skipIf(!(await builtBinaryExists(BUILT_SERVER)))(
-  "DockerLspManager with the built docker-language-server",
+  "DockerLspManager with the built docker-langserver",
   () => {
-    test("starts it and answers a hover in a Bake file", async () => {
+    let wt: string;
+    let manager: DockerLspManager;
+    let client: FakeClient;
+    let capabilities: Record<string, unknown>;
+
+    beforeAll(async () => {
       wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
       manager = new DockerLspManager();
-      const frames: Frame[] = [];
-      let wake = () => {};
-      const ws = {
-        send: (data: string) => {
-          frames.push(JSON.parse(data) as Frame);
-          wake();
-          return data.length;
+      client = new FakeClient(manager);
+      manager.createSession(client.ws, wt);
+      // What Monaco's client declares that the server reads.
+      const result = (await client.request("initialize", {
+        processId: null,
+        capabilities: {
+          workspace: { applyEdit: true, workspaceEdit: { documentChanges: true } },
+          textDocument: {
+            hover: { contentFormat: ["markdown", "plaintext"] },
+            completion: { completionItem: { snippetSupport: true } },
+            semanticTokens: {},
+          },
         },
-        close: () => {},
-      } as unknown as ServerWebSocket<unknown>;
-      const frame = async (matches: (candidate: Frame) => boolean): Promise<Frame> => {
-        for (;;) {
-          const found = frames.find(matches);
-          if (found) return found;
-          await new Promise<void>((resolveWake) => {
-            wake = resolveWake;
-          });
-        }
-      };
-      const send = (message: Record<string, unknown>) =>
-        manager?.handleMessage(ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
+      })) as { capabilities: Record<string, unknown> };
+      capabilities = result.capabilities;
+      client.send({ method: "initialized", params: {} });
+    });
 
-      manager.createSession(ws, wt);
-      send({ id: 1, method: "initialize", params: { processId: null, capabilities: {} } });
-      expect((await frame((candidate) => candidate.id === 1)).result?.capabilities).toHaveProperty(
-        "hoverProvider",
-      );
-      send({ method: "initialized", params: {} });
+    afterAll(async () => {
+      manager.destroy();
+      await rm(wt, { recursive: true, force: true });
+    });
 
-      // Bake files are answered from the server's own schema; a Dockerfile hover asks Docker Scout.
-      const uri = `file://${join(wt, "docker-bake.hcl")}`;
-      const text = 'target "app" {\n  dockerfile = "Dockerfile"\n}\n';
-      send({
+    let documents = 0;
+    /** Opens a new Dockerfile with `text` and returns its URI and first diagnostics. */
+    async function open(text: string): Promise<{ uri: string; diagnostics: Diagnostic[] }> {
+      documents += 1;
+      const uri = pathToFileURL(join(wt, `Dockerfile.${documents}`)).href;
+      const diagnostics = client.nextDiagnostics(uri);
+      client.send({
         method: "textDocument/didOpen",
-        params: { textDocument: { uri, languageId: "dockerbake", version: 1, text } },
+        params: { textDocument: { uri, languageId: "dockerfile", version: 1, text } },
       });
-      await frame((candidate) => candidate.method === "textDocument/publishDiagnostics");
-      send({
-        id: 2,
-        method: "textDocument/hover",
-        params: { textDocument: { uri }, position: { line: 0, character: 1 } },
+      return { uri, diagnostics: await diagnostics };
+    }
+
+    test("advertises the Dockerfile features", () => {
+      expect(capabilities).toMatchObject({
+        completionProvider: expect.any(Object),
+        hoverProvider: true,
+        documentFormattingProvider: true,
+        documentSymbolProvider: true,
+        codeActionProvider: true,
       });
-      const hover = await frame((candidate) => candidate.id === 2);
-      expect(JSON.stringify(hover.result)).toContain("docker build");
+      expect(capabilities).not.toHaveProperty("semanticTokensProvider");
+    });
+
+    test("reports dockerfile-utils' local checks as diagnostics", async () => {
+      const { diagnostics } = await open('FROM alpine\nMAINTAINER me\nCMD ["a"]\nCMD ["b"]\n');
+      expect(diagnostics.map(({ source }) => source)).toEqual(
+        expect.arrayContaining(["dockerfile-utils"]),
+      );
+      expect(diagnostics.map(({ message }) => message).join("\n")).toContain(
+        "There can only be one CMD instruction",
+      );
+    });
+
+    test("applies incremental changes", async () => {
+      const { uri } = await open("FROM alpine\nRUN echo hi\n");
+      const diagnostics = client.nextDiagnostics(uri);
+      // Replaces `RUN` with `run`, which the server flags by its casing.
+      client.send({
+        method: "textDocument/didChange",
+        params: {
+          textDocument: { uri, version: 2 },
+          contentChanges: [
+            {
+              range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } },
+              text: "run",
+            },
+          ],
+        },
+      });
+      // Exactly that: a server that took the fragment for the whole file would also miss its FROM.
+      expect((await diagnostics).map(({ message }) => message)).toEqual([
+        "Instructions should be written in uppercase letters",
+      ]);
+    });
+
+    test("completes instructions", async () => {
+      const { uri } = await open("FROM alpine\n");
+      const items = (await client.request("textDocument/completion", {
+        textDocument: { uri },
+        position: { line: 1, character: 0 },
+      })) as { label: string }[];
+      expect(items.map(({ label }) => label)).toEqual(
+        expect.arrayContaining(["RUN command", "COPY source dest"]),
+      );
+    });
+
+    test("answers an image tag completion without asking Docker Hub", async () => {
+      const { uri } = await open("FROM alpine:3\n");
+      const items = await client.request("textDocument/completion", {
+        textDocument: { uri },
+        position: { line: 0, character: 13 },
+      });
+      expect(items).toEqual([]);
+    });
+
+    test("hovers an instruction", async () => {
+      const { uri } = await open("FROM alpine\nRUN echo hi\n");
+      const hover = await client.request("textDocument/hover", {
+        textDocument: { uri },
+        position: { line: 1, character: 1 },
+      });
+      expect(JSON.stringify(hover)).toContain("Execute any commands");
+    });
+
+    test("formats", async () => {
+      const { uri } = await open("FROM alpine\n   RUN echo hi\n");
+      const edits = (await client.request("textDocument/formatting", {
+        textDocument: { uri },
+        options: { tabSize: 4, insertSpaces: true },
+      })) as { newText: string; range: { start: { line: number } } }[];
+      expect(edits).toEqual([expect.objectContaining({ newText: "" })]);
+      expect(edits[0]?.range.start.line).toBe(1);
+    });
+
+    test("lists document symbols", async () => {
+      const { uri } = await open("FROM alpine AS build\nRUN echo hi\n");
+      const symbols = (await client.request("textDocument/documentSymbol", {
+        textDocument: { uri },
+      })) as { name: string }[];
+      expect(symbols.map(({ name }) => name)).toEqual(["FROM", "RUN"]);
     });
   },
 );

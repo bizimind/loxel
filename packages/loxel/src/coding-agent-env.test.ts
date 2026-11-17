@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isCodingAgent, withoutAgentEnv } from "./coding-agent-env";
+import { codingAgentName, isCodingAgent, withoutAgentEnv } from "./coding-agent-env";
 
 describe("isCodingAgent", () => {
   test("recognizes the variables coding agents set", () => {
@@ -14,6 +14,19 @@ describe("isCodingAgent", () => {
       false,
     );
     expect(isCodingAgent({ CLAUDECODE: "", AI_AGENT: " " })).toBe(false);
+  });
+});
+
+describe("codingAgentName", () => {
+  test("names the agent from its variables", () => {
+    expect(codingAgentName({ CLAUDECODE: "1" })).toBe("Claude Code");
+    expect(codingAgentName({ CODEX_THREAD_ID: "t" })).toBe("Codex");
+    expect(codingAgentName({ AI_AGENT: "x", GEMINI_CLI: "1" })).toBe("Gemini CLI");
+  });
+
+  test("names none for the cross-agent convention alone, or for a user", () => {
+    expect(codingAgentName({ AI_AGENT: "copilot" })).toBeUndefined();
+    expect(codingAgentName({ HOME: "/home/me", CLAUDECODE: "" })).toBeUndefined();
   });
 });
 

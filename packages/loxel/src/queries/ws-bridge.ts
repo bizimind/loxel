@@ -12,6 +12,7 @@ import { openFromInbox, openRequest } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
+import { useAgentTerminalsStore } from "@/store/agent-terminals";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
@@ -440,6 +441,10 @@ export function useWsBridge(): void {
 
         case "schema_consent_changed":
           useSchemaConsentStore.setState(message.data);
+          break;
+
+        case "agent_terminals_changed":
+          useAgentTerminalsStore.setState(message.data);
           break;
 
         case "notifications_sync":

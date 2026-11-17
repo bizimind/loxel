@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
+import {
+  AGENT_TERMINAL_POLICY_LABELS,
+  AgentTerminalPolicySchema,
+} from "@/api/agent-terminal-model";
+import * as api from "@/api/client";
 import type { NotificationSequence } from "@/api/ws-protocol";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { showToast } from "@/components/ui/toast";
+import { pathName } from "@/lib/project-file-helpers";
 import { WHEN_QUITTING_LABELS, WhenQuittingSchema } from "@/lib/quit-terminals";
+import { useAgentTerminalsStore } from "@/store/agent-terminals";
 import { DEFAULT_TERMINAL_SCROLLBACK, useSettingsStore } from "@/store/settings-store";
 
 export function TerminalSection() {
@@ -136,6 +145,8 @@ export function TerminalSection() {
         </select>
       </div>
 
+      <AgentTerminalsSetting />
+
       <div className="space-y-1.5">
         <div className="flex items-center gap-2">
           <label className="text-muted-foreground text-xs">Bidirectional Text</label>
@@ -150,6 +161,67 @@ export function TerminalSection() {
           unchanged. Turn off for programs that already reorder it themselves, such as Emacs.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "When an Agent Starts a Terminal": what a coding agent's `loxel terminal` does, and the worktrees
+ * where the user chose to always run them.
+ */
+function AgentTerminalsSetting() {
+  const policy = useSettingsStore((s) => s.terminal.agentTerminals);
+  const updateTerminal = useSettingsStore((s) => s.updateTerminal);
+  const alwaysWorktrees = useAgentTerminalsStore((s) => s.alwaysWorktrees);
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor="terminal-agent-terminals" className="text-muted-foreground text-xs">
+        When an Agent Starts a Terminal
+      </label>
+      <p className="text-muted-foreground text-[10px]">
+        What happens when a coding agent runs <code>loxel terminal</code>: start it at once, ask you
+        first, or refuse. Your own <code>loxel terminal</code> commands always run. This keeps
+        agents polite; it is not a sandbox, since any program running as you can start a shell
+        anyway.
+      </p>
+      <select
+        id="terminal-agent-terminals"
+        value={policy}
+        onChange={(e) => {
+          const parsed = AgentTerminalPolicySchema.safeParse(e.target.value);
+          if (parsed.success) updateTerminal({ agentTerminals: parsed.data });
+        }}
+        className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+      >
+        {AgentTerminalPolicySchema.options.map((choice) => (
+          <option key={choice} value={choice}>
+            {AGENT_TERMINAL_POLICY_LABELS[choice]}
+          </option>
+        ))}
+      </select>
+      {alwaysWorktrees.length > 0 && (
+        <div className="flex items-center gap-2 pt-1">
+          <span
+            className="text-muted-foreground min-w-0 truncate text-[10px]"
+            title={alwaysWorktrees.join("\n")}
+          >
+            Always run in: {alwaysWorktrees.map(pathName).join(", ")}
+          </span>
+          <Button
+            variant="outline"
+            size="xs"
+            className="ml-auto shrink-0"
+            onClick={() => {
+              api.clearAgentTerminalWorktrees().catch((err: unknown) => {
+                showToast(`Could not clear: ${err instanceof Error ? err.message : String(err)}`);
+              });
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -86,13 +86,13 @@ Each language server is independent of the others. A language with more to say h
 | --------- | -------------------------- | ---------------------------------------------------------------- |
 | YAML      | Always active              | `.yml`, `.yaml`                                                  |
 | Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
-| Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
+| Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`                    |
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
-The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile checks are local only: Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries, so Dockerfiles keep the language server's other features but get no lint warnings. Run `docker build --check` in a terminal for those.
+Dockerfiles are checked as you type, all on your machine: you get warnings for problems such as more than one `CMD` in a stage, a relative `WORKDIR` or the deprecated `MAINTAINER`, along with completion, hover and formatting. The Docker language server sends nothing off your machine, so completing an image's tag after `FROM` doesn't look the tags up on Docker Hub. Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries; run that in a terminal for those. Docker Bake files (`docker-bake.hcl`) are highlighted as HCL, without completion, hover or diagnostics.
 
 Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed. The Terraform language server doesn't contact the Terraform Registry, so modules from the registry get completion and hover only once `terraform init` has installed them, and completing a module's `source` doesn't search the registry.
 

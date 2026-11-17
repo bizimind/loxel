@@ -1,33 +1,40 @@
 /**
- * Environment variables coding agents set for the commands they run. Variables an ordinary shell
- * can also carry (an editor's integrated terminal, a cloud IDE) are left out, so a user is never
- * mistaken for an agent.
+ * Environment variables coding agents set for the commands they run, and the agent each names (null
+ * for the cross-agent convention, which names none). Variables an ordinary shell can also carry (an
+ * editor's integrated terminal, a cloud IDE) are left out, so a user is never mistaken for an agent.
  */
-export const CODING_AGENT_ENV_VARS = [
+const CODING_AGENTS = [
   // Cross-agent convention (GitHub Copilot, v0, ...)
-  "AI_AGENT",
-  // Claude Code
-  "CLAUDECODE",
-  "CLAUDE_CODE",
-  // OpenAI Codex
-  "CODEX_SANDBOX",
-  "CODEX_CI",
-  "CODEX_THREAD_ID",
-  // Gemini CLI
-  "GEMINI_CLI",
-  // Cursor's agent
-  "CURSOR_AGENT",
-  // opencode
-  "OPENCODE_CLIENT",
-  // Augment
-  "AUGMENT_AGENT",
-  // Antigravity
-  "ANTIGRAVITY_AGENT",
-] as const;
+  ["AI_AGENT", null],
+  ["CLAUDECODE", "Claude Code"],
+  ["CLAUDE_CODE", "Claude Code"],
+  ["CODEX_SANDBOX", "Codex"],
+  ["CODEX_CI", "Codex"],
+  ["CODEX_THREAD_ID", "Codex"],
+  ["GEMINI_CLI", "Gemini CLI"],
+  ["CURSOR_AGENT", "Cursor"],
+  ["OPENCODE_CLIENT", "opencode"],
+  ["AUGMENT_AGENT", "Augment"],
+  ["ANTIGRAVITY_AGENT", "Antigravity"],
+] as const satisfies ReadonlyArray<readonly [string, string | null]>;
+
+export const CODING_AGENT_ENV_VARS = CODING_AGENTS.map(([name]) => name);
+
+const isSet = (env: Record<string, string | undefined>, name: string) =>
+  (env[name] ?? "").trim() !== "";
 
 /** Whether a process was started by a coding agent rather than by the user, from its env. */
 export function isCodingAgent(env: Record<string, string | undefined>): boolean {
-  return CODING_AGENT_ENV_VARS.some((name) => (env[name] ?? "").trim() !== "");
+  return CODING_AGENT_ENV_VARS.some((name) => isSet(env, name));
+}
+
+/**
+ * Which coding agent started a process, from its env: "Claude Code", "Codex", ...; undefined when
+ * no agent did, or for one only the cross-agent convention marks.
+ */
+export function codingAgentName(env: Record<string, string | undefined>): string | undefined {
+  const named = CODING_AGENTS.find(([name, agent]) => agent !== null && isSet(env, name));
+  return named?.[1] ?? undefined;
 }
 
 /**
@@ -52,6 +59,7 @@ const SESSION_ENV_VARS = [
   "LOXEL_SOCKET",
   "LOXEL_WORKTREE",
   "LOXEL_WINDOW_ID",
+  "LOXEL_TERMINAL_ID",
 ];
 
 /**

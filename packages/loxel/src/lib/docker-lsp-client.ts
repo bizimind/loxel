@@ -1,8 +1,8 @@
 import { createLspClient } from "./lsp-client";
 
-// docker-language-server: only worktrees with Dockerfile/docker-bake.hcl pay.
+// dockerfile-language-server-nodejs: only worktrees with a Dockerfile open pay.
 export default createLspClient({
   route: "ws/docker-lsp",
   name: "Docker",
-  languageId: ["dockerfile", "dockerbake"],
+  languageId: "dockerfile",
 });
