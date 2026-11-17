@@ -180,6 +180,13 @@ export type WsClientMessage =
       body?: string;
     };
 
+/**
+ * The query parameter of a worktree language-server socket asking for a server started afresh,
+ * not one kept running from an earlier socket: the user restarts the servers (see
+ * `stdio-lsp-manager.ts`).
+ */
+export const LSP_FRESH_SERVER_PARAM = "fresh";
+
 // Close codes of a language-server socket, which tell the client whether to reconnect (see
 // `lsp-connection.ts`).
 

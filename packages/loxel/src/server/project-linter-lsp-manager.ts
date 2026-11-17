@@ -306,7 +306,8 @@ export abstract class ProjectLinterLspManager<
       session,
       subscribeNodeEnv(context.wtPath, ({ env }) => {
         if (this.isSessionLive(session) && env?.nodePath !== node) {
-          this.restart(ws, "Node changed; reconnect");
+          // The session's socket now, which another may have taken the server over with.
+          this.restart(session.ws, "Node changed; reconnect");
         }
       }),
     );

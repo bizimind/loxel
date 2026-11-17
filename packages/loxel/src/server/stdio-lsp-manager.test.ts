@@ -929,6 +929,11 @@ describe("StdioLspManager handing a server to a new socket", () => {
       this.adoptions += 1;
     }
 
+    startFresh(ws: ServerWebSocket<unknown>, wtPath: string): void {
+      this.markFreshServer(ws);
+      this.start(ws, wtPath);
+    }
+
     async untilSessionCloses(): Promise<void> {
       while (this.sessionCloses === 0) {
         await new Promise<void>((resolve) => {
@@ -1037,6 +1042,21 @@ describe("StdioLspManager handing a server to a new socket", () => {
     next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
     expect(next.toClient).toContainEqual({ jsonrpc: "2.0", id: 0, result: CAPABILITIES });
     expect(handover.procs).toHaveLength(1);
+  });
+
+  test("a socket asking for a fresh server stops the running one and starts another", async () => {
+    const { client, root, handover } = await setupHandover();
+    await handshake(client);
+    handover.releaseClient(client.ws);
+
+    const next = new FakeClient(handover);
+    handover.startFresh(next.ws, root);
+    next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    await next.serverReceived((f) => f.method === "initialize");
+
+    expect(handover.procs).toHaveLength(2);
+    expect(handover.sessionCloses).toBeGreaterThanOrEqual(1);
+    expect(client.closes).toEqual([]);
   });
 
   test("a server nobody takes over is stopped once the grace period has passed", async () => {

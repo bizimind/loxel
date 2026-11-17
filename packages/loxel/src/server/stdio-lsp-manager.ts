@@ -136,6 +136,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly sessionGraceMs: number = LSP_SESSION_GRACE_MS;
   /** Sessions whose socket went, each stopped once its grace period has passed. */
   private sessionGraceTimers: GracePeriods<TSession> | undefined;
+  /** Sockets that asked for a server started afresh rather than one taken over. */
+  private readonly freshServerSockets = new WeakSet<ServerWebSocket<unknown>>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(readonly name: LspName) {
@@ -720,8 +722,9 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       const existingWs = this._sessionsByKey.get(key);
       if (existingWs && existingWs !== ws) {
         const existing = this.sessions.get(existingWs);
-        // A server another socket started, running or waiting for a new socket, is taken over.
-        if (existing && this.isAdoptable(existing, context)) {
+        // A server another socket started, running or waiting for a new socket, is taken over,
+        // unless this socket asked for a fresh one.
+        if (existing && !this.freshServerSockets.has(ws) && this.isAdoptable(existing, context)) {
           this.adoptSession(existing, ws, key);
           return;
         }
@@ -1015,6 +1018,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     return this.sessionGraceTimers;
   }
 
+  /** `ws` asks for a server started afresh, not one taken over from an earlier socket. */
+  protected markFreshServer(ws: ServerWebSocket<unknown>): void {
+    this.freshServerSockets.add(ws);
+  }
+
   /** Whether `session`'s socket went and its server waits for a new one. */
   protected isWaitingForClient(session: TSession): boolean {
     return this.sessionGraceTimers?.has(session) === true;
@@ -1306,7 +1314,12 @@ export abstract class WorktreeSessionLspManager<
   private readonly heldUntilTrusted = new Map<ServerWebSocket<unknown>, string>();
   private unsubscribeRepoTrust: (() => void) | null = null;
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+  /**
+   * Start or take over `wtPath`'s server for `ws`. With `freshServer` (the user restarts the
+   * servers), one an earlier socket left running is stopped and a new one started.
+   */
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string, freshServer = false): void {
+    if (freshServer) this.markFreshServer(ws);
     if (this.runsOnlyWhenTrusted && !this.repoTrustRestriction) {
       throw new Error(`${this.name} sets runsOnlyWhenTrusted without a repoTrustRestriction`);
     }

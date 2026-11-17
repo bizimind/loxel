@@ -149,7 +149,7 @@ export interface ClientState {
 /** A language-server manager rooted at a worktree, as `server.ts` drives it. */
 export interface WorktreeLspServer {
   readonly name: LspName;
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void;
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string, freshServer?: boolean): void;
   destroySession(ws: ServerWebSocket<unknown>): void;
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
@@ -169,6 +169,8 @@ export interface WorktreeLspData {
   type: LspName;
   wtPath: string;
   manager: WorktreeLspServer;
+  /** The client asked for a server started afresh, not one an earlier socket left running. */
+  freshServer: boolean;
 }
 
 /** WS data tag for routing app vs language-server connections. */

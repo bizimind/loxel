@@ -53,6 +53,10 @@ export class LspClientHandover {
    * client with here.
    */
   fromClient(frame: string): ClientFrameResult {
+    // Most of the traffic is edits, which need nothing from here.
+    if (!frame.includes('"id"') && !TRACKED_CLIENT_NOTIFICATION.test(frame)) {
+      return { toServer: frame, toClient: [] };
+    }
     const message = parseMessage(frame);
     if (!message) return { toServer: frame, toClient: [] };
     const { id, method } = message;
@@ -76,6 +80,12 @@ export class LspClientHandover {
   fromServer(frame: string): { toClient: string | null; toServer: string[] } {
     // Notifications are most of the traffic (diagnostics, progress, logs), and carry no id.
     if (!frame.includes('"id"')) return { toClient: this.connected ? frame : null, toServer: [] };
+    // Answers can be large (completions, semantic tokens); read the id without parsing the rest.
+    const head = RESPONSE_HEAD.exec(frame);
+    const idRange = head?.indices?.[1];
+    if (head?.[1] !== undefined && idRange) {
+      return this.serverResponse(frame, jsonRpcId(JSON.parse(head[1])), idRange);
+    }
     const message = parseMessage(frame);
     if (!message) return { toClient: this.connected ? frame : null, toServer: [] };
     const { id, method } = message;
@@ -88,14 +98,7 @@ export class LspClientHandover {
     if (method !== undefined || id === undefined) {
       return { toClient: this.connected ? frame : null, toServer: [] };
     }
-    const clientId = this.inFlight.get(id);
-    // Not a request of this client's: an answer to one of an earlier client's, which was cancelled.
-    if (clientId === undefined) return { toClient: this.adopted ? null : frame, toServer: [] };
-    this.inFlight.delete(id);
-    this.serverIds.delete(clientId);
-    if (id === this.initializeId && "result" in message) this.initializeResult = message.result;
-    if (!this.adopted) return { toClient: frame, toServer: [] };
-    return { toClient: JSON.stringify({ ...message, id: clientId }), toServer: [] };
+    return this.serverResponse(frame, id, null);
   }
 
   /**
@@ -132,6 +135,38 @@ export class LspClientHandover {
     this.connected = true;
     this.adopted = true;
     this.awaitingInitialize = true;
+  }
+
+  /**
+   * The server's answer to a client request, whose id is `id`, written at `idRange` of the frame
+   * when known (else the frame is parsed to replace it).
+   */
+  private serverResponse(
+    frame: string,
+    id: JsonRpcId | undefined,
+    idRange: [number, number] | null,
+  ): { toClient: string | null; toServer: string[] } {
+    const clientId = id === undefined ? undefined : this.inFlight.get(id);
+    // Not a request of this client's: an answer to one of an earlier client's, which was
+    // cancelled, or one no client is connected to hear.
+    if (id === undefined || clientId === undefined) {
+      return { toClient: this.adopted || !this.connected ? null : frame, toServer: [] };
+    }
+    this.inFlight.delete(id);
+    this.serverIds.delete(clientId);
+    if (id === this.initializeId) {
+      const message = parseMessage(frame);
+      if (message && "result" in message) this.initializeResult = message.result;
+    }
+    if (!this.adopted) return { toClient: frame, toServer: [] };
+    if (idRange) {
+      const [start, end] = idRange;
+      const rewritten = frame.slice(0, start) + JSON.stringify(clientId) + frame.slice(end);
+      return { toClient: rewritten, toServer: [] };
+    }
+    const message = parseMessage(frame);
+    if (!message) return { toClient: null, toServer: [] };
+    return { toClient: JSON.stringify({ ...message, id: clientId }), toServer: [] };
   }
 
   private clientRequest(
@@ -235,6 +270,17 @@ interface JsonRpcMessage extends Record<string, unknown> {
  * counts up to from 0, and within the 32-bit range some servers (rust-analyzer) hold ids in.
  */
 const ADOPTED_ID_BASE = 1_000_000_000;
+
+/**
+ * The start of an answer as servers write it, `{"jsonrpc":"2.0","id":<id>,"result"|"error":`,
+ * with the id's position. Frames written otherwise are parsed in full.
+ */
+const RESPONSE_HEAD =
+  /^\{\s*"jsonrpc"\s*:\s*"2\.0"\s*,\s*"id"\s*:\s*(-?\d+|"(?:[^"\\]|\\.)*")\s*,\s*"(?:result|error)"\s*:/d;
+
+/** The client notifications the handover keeps track of; any other without an id passes as is. */
+const TRACKED_CLIENT_NOTIFICATION =
+  /"(?:initialized|textDocument\/didOpen|textDocument\/didClose|\$\/cancelRequest)"/;
 
 /** Ids of the registration requests sent to an adopting client, whose answers stay here. */
 const REPLAY_ID_PREFIX = "loxel-handover-";

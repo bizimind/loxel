@@ -10,11 +10,12 @@ import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
-import type {
-  FileMoveSource,
-  TerminalSpawnTarget,
-  WsClientMessage,
-  WsMessage,
+import {
+  type FileMoveSource,
+  LSP_FRESH_SERVER_PARAM,
+  type TerminalSpawnTarget,
+  type WsClientMessage,
+  type WsMessage,
 } from "@/api/ws-protocol";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
@@ -710,7 +711,8 @@ function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void 
   const resources = wtResources.get(wtPath);
   if (!resources) return;
 
-  resources.subscribers.delete(ws);
+  // A repeated unsubscribe must not start the grace period again.
+  if (!resources.subscribers.delete(ws)) return;
   const clientState = clients.get(ws);
   if (clientState) clientState.subscribedWorktrees.delete(wtPath);
 
@@ -1506,6 +1508,7 @@ async function serveRequest(
       type: worktreeLspManager.name,
       wtPath,
       manager: worktreeLspManager,
+      freshServer: url.searchParams.has(LSP_FRESH_SERVER_PARAM),
     });
     if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
     return undefined;
@@ -1554,7 +1557,7 @@ const server = Bun.serve<WsData>({
       }
       const worktreeLsp = worktreeLspData(ws);
       if (worktreeLsp) {
-        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath);
+        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath, worktreeLsp.freshServer);
         return;
       }
       if (shuttingDown) {

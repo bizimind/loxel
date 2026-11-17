@@ -49,9 +49,10 @@ export interface LspConnectionOptions {
   /**
    * Open the socket for the worktree (null: a server not scoped to one); rejects when it cannot.
    * `signal` aborts when the attempt is superseded: close a socket still opening, and start no
-   * client on it.
+   * client on it. `freshServer` asks for a server started afresh rather than the one an earlier
+   * socket left running (see {@link LspConnection.restart}).
    */
-  open(wtPath: string | null, signal: AbortSignal): Promise<LspLink>;
+  open(wtPath: string | null, signal: AbortSignal, freshServer: boolean): Promise<LspLink>;
   onStateChange(state: LspConnectionState): void;
 }
 
@@ -59,8 +60,12 @@ export interface LspConnection {
   /** Connect to `wtPath`'s server. A no-op while already connected (or stopped) for that path. */
   connect: (wtPath: string | null) => void;
   disconnect: () => void;
-  /** Connect again from scratch, whatever the state, with a fresh failure count. */
-  restart: () => void;
+  /**
+   * Connect again from scratch, whatever the state, with a fresh failure count. The server Loxel
+   * keeps for a while after its socket closes is taken over again, unless `freshServer` asks for
+   * a new one (the user restarts the language servers).
+   */
+  restart: (options?: { freshServer?: boolean }) => void;
   /**
    * Loxel's server is reachable again: reconnect now, with a fresh failure count, if the
    * connection is waiting to reconnect or stopped for any reason but `replaced`; while an attempt
@@ -111,13 +116,13 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     link = null;
   }
 
-  function attempt(wtPath: string | null): void {
+  function attempt(wtPath: string | null, freshServer = false): void {
     release();
     const gen = generation;
     const controller = new AbortController();
     pending = controller;
     setState({ state: "connecting" });
-    options.open(wtPath, controller.signal).then(
+    options.open(wtPath, controller.signal, freshServer).then(
       (opened) => {
         if (gen !== generation) {
           opened.dispose();
@@ -194,10 +199,10 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
       release();
       if (state.state !== "idle") setState({ state: "idle" });
     },
-    restart: () => {
+    restart: (restartOptions) => {
       if (!target) return;
       failures = 0;
-      attempt(target.wtPath);
+      attempt(target.wtPath, restartOptions?.freshServer === true);
     },
     resume: () => {
       if (!target) return;

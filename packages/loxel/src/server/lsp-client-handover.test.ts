@@ -175,4 +175,36 @@ describe("LspClientHandover", () => {
       handover.fromClient(frame({ method: "$/cancelRequest", params: { id: 1 } })).toServer,
     ).toBeNull();
   });
+  test("an answer written in another key order maps back the same way", () => {
+    const handover = initialized();
+    handover.disconnect();
+    handover.adopt();
+    handover.fromClient(frame({ id: 0, method: "initialize", params: {} }));
+    handover.fromClient(frame({ method: "initialized", params: {} }));
+    const request = parse(
+      handover.fromClient(frame({ id: 2, method: "textDocument/hover", params: {} })).toServer,
+    ) as { id: number };
+
+    const answer = JSON.stringify({ result: { contents: "x" }, id: request.id, jsonrpc: "2.0" });
+    expect(parse(handover.fromServer(answer).toClient)).toEqual({
+      result: { contents: "x" },
+      id: 2,
+      jsonrpc: "2.0",
+    });
+  });
+
+  test("while no client is connected, answers go nowhere", () => {
+    const handover = initialized();
+    handover.disconnect();
+    expect(handover.fromServer(frame({ id: 9, result: null })).toClient).toBeNull();
+  });
+
+  test("passes edits through without looking at them", () => {
+    const handover = initialized();
+    const edit = frame({
+      method: "textDocument/didChange",
+      params: { textDocument: { uri: URI, version: 2 }, contentChanges: [{ text: "x" }] },
+    });
+    expect(handover.fromClient(edit)).toEqual({ toServer: edit, toClient: [] });
+  });
 });
