@@ -4,7 +4,7 @@ const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
 const { onLoxelEvent } = await import("./loxel-events");
-const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, revokeInboxOpens } =
+const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, dropInboxOpen } =
   await import("./open-path");
 const { wsClient } = await import("@/api/client");
 const { useProjectStore } = actualProjects;
@@ -170,7 +170,7 @@ describe("opens from outside the window", () => {
     expect(created).toHaveLength(1);
   });
 
-  test("an open from the inbox another window took is not placed here", async () => {
+  test("an open from the inbox another window placed is not placed here", async () => {
     const sent: unknown[] = [];
     const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
     cleanups.push(() => send.mockRestore());
@@ -181,14 +181,14 @@ describe("opens from outside the window", () => {
     };
 
     await openFromInbox("in-2", message);
-    revokeInboxOpens(["in-2"]);
+    dropInboxOpen("in-2");
     for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
       dispatchPendingOpen(open);
     expect(created).toEqual([]);
     expect(sent).toEqual([]);
   });
 
-  test("an open from the inbox revoked while on its way is neither placed nor answered", async () => {
+  test("an open from the inbox placed elsewhere while on its way is neither placed nor answered", async () => {
     const sent: unknown[] = [];
     const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
     cleanups.push(() => send.mockRestore());
@@ -198,7 +198,7 @@ describe("opens from outside the window", () => {
       wtPath: MAIN,
       data: { url: URL_TARGET },
     });
-    revokeInboxOpens(["in-3"]);
+    dropInboxOpen("in-3");
     await opening;
     expect(created).toEqual([]);
     expect(sent).toEqual([]);

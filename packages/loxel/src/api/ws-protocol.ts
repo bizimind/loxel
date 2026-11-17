@@ -77,14 +77,11 @@ export type WsMessage =
   /**
    * An open request the server kept in its open inbox while no window was connected. The window
    * answers `inbox_open_done` once it has placed the panel (or the open failed); until then the
-   * server keeps the request, and gives it to the next window if this one goes away.
+   * server keeps the request, and gives it to every window that says hello.
    */
   | { type: "open_from_inbox"; inboxId: string; message: OpenRequestMessage }
-  /**
-   * Inbox requests this window held that another window took while this one was away: it must not
-   * open them too.
-   */
-  | { type: "inbox_open_revoked"; inboxIds: string[] }
+  /** A window placed the panel of an `open_from_inbox` request: the others drop their copy. */
+  | { type: "inbox_open_placed"; inboxId: string }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }

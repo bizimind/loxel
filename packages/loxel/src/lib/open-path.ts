@@ -40,18 +40,18 @@ function inOrder<T>(open: () => Promise<T>): Promise<T | undefined> {
 const inboxOpens = new Map<string, boolean>();
 
 function inboxOpenDone(inboxId: string): void {
-  // Revoked while its open was on its way: another window holds it now.
-  if (!inboxOpens.has(inboxId) || inboxOpens.get(inboxId) === true) return;
+  // Placed, here or in another window.
+  if (inboxOpens.get(inboxId) === true) return;
   inboxOpens.set(inboxId, true);
   api.wsClient.send({ type: "inbox_open_done", inboxId });
 }
 
 /**
- * Another window took these inbox requests while this one was away: the panels queued for them
- * here are not placed. A request handed here again later opens as new.
+ * A window placed the panel of the inbox request `inboxId`: unless this one did, the panel queued
+ * for it here is not placed. Sent to every window, this one included.
  */
-export function revokeInboxOpens(inboxIds: readonly string[]): void {
-  for (const id of inboxIds) if (inboxOpens.get(id) === false) inboxOpens.delete(id);
+export function dropInboxOpen(inboxId: string): void {
+  if (inboxOpens.get(inboxId) === false) inboxOpens.set(inboxId, true);
 }
 
 /**
@@ -252,11 +252,11 @@ async function openInWorktree(target: string | null, open: PendingOpen): Promise
  * Create the panel a {@link PendingOpen} describes in the mounted center layout. Creation goes
  * through the typed window events, like every other panel, so this module does not depend on the
  * panel creators. The open inbox request it came from, if any, is done with; one another window
- * took meanwhile is not placed.
+ * placed meanwhile is not placed again.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
   if (open.inboxId) {
-    // Revoked (another window took it), or already placed from an earlier copy of the request.
+    // Placed already: in another window, or here from an earlier copy of the request.
     if (inboxOpens.get(open.inboxId) !== false) return;
     inboxOpenDone(open.inboxId);
   }

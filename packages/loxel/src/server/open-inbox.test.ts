@@ -36,27 +36,10 @@ describe("OpenInbox", () => {
 
     const [first, second] = inbox.list();
     expect([first?.message, second?.message]).toEqual([file("/wt/a.ts"), terminal("t1")]);
-    inbox.handTo([first!.id, second!.id], "w1");
-    inbox.placedBy(first!.id, "w2"); // not the window holding it
-    expect(inbox.list()).toHaveLength(2);
-    inbox.placedBy(first!.id, "w1");
-    expect(inbox.list()).toEqual([{ ...second!, delivered: true, heldBy: "w1" }]);
-  });
-
-  test("gives a request to the window holding it, or to any once that one is gone", () => {
-    const inbox = new OpenInbox({ now: clock });
-    inbox.add(file("/wt/a.ts"), "/wt");
-    const gone = new Set<string>();
-    const isGone = (id: string) => gone.has(id);
-    const [entry] = inbox.forWindow("w1", isGone);
-    inbox.handTo([entry!.id], "w1");
-
-    expect(inbox.holds("w1")).toBe(true);
-    expect([...inbox.holders()]).toEqual(["w1"]);
-    expect(inbox.forWindow("w2", isGone)).toEqual([]);
-    expect(inbox.forWindow("w1", isGone).map((e) => e.id)).toEqual([entry!.id]);
-    gone.add("w1");
-    expect(inbox.forWindow("w2", isGone).map((e) => [e.id, e.heldBy])).toEqual([[entry!.id, "w1"]]);
+    inbox.markDelivered([first!.id, second!.id]);
+    expect(inbox.remove(first!.id)).toBe(true);
+    expect(inbox.remove(first!.id)).toBe(false);
+    expect(inbox.list()).toEqual([{ ...second!, delivered: true }]);
   });
 
   test("holds a queued terminal until its panel is placed", () => {
@@ -65,12 +48,9 @@ describe("OpenInbox", () => {
 
     expect(inbox.holdsTerminal("t1")).toBe(true);
     expect(inbox.holdsTerminal("t2")).toBe(false);
-    inbox.handTo(
-      inbox.list().map((entry) => entry.id),
-      "w1",
-    );
+    inbox.markDelivered(inbox.list().map((entry) => entry.id));
     expect(inbox.holdsTerminal("t1")).toBe(true);
-    inbox.placedBy(inbox.list()[0]!.id, "w1");
+    inbox.remove(inbox.list()[0]!.id);
     expect(inbox.holdsTerminal("t1")).toBe(false);
   });
 
@@ -111,16 +91,16 @@ describe("OpenInbox", () => {
     first.add(page("http://localhost:5173/"), "/wt");
     first.add(file("/wt/gone.ts"), "/wt");
     first.dropWhere(({ message }) => message.type === "open_file");
-    first.handTo([first.list()[0]!.id], "w1");
+    first.markDelivered([first.list()[0]!.id]);
     first.close();
 
     const second = new OpenInbox({ path, now: clock });
     expect(second.holdsTerminal("t1")).toBe(true);
-    expect(second.list().map((entry) => [entry.message, entry.heldBy])).toEqual([
-      [terminal("t1", "claude"), "w1"],
+    expect(second.list().map((entry) => [entry.message, entry.delivered])).toEqual([
+      [terminal("t1", "claude"), true],
       [page("http://localhost:5173/"), undefined],
     ]);
-    for (const entry of second.list()) second.placedBy(entry.id, entry.heldBy);
+    for (const entry of second.list()) second.remove(entry.id);
     second.close();
 
     const third = new OpenInbox({ path, now: clock });

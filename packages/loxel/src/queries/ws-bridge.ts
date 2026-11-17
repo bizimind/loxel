@@ -8,7 +8,7 @@ import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFromInbox, openRequest, revokeInboxOpens } from "@/lib/open-path";
+import { dropInboxOpen, openFromInbox, openRequest } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
@@ -365,8 +365,8 @@ export function useWsBridge(): void {
           void openFromInbox(message.inboxId, message.message);
           break;
 
-        case "inbox_open_revoked":
-          revokeInboxOpens(message.inboxIds);
+        case "inbox_open_placed":
+          dropInboxOpen(message.inboxId);
           break;
 
         // --- Project-scoped events (carry projectPath) ---

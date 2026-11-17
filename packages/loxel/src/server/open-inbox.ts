@@ -1,7 +1,6 @@
 /**
  * The open inbox: what `loxel` asked to open while no window was connected, kept until a window
- * has placed its panel, and held by the window it was handed to until then. See
- * docs/TERMINALS.md#the-open-inbox.
+ * has placed its panel. See docs/TERMINALS.md#the-open-inbox.
  */
 import { basename } from "node:path";
 
@@ -78,14 +77,8 @@ const InboxEntrySchema = z.object({
   /** The worktree the panel opens in, null for Home, or absent for whatever the window shows. */
   worktreePath: z.string().nullable().optional(),
   message: InboxMessageSchema,
-  /** A window got it, and a notification said so. */
+  /** A window got it, and a notification said so; it waits for a window to place its panel. */
   delivered: z.boolean().optional(),
-  /**
-   * The window (`windowId`) it was handed to, which has not placed its panel yet: it gets it again
-   * after a reload, a reconnect or a server restart, and another window takes it only once it has
-   * been away for a grace period.
-   */
-  heldBy: z.string().optional(),
 });
 export type InboxEntry = z.infer<typeof InboxEntrySchema>;
 
@@ -154,43 +147,21 @@ export class OpenInbox {
     return this.entries;
   }
 
-  /**
-   * The requests the window `windowId` gets on saying hello: those it holds, those nobody holds,
-   * and those of a window that has been away too long to be coming back (`gone`).
-   */
-  forWindow(windowId: string, gone: (holder: string) => boolean): readonly InboxEntry[] {
-    return this.list().filter(
-      ({ heldBy }) => heldBy === undefined || heldBy === windowId || gone(heldBy),
-    );
-  }
-
-  /** The windows holding requests. */
-  holders(): Set<string> {
-    return new Set(this.list().flatMap(({ heldBy }) => (heldBy === undefined ? [] : [heldBy])));
-  }
-
-  /** Whether the window `windowId` holds a request. */
-  holds(windowId: string): boolean {
-    return this.entries.some((entry) => entry.heldBy === windowId);
-  }
-
-  /** The window `windowId` got the requests `ids`: it holds them until it places their panels. */
-  handTo(ids: readonly string[], windowId: string): void {
-    const handed = new Set(ids);
+  /** Remember that windows got the requests `ids`, so they are not announced again. */
+  markDelivered(ids: readonly string[]): void {
+    const marked = new Set(ids);
     for (const entry of this.entries) {
-      if (!handed.has(entry.id) || (entry.delivered && entry.heldBy === windowId)) continue;
+      if (!marked.has(entry.id) || entry.delivered) continue;
       entry.delivered = true;
-      entry.heldBy = windowId;
       this.persisted.insert(entry);
     }
   }
 
-  /**
-   * The window `windowId` placed the request's panel: it is done with, unless another window holds
-   * it now (it took it while this one was away).
-   */
-  placedBy(id: string, windowId: string | undefined): void {
-    this.dropWhere((entry) => entry.id === id && entry.heldBy === windowId);
+  /** A window placed the request's panel: it is done with. Returns whether it was still here. */
+  remove(id: string): boolean {
+    const before = this.entries.length;
+    this.dropWhere((entry) => entry.id === id);
+    return this.entries.length < before;
   }
 
   /**

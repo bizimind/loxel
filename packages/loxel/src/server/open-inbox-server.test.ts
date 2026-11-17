@@ -41,8 +41,6 @@ async function startServer(stateDir: string) {
       LOXEL_DEV: "1",
       LOXEL_STATE_DIR: stateDir,
       LOXEL_SERVE_PORT: String(port),
-      // Short, so a window's requests move on once it is gone within the test.
-      LOXEL_INBOX_HOLD_GRACE_MS: "500",
     },
     stdin: "ignore",
     stdout: "ignore",
@@ -158,23 +156,19 @@ describe("a server with no window connected", () => {
       expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
       await fence(reloaded);
       expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
-      // Once A has been gone for the grace period, the window in use takes it over, and A is told
-      // if it comes back, so it does not open it too.
-      reloaded.ws.close();
+      // Every window that says hello gets it until one places the panel; then the others are told
+      // to drop their copy.
       const windowB = await connectWindow(current);
       windowB.ws.send(hello(crypto.randomUUID()));
       expect(await received(windowB.log, "open_from_inbox")).toEqual(delivered);
-      const back = await connectWindow(current);
-      back.ws.send(hello(windowA));
-      expect(await received(back.log, "inbox_open_revoked")).toEqual({
-        type: "inbox_open_revoked",
-        inboxIds: [delivered.inboxId],
+      reloaded.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
+      expect(await received(windowB.log, "inbox_open_placed")).toEqual({
+        type: "inbox_open_placed",
+        inboxId: delivered.inboxId,
       });
-      await fence(back);
-      expect(back.log.entries.some((m) => m.type === "open_from_inbox")).toBe(false);
-      back.ws.close();
-      windowB.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
       await fence(windowB);
+      expect(windowB.log.entries.some((m) => m.type === "notification_added")).toBe(false);
+      reloaded.ws.close();
       windowB.ws.close();
       await stopServer(current.server);
 
