@@ -701,6 +701,49 @@ describe("TerminalManager with events in flight", () => {
     expect(manager.running().map((session) => session.id)).toEqual([id]);
   });
 
+  test("an orphan the caller keeps (its panel is queued) is neither counted nor destroyed", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const queued = crypto.randomUUID();
+    const orphan = crypto.randomUUID();
+    await manager.ensureSpawned(queued, attachOptions);
+    await manager.ensureSpawned(orphan, attachOptions);
+    const kept = (id: string) => id === queued;
+
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(manager.running().map((session) => session.id)).toEqual([queued]);
+    expect(manager.hasOrphanSessions(kept)).toBe(false);
+    expect(manager.hasOrphanSessions()).toBe(true);
+  });
+
+  test("only a running session with no client attached and not kept is an orphan", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const [shared, queued, orphan] = [0, 1, 2].map(() => crypto.randomUUID());
+    for (const id of [shared, queued, orphan]) await manager.ensureSpawned(id!, attachOptions);
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(shared!, first.sink, attachOptions);
+    await manager.attach(shared!, second.sink, attachOptions);
+    // One of its two windows leaving leaves it attached, so it is no orphan, kept or not.
+    manager.detach(shared!, first.sink);
+    const kept = (id: string) => id === queued;
+
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(
+      manager
+        .running()
+        .map((session) => session.id)
+        .toSorted(),
+    ).toEqual([shared!, queued!].toSorted());
+    expect(manager.hasOrphanSessions(kept)).toBe(false);
+
+    // Once its last window leaves too, it is an orphan like any other.
+    manager.detach(shared!, second.sink);
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(manager.running().map((session) => session.id)).toEqual([queued!]);
+  });
+
   test("a session found ended on a reconnect is recorded at once, and drained when its panel mounts", async () => {
     const host = new FakeTerminalHost();
     let changes = 0;

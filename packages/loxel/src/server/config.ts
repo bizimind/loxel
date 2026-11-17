@@ -82,4 +82,11 @@ export const config = {
   removedWorktreeTerminalDelayMs: Number(
     process.env.LOXEL_REMOVED_WORKTREE_TERMINAL_DELAY_MS ?? 60_000,
   ),
+  /**
+   * How long a worktree's resources outlive its last subscriber, so a reload, a network blip or a
+   * quick look at another worktree keeps its undo history and caches; tests shorten it. Five
+   * minutes, like an orphaned terminal's wait for its window: long enough for a window to come
+   * back, short enough that idle watchers do not pile up.
+   */
+  worktreeGraceMs: Number(process.env.LOXEL_WORKTREE_GRACE_MS ?? 5 * 60_000),
 } as const;

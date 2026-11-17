@@ -32,6 +32,8 @@ export function sourceLabel({ source }: ServerNotification): string {
       return "Loxel";
     case "terminal":
       return placeName(source.worktreePath);
+    case "inbox":
+      return source.worktreePath === undefined ? "Loxel" : placeName(source.worktreePath);
     case "browser":
       return `${hostOf(source.origin)} · ${placeName(source.worktreePath)}`;
     default: {
@@ -44,6 +46,7 @@ export function sourceLabel({ source }: ServerNotification): string {
 const DEFAULT_TITLES: Record<NotificationSource["kind"], string> = {
   terminal: "Terminal notification",
   browser: "Browser notification",
+  inbox: "Opened while you were away",
   server: "Loxel notification",
 };
 

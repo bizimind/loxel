@@ -51,6 +51,7 @@ class FakeServer {
   readonly opens: Array<{
     wtPath: string | null;
     signal: AbortSignal;
+    freshServer: boolean;
     accept: () => FakeLink;
     refuse: () => void;
   }> = [];
@@ -59,11 +60,12 @@ class FakeServer {
 
   constructor() {
     this.connection = createLspConnection({
-      open: (wtPath, signal) =>
+      open: (wtPath, signal, freshServer) =>
         new Promise((resolve, reject) => {
           this.opens.push({
             wtPath,
             signal,
+            freshServer,
             accept: () => {
               const closed = Promise.withResolvers<LspClose>();
               const fake: FakeLink = {
@@ -291,6 +293,19 @@ describe("createLspConnection", () => {
 
     expect(server.opens[0]!.signal.aborted).toBe(true);
     expect(server.opens[1]!.signal.aborted).toBe(false);
+  });
+
+  test("only a restart that asks for it asks for a fresh server, and only once", async () => {
+    const { server } = await connected();
+    server.connection.restart();
+    server.connection.restart({ freshServer: true });
+    expect(server.opens.map((open) => open.freshServer)).toEqual([false, false, true]);
+
+    // A reconnect after that takes over whatever the fresh socket started.
+    server.opens[2]!.accept().close(LSP_EXITED_CLOSE_CODE);
+    await settle();
+    advance(LSP_RECONNECT_BASE_DELAY_MS);
+    expect(server.opens[3]!.freshServer).toBe(false);
   });
 
   test("resume during an attempt retries at once if that attempt fails", async () => {

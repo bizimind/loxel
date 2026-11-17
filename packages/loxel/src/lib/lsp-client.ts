@@ -1,6 +1,7 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 import type { IDisposable } from "monaco-editor";
 
+import { LSP_FRESH_SERVER_PARAM } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
 
@@ -45,7 +46,7 @@ export function getAllConnectedLspClients(): MonacoLspClient[] {
 
 /** Restart every language server Loxel is connected to (or trying to be), from scratch. */
 export function restartLanguageServers(): void {
-  for (const connection of connections) connection.restart();
+  for (const connection of connections) connection.restart({ freshServer: true });
 }
 
 /** Restart the language servers that stopped (crashed, could not start, another window took them). */
@@ -89,8 +90,9 @@ export interface LspClientOptions {
  * connect/disconnect pair backed by one WebSocket and one `MonacoLspClient` at a time.
  *
  * `connect(wtPath)` is idempotent per worktree path (null: a server not scoped to a worktree,
- * YAML). Connecting to a different path disposes the old client and socket (killing the
- * server-side subprocess) and opens a new connection. Both the worktree switch and `disconnect()`
+ * YAML). Connecting to a different path disposes the old client and socket (the server keeps the
+ * old worktree's server a while for a socket to take it over, see `stdio-lsp-manager.ts`) and opens
+ * a new connection. Both the worktree switch and `disconnect()`
  * dispose the client (unregistering providers and closing synced documents) before the socket.
  * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`), plus the tabs of
  * its own read-only documents. Workspace edits
@@ -120,9 +122,14 @@ export function createLspClient({
   const ownsVirtualDocument = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
     model.uri.scheme === virtualDocuments?.scheme && !isPreviewModel(model);
 
-  async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
+  async function open(
+    wtPath: string | null,
+    signal: AbortSignal,
+    freshServer: boolean,
+  ): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const query = wtPath === null ? "" : `?wt=${encodeURIComponent(wtPath)}`;
+    const fresh = freshServer ? `&${LSP_FRESH_SERVER_PARAM}=1` : "";
+    const query = wtPath === null ? "" : `?wt=${encodeURIComponent(wtPath)}${fresh}`;
     const address = `${proto}//${location.host}/${route}${query}`;
     const { socket, closed } = await openSocket(address, signal);
     // Superseded while the open settled (the abort closed the socket): start no client on it.

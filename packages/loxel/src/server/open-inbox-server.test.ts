@@ -1,0 +1,155 @@
+/**
+ * The open inbox and the notifications across restarts of a real server process: what `server.ts`
+ * wires up around open-inbox.ts and notification-store.ts. `LOXEL_DEV=1` keeps the server off the
+ * keychain, and a temporary state directory off the user's projects.
+ */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+import type { WsMessage } from "@/api/ws-protocol";
+import { cliSocketPath } from "@/socket-paths";
+import { CaptureLog } from "@/test/git-sync-harness";
+
+// The package's test preload replaces `fetch` and `WebSocket` with browser ones, which have no
+// `unix` option and enforce CORS.
+if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+
+const LOXEL_ROOT = path.resolve(import.meta.dir, "../..");
+const TEST_TIMEOUT_MS = 120_000;
+
+/** A port free right now: the server takes its port from the environment. */
+function freePort(): number {
+  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: () => {} } });
+  const { port } = listener;
+  listener.stop(true);
+  return port;
+}
+
+/** A server process for `stateDir`, once it answers on its loopback port. */
+async function startServer(stateDir: string) {
+  const port = freePort();
+  const server = Bun.spawn(["bun", "src/server/index.ts"], {
+    cwd: LOXEL_ROOT,
+    env: {
+      ...process.env,
+      LOXEL_DEV: "1",
+      LOXEL_STATE_DIR: stateDir,
+      LOXEL_SERVE_PORT: String(port),
+    },
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  // Polled: the server signals nothing else when it starts listening.
+  while (!(await fetch(`http://127.0.0.1:${port}/api/version`).catch(() => null))?.ok) {
+    if (server.exitCode !== null) throw new Error(`Server exited: ${server.exitCode}`);
+    await Bun.sleep(50);
+  }
+  return { server, port };
+}
+
+async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
+  server.kill("SIGTERM");
+  await server.exited;
+}
+
+/** An app window's socket, recording every message the server sends it. */
+async function connectWindow(port: number) {
+  const log = new CaptureLog<WsMessage>();
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws.addEventListener("message", (event) => {
+    log.add(JSON.parse(String(event.data)) as WsMessage);
+  });
+  await new Promise((resolve, reject) => {
+    ws.addEventListener("open", resolve);
+    ws.addEventListener("error", () => reject(new Error("WebSocket error")));
+  });
+  return { ws, log };
+}
+
+/** The first message of `type` the window got. */
+async function received<K extends WsMessage["type"]>(
+  log: CaptureLog<WsMessage>,
+  type: K,
+): Promise<Extract<WsMessage, { type: K }>> {
+  const seq = await log.waitFor((message) => message.type === type, { label: type });
+  return log.entries[seq] as Extract<WsMessage, { type: K }>;
+}
+
+describe("a server with no window connected", () => {
+  let stateDir: string;
+  let file: string;
+  let current: Awaited<ReturnType<typeof startServer>> | null = null;
+
+  const overSocket = (body: unknown) =>
+    fetch("http://localhost/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      unix: cliSocketPath(stateDir),
+    });
+
+  beforeAll(() => {
+    stateDir = realpathSync(mkdtempSync(path.join(tmpdir(), "loxel-open-inbox-")));
+    file = path.join(stateDir, "plan.md");
+    writeFileSync(file, "# plan\n");
+  });
+
+  afterAll(() => {
+    current?.server.kill("SIGKILL");
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  test(
+    "keeps an open for the next window, across a restart, and tells it what opened",
+    async () => {
+      current = await startServer(stateDir);
+      const res = await overSocket({ filePath: file, focus: false, queue: true });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ ok: true, queued: true });
+      // Without `queue`, as from an older CLI or the app itself, it still waits for a window.
+      expect((await overSocket({ filePath: file })).status).toBe(503);
+      // A terminal starts at once, and its shell ends with this server (SIGTERM ends terminals): the
+      // next server drops its panel rather than show a new shell in it.
+      const terminal = await overSocket({ terminal: { cwd: stateDir }, queue: true });
+      expect(terminal.status).toBe(202);
+      await stopServer(current.server);
+
+      current = await startServer(stateDir);
+      const { ws, log } = await connectWindow(current.port);
+      ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      expect(await received(log, "open_file")).toEqual({
+        type: "open_file",
+        data: { filePath: file, focus: false },
+      });
+      const added = await received(log, "notification_added");
+      expect(added.data).toMatchObject({
+        title: "A file opened while you were away",
+        body: "plan.md",
+      });
+      // Outside every worktree, the file opened in what the window showed.
+      expect(added.data.source).toEqual({ kind: "inbox" });
+      // The notification follows every delivery, so a terminal would have come before it.
+      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
+      ws.close();
+      await stopServer(current.server);
+
+      // Delivered once, and the notification outlives another restart.
+      current = await startServer(stateDir);
+      const next = await connectWindow(current.port);
+      next.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
+      // Nothing more was delivered: the server answers a window's messages in order, so the reply
+      // to one sent after the hello comes after anything the hello brought.
+      next.ws.send(JSON.stringify({ type: "subscribe_logs" }));
+      await received(next.log, "log_error_snapshot");
+      expect(next.log.entries.some((message) => message.type === "open_file")).toBe(false);
+      next.ws.close();
+    },
+    TEST_TIMEOUT_MS,
+  );
+});

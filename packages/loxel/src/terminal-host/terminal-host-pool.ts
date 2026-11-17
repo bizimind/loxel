@@ -106,6 +106,7 @@ export class TerminalHostPool implements TerminalHost {
   private held: TerminalHostEvent[] | null = [];
   /** The caller's `adopt`, for the sessions of a host found not answering, once it does. */
   private adopt: ((sessions: TerminalSessionInfo[]) => void) | null = null;
+  private readonly sessionsKnownListeners = new Set<() => void>();
   private closed = false;
 
   constructor(private readonly options: TerminalHostPoolOptions) {
@@ -123,6 +124,31 @@ export class TerminalHostPool implements TerminalHost {
       build: options.serverBuild,
       capabilities: [...TERMINAL_HOST_CAPABILITIES],
     };
+  }
+
+  /**
+   * Whether every host has listed its sessions, so a session adopted from none of them does not
+   * run. False while a host found not answering at startup has yet to answer or be gone.
+   */
+  get sessionsKnown(): boolean {
+    for (const host of this.hosts) if (!host.knowsSessions) return false;
+    return true;
+  }
+
+  /**
+   * Call `listener` whenever a host found not answering at startup answers or is gone, leaving
+   * every host's sessions known ({@link sessionsKnown}). Returns an unsubscribe function.
+   */
+  onSessionsKnown(listener: () => void): () => void {
+    this.sessionsKnownListeners.add(listener);
+    return () => this.sessionsKnownListeners.delete(listener);
+  }
+
+  private notifyIfSessionsKnown(): void {
+    // Not while leaving the hosts (their sessions outlive this server), nor before `start()` has
+    // handed over what it found: either would take an unadopted session for an ended one.
+    if (this.closed || this.held !== null || !this.sessionsKnown) return;
+    for (const listener of this.sessionsKnownListeners) listener();
   }
 
   /**
@@ -445,6 +471,7 @@ export class TerminalHostPool implements TerminalHost {
       `Terminal host ${host.hostId} answers; reattaching ${adopted.length} terminal(s)`,
     );
     if (adopted.length > 0) this.adopt?.(adopted);
+    this.notifyIfSessionsKnown();
     // Let go once the host knows which sessions it keeps, should it keep none.
     queueMicrotask(() => this.retireIfDone(host));
     return adopted;
@@ -475,6 +502,7 @@ export class TerminalHostPool implements TerminalHost {
       for (const [id, owner] of this.owners) {
         if (owner.host === host) this.owners.delete(id);
       }
+      if (!host.knowsSessions) this.notifyIfSessionsKnown();
     });
     return host;
   }

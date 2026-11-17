@@ -6,7 +6,11 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket, Subprocess } from "bun";
 
-import { LSP_EXITED_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import {
+  LSP_EXITED_CLOSE_CODE,
+  LSP_REPLACED_CLOSE_CODE,
+  LSP_START_FAILED_CLOSE_CODE,
+} from "@/api/ws-protocol";
 
 import { FileChangeType } from "./lsp-watched-files";
 import {
@@ -19,10 +23,11 @@ import {
 // A stand-in language server: echoes every frame it reads back as a `test/received`
 // notification, writes whatever a `test/emit` notification carries as its own frame, exits with
 // the code a `test/exit` notification carries, kills itself on `test/kill`, fills a `test/argv`
-// notification with its arguments, and a `test/startChild` one with the pid of a child it starts in
-// a process group of its own.
+// notification with its arguments, a `test/startChild` one with the pid of a child it starts in
+// a process group of its own, and a `test/history` one with the method of every frame it read.
 const FAKE_SERVER = `
 let buf = Buffer.alloc(0);
+const seen = [];
 const write = (msg) => {
   const body = Buffer.from(JSON.stringify(msg));
   process.stdout.write("Content-Length: " + body.byteLength + "\\r\\n\\r\\n");
@@ -44,6 +49,8 @@ for await (const chunk of process.stdin) {
       const child = require("node:child_process").spawn("/bin/sleep", ["1000"], { detached: true, stdio: "ignore" });
       msg.params = { pid: child.pid };
     }
+    seen.push(msg.method ?? "response");
+    if (msg.method === "test/history") msg.params = { seen };
     if (msg.method === "test/emit") write(msg.params);
     else write({ jsonrpc: "2.0", method: "test/received", params: msg });
   }
@@ -51,6 +58,7 @@ for await (const chunk of process.stdin) {
 `;
 
 interface Frame {
+  jsonrpc?: string;
   id?: number | string;
   method?: string;
   params?: Record<string, unknown>;
@@ -149,6 +157,10 @@ class FakeClient {
 
   async serverReceived(match: (frame: Frame) => boolean): Promise<Frame> {
     return this.waitFor(() => this.toServer.find(match));
+  }
+
+  async clientReceived(match: (frame: Frame) => boolean): Promise<Frame> {
+    return this.waitFor(() => this.toClient.find(match));
   }
 
   private async waitFor(find: () => Frame | undefined): Promise<Frame> {
@@ -875,5 +887,195 @@ describe("StdioLspManager process exit", () => {
     await keyed.untilSessionCloses(2);
 
     expect(client.closes).toEqual([]);
+  });
+});
+
+describe("StdioLspManager handing a server to a new socket", () => {
+  const CAPABILITIES = { capabilities: { hoverProvider: true } };
+  const URI = "file:///wt/a.py";
+
+  class HandoverLspManager extends FakeLspManager {
+    readonly procs: Subprocess[] = [];
+    sessionCloses = 0;
+    adoptions = 0;
+    private closeWaiters: Array<() => void> = [];
+
+    constructor(
+      script: string,
+      protected override readonly sessionGraceMs: number,
+    ) {
+      super(script);
+    }
+
+    protected override getSessionKey(context: WtLspContext): string {
+      return context.wtPath;
+    }
+
+    protected override buildSession(
+      ws: ServerWebSocket<unknown>,
+      proc: Subprocess,
+      context: WtLspContext,
+    ): WtLspSession {
+      this.procs.push(proc);
+      return super.buildSession(ws, proc, context);
+    }
+
+    protected override onSessionClosed(): void {
+      this.sessionCloses += 1;
+      for (const wake of this.closeWaiters.splice(0)) wake();
+    }
+
+    protected override onClientAdopted(): void {
+      this.adoptions += 1;
+    }
+
+    startFresh(ws: ServerWebSocket<unknown>, wtPath: string): void {
+      this.markFreshServer(ws);
+      this.start(ws, wtPath);
+    }
+
+    async untilSessionCloses(): Promise<void> {
+      while (this.sessionCloses === 0) {
+        await new Promise<void>((resolve) => {
+          this.closeWaiters.push(resolve);
+        });
+      }
+    }
+  }
+
+  async function setupHandover(
+    graceMs = 60_000,
+  ): Promise<{ client: FakeClient; root: string; handover: HandoverLspManager }> {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
+    const script = join(dir, "fake-server.mjs");
+    await writeFile(script, FAKE_SERVER);
+    const handover = new HandoverLspManager(script, graceMs);
+    manager = handover;
+    const client = new FakeClient(handover);
+    handover.start(client.ws, dir);
+    return { client, root: dir, handover };
+  }
+
+  /** The client's handshake, answered by the server, and one document opened. */
+  async function handshake(client: FakeClient): Promise<void> {
+    client.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    await client.serverReceived((f) => f.method === "initialize");
+    client.emit({ id: 0, result: CAPABILITIES });
+    client.send({ method: "initialized", params: {} });
+    client.send({
+      method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, text: "" } },
+    });
+    await client.serverReceived((f) => f.method === "textDocument/didOpen");
+  }
+
+  /** What the server read, in order, once it has read a `test/history` sent now. */
+  async function history(client: FakeClient): Promise<string[]> {
+    client.send({ method: "test/history" });
+    const frame = await client.serverReceived((f) => f.method === "test/history");
+    return (frame.params as { seen: string[] }).seen;
+  }
+
+  test("a new socket within the grace period takes the running server over", async () => {
+    const { client, root, handover } = await setupHandover();
+    await handshake(client);
+    client.send({ id: 1, method: "textDocument/hover", params: {} });
+    await client.serverReceived((f) => f.method === "textDocument/hover");
+
+    handover.releaseClient(client.ws);
+    const next = new FakeClient(handover);
+    handover.start(next.ws, root);
+    next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    expect(next.toClient).toContainEqual({ jsonrpc: "2.0", id: 0, result: CAPABILITIES });
+    expect(handover.adoptions).toBe(0);
+    next.send({ method: "initialized", params: {} });
+    expect(handover.adoptions).toBe(1);
+    next.send({ method: "textDocument/didOpen", params: { textDocument: { uri: URI, text: "" } } });
+
+    // One server, initialized once; the first socket's request cancelled and its document closed
+    // before the new socket opened it again.
+    expect(await history(next)).toEqual([
+      "initialize",
+      "test/emit",
+      "initialized",
+      "textDocument/didOpen",
+      "textDocument/hover",
+      "$/cancelRequest",
+      "textDocument/didClose",
+      "textDocument/didOpen",
+      "test/history",
+    ]);
+    expect(handover.procs).toHaveLength(1);
+    expect(handover.sessionCloses).toBe(0);
+    expect(client.closes).toEqual([]);
+  });
+
+  test("the new socket's requests are answered with its own ids", async () => {
+    const { client, root, handover } = await setupHandover();
+    await handshake(client);
+    handover.releaseClient(client.ws);
+    const next = new FakeClient(handover);
+    handover.start(next.ws, root);
+    next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    next.send({ method: "initialized", params: {} });
+
+    next.send({ id: 1, method: "textDocument/hover", params: {} });
+    const asked = await next.serverReceived((f) => f.method === "textDocument/hover");
+    expect(asked.id).not.toBe(1);
+    // The first socket's answer to its own id 1 would have been dropped; this one is the new one's.
+    next.emit({ id: asked.id, result: "hover" });
+    expect(await next.clientReceived((f) => f.result === "hover")).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: "hover",
+    });
+  });
+
+  test("a second socket takes over a server whose socket is still open", async () => {
+    const { client, root, handover } = await setupHandover();
+    await handshake(client);
+
+    const next = new FakeClient(handover);
+    handover.start(next.ws, root);
+
+    expect(client.closes).toEqual([[LSP_REPLACED_CLOSE_CODE, "Replaced by newer connection"]]);
+    next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    expect(next.toClient).toContainEqual({ jsonrpc: "2.0", id: 0, result: CAPABILITIES });
+    expect(handover.procs).toHaveLength(1);
+  });
+
+  test("a socket asking for a fresh server stops the running one and starts another", async () => {
+    const { client, root, handover } = await setupHandover();
+    await handshake(client);
+    handover.releaseClient(client.ws);
+
+    const next = new FakeClient(handover);
+    handover.startFresh(next.ws, root);
+    next.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    await next.serverReceived((f) => f.method === "initialize");
+
+    expect(handover.procs).toHaveLength(2);
+    expect(handover.sessionCloses).toBeGreaterThanOrEqual(1);
+    expect(client.closes).toEqual([]);
+  });
+
+  test("a server nobody takes over is stopped once the grace period has passed", async () => {
+    const { client, handover } = await setupHandover(10);
+    await handshake(client);
+
+    handover.releaseClient(client.ws);
+    expect(handover.sessionCloses).toBe(0);
+    await handover.untilSessionCloses();
+    await handover.procs[0]!.exited;
+    expect(client.closes).toEqual([]);
+  });
+
+  test("a socket that goes before its handshake ends stops its server at once", async () => {
+    const { client, handover } = await setupHandover();
+    client.send({ id: 0, method: "initialize", params: { capabilities: {} } });
+    await client.serverReceived((f) => f.method === "initialize");
+
+    handover.releaseClient(client.ws);
+    expect(handover.sessionCloses).toBe(1);
   });
 });

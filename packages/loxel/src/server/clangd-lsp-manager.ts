@@ -31,6 +31,7 @@ import { reportRepoRestriction } from "./repo-trust";
 import { isSameFileSync } from "./same-file";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
+  sendWarning,
   WorktreeLspManager,
   type SpawnOptions,
   type SuppressibleFeature,
@@ -210,8 +211,6 @@ const BUNDLED_RESOURCE_DIR = "clangd-resource";
 const BUNDLED_CLANGD_RESTRICTION = "Uses Loxel's own clangd instead of yours.";
 /** The same where the user's own clangd runs anyway, as nothing is bundled for the platform. */
 const USER_CLANGD_RESTRICTION = "Asks only compilers in system folders for include paths.";
-/** `window/showMessage`'s warning type. */
-const MESSAGE_TYPE_WARNING = 2;
 const NO_DEVELOPER_TOOLS_MESSAGE =
   "Standard headers need Apple's developer tools: run xcode-select --install in a terminal, then Restart Language Servers";
 const PROBE_TIMEOUT_MS = 10_000;
@@ -730,14 +729,17 @@ export class ClangdLspManager extends WorktreeLspManager {
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
+    this.warnOfMissingDeveloperTools(session);
+  }
+
+  /** A window that took the server over has not seen what the last one was told. */
+  protected override onClientAdopted(session: WtLspSession): void {
+    this.warnOfMissingDeveloperTools(session);
+  }
+
+  private warnOfMissingDeveloperTools(session: WtLspSession): void {
     if (this.launches.get(session.wtPath)?.developerTools !== false) return;
-    session.ws.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        method: "window/showMessage",
-        params: { type: MESSAGE_TYPE_WARNING, message: NO_DEVELOPER_TOOLS_MESSAGE },
-      }),
-    );
+    sendWarning(session.ws, NO_DEVELOPER_TOOLS_MESSAGE);
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {

@@ -292,6 +292,14 @@ export class CSharpLspManager extends WorktreeLspManager {
     super.detach(ws);
   }
 
+  /**
+   * Stops the server with its socket: a new connection goes through the gate, which replaces every
+   * other connection of the worktree before deciding, so no server would be taken over.
+   */
+  override destroySession(ws: ServerWebSocket<unknown>): void {
+    this.detach(ws);
+  }
+
   override async destroy(): Promise<void> {
     this.unsubscribeTrust?.();
     this.unsubscribeTrust = null;

@@ -19,6 +19,7 @@ import {
 import { getGoChoice } from "./go-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
+  sendWarning,
   type SpawnOptions,
   WorktreeLspManager,
   type WtLspContext,
@@ -137,9 +138,6 @@ export function withoutHiddenActions(body: string): string {
   return JSON.stringify(frame);
 }
 
-/** LSP `MessageType.Warning`. */
-const MESSAGE_TYPE_WARNING = 2;
-
 /** Finds a kind of problem in a frame's text; a capture group holds what the message names. */
 const NEWER_GO = /requires go >= (\S+) \(running go (\S+); GOTOOLCHAIN=local\)/;
 const MISSING_MODULE = /could not import (\S+) \(no required module provides package/;
@@ -244,8 +242,8 @@ interface SessionWatch {
  */
 export class GoLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
-  /** What each session has told the user already. */
-  private readonly reported = new WeakMap<WtLspSession, Set<string>>();
+  /** What each session has told the user already, by kind. */
+  private readonly reported = new WeakMap<WtLspSession, Map<string, string>>();
   /** Worktrees last told to install a newer Go, which may be in a directory new to the PATH. */
   private readonly waitingForNewerGo = new Set<string>();
   /** Starts that found no usable `go`. */
@@ -381,12 +379,17 @@ export class GoLspManager extends WorktreeLspManager {
 
   /** Tell the user, through the client's `showMessages`, once per session and problem. */
   private report(session: WtLspSession, { kind, message }: GoSetupProblem): void {
-    const reported = this.reported.get(session) ?? new Set();
+    const reported = this.reported.get(session) ?? new Map<string, string>();
     this.reported.set(session, reported);
     if (kind === "newer-go") this.waitingForNewerGo.add(session.wtPath);
     if (reported.has(kind)) return;
-    reported.add(kind);
-    const params = { type: MESSAGE_TYPE_WARNING, message };
-    session.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "window/showMessage", params }));
+    reported.set(kind, message);
+    sendWarning(session.ws, message);
+  }
+
+  /** A window that took the server over has not seen what the last one was told. */
+  protected override onClientAdopted(session: WtLspSession): void {
+    for (const message of this.reported.get(session)?.values() ?? [])
+      sendWarning(session.ws, message);
   }
 }

@@ -274,6 +274,8 @@ Clicking an entry focuses it, so keyboard navigation continues from there.
 - **Untracked** — green
 - **Ignored** — muted/gray
 
+**Undo:** `Cmd+Z` in the tree undoes the last create, rename, move, paste or delete, and `Cmd+Shift+Z` redoes it. Every window on the worktree shares one history, and it survives reloading the window, a dropped connection, or a few minutes spent in another worktree.
+
 **Drag and drop:** files and folders can be dragged within the project tree to reorganize them. See [Drafts](/docs/drafts) for dragging draft files into the project.
 
 **Context menu:** right-click a file or folder for New File, New Directory, Rename, Cut, Copy, Paste, Delete, Copy Name, Copy Relative Path, and Copy Absolute Path; on macOS also **Reveal in Finder** and **Open In** (the apps macOS offers for a file; installed terminals and editors for a folder). A modified file or folder also gets **Git Restore**.

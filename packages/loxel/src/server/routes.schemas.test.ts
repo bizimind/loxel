@@ -173,6 +173,8 @@ describe("POST /api/schemas/sync", () => {
       homeDrafts: {} as never,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
+      queueForWindow: () => "full",
+      dropQueuedTerminal: () => {},
     };
 
     const pyproject = "https://json.schemastore.org/pyproject.json";

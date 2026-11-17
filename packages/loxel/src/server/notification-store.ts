@@ -1,18 +1,24 @@
 /**
- * Server-side in-memory notification store.
+ * The server's notifications, newest first.
  *
- * Generic notification model: terminals, browser panel pages and the server itself are its
- * sources, told apart by `source.kind`.
+ * Generic notification model: terminals, browser panel pages, the open inbox and the server itself
+ * are its sources, told apart by `source.kind`.
  *
- * Ephemeral: state is lost on server restart (matches current notification behavior).
- * All connected clients are kept in sync via WS broadcasts from the caller.
+ * Persisted: every change is written through to its SQLite file, so a restart keeps the list,
+ * dismissals included. Browser pages' notifications are the exception, kept for the server's life
+ * only: what a site writes in them (sign-in codes, chat and mail previews) stays off disk, as the
+ * page object their clicks reach does not outlive the app. All connected clients are kept in sync
+ * via WS broadcasts from the caller.
  */
 import {
   type BrowserNotificationSource,
   type NotificationSource,
   type ServerNotification,
+  ServerNotificationSchema,
   isPanelSource,
 } from "@/api/notification-model";
+
+import { PersistedList } from "./persisted-list";
 
 const MAX_NOTIFICATIONS = 200;
 /**
@@ -22,7 +28,16 @@ const MAX_NOTIFICATIONS = 200;
 const MAX_BROWSER_NOTIFICATIONS = 50;
 
 export class NotificationStore {
-  private notifications: ServerNotification[] = [];
+  private notifications: ServerNotification[];
+  private readonly persisted: PersistedList<ServerNotification>;
+
+  /** `path` is the SQLite file to keep the list in; null keeps it in memory only. */
+  constructor(path: string | null = null) {
+    this.persisted = new PersistedList(path, ServerNotificationSchema);
+    this.notifications = this.persisted.load().toReversed();
+    // A list persisted under a larger cap, or by a store whose trims did not reach the file.
+    this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
+  }
 
   add(input: Omit<ServerNotification, "id" | "timestamp">): ServerNotification {
     const notification: ServerNotification = {
@@ -31,9 +46,8 @@ export class NotificationStore {
       timestamp: Date.now(),
     };
     this.notifications.unshift(notification);
-    if (this.notifications.length > MAX_NOTIFICATIONS) {
-      this.notifications.length = MAX_NOTIFICATIONS;
-    }
+    if (notification.source.kind !== "browser") this.persisted.insert(notification);
+    this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
     return notification;
   }
 
@@ -48,15 +62,11 @@ export class NotificationStore {
     const added = this.add(input);
     const browser = this.notifications.filter((n) => n.source.kind === "browser");
     const excess = new Set(browser.slice(MAX_BROWSER_NOTIFICATIONS).map((n) => n.id));
-    if (excess.size > 0) this.notifications = this.notifications.filter((n) => !excess.has(n.id));
-    return { added, evicted: [...excess] };
+    return { added, evicted: this.removeWhere((n) => excess.has(n.id)) };
   }
 
   dismiss(id: string): boolean {
-    const idx = this.notifications.findIndex((n) => n.id === id);
-    if (idx === -1) return false;
-    this.notifications.splice(idx, 1);
-    return true;
+    return this.removeWhere((n) => n.id === id).length > 0;
   }
 
   dismissByPanel(panelId: string): boolean {
@@ -65,13 +75,7 @@ export class NotificationStore {
 
   /** Remove the notifications whose source matches, returning their ids. */
   dismissWhere(matches: (source: NotificationSource) => boolean): string[] {
-    const removed: string[] = [];
-    this.notifications = this.notifications.filter((n) => {
-      if (!matches(n.source)) return true;
-      removed.push(n.id);
-      return false;
-    });
-    return removed;
+    return this.removeWhere((n) => matches(n.source));
   }
 
   /**
@@ -90,22 +94,48 @@ export class NotificationStore {
     );
   }
 
-  /** Dismiss what a worktree's panels raised. Returns the panels that had notifications. */
-  dismissByWorktree(worktreePath: string): string[] {
+  /**
+   * Dismiss what a worktree's panels and its inbox raised. Returns the panels that had
+   * notifications, and the ids of the inbox's.
+   */
+  dismissByWorktree(worktreePath: string): { panelIds: string[]; inboxIds: string[] } {
     const panelIds = new Set<string>();
-    this.notifications = this.notifications.filter((n) => {
-      if (!isPanelSource(n.source) || n.source.worktreePath !== worktreePath) return true;
-      panelIds.add(n.source.panelId);
-      return false;
+    const inboxIds: string[] = [];
+    this.removeWhere(({ id, source }) => {
+      if (source.kind === "inbox" && source.worktreePath === worktreePath) {
+        inboxIds.push(id);
+        return true;
+      }
+      if (!isPanelSource(source) || source.worktreePath !== worktreePath) return false;
+      panelIds.add(source.panelId);
+      return true;
     });
-    return [...panelIds];
+    return { panelIds: [...panelIds], inboxIds };
   }
 
   dismissAll(): void {
     this.notifications = [];
+    this.persisted.clear();
   }
 
   getAll(): readonly ServerNotification[] {
     return this.notifications;
+  }
+
+  /** Close the file the list is kept in. */
+  close(): void {
+    this.persisted.close();
+  }
+
+  /** Remove the notifications that match, from memory and the file. Returns their ids. */
+  private removeWhere(matches: (n: ServerNotification, index: number) => boolean): string[] {
+    const removed: string[] = [];
+    this.notifications = this.notifications.filter((n, index) => {
+      if (!matches(n, index)) return true;
+      removed.push(n.id);
+      return false;
+    });
+    this.persisted.delete(removed);
+    return removed;
   }
 }

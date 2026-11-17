@@ -29,7 +29,7 @@ Derived per-repo state is keyed by a hash of the git root (`hash12` in [config.t
 
 ## Server-side project lifecycle
 
-[server.ts](../src/server/server.ts) holds two maps: `projects` (`ProjectState`, keyed by git root, always running) and `wtResources` (`WorktreeResources`, keyed by worktree path, alive while subscribed). Both shapes live in [server-state.ts](../src/server/server-state.ts). There is no server-side "active project" or "active worktree"; the server serves all projects concurrently.
+[server.ts](../src/server/server.ts) holds two maps: `projects` (`ProjectState`, keyed by git root, always running) and `wtResources` (`WorktreeResources`, keyed by worktree path, alive while subscribed and for a grace period after). Both shapes live in [server-state.ts](../src/server/server-state.ts). There is no server-side "active project" or "active worktree"; the server serves all projects concurrently.
 
 At startup the server loads `projects.db`, registers `process.argv[2]` as a project if given, then runs `initializeProject` for every project in parallel (`Promise.allSettled`, failures are logged and the project stays without server state). `initializeProject(repoPath)`:
 
@@ -41,7 +41,7 @@ At startup the server loads `projects.db`, registers `process.argv[2]` as a proj
 
 `teardownProject` tears down every `WorktreeResources` of the project, stops the watcher and status tracker and closes both databases.
 
-Worktree resources (status watcher for linked worktrees, files service, drafts, external files, Others folders, file-operation history) are created by `subscribeWorktree` on the first `subscribe_worktree` WebSocket message and torn down when the last subscriber leaves. Removal-specific teardown (`suspendWorktreeWatchers`, `completeWorktreeRemoval`, `reconcileWorktrees`) is described in [WATCHERS.md](WATCHERS.md#worktree-lifecycle).
+Worktree resources (status watcher for linked worktrees, files service, drafts, external files, Others folders, file-operation history) are created by `subscribeWorktree` on the first `subscribe_worktree` WebSocket message and torn down when a grace period after the last subscriber left has passed with nobody subscribing again ([SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)). Removal-specific teardown (`suspendWorktreeWatchers`, `completeWorktreeRemoval`, `reconcileWorktrees`) is described in [WATCHERS.md](WATCHERS.md#worktree-lifecycle).
 
 The project watcher's `worktrees` event broadcasts `worktrees_changed` to the project's subscribers, then cleans up after the worktrees git no longer has registered and follows the ones that moved, then invalidates the status tracker.
 

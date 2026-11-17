@@ -10,11 +10,12 @@ import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
-import type {
-  FileMoveSource,
-  TerminalSpawnTarget,
-  WsClientMessage,
-  WsMessage,
+import {
+  type FileMoveSource,
+  LSP_FRESH_SERVER_PARAM,
+  type TerminalSpawnTarget,
+  type WsClientMessage,
+  type WsMessage,
 } from "@/api/ws-protocol";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
@@ -35,10 +36,12 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { gitExecClient } from "./git-exec-client";
+import { GracePeriods } from "./grace-periods";
 import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
+import { OpenInbox, deliveredNotices } from "./open-inbox";
 import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
@@ -197,6 +200,8 @@ const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
+/** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
+const worktreeGrace = new GracePeriods<string>(config.worktreeGraceMs);
 
 /** Find the project that owns the given path: under its cwd or its worktrees dir. */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
@@ -379,6 +384,47 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
   const targets = activeWindowSockets(windowId);
   for (const ws of targets) sendTo(ws, message);
   return targets.length > 0;
+}
+
+/**
+ * Hand the open inbox to a window that just said hello, the first after a time with none. Each
+ * request opens as it would have then, focus included, and one notification per worktree says what
+ * opened: a panel opened without focus waits unseen in its worktree.
+ */
+function deliverInbox(ws: ServerWebSocket<WsData>): void {
+  const entries = openInbox.takeAll();
+  if (entries.length === 0) return;
+  for (const { message } of entries) sendTo(ws, message);
+  for (const { worktreePath, title, body } of deliveredNotices(entries)) {
+    const notification = notificationStore.add({
+      source: { kind: "inbox", worktreePath },
+      title,
+      ...(body ? { body } : {}),
+      urgency: "normal",
+    });
+    broadcastAll({ type: "notification_added", data: notification });
+  }
+  log.info(`Delivered ${entries.length} open(s) queued while no window was connected`);
+}
+
+/**
+ * Drop the queued terminals that did not outlive the last server: a panel for one would only show
+ * a new shell. Only once every terminal host has listed its sessions: one that did not answer at
+ * startup may still hold them, and is adopted once it does.
+ */
+function dropGoneQueuedTerminals(): void {
+  if (!terminalHosts.sessionsKnown) return;
+  openInbox.dropWhere(
+    ({ message }) =>
+      message.type === "open_terminal" && !terminalManager.get(message.data.terminalId),
+  );
+}
+
+/** The terminal's session is gone: a panel for it would only show a new shell. */
+function dropQueuedTerminal(id: string): void {
+  openInbox.dropWhere(
+    ({ message }) => message.type === "open_terminal" && message.data.terminalId === id,
+  );
 }
 
 /** The window {@link sendToActiveWindow} delivers to, or null when no window is connected. */
@@ -574,13 +620,25 @@ function createFilesService(
 
 // --- Subscription management ---
 
+/**
+ * Tell a new subscriber to refetch the worktree's file queries: whatever it cached was not kept up
+ * to date while it was not subscribed (a reload, a reconnect, a look at another worktree). A
+ * directory's changes reach it again once it lists that directory again.
+ */
+function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectPath: string): void {
+  sendTo(ws, { type: "worktree_files_resynced", wtPath, projectPath });
+}
+
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
   const existing = wtResources.get(wtPath);
   if (existing) {
+    // Within its grace period the worktree is adopted as it is, undo history included.
+    if (worktreeGrace.cancel(wtPath)) log.info(`Worktree resources adopted: ${wtPath}`);
     existing.subscribers.add(ws);
     const clientState = clients.get(ws);
     if (clientState) clientState.subscribedWorktrees.add(wtPath);
     log.debug(`Client subscribed to ${wtPath} (${existing.subscribers.size} subscribers)`);
+    sendFilesResynced(ws, wtPath, existing.projectPath);
     return;
   }
 
@@ -685,24 +743,30 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   });
   // Same for the Others section, which starts with the folders restored from the last session.
   broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources) return;
 
-  resources.subscribers.delete(ws);
+  // A repeated unsubscribe must not start the grace period again.
+  if (!resources.subscribers.delete(ws)) return;
   const clientState = clients.get(ws);
   if (clientState) clientState.subscribedWorktrees.delete(wtPath);
 
   if (resources.subscribers.size === 0) {
-    teardownWorktreeResources(wtPath, resources);
+    log.info(`Worktree resources kept for ${config.worktreeGraceMs} ms: ${wtPath}`);
+    worktreeGrace.start(wtPath, () => {
+      if (wtResources.get(wtPath) === resources) teardownWorktreeResources(wtPath, resources);
+    });
   } else {
     log.debug(`Client unsubscribed from ${wtPath} (${resources.subscribers.size} remaining)`);
   }
 }
 
 function teardownWorktreeResources(wtPath: string, resources: WorktreeResources): void {
+  worktreeGrace.cancel(wtPath);
   suspendedWorktrees.delete(wtPath);
   resources.worktreeWatcher?.stop();
   resources.filesService.stop();
@@ -747,6 +811,7 @@ function forgetWorktreeInLanguageServers(wtPath: string): void {
 
 /** Stop serving a worktree path that no longer exists. */
 function releaseWorktreeResources(wtPath: string): void {
+  for (const manager of worktreeLspManagers) manager.stopWaitingSessions?.(wtPath);
   forgetWorktreeInLanguageServers(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
@@ -772,10 +837,16 @@ function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
       broadcastAll({ type: "notification_panel_dismissed", panelId: id });
     }
   });
-  for (const panelId of notificationStore.dismissByWorktree(wtPath)) {
-    broadcastAll({ type: "notification_panel_dismissed", panelId });
-  }
+  forgetWorktreeNotifications(wtPath);
   deleteWorktreeRows(wtPath);
+}
+
+/** Dismiss what a removed worktree's panels raised, and drop the opens waiting for it. */
+function forgetWorktreeNotifications(wtPath: string): void {
+  const { panelIds, inboxIds } = notificationStore.dismissByWorktree(wtPath);
+  for (const panelId of panelIds) broadcastAll({ type: "notification_panel_dismissed", panelId });
+  for (const id of inboxIds) broadcastAll({ type: "notification_dismissed", id });
+  openInbox.dropWhere((entry) => entry.worktreePath === wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -901,6 +972,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
   for (const wtPath of deleteRowsOfMissingWorktrees(worktreesDir, registeredPaths)) {
     log.info(`Worktree removed while its project was not watched, deleted its rows: ${wtPath}`);
     forgetWorktreeInLanguageServers(wtPath);
+    forgetWorktreeNotifications(wtPath);
   }
 
   const filteredWorktrees: WorktreeEntry[] = managed
@@ -976,6 +1048,8 @@ const terminalHosts = new TerminalHostPool({
   log: logger.child("terminal"),
   perfLog: logger.child("perf"),
 });
+// A host that did not answer at startup has answered, or is gone: what it holds is known now.
+terminalHosts.onSessionsKnown(() => dropGoneQueuedTerminals());
 terminalHosts.onEvent((event) => {
   if (event.type === "output") stress.track("pty-output");
 });
@@ -992,10 +1066,17 @@ const terminalManager = new TerminalManager(terminalHosts, {
     broadcastAll({ type: "notification_added", data: notification });
   },
   onSessionsChanged: () => broadcastAll({ type: "terminals_changed" }),
-  // The manager already sent terminal_exit to the attached clients.
-  onExit: (id) => forgetTerminal(id),
+  onExit: (id) => {
+    // The manager already sent terminal_exit to the attached clients.
+    forgetTerminal(id);
+    dropQueuedTerminal(id);
+  },
 });
-const notificationStore = new NotificationStore();
+const notificationStore = new NotificationStore(join(config.stateDir, "notifications.db"));
+/** What `loxel` asked to open while no window was connected, for the next window to connect. */
+const openInbox = new OpenInbox({ path: join(config.stateDir, "open-inbox.db") });
+/** A panel for the terminal is waiting in the inbox: it is not an orphan. */
+const queuedTerminal = (id: string) => openInbox.holdsTerminal(id);
 /** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
 const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
@@ -1099,7 +1180,9 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
 
     case "window_hello": {
       const clientState = clients.get(ws);
-      if (clientState) clientState.windowId = msg.windowId;
+      if (!clientState) break;
+      clientState.windowId = msg.windowId;
+      deliverInbox(ws);
       break;
     }
 
@@ -1361,6 +1444,13 @@ const routeContext: RouteContext = {
       command,
     });
   },
+  // A window may have connected while the route awaited: it gets the request now, since the inbox
+  // goes out only on a window's hello.
+  queueForWindow: (message, worktreePath) => {
+    if (clients.size > 0 && sendToActiveWindow(null, message)) return "sent";
+    return openInbox.add(message, worktreePath) ? "queued" : "full";
+  },
+  dropQueuedTerminal,
   listTerminals: async ({ programs }) => {
     const running = terminalManager.running();
     const foreground = programs ? await terminalManager.foregroundProcesses() : {};
@@ -1390,6 +1480,7 @@ try {
 // Terminals that outlived the previous server are this one's before any client can attach to them.
 try {
   const { ended } = await terminalHosts.start((sessions) => terminalManager.adopt(sessions));
+  dropGoneQueuedTerminals();
   const notice = endedHostsNotice(ended);
   // Kept in the store, so the first window to connect gets it with notifications_sync.
   if (notice) {
@@ -1469,6 +1560,7 @@ async function serveRequest(
       type: worktreeLspManager.name,
       wtPath,
       manager: worktreeLspManager,
+      freshServer: url.searchParams.has(LSP_FRESH_SERVER_PARAM),
     });
     if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
     return undefined;
@@ -1517,7 +1609,7 @@ const server = Bun.serve<WsData>({
       }
       const worktreeLsp = worktreeLspData(ws);
       if (worktreeLsp) {
-        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath);
+        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath, worktreeLsp.freshServer);
         return;
       }
       if (shuttingDown) {
@@ -1606,7 +1698,7 @@ recoverOrphanLayoutSessions();
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
 // the last window closes gives them time to.
-if (terminalManager.hasOrphanSessions()) startIdleTimer();
+if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
@@ -1638,7 +1730,7 @@ function startIdleTimer(): void {
     );
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      const destroyed = terminalManager.destroyOrphans();
+      const destroyed = terminalManager.destroyOrphans(queuedTerminal);
       if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
       if (ownedByApp) return;
       log.info("Idle timeout reached, shutting down");

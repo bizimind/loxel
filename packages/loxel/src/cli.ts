@@ -2,7 +2,7 @@
 import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { isCodingAgent } from "./coding-agent-env";
 import { SOCKET_URL, findServer, givenServerGone, waitForServer } from "./find-server";
-import { requestOpenAll } from "./open-request";
+import { WINDOW_WAIT_MS, requestOpenAll } from "./open-request";
 import { isHttpUrl } from "./url-utils";
 
 async function detectWorktree(dir: string): Promise<string> {
@@ -80,13 +80,10 @@ async function main(): Promise<void> {
   // the background. A server a Loxel terminal names belongs to the window the terminal is in, so
   // it is not focused, and is launched (in the background) only when it is gone for good (#1387).
   const found = await findServer(process.env);
-  if (found?.given) {
-    if (await givenServerGone(found.socket, { onWaiting: announceWaiting })) {
-      launchLoxel({ background: true });
-    }
-  } else if (focus || !found) {
-    launchLoxel({ background: !focus });
-  }
+  const launched = found?.given
+    ? await givenServerGone(found.socket, { onWaiting: announceWaiting })
+    : focus || !found;
+  if (launched) launchLoxel({ background: found?.given === true || !focus });
   const socket =
     found?.socket ?? (await waitForServer(process.env, { onWaiting: announceWaiting }));
 
@@ -114,12 +111,22 @@ async function main(): Promise<void> {
   }
   const sendable = opens.flatMap(({ label, request }) => (request ? [{ label, request }] : []));
 
-  const { warnings, failures } = await requestOpenAll(
+  // Launching Loxel brings a window (one starts with the app, and activating it opens one), so the
+  // opens wait for it as long as a cold start takes. Otherwise none is coming: with no window open,
+  // they wait in Loxel's inbox for the next one instead.
+  const { warnings, queued, failures } = await requestOpenAll(
     SOCKET_URL,
     sendable.map((open) => open.request),
-    { unix: socket, onWaiting: announceWaiting },
+    { unix: socket, onWaiting: announceWaiting, queueAfterMs: launched ? WINDOW_WAIT_MS : 0 },
   );
   for (const warning of warnings) process.stderr.write(`loxel: warning: ${warning}\n`);
+  if (queued > 0) {
+    const all = queued === sendable.length;
+    const what = all ? (queued === 1 ? "this" : "these") : `${queued} of these`;
+    process.stderr.write(
+      `loxel: no Loxel window is open; ${what} will open in the next window to connect\n`,
+    );
+  }
   for (const { index, message } of failures) {
     process.stderr.write(`loxel: ${sendable[index]!.label}${message}\n`);
   }
