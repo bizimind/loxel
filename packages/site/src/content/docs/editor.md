@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
+description: Quick Open, Go to Symbol, Find in Files, autosave (also while the server restarts), formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
 section: "In the code"
 order: 1
 ---
@@ -50,6 +50,12 @@ Press `Cmd+S` to save immediately. Explicit save is the trigger for format on sa
 > **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed, can't start, or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
 
 If a file can't be loaded, the editor stays read-only and a banner says so, so nothing you type can overwrite the file. Click **Retry** in the banner to load it again.
+
+### Saves while Loxel's server is away
+
+If Loxel's server can't be reached when a save happens (it is restarting, for example), the save is kept and the tab shows a hollow dot before its icon until it goes through. Keep typing; Loxel saves as soon as the server is back. Before writing, it reads the file again: if something else changed the file in the meantime, your edits are merged with that change, and if they can't be merged, the [conflict banner](#conflict-detection) appears instead of either version being overwritten.
+
+Closing the tab, reloading the window or quitting Loxel doesn't lose a save that is still waiting. It goes through when the server is back, or the next time Loxel starts, and Loxel tells you which files it saved from the last session. If it can't be merged, the file opens again with your edits and the conflict banner. Opening the file while its save is still waiting shows your edits, not the older version on disk.
 
 ---
 

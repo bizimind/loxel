@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { openEditorPaths, useEditorStateStore } from "./editor-state";
+import { diskBase, openEditorPaths, useEditorStateStore } from "./editor-state";
 
 const FILE = "test.md";
 
@@ -592,5 +592,61 @@ describe("moved files", () => {
     expect(getEntry()?.takePendingEdit).toBe(take);
     store.registerPendingEdit(FILE, null);
     expect(getEntry()?.takePendingEdit).toBeNull();
+  });
+});
+
+describe("saves confirmed by the server", () => {
+  test("markWritten makes the newest save's content the merge base", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a");
+    store.markSaving(FILE, "n1");
+    store.markSaving(FILE, "n2");
+
+    store.markWritten(FILE, "n1", "older"); // a late response of an older save
+    expect(getEntry()!.baseContent).toBe("a");
+    store.markWritten(FILE, "n2", "newer");
+    expect(getEntry()!.baseContent).toBe("newer");
+  });
+});
+
+describe("disk content merged once", () => {
+  test("the same disk content arriving again is not merged a second time", () => {
+    const store = useEditorStateStore.getState();
+    let editor = "X\nb\nc";
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    store.registerEditorCallbacks(
+      FILE,
+      () => editor,
+      (merged) => {
+        editor = merged;
+        return merged;
+      },
+    );
+    store.markDirty(FILE);
+    store.handleDiskChange(FILE, [], "a\nb\nZ");
+    expect(editor).toBe("X\nb\nZ");
+    expect(diskBase(getEntry()!)).toBe("a\nb\nZ");
+
+    // A resync after a reconnect reports the same disk content: the base is now the merge
+    // result, so merging again would read as disk reverting the editor's edit.
+    store.handleDiskChange(FILE, [], "a\nb\nZ");
+    expect(editor).toBe("X\nb\nZ");
+    expect(getEntry()!.state).toBe("dirty");
+  });
+});
+
+describe("adoptQueuedEdit", () => {
+  test("takes over a waiting save as unsaved edits, or as a conflict with the disk", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.adoptQueuedEdit(FILE, { base: "base", disk: null });
+    expect(getEntry()!.state).toBe("dirty");
+    expect(getEntry()!.baseContent).toBe("base");
+
+    store.adoptQueuedEdit(FILE, { base: "base", disk: "theirs" });
+    expect(getEntry()!.state).toBe("diverged");
+    expect(getEntry()!.diskContent).toBe("theirs");
   });
 });

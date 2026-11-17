@@ -2,7 +2,14 @@ import * as api from "@/api/client";
 import { showToast } from "@/components/ui/toast";
 import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
-import { useEditorStateStore } from "@/store/editor-state";
+import {
+  addOutboxEntry,
+  ensureRetryScheduled,
+  hasQueuedSave,
+  outboxSaveFailed,
+  outboxSaveWritten,
+} from "@/lib/save-outbox";
+import { diskBase, useEditorStateStore } from "@/store/editor-state";
 
 /**
  * Shared save orchestration for file-backed editors.
@@ -102,7 +109,11 @@ function stashContent(nonce: string, content: string, editorKey: string): void {
  * failure (e.g. a move carrying edits) use the result; others can ignore it.
  *
  * `editorKey` names the editor-state entry that tracks the save; it is the file path except for
- * editors that are not the file's own tab (see `useEditorStateStore`).
+ * editors that are not the file's own tab (see `useEditorStateStore`). A save of an open editor
+ * goes through the save outbox ([save-outbox.ts](save-outbox.ts)), which keeps it until the
+ * server confirms it and retries it if the server cannot be reached. While an editor has a save
+ * waiting there, its later saves wait too: the outbox reads the disk before writing, so edits
+ * made on disk meanwhile are merged rather than overwritten.
  */
 export async function saveEditorContent(
   filePath: string,
@@ -111,9 +122,55 @@ export async function saveEditorContent(
   options?: SaveOptions,
   editorKey: string = filePath,
 ): Promise<boolean> {
+  const editor = useEditorStateStore.getState().files.get(editorKey);
+  if (editor && hasQueuedSave(editor)) {
+    addOutboxEntry(
+      editor,
+      {
+        editorKey,
+        filePath,
+        worktreePath: worktreePath ?? null,
+        base: diskBase(editor),
+        content,
+        options,
+      },
+      "queued",
+    );
+    ensureRetryScheduled();
+    return false;
+  }
+  return writeEditorContent(filePath, content, worktreePath, options, editorKey);
+}
+
+/** `saveEditorContent` without waiting for the outbox: the disk is known to hold the base. */
+export async function writeEditorContent(
+  filePath: string,
+  content: string,
+  worktreePath?: string | null,
+  options?: SaveOptions,
+  editorKey: string = filePath,
+): Promise<boolean> {
   const nonce = crypto.randomUUID();
   const wtKey = worktreePath ?? "";
-  useEditorStateStore.getState().markSaving(editorKey, nonce);
+  const store = useEditorStateStore.getState();
+  // A write with no editor behind it (a move carrying edits to a path with no tab yet) is not
+  // kept: its caller keeps the edits if it fails.
+  const editor = store.files.get(editorKey);
+  const outboxEntry = editor
+    ? addOutboxEntry(
+        editor,
+        {
+          editorKey,
+          filePath,
+          worktreePath: worktreePath ?? null,
+          base: diskBase(editor),
+          content,
+          options,
+        },
+        "sending",
+      )
+    : null;
+  store.markSaving(editorKey, nonce);
   if (wtKey) incrementPending(wtKey);
   try {
     const result = await api.writeFileContent({
@@ -124,6 +181,9 @@ export async function saveEditorContent(
       format: options?.format,
       formattingSettings: options?.formattingSettings,
     });
+    const written = result.content ?? content;
+    useEditorStateStore.getState().markWritten(editorKey, nonce, written);
+    if (outboxEntry) outboxSaveWritten(outboxEntry, written);
     // Stash the written content (may be formatted) so the WS echo handler
     // can use it directly instead of fetching via HTTP.
     if (result.content !== undefined) {
@@ -148,6 +208,7 @@ export async function saveEditorContent(
       .child("files")
       .error("Failed to save file", { filePath, error: err instanceof Error ? err : undefined });
     useEditorStateStore.getState().handleSaveError(editorKey, nonce);
+    if (outboxEntry) outboxSaveFailed(outboxEntry, err);
     return false;
   } finally {
     if (wtKey) decrementPending(wtKey);

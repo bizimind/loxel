@@ -35,6 +35,7 @@ import type { FilePanelType } from "@/lib/open-file";
 import { parseUnifiedDiff } from "@/lib/parse-unified-diff";
 import { isWithin } from "@/lib/project-file-helpers";
 import { saveEditorContent } from "@/lib/save-editor-content";
+import { forgetOutboxPath } from "@/lib/save-outbox";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-documents";
 import { queryKeys } from "@/queries/query-keys";
@@ -782,6 +783,8 @@ function markOtherViewsDeleted(path: string): void {
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */
 export function handleFileDeleted(filePath: string): void {
+  // Edits of a deleted file still waiting to be saved would otherwise re-create it.
+  forgetOutboxPath(filePath);
   const dv = getCenterApi();
   if (!dv) return;
   markOtherViewsDeleted(filePath);

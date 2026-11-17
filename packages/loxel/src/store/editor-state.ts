@@ -8,7 +8,13 @@ export type EditorFileState = "clean" | "dirty" | "saving" | "diverged";
 export interface EditorFileEntry {
   /** Absolute path of the file this editor shows; several entries can share one. */
   filePath: string;
+  /** Unique per mounted editor: a tab closed and reopened on the same key gets a new one. Ties a
+   *  save waiting in the outbox ([save-outbox.ts](../lib/save-outbox.ts)) to the editor that made it. */
+  instanceId: string;
   state: EditorFileState;
+  /** A save of this editor failed because the server could not be reached and waits in the
+   *  outbox for a retry. Orthogonal to `state`, which stays `dirty` meanwhile. */
+  queued: boolean;
   /** The file no longer exists on disk (deleted externally after it was opened, or missing on
    *  load). Autosave is suspended until content arrives again — from an external restore or
    *  from a confirmed explicit save that re-creates it. Orthogonal to `state`, which keeps
@@ -26,8 +32,14 @@ export interface EditorFileEntry {
   pendingNonces: Set<string>;
   /** Latest disk content from external change — used for diverged resolution. */
   diskContent: string | null;
-  /** Content at last clean state — used as merge base for 3-way auto-merge. */
+  /** Content at last clean state — used as merge base for 3-way auto-merge. Also advanced to
+   *  the written content when the server confirms a save, before its echo arrives. */
   baseContent: string | null;
+  /** The disk content the last external change merge was made against, until the editor's next
+   *  write. `baseContent` then holds the editor's form of the merge result, so this is the raw
+   *  disk version the editor's content descends from (see `diskBase`), and the same disk
+   *  content arriving again (a resync, a retry's read) is not merged a second time. */
+  mergedDiskContent: string | null;
   /** Registered by text editors (CodeEditor, MarkdownEditor) for auto-merge.
    *  Returns current editor content as serialized string. null for Excalidraw / unmounted. */
   getEditorContent: (() => string | null) | null;
@@ -66,6 +78,16 @@ interface EditorStateStore {
   markDirty: (key: string) => void;
   markSaving: (key: string, nonce: string) => void;
   handleSaveError: (key: string, nonce: string) => void;
+  /** The server wrote `content` for the save `nonce`: it is the merge base from now on, if that
+   *  save is the newest one in flight (an older save's late response would be stale). */
+  markWritten: (key: string, nonce: string, content: string) => void;
+  /** Mark whether a save of this editor waits in the outbox. */
+  setQueued: (key: string, queued: boolean) => void;
+  /**
+   * Take over an outbox save in a freshly mounted editor that shows its content: `dirty` on
+   * `base`, or `diverged` from `disk` when the save conflicted with the file on disk.
+   */
+  adoptQueuedEdit: (key: string, edit: { base: string | null; disk: string | null }) => void;
   /** Core state machine: handle an external disk change notification. */
   handleDiskChange: (key: string, nonces: string[], diskContent: string) => void;
   acceptDiskVersion: (key: string) => void;
@@ -92,13 +114,16 @@ interface EditorStateStore {
 function defaultEntry(filePath: string): EditorFileEntry {
   return {
     filePath,
+    instanceId: crypto.randomUUID(),
     state: "clean",
+    queued: false,
     deleted: false,
     movedTo: null,
     takePendingEdit: null,
     pendingNonces: new Set(),
     diskContent: null,
     baseContent: null,
+    mergedDiskContent: null,
     getEditorContent: null,
     applyMergedContent: null,
     savedSnapshots: new Map(),
@@ -170,6 +195,42 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 
+  markWritten: (key, nonce, content) => {
+    set((s) => {
+      const entry = s.files.get(key);
+      if (!entry || [...entry.pendingNonces].at(-1) !== nonce) return s;
+      const files = new Map(s.files);
+      files.set(key, { ...entry, baseContent: content, mergedDiskContent: null });
+      return { files };
+    });
+  },
+
+  setQueued: (key, queued) => {
+    set((s) => {
+      const entry = s.files.get(key);
+      if (!entry || entry.queued === queued) return s;
+      const files = new Map(s.files);
+      files.set(key, { ...entry, queued });
+      return { files };
+    });
+  },
+
+  adoptQueuedEdit: (key, { base, disk }) => {
+    set((s) => {
+      const entry = s.files.get(key);
+      if (!entry) return s;
+      const files = new Map(s.files);
+      files.set(key, {
+        ...entry,
+        state: disk === null ? "dirty" : "diverged",
+        baseContent: base,
+        diskContent: disk,
+        mergedDiskContent: null,
+      });
+      return { files };
+    });
+  },
+
   handleDiskChange: (key, nonces, diskContent) => {
     // Disk content arriving means the file exists (again).
     get().setDeleted(key, false);
@@ -177,6 +238,15 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     if (!entry) return;
     const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
     const isOwnEcho = matchedNonces.length > 0;
+
+    // Disk content the editor already merged (a resync or a save retry reading the file again):
+    // merging it again with the merge result as base would read as disk undoing the editor's
+    // own edits.
+    const alreadyMerged =
+      !isOwnEcho &&
+      (entry.state === "dirty" || entry.state === "saving") &&
+      diskContent === entry.mergedDiskContent;
+    if (alreadyMerged) return;
 
     // If an own-echo arrives for a nonce that has been superseded (newer saves
     // still in flight), the disk state implied by this echo is stale — a later
@@ -245,6 +315,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 pendingNonces: pending,
                 savedSnapshots: snapshots,
                 baseContent: diskContent,
+                mergedDiskContent: null,
                 diskContent: null,
               });
               return { files };
@@ -268,6 +339,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 pendingNonces: pending,
                 savedSnapshots: snapshots,
                 baseContent: diskContent,
+                mergedDiskContent: null,
                 diskContent: null,
               });
               return { files };
@@ -312,6 +384,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
               files.set(key, {
                 ...e,
                 baseContent: diskContent,
+                mergedDiskContent: null,
                 pendingNonces: pending,
                 savedSnapshots: snapshots,
               });
@@ -332,6 +405,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
               files.set(key, {
                 ...e,
                 baseContent: diskContent,
+                mergedDiskContent: null,
                 pendingNonces: pending,
                 savedSnapshots: snapshots,
               });
@@ -377,6 +451,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
         pendingNonces: new Set(),
         savedSnapshots: new Map(),
         baseContent: entry.diskContent,
+        mergedDiskContent: null,
         diskContent: null,
       });
       return { files };
@@ -393,6 +468,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
         ...entry,
         state: "dirty",
         baseContent: entry.diskContent ?? entry.baseContent,
+        mergedDiskContent: null,
         diskContent: null,
       });
       return { files };
@@ -448,7 +524,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
-      files.set(key, { ...entry, baseContent: content });
+      files.set(key, { ...entry, baseContent: content, mergedDiskContent: null });
       return { files };
     });
   },
@@ -473,6 +549,14 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 }));
+
+/**
+ * The disk content an editor's unsaved edits were made on: the raw disk version of its last
+ * merge, else its merge base. What a save waiting in the outbox merges against.
+ */
+export function diskBase(entry: EditorFileEntry): string | null {
+  return entry.mergedDiskContent ?? entry.baseContent;
+}
 
 /** Distinct paths of every open editor. */
 export function openEditorPaths(files: Map<string, EditorFileEntry>): string[] {
@@ -571,6 +655,7 @@ function tryAutoMerge(
       pendingNonces,
       savedSnapshots,
       baseContent: newBase,
+      mergedDiskContent: diskContent,
       diskContent: null,
     });
     return { files };

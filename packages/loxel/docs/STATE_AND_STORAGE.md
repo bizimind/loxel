@@ -160,12 +160,13 @@ Secret storage is a capability for stores that come to hold secrets: nothing per
 
 ## Browser storage
 
-The renderer uses browser storage only where state is per window or must exist before the server answers:
+The renderer uses browser storage only where state is per window or must exist while the server does not answer:
 
 - `sessionStorage[<prefix>-activeWorktreePath]` ([worktrees.ts](../src/store/worktrees.ts)): the active worktree, per window, restored on reload.
 - `localStorage[<prefix>-window-id]` ([window-id.ts](../src/lib/window-id.ts)): the window ID outside Electron only; Electron windows get theirs from the main process.
 - `localStorage[<prefix>-logs-last-seen-error-total]` ([panel-badges.ts](../src/store/panel-badges.ts)): logs badge bookkeeping.
 - `localStorage[loxel-dark-mode]` ([theme-cache.ts](../src/lib/theme-cache.ts)): the last resolved theme, which an inline script in `index.html` applies before first paint and `ui.ts` starts `darkMode` from, until the settings load.
+- IndexedDB `loxel-save-outbox` ([save-outbox.ts](../src/lib/save-outbox.ts)): editor saves the server has not confirmed, so they survive a server restart and the window closing; see [EDITOR.md](EDITOR.md#save-outbox).
 - Legacy store and layout entries, read once for migration.
 
 ## Invariants
