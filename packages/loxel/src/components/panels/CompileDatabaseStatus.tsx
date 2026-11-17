@@ -1,5 +1,4 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
 
 import {
   getCompileDatabaseStatus,
@@ -30,7 +29,7 @@ export function CompileDatabaseStatusItem() {
   const filePath = useActiveEditorFile()?.filePath ?? null;
   const associations = useSettingsStore(selectEffectiveFileAssociations);
   const worktreePath = active?.wtPath ?? null;
-  const wt = useMemo(() => localRef(worktreePath), [worktreePath]);
+  const wt = localRef(worktreePath);
   const project = useProjectRef(wt);
   const { data: file } = useQuery({
     // Extends the status's key, so that its changed message refreshes this too.

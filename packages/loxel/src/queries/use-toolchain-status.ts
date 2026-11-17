@@ -1,5 +1,4 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
 
 import { localRef } from "@/api/local-server";
 import type { ToolchainStatusDescriptor } from "@/api/toolchain-status-model";
@@ -24,7 +23,7 @@ export function useActiveToolchainStatus<Status>(
   const language = active && resolveLanguage(active.filePath, associations);
   const wtPath =
     active && language && toolchain.languageIds.includes(language) ? active.worktreePath : null;
-  const wt = useMemo(() => localRef(wtPath), [wtPath]);
+  const wt = localRef(wtPath);
   const project = useProjectRef(wt);
   const { data } = useQuery({
     queryKey: queryKeys.toolchainStatus(toolchain.id, project, wt),

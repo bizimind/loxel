@@ -17,7 +17,8 @@ import type { LocalDbKey } from "@/queries/query-keys";
 export interface DataAdapter {
   /**
    * The prefix of the TanStack Query keys the views cache this adapter's data under: invalidating
-   * it refreshes every view of it.
+   * it refreshes every view of it. Loxel's `queryKeys.localdb` builds it, since Loxel accepts only
+   * keys its builders made.
    */
   readonly queryKey: LocalDbKey;
 
