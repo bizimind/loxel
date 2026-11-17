@@ -44,7 +44,7 @@ require (
 	github.com/hashicorp/terraform-schema v0.0.0-20261028060105-fc59ccdf4f6f // indirect
 	github.com/hashicorp/terraform-svchost v0.2.1 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
-	github.com/imdario/mergo v0.3.15 // indirect
+	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
