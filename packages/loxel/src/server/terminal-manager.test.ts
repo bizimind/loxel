@@ -1088,6 +1088,39 @@ describe("TerminalManager with several clients", () => {
     const KIB = 1024;
     const flow = { highWaterBytes: 100 * KIB, lowWaterBytes: 10 * KIB };
 
+    test("a client that acknowledges output as it is sent is never paused", async () => {
+      const host = new FakeTerminalHost();
+      // Any chunk passes a one-byte budget: only an ack applied after the chunk is counted keeps
+      // this client streaming, as an ack sent from inside `sendOutput` is.
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        { highWaterBytes: 1, lowWaterBytes: 0 },
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      const recording = createRecordingSink();
+      const acking: TerminalSink = {
+        ...recording.sink,
+        sendOutput: (chunk) => {
+          recording.sink.sendOutput(chunk);
+          manager.ack(id, acking, 0, chunk.data.byteLength);
+        },
+      };
+      const attached = manager.attach(id, acking, attachOptions);
+      await until(() => host.attaches.length === 1);
+      host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 0) });
+      await attached;
+      host.emit(output(id, 0, 10));
+      host.emit(output(id, 10, 10));
+      expect(recording.outputText()).toHaveLength(20);
+    });
+
     test("a slow client is paused and caught up with a snapshot, and never holds up the fast one", async () => {
       const host = new FakeTerminalHost();
       const manager = new TerminalManager(
@@ -1180,8 +1213,8 @@ describe("TerminalManager with several clients", () => {
         ...attachOptions,
         command: "read go; head -c 150000 /dev/zero | tr '\\0' a; echo; echo THE-''END; exit 0",
       });
-      // Acks each chunk as it gets it, so it never falls behind (each chunk is far under the
-      // budget), the host never pauses, and makes no final resync of its own.
+      // Acks each chunk as it gets it. A single PTY read larger than the budget can still pause it
+      // (CI delivers those), so how many states it gets is not the point: both end with the tail.
       const fast = createRecordingSink();
       const acking: TerminalSink = {
         ...fast.sink,
@@ -1195,10 +1228,12 @@ describe("TerminalManager with several clients", () => {
       manager.write(id, acking, new TextEncoder().encode("\n"));
 
       await until(() => slow.exits.length > 0 && fast.exits.length > 0, 30_000);
-      expect(fast.states).toHaveLength(1);
-      expect(fast.outputText()).toContain("THE-END");
-      const shown = (slow.states.at(-1)?.snapshot ?? "") + slow.outputText();
-      expect(shown).toContain("THE-END");
+      const shows = (client: typeof slow) =>
+        (client.states.at(-1)?.snapshot ?? "") + client.outputText();
+      expect(shows(fast)).toContain("THE-END");
+      expect(shows(slow)).toContain("THE-END");
+      // The slow client got the final snapshot before the exit, not only its attach's state.
+      expect(slow.states.length).toBeGreaterThan(1);
     });
   });
 });

@@ -224,9 +224,11 @@ export class TerminalFanout {
     this.offset = output.offset + bytes;
     for (const [sink, client] of this.clients) {
       if (client.status !== "live") continue;
-      sink.sendOutput(output);
+      // Counted before it is sent: a client in this process can acknowledge it before
+      // `sendOutput` returns, and an ack applied first would be lost, pausing one that keeps up.
       client.unacked += bytes;
-      if (client.unacked > this.flow.highWaterBytes) {
+      sink.sendOutput(output);
+      if (client.status === "live" && client.unacked > this.flow.highWaterBytes) {
         client.status = "paused";
         const behind = `${client.unacked} bytes behind`;
         log.info(`Terminal ${this.id.slice(0, 8)} client is ${behind}, pausing its output`);
