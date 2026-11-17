@@ -19,13 +19,20 @@ import {
 } from "electron";
 import { z } from "zod";
 
-import { DEFAULT_SERVER_PORT } from "../app-ports";
-import { demoPort } from "../demo-instance";
 import {
   DEFAULT_WHEN_QUITTING,
   type WhenQuitting,
   WhenQuittingSchema,
 } from "../lib/quit-terminals";
+import {
+  APP_SESSION_SECRET,
+  SERVER_PORT,
+  SERVER_URL,
+  serverAuthorization,
+  authorizeWindowRequests,
+  serverFetch,
+  setServerStartedByHand,
+} from "./app-server";
 import { getDek, initDek } from "./dek";
 import {
   DEMO_INSTANCE,
@@ -35,12 +42,6 @@ import {
   IS_DEMO_HIDDEN,
   IS_DEV,
 } from "./env";
-const SERVER_PORT = IS_DEMO
-  ? demoPort(DEMO_INSTANCE)
-  : IS_DEV
-    ? DEFAULT_SERVER_PORT.dev
-    : DEFAULT_SERVER_PORT.production;
-const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
 /**
  * The server this process started, which lives exactly as long as the app. Null while a crashed
@@ -205,7 +206,10 @@ function startServer(): void {
   }
   serverProcess = child;
   serverChannel = channel;
+  setServerStartedByHand(false);
   channel.on("error", () => {});
+  // First on the channel: the server serves nothing over TCP until it has the secret.
+  channel.write(encodeParentMessage({ type: "session", secret: APP_SESSION_SECRET }));
   // A binary that cannot be run (missing, not executable) fails here, after the spawn returned.
   child.on("error", (err) => {
     console.error("[electron] Could not start the server:", err);
@@ -315,7 +319,7 @@ const pendingPromotes = new Set<Promise<unknown>>();
 function promoteLayoutForWindow(windowId: string): void {
   const p = (async () => {
     try {
-      const res = await fetch(`${SERVER_URL}/api/layout/promote`, {
+      const res = await serverFetch("/api/layout/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ windowId }),
@@ -562,7 +566,7 @@ function askThenQuit(): void {
   }
   const controller = new AbortController();
   quitQuestion = controller;
-  askBeforeQuitting(SERVER_URL, { window: windowToAskIn, signal: controller.signal })
+  askBeforeQuitting({ window: windowToAskIn, signal: controller.signal })
     .catch((err: unknown) => {
       // Nothing was answered: keep the terminals, which the next launch reattaches, rather than
       // end programs the user was to be asked about.
@@ -797,6 +801,9 @@ app.on("web-contents-created", (_, contents) => {
   // Strip dangerous preferences from any dynamically-created webview, then load Loxel's own
   // sandboxed preload (which also runs in subframes, without Node.js).
   contents.on("will-attach-webview", (_, webPreferences) => {
+    // Browser panels' partition, whatever the element asks for: never the windows' session, whose
+    // requests to the server carry the app's secret.
+    webPreferences.partition = BROWSER_PARTITION;
     delete webPreferences.preload;
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInWorker = false;
@@ -824,6 +831,7 @@ function startAppServer(): Promise<void> {
     if (running && !running.appOwned && !running.shuttingDown) {
       if (IS_DEV) {
         console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
+        setServerStartedByHand(true);
         return;
       }
       throw new Error(
@@ -967,7 +975,7 @@ function openFromOS({ request, label, target }: OsOpen): void {
   openQueue = openQueue.then(async () => {
     try {
       await ensureWindow();
-      await requestOpen(SERVER_URL, request);
+      await requestOpen(SERVER_URL, request, { headers: serverAuthorization() });
     } catch (err) {
       console.error(`[electron] Failed to open ${label}:`, err);
       void dialog.showMessageBox({
@@ -1128,13 +1136,15 @@ app.whenReady().then(async () => {
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();
-    applyLaunchSettings(await readLaunchSettings(SERVER_URL));
+    applyLaunchSettings(await readLaunchSettings());
+    // Before any page loads: every request the windows make to the server carries the secret.
+    authorizeWindowRequests(session.defaultSession, APP_ORIGIN);
     await createWindow();
     const opensAtLaunch = launchOpens;
     launchOpens = null;
     for (const open of opensAtLaunch ?? []) openFromOS(open);
-    startMainProcessMonitor(SERVER_URL);
-    if (!IS_DEMO) scheduleAutomaticUpdateCheck(SERVER_URL);
+    startMainProcessMonitor();
+    if (!IS_DEMO) scheduleAutomaticUpdateCheck();
 
     // On macOS, clicking the dock icon after all windows are closed re-activates.
     app.on("activate", () => {

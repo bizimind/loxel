@@ -16,6 +16,7 @@ import {
   QuitReplySchema,
   quitConfirmation,
 } from "../lib/quit-terminals";
+import { serverFetch } from "./app-server";
 import {
   QUIT_ANSWER,
   QUIT_QUESTION,
@@ -45,11 +46,8 @@ export interface QuitQuestionOptions {
  * Ask what to do with the terminals before quitting. Resolves `end` at once when no terminal runs
  * a program, and `cancel` when `signal` is aborted before the user answers.
  */
-export async function askBeforeQuitting(
-  serverUrl: string,
-  options: QuitQuestionOptions,
-): Promise<QuitAnswer> {
-  const confirmation = quitConfirmation(await listTerminalsForQuit(serverUrl));
+export async function askBeforeQuitting(options: QuitQuestionOptions): Promise<QuitAnswer> {
+  const confirmation = quitConfirmation(await listTerminalsForQuit());
   if (options.signal.aborted) return "cancel";
   if (!confirmation) return "end";
   const win = options.window();
@@ -67,11 +65,11 @@ export async function askBeforeQuitting(
  * or null when the server does not answer in time. The wait counts only time the machine is
  * awake, so a laptop that sleeps while the request is out does not give up on waking.
  */
-async function listTerminalsForQuit(serverUrl: string): Promise<RunningTerminal[] | null> {
+async function listTerminalsForQuit(): Promise<RunningTerminal[] | null> {
   const controller = new AbortController();
   const cancel = awakeTimeout(LIST_TIMEOUT_MS, () => controller.abort());
   try {
-    const res = await fetch(`${serverUrl}/api/terminals?programs`, { signal: controller.signal });
+    const res = await serverFetch("/api/terminals?programs", { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return RunningTerminalsSchema.parse(await res.json()).terminals;
   } catch (err) {

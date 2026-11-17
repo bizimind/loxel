@@ -14,16 +14,10 @@ const EXTRA_PROJECTS = [
   resolve(homedir(), ".loxel-demo/my-project-chore-update-deps"),
 ];
 
-test("sidebar-worktrees screenshot", async ({ page, baseURL }) => {
-  const base = baseURL ?? `http://localhost:${process.env.LOXEL_PORT ?? 7434}`;
-
+test("sidebar-worktrees screenshot", async ({ page, request }) => {
   // Register the demo projects via the HTTP API before loading the UI.
   for (const projectPath of [DEMO_PROJECT, ...EXTRA_PROJECTS]) {
-    await fetch(`${base}/api/projects`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath }),
-    });
+    await request.post("/api/projects", { data: { path: projectPath } });
   }
 
   await waitForLoxel(page);

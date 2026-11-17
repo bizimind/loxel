@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
+import { bearer, newSessionSecret } from "@/app-session";
+
 import {
   type AdmissionRequest,
   type Principal,
   type RequestOriginPolicy,
   checkRequest,
+  tcpPrincipal,
 } from "./request-origin";
 
 const PORT = 7433;
@@ -242,5 +245,62 @@ describe("checkRequest: principals", () => {
     expect(status(jsonPost({}))).toBeNull();
     expect(status(request("GET", {}, "/ws"))).toBeNull();
     expect(status(request("GET", {}, "/"))).toBeNull();
+  });
+});
+
+describe("checkRequest: the app's session over TCP", () => {
+  const anonymous = (method: string, pathname: string, headers: Record<string, string> = {}) =>
+    status(request(method, headers, pathname), prod, "anonymous");
+
+  test("without the secret, only the version and static files are served", () => {
+    expect(anonymous("GET", "/api/version")).toBeNull();
+    expect(anonymous("GET", "/")).toBeNull();
+    expect(anonymous("GET", "/assets/index-abc123.js")).toBeNull();
+  });
+
+  test("without the secret, every other /api and /ws path is a 401", () => {
+    for (const [method, pathname] of [
+      ["GET", "/api/projects"],
+      ["GET", "/api/terminals"],
+      ["GET", "/api/session"],
+      ["POST", "/api/open"],
+      ["POST", "/api/version"],
+      ["GET", "/api"],
+      ["GET", "/apifoo"],
+      ["GET", "/ws"],
+      ["GET", "/ws/ts-lsp"],
+      ["HEAD", "/api/projects"],
+      ["OPTIONS", "/api/projects"],
+      ["HEAD", "/api/version"],
+    ] as const) {
+      expect(anonymous(method, pathname, { "Content-Type": "application/json" })).toBe(401);
+    }
+    const rejection = checkRequest(request("GET", {}, "/api/projects"), "anonymous", prod);
+    expect(rejection).toMatchObject({ status: 401, details: { principal: "anonymous" } });
+  });
+
+  test("the browser rules still apply without the secret", () => {
+    expect(anonymous("GET", "/", { Host: "evil.example" })).toBe(400);
+    expect(anonymous("GET", "/api/version", { Origin: "https://evil.example" })).toBe(403);
+  });
+});
+
+describe("tcpPrincipal", () => {
+  const secret = newSessionSecret();
+  const principal = (headers: Record<string, string>) => tcpPrincipal(new Headers(headers), secret);
+
+  test("is the app with the secret as a Bearer header", () => {
+    expect(principal({ Authorization: bearer(secret) })).toBe("app");
+    expect(principal({ Authorization: `bearer ${secret}` })).toBe("app");
+  });
+
+  test("is anonymous without the secret, or with any other value", () => {
+    expect(principal({})).toBe("anonymous");
+    expect(principal({ Authorization: bearer(newSessionSecret()) })).toBe("anonymous");
+    expect(principal({ Authorization: bearer(secret.slice(1)) })).toBe("anonymous");
+    expect(principal({ Authorization: secret })).toBe("anonymous");
+    expect(principal({ Authorization: `Basic ${secret}` })).toBe("anonymous");
+    expect(principal({ Authorization: "Bearer " })).toBe("anonymous");
+    expect(principal({ Cookie: `session=${secret}` })).toBe("anonymous");
   });
 });

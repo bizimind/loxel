@@ -1,7 +1,9 @@
 /**
  * The private channel from the desktop app to the server it started: a pipe on the server's file
  * descriptor `PARENT_CHANNEL_FD`, one `ParentMessage` per line, open for the server's whole life.
- * The pipe closing without a `shutdown` means the app is gone. Electron main writes it,
+ * The first message is always `session`, with the app's session secret (app-session.ts), which the
+ * server waits for before it serves the app over TCP; a `shutdown` may follow. The pipe closing
+ * without a `shutdown` means the app is gone. Electron main writes it,
  * `src/server/parent-channel.ts` reads it.
  *
  * Not stdin, which carries only the data encryption key and is closed after it: children the
@@ -9,6 +11,8 @@
  * an open one would reach every git command and hook. Bun passes no descriptor above 2 to a child.
  */
 import { z } from "zod";
+
+import { SessionSecretSchema } from "./app-session";
 
 /** The server's descriptor for the channel: the first one after stdin, stdout and stderr. */
 export const PARENT_CHANNEL_FD = 3;
@@ -24,6 +28,7 @@ export const ShutdownTerminalsSchema = z.enum(["end", "keep"]);
 export type ShutdownTerminals = z.infer<typeof ShutdownTerminalsSchema>;
 
 export const ParentMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("session"), secret: SessionSecretSchema }),
   z.object({ type: z.literal("shutdown"), terminals: ShutdownTerminalsSchema }),
 ]);
 export type ParentMessage = z.infer<typeof ParentMessageSchema>;

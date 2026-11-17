@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { closeSync } from "node:fs";
 import { PassThrough } from "node:stream";
 
+import { newSessionSecret } from "@/app-session";
 import type { ShutdownTerminals } from "@/parent-channel-protocol";
 import { PARENT_CHANNEL_FD, encodeParentMessage } from "@/parent-channel-protocol";
 
@@ -10,7 +11,7 @@ import { listenToParent } from "./parent-channel";
 /** A channel over a pipe the test writes to, and what its listener got. */
 function openChannel() {
   const input = new PassThrough();
-  const events: (ShutdownTerminals | "closed")[] = [];
+  const events: (ShutdownTerminals | "closed" | { session: string })[] = [];
   let onEvent = () => {};
   /** Resolves once the listener has had `count` events. */
   const eventsReached = (count: number) =>
@@ -21,6 +22,10 @@ function openChannel() {
       onEvent();
     });
   listenToParent(input, {
+    session: (secret) => {
+      events.push({ session: secret });
+      onEvent();
+    },
     shutdown: (terminals) => {
       events.push(terminals);
       onEvent();
@@ -40,6 +45,22 @@ describe("listenToParent", () => {
     input.end();
     await eventsReached(2);
     expect(events).toEqual(["keep", "closed"]);
+  });
+
+  test("delivers the app's session secret, then its shutdown", async () => {
+    const { input, events, eventsReached } = openChannel();
+    const secret = newSessionSecret();
+    input.write(encodeParentMessage({ type: "session", secret }));
+    input.end(encodeParentMessage({ type: "shutdown", terminals: "end" }));
+    await eventsReached(3);
+    expect(events).toEqual([{ session: secret }, "end", "closed"]);
+  });
+
+  test("ignores a session message whose secret is not one", async () => {
+    const { input, events, eventsReached } = openChannel();
+    input.end(`${JSON.stringify({ type: "session", secret: "short" })}\n`);
+    await eventsReached(1);
+    expect(events).toEqual(["closed"]);
   });
 
   test("the channel closing without a message means the app is gone", async () => {

@@ -12,6 +12,7 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { WsMessage } from "@/api/ws-protocol";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
 import { CaptureLog } from "@/test/git-sync-harness";
 
@@ -50,7 +51,7 @@ async function startServer(stateDir: string) {
     if (server.exitCode !== null) throw new Error(`Server exited: ${server.exitCode}`);
     await Bun.sleep(50);
   }
-  return { server, port };
+  return { server, port, auth: sessionAuthorization(stateDir) };
 }
 
 async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
@@ -59,9 +60,9 @@ async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
 }
 
 /** An app window's socket, recording every message the server sends it. */
-async function connectWindow(port: number) {
+async function connectWindow({ port, auth }: { port: number; auth: { Authorization: string } }) {
   const log = new CaptureLog<WsMessage>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = bunWebSocket(`ws://127.0.0.1:${port}/ws`, auth);
   ws.addEventListener("message", (event) => {
     log.add(JSON.parse(String(event.data)) as WsMessage);
   });
@@ -121,7 +122,7 @@ describe("a server with no window connected", () => {
       await stopServer(current.server);
 
       current = await startServer(stateDir);
-      const { ws, log } = await connectWindow(current.port);
+      const { ws, log } = await connectWindow(current);
       ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
       expect(await received(log, "open_file")).toEqual({
         type: "open_file",
@@ -141,7 +142,7 @@ describe("a server with no window connected", () => {
 
       // Delivered once, and the notification outlives another restart.
       current = await startServer(stateDir);
-      const next = await connectWindow(current.port);
+      const next = await connectWindow(current);
       next.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
       expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
       // Nothing more was delivered: the server answers a window's messages in order, so the reply
@@ -175,7 +176,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
       // "When an Agent Starts a Terminal" is Ask, as a window saves it.
       const saved = await fetch(`http://127.0.0.1:${current.port}/api/stores/settings`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...current.auth, "Content-Type": "application/json" },
         body: JSON.stringify({
           value: JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
         }),
@@ -191,7 +192,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
       expect(res.status).toBe(202);
       expect(await res.json()).toEqual({ ok: true, asked: true, queued: true });
 
-      const { ws, log } = await connectWindow(current.port);
+      const { ws, log } = await connectWindow(current);
       const windowId = crypto.randomUUID();
       ws.send(JSON.stringify({ type: "window_hello", windowId }));
       const seq = await log.waitFor(
@@ -207,7 +208,7 @@ describe("an agent's terminal with Ask and no window connected", () => {
 
       const answer = await fetch(`http://127.0.0.1:${current.port}/api/agent-terminals/answer`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...current.auth, "Content-Type": "application/json" },
         body: JSON.stringify({ id: ask!.id, answer: "run", windowId }),
       });
       expect(answer.status).toBe(200);

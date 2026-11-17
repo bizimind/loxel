@@ -78,15 +78,16 @@ const recoveredSaved: string[] = [];
 
 /**
  * Why a failed request may succeed later: `unreachable`, the server could not be reached (or
- * answered that it is unavailable); `unavailable`, it does not serve this path right now (a plain
- * 404: the path is in no worktree it has resources for, because it restarted or the window has
- * not subscribed again yet). null for a real answer, such as ENOENT or a refused write.
+ * answered that it is unavailable, or no longer accepts this window's session, which a reload
+ * fixes, and the outbox keeps the save across it); `unavailable`, it does not serve this path
+ * right now (a plain 404: the path is in no worktree it has resources for, because it restarted
+ * or the window has not subscribed again yet). null for a real answer, such as ENOENT or a refused write.
  */
 function retryReason(err: unknown): "unreachable" | "unavailable" | null {
   if (err instanceof TypeError) return "unreachable"; // fetch could not reach the server
   if (!(err instanceof api.ApiError)) return null;
   if (err.status === 404) return err.code === "ENOENT" ? null : "unavailable";
-  return err.status === 502 || err.status === 503 || err.status === 504 ? "unreachable" : null;
+  return [401, 502, 503, 504].includes(err.status) ? "unreachable" : null;
 }
 
 /** Whether a failed save may succeed later: the server was unreachable or not ready for it. */
