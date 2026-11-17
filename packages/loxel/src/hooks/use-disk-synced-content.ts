@@ -192,7 +192,7 @@ export function useDiskSyncedContent<T>(
       // Edits carried over by a move, or of a file deleted from disk, are not saved here; the
       // outbox keeps the latter for review.
       const closing = useEditorStateStore.getState().files.get(editorKey);
-      if (closing) outboxEditorClosing(closing);
+      if (closing) outboxEditorClosing(editorKey, closing, worktreePathRef.current ?? null);
       // Flush pending save before closing — handles unmount.
       // On scope change, the render-phase flush above already clears the timer,
       // so this is a no-op in that case.

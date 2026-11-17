@@ -443,17 +443,78 @@ describe("recovery", () => {
     serverDown = false;
     await retryQueuedSaves();
     expect(editor()?.deleted).toBe(true);
+    text.current = "a\nb\nc\nd\ne\n"; // typed on, with autosave stopped by the deletion
 
-    outboxEditorClosing(editor()!);
+    outboxEditorClosing(FILE, editor()!, "/repo");
     useEditorStateStore.getState().closeFile(FILE);
     expect(opened).toEqual([]); // not reopened behind the user's back
 
     await reload(storage);
     expect(opened).toEqual([FILE]);
-    expect(findAdoptableEntry(FILE)?.content).toBe("a\nb\nc\nd\n");
+    expect(findAdoptableEntry(FILE)?.content).toBe("a\nb\nc\nd\ne\n");
     // Given up only by the user: discarding them, or deleting the file in Loxel.
     forgetOutboxPath(FILE);
     expect(outboxEntriesForTests()).toEqual([]);
+  });
+});
+
+describe("deleted files", () => {
+  test("edits typed after the file was deleted are kept when its tab closes", async () => {
+    const text = { current: "a\nb\nc\n" };
+    openEditor("a\nb\nc\n", text);
+    const store = useEditorStateStore.getState();
+    store.setDeleted(FILE, true);
+    text.current = "a\nb\nc\nnew\n";
+    store.markDirty(FILE);
+
+    outboxEditorClosing(FILE, editor()!, "/repo");
+    store.closeFile(FILE);
+    expect(outboxEntriesForTests().map((e) => [e.status, e.content])).toEqual([
+      ["review", "a\nb\nc\nnew\n"],
+    ]);
+    expect(opened).toEqual([]);
+  });
+
+  test("a clean editor of a deleted file leaves nothing behind", () => {
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\n" });
+    useEditorStateStore.getState().setDeleted(FILE, true);
+    outboxEditorClosing(FILE, editor()!, "/repo");
+    expect(outboxEntriesForTests()).toEqual([]);
+  });
+});
+
+describe("recovered saves", () => {
+  test("stay unmerged after a write the disk changed under", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e1", leftBehind());
+    await initSaveOutbox({ storage });
+    const entry = findAdoptableEntry(FILE)!;
+    const text = { current: entry.content };
+    openEditor("a\nb\nc\n", text);
+    adoptOutboxEntry(FILE, entry);
+    afterNextRead = () => (disk[FILE] = "A\nb\nc\n");
+
+    await retryQueuedSaves();
+    // Read at its base, refused at the write, then read again: shown, not merged.
+    expect(disk[FILE]).toBe("A\nb\nc\n");
+    expect(editor()?.state).toBe("diverged");
+    expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
+  });
+});
+
+describe("a file another program keeps rewriting", () => {
+  test("is retried a few times, then left to the backoff", async () => {
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+    serverDown = true;
+    await saveEditorContent(FILE, text.current, "/repo");
+    serverDown = false;
+    let rewrites = 0;
+    onWrite = () => (disk[FILE] = `rewrite ${++rewrites}\n`);
+
+    await retryQueuedSaves();
+    expect(rewrites).toBe(3);
+    expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["queued"]);
   });
 });
 

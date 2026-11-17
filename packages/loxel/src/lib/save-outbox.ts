@@ -20,7 +20,7 @@ import {
   releaseWorktree,
 } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
-import { type EditorFileEntry, useEditorStateStore } from "@/store/editor-state";
+import { type EditorFileEntry, diskBase, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("files");
@@ -64,6 +64,8 @@ export interface OutboxStorage {
 /** Retry delays after consecutive failed rounds; the last one repeats. */
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const LOCK_PREFIX = "loxel-save-outbox:";
+/** Passes in a row a retry round makes for saves whose file changed between read and write. */
+const MAX_CHANGED_PASSES = 3;
 
 /** This window (page load); a new one in tests, as after a reload. */
 let ownerId = crypto.randomUUID();
@@ -223,14 +225,12 @@ export function addOutboxEntry(
     OutboxEntry,
     "editorKey" | "filePath" | "worktreePath" | "base" | "content" | "options"
   >,
-  status: "sending" | "queued",
+  status: "sending" | "queued" | "review",
 ): { entry: OutboxEntry; stored: Promise<void> } {
-  // Same id as the save it replaces, so its stored record is overwritten, not left behind.
+  // Same id as the save it replaces, so its stored record is overwritten, not left behind. One
+  // replacing a recovered save stays recovered: its edits still go back to an earlier session.
   const previous = entryOfInstance(editor.instanceId);
-  if (previous) {
-    entries.delete(previous.id);
-    recovered.delete(previous.id);
-  }
+  if (previous) entries.delete(previous.id);
   const entry: OutboxEntry = {
     ...save,
     id: previous?.id ?? crypto.randomUUID(),
@@ -293,23 +293,38 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
 }
 
 /**
- * The editor `editor` is closing. Edits a move carried over went with it. Those of a file deleted
- * on disk are kept for review, shown again when the file's tab next opens (at the latest after a
- * reload): only the user gives them up, by discarding them or deleting the file in Loxel.
+ * The editor `editorKey` (`editor`, of `worktreePath`) is closing. Edits a move carried over went
+ * with it. Those of a file deleted on disk are kept for review, as the editor shows them now
+ * (autosave stopped with the deletion), and shown again when the file's tab next opens (at the
+ * latest after a reload): only the user gives them up, by discarding them or deleting the file in
+ * Loxel.
  */
-export function outboxEditorClosing(editor: EditorFileEntry): void {
+export function outboxEditorClosing(
+  editorKey: string,
+  editor: EditorFileEntry,
+  worktreePath: string | null,
+): void {
   const entry = entryOfInstance(editor.instanceId);
-  if (!entry) return;
   if (editor.movedTo) {
-    removeEntry(entry);
+    if (entry) removeEntry(entry);
     return;
   }
-  if (!editor.deleted || entry.status === "review") return;
-  entry.status = "review";
-  entry.disk = null;
-  recovered.delete(entry.id);
-  void persist(entry);
-  entriesChanged();
+  if (!editor.deleted || editor.state === "clean") return;
+  const content =
+    editor.takePendingEdit?.()?.content ?? editor.getEditorContent?.() ?? entry?.content;
+  if (content === undefined || content === null) return;
+  addOutboxEntry(
+    editor,
+    {
+      editorKey,
+      filePath: editor.filePath,
+      worktreePath,
+      base: diskBase(editor),
+      content,
+      options: entry?.options,
+    },
+    "review",
+  );
 }
 
 /** Forget the saves of a file, or of everything under a folder, that the user deleted. */
@@ -387,10 +402,17 @@ export function retryQueuedSaves(): Promise<void> {
   }
   currentRun = (async () => {
     let failed = false;
+    let again = false;
+    let changedPasses = 0;
     do {
       runAgain = false;
-      failed = await retryRound();
-    } while (runAgain && !failed);
+      const outcome = await retryRound();
+      // A file another program keeps rewriting would otherwise be read and merged in a tight
+      // loop: after a few passes it waits for the backoff like a failure.
+      if (outcome === "changed") changedPasses++;
+      failed = outcome === "failed" || changedPasses >= MAX_CHANGED_PASSES;
+      again = runAgain || outcome === "changed";
+    } while (again && !failed);
     failedRounds = failed ? failedRounds + 1 : 0;
   })().finally(() => {
     currentRun = null;
@@ -407,24 +429,27 @@ export function ensureRetryScheduled(): void {
 }
 
 /**
- * One pass over the queued saves; true when one of them failed again. Stops when the server
+ * One pass over the queued saves: `failed` when one of them failed again, `changed` when one found
+ * the file changed between its read and its write and needs another pass. Stops when the server
  * cannot be reached, but goes on past a save whose path it does not serve right now (a worktree
  * not subscribed yet, or removed), so that one cannot hold up the others.
  */
-async function retryRound(): Promise<boolean> {
+async function retryRound(): Promise<"done" | "failed" | "changed"> {
   const queued = [...entries.values()]
     .filter((e) => e.status === "queued")
     .sort((a, b) => a.seq - b.seq);
   let failed = false;
+  let changed = false;
   for (const entry of queued) {
     if (entries.get(entry.id) !== entry || entry.status !== "queued") continue;
     const editor = ownerEditor(entry);
     const outcome = editor ? await retryInEditor(entry, editor) : await retryClosed(entry);
-    if (outcome === "unreachable") return true;
+    if (outcome === "unreachable") return "failed";
     if (outcome === "unavailable") failed = true;
-    if (outcome === "changed") runAgain = true;
+    if (outcome === "changed") changed = true;
   }
-  return failed;
+  if (failed) return "failed";
+  return changed ? "changed" : "done";
 }
 
 type DiskRead =
