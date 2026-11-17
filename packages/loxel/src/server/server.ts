@@ -22,6 +22,7 @@ import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channe
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
+import { AgentTerminals } from "./agent-terminals";
 import { type CliSocket, takeOverSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
@@ -88,7 +89,11 @@ import { stress } from "./stress-detector";
 import type { TerminalSink } from "./terminal-fanout";
 import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
-import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
+import {
+  agentTerminalPolicy,
+  isNotificationSequenceEnabled,
+  terminalSpawnSettings,
+} from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { getCurrentVersion } from "./version";
@@ -357,6 +362,8 @@ function terminalSpawnTarget(
   // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
   if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
+  // Tells Loxel which terminal an agent's `loxel terminal` came from.
+  envOverrides.LOXEL_TERMINAL_ID = msg.id;
 
   // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
   // after a server restart; start in the worktree then rather than failing the attach.
@@ -808,6 +815,7 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
   for (const { from, to } of moved) {
     log.info(`Worktree moved: ${from} -> ${to}`);
     terminalManager.retargetWorktree(from, to);
+    agentTerminals.moveWorktree(from, to);
     releaseWorktreeResources(from);
   }
   // Its directory is gone but nothing says it was removed (deleted by hand, say). Nothing is lost by
@@ -856,12 +864,16 @@ function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
   deleteWorktreeRows(wtPath);
 }
 
-/** Dismiss what a removed worktree's panels raised, and drop the opens waiting for it. */
+/**
+ * Dismiss what a removed worktree's panels raised, drop the opens and agents' terminals waiting for
+ * it, and forget that its agents' terminals always run.
+ */
 function forgetWorktreeNotifications(wtPath: string): void {
   const { panelIds, inboxIds } = notificationStore.dismissByWorktree(wtPath);
   for (const panelId of panelIds) broadcastAll({ type: "notification_panel_dismissed", panelId });
   for (const id of inboxIds) broadcastAll({ type: "notification_dismissed", id });
   openInbox.dropWhere((entry) => entry.worktreePath === wtPath);
+  agentTerminals.dropWorktree(wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -1092,6 +1104,16 @@ const notificationStore = new NotificationStore(join(config.stateDir, "notificat
 const openInbox = new OpenInbox({ path: join(config.stateDir, "open-inbox.db") });
 /** A panel for the terminal is waiting in the inbox: it is not an orphan. */
 const queuedTerminal = (id: string) => openInbox.holdsTerminal(id);
+const AGENT_TERMINAL_WORKTREES_STORE_KEY = "agent-terminal-worktrees";
+/** The terminals agents asked for while the user has to answer, and where they always run. */
+const agentTerminals = new AgentTerminals({
+  loadAlways: () => getStore(AGENT_TERMINAL_WORKTREES_STORE_KEY),
+  saveAlways: (json) => putStore(AGENT_TERMINAL_WORKTREES_STORE_KEY, json),
+  onChange: (data) => broadcastAll({ type: "agent_terminals_changed", data }),
+});
+/** Whether a window with this ID is connected. */
+const isWindowConnected = (windowId: string) =>
+  [...clients.values()].some((state) => state.windowId === windowId);
 /** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
 const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
@@ -1198,6 +1220,8 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       if (!clientState) break;
       clientState.windowId = msg.windowId;
       deliverInbox(ws);
+      // What waits for an answer with no window to ask in is asked in this one.
+      agentTerminals.windowConnected(msg.windowId, isWindowConnected);
       break;
     }
 
@@ -1466,6 +1490,8 @@ const routeContext: RouteContext = {
     return openInbox.add(message, worktreePath) ? "queued" : "full";
   },
   dropQueuedTerminal,
+  agentTerminals,
+  agentTerminalPolicy,
   listTerminals: async ({ programs }) => {
     const running = terminalManager.running();
     const foreground = programs ? await terminalManager.foregroundProcesses() : {};
@@ -1661,6 +1687,7 @@ const server = Bun.serve<WsData>({
       sendTo(ws, { type: "server_hello", version: getCurrentVersion(), ...serverIdentity });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
       sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
+      sendTo(ws, { type: "agent_terminals_changed", data: agentTerminals.state() });
       log.debug(`Client connected (${clients.size} total)`);
     },
 
@@ -1679,6 +1706,8 @@ const server = Bun.serve<WsData>({
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
+      // What this window was asking moves to the window in use, or waits for the next one.
+      agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();

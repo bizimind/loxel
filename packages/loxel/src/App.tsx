@@ -25,6 +25,7 @@ import { SchemaConsentPrompt } from "./components/settings/SchemaConsentPrompt";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { SymbolSearchModal } from "./components/symbol-search/SymbolSearchModal";
+import { AgentTerminalPrompt } from "./components/terminal/AgentTerminalPrompt";
 import { QuitQuestionHost } from "./components/terminal/QuitQuestionHost";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
@@ -127,6 +128,7 @@ export default function App() {
       <SymbolSearchModal />
       <ToastContainer />
       <SchemaConsentPrompt />
+      <AgentTerminalPrompt />
       <ConfirmDialogHost />
       <QuitQuestionHost />
     </div>

@@ -228,6 +228,13 @@ describe("checkRequest: principals", () => {
     expect(rejection).toMatchObject({ status: 403, details: { principal: "cli" } });
   });
 
+  test("the CLI cannot answer an agent's terminal request: an agent could approve its own", () => {
+    for (const pathname of ["/api/agent-terminals/answer", "/api/agent-terminals/clear-always"]) {
+      expect(cli("POST", pathname, { "Content-Type": "application/json" })).toBe(403);
+      expect(status(request("POST", { "Content-Type": "application/json" }, pathname))).toBeNull();
+    }
+  });
+
   test("the CLI's mutations must still be JSON", () => {
     expect(cli("POST", "/api/open")).toBe(415);
     expect(cli("POST", "/api/open", { "Content-Type": "text/plain" })).toBe(415);

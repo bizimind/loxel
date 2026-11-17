@@ -1,3 +1,4 @@
+import type { AgentOrigin } from "./api/agent-terminal-model";
 import type { PanelOpenOptions } from "./api/panel-placement-model";
 
 /**
@@ -26,20 +27,25 @@ export interface OpenTerminalRequest {
  * `pinWtPath` is the worktree to open in, overriding the one a file or terminal belongs to.
  * `commandWtPath` does the same for a file sent with a URL for that worktree, but is dropped if it
  * names no project's worktree, since the file can still open by itself.
+ *
+ * `agent` marks a terminal a coding agent asked for: it follows "When an Agent Starts a Terminal".
  */
 export type OpenRequest = (
   | { filePath: string; pinWtPath?: string; commandWtPath?: string }
   | { url: string; wtPath?: string }
-  | { terminal: OpenTerminalRequest; pinWtPath?: string }
+  | { terminal: OpenTerminalRequest; pinWtPath?: string; agent?: AgentOrigin }
 ) & { windowId?: string } & PanelOpenOptions;
 
 /**
- * Reply to `POST /api/open`: `warning` notes part of the request that was ignored, and `queued`
- * that no window was connected, so the open waits in the server's inbox for the next one.
+ * Reply to `POST /api/open`: `warning` notes part of the request that was ignored, `queued` that no
+ * window was connected, so the open waits in the server's inbox for the next one, and `asked` that
+ * an agent's terminal waits for the user to answer in Loxel (in the next window, when also
+ * `queued`).
  */
 export interface OpenResult {
   warning?: string;
   queued?: boolean;
+  asked?: boolean;
 }
 
 interface RequestOpenOptions {
@@ -117,7 +123,12 @@ export async function requestOpen(
     const fields = typeof data === "object" && data !== null ? data : {};
     const warning = "warning" in fields ? fields.warning : undefined;
     const queued = "queued" in fields && fields.queued === true;
-    return { ...(typeof warning === "string" ? { warning } : {}), ...(queued ? { queued } : {}) };
+    const asked = "asked" in fields && fields.asked === true;
+    return {
+      ...(typeof warning === "string" ? { warning } : {}),
+      ...(queued ? { queued } : {}),
+      ...(asked ? { asked } : {}),
+    };
   }
 
   const message =
@@ -133,6 +144,8 @@ export interface OpenAllResult {
   warnings: string[];
   /** How many went to the server's inbox, to open when a window connects. */
   queued: number;
+  /** How many wait for the user to answer in Loxel (some of them also `queued`). */
+  asked: number;
   /** The requests that failed, by index, and why. */
   failures: Array<{ index: number; message: string }>;
 }
@@ -158,6 +171,7 @@ export async function requestOpenAll(
   let announced = false;
   const warnings = new Set<string>();
   let queued = 0;
+  let asked = 0;
   const failures: OpenAllResult["failures"] = [];
   for (const [index, request] of requests.entries()) {
     try {
@@ -173,9 +187,10 @@ export async function requestOpenAll(
       });
       if (result.warning) warnings.add(result.warning);
       if (result.queued) queued += 1;
+      if (result.asked) asked += 1;
     } catch (err) {
       failures.push({ index, message: err instanceof Error ? err.message : String(err) });
     }
   }
-  return { warnings: [...warnings], queued, failures };
+  return { warnings: [...warnings], queued, asked, failures };
 }
