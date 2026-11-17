@@ -145,7 +145,9 @@ export class TerminalHostPool implements TerminalHost {
   }
 
   private notifyIfSessionsKnown(): void {
-    if (!this.sessionsKnown) return;
+    // Not while leaving the hosts (their sessions outlive this server), nor before `start()` has
+    // handed over what it found: either would take an unadopted session for an ended one.
+    if (this.closed || this.held !== null || !this.sessionsKnown) return;
     for (const listener of this.sessionsKnownListeners) listener();
   }
 
