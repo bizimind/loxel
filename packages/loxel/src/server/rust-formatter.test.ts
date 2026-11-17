@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import type { RustToolchain, RustTools } from "@/api/rust-toolchain-model";
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
+import { writeExecutable } from "@/test/executable";
 
 // The fakes here are scripts, which the lookup refuses; `rust-tool-shim.test.ts` covers that.
 mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false }));
@@ -34,8 +35,7 @@ async function addFiles(files: Record<string, string>): Promise<void> {
 }
 
 async function install(path: string, script = REPORT): Promise<string> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, script, { mode: 0o755 });
+  await writeExecutable(path, script);
   return path;
 }
 

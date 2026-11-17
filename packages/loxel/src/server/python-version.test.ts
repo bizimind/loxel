@@ -1,7 +1,9 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { writeExecutable } from "@/test/executable";
 
 const stateDir = await mkdtemp(join(tmpdir(), "python-version-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
@@ -36,8 +38,7 @@ async function fakePython(body: string): Promise<{ python: string; runs: () => P
   root = await realpath(await mkdtemp(join(tmpdir(), "python-version-")));
   const python = join(root, "python");
   const counter = `${python}.runs`;
-  await writeFile(python, `#!/bin/sh\necho x >> '${counter}'\n${body}\n`);
-  await chmod(python, 0o755);
+  await writeExecutable(python, `#!/bin/sh\necho x >> "$0.runs"\n${body}\n`);
   const runs = async () => {
     const file = Bun.file(counter);
     return (await file.exists()) ? (await file.text()).split("\n").filter(Boolean).length : 0;
@@ -77,12 +78,6 @@ describe("pythonVersion", () => {
     await writeFile(join(wt, ".python-version"), "3.11.9\n");
     return { python, wt };
   }
-
-  test("asks from the worktree of a trusted repository, so a shim reads its .python-version", async () => {
-    const { python, wt } = await shimAndWorktree();
-    setRepoTrusted(wt, true);
-    expect(await pythonVersion(bare(python), wt)).toBe("3.11.9");
-  });
 
   test("asks from the filesystem root otherwise, and again from the worktree once trusted", async () => {
     const { python, wt } = await shimAndWorktree();

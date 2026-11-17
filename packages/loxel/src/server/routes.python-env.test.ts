@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { PythonEnvCandidatesResponse, PythonEnvResponse } from "@/api/python-env-model";
+import { writeExecutable } from "@/test/executable";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "routes-python-env-state-"));
@@ -26,13 +27,6 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
   await rm(stateDir, { recursive: true, force: true });
 });
-
-async function writeExecutable(filePath: string, script: string): Promise<string> {
-  await mkdir(join(filePath, ".."), { recursive: true });
-  await writeFile(filePath, script);
-  await chmod(filePath, 0o755);
-  return filePath;
-}
 
 /** A venv whose interpreter answers `--version` like CPython. */
 async function makeVenv(dir: string): Promise<string> {

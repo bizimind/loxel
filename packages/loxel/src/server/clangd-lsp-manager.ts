@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, normalize, relative, resolve } from "node:path";
@@ -35,6 +28,7 @@ import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { isInside } from "./path-containment";
 import { reportRepoRestriction } from "./repo-trust";
+import { isSameFileSync } from "./same-file";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   WorktreeLspManager,
@@ -287,9 +281,7 @@ export async function checkClangd(
   run: typeof probe = probe,
   appleAllowed = false,
 ): Promise<ClangdCheck> {
-  if (!appleAllowed && platform === "darwin" && realPath(binary) === APPLE_CLANGD_STUB) {
-    return "apple";
-  }
+  if (!appleAllowed && platform === "darwin" && isAppleClangdStub(binary)) return "apple";
   const { stdout } = await run([binary, "--version"]);
   if (!appleAllowed && /\bApple\b/.test(stdout)) return "apple";
   const major = clangdMajorVersion(stdout);
@@ -297,12 +289,9 @@ export async function checkClangd(
   return major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
 }
 
-function realPath(file: string): string {
-  try {
-    return realpathSync(file);
-  } catch {
-    return file;
-  }
+/** Apple's stub, by any of the names of its file, or by its path where it does not exist. */
+function isAppleClangdStub(binary: string): boolean {
+  return binary === APPLE_CLANGD_STUB || isSameFileSync(binary, APPLE_CLANGD_STUB);
 }
 
 const INDEX_DIRECTORY_PARTS = [".cache", ".cache/clangd", ".cache/clangd/index"];

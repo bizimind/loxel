@@ -1,18 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
+import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
 
 import {
@@ -44,11 +36,6 @@ async function makeDir(prefix: string): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   roots.push(dir);
   return dir;
-}
-
-async function writeExecutable(file: string, script: string): Promise<void> {
-  await writeFile(file, script);
-  await chmod(file, 0o755);
 }
 
 /** Stands in for `go`: appends its arguments and environment to `log`, and reports `version`. */

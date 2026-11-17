@@ -6,6 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
 
 import { LSP_REPLACED_CLOSE_CODE, LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
+import { writeExecutable } from "@/test/executable";
 
 // Trust lives in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "csharp-lsp-state-"));
@@ -108,12 +109,6 @@ async function write(file: string, content = ""): Promise<string> {
   return file;
 }
 
-async function writeExecutable(file: string, script: string): Promise<string> {
-  await write(file, script);
-  await chmod(file, 0o755);
-  return file;
-}
-
 const PROJECT = '<Project Sdk="Microsoft.NET.Sdk"></Project>';
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
@@ -134,16 +129,24 @@ async function makeRepo(files: Record<string, string> = {}): Promise<string> {
   return wt;
 }
 
-/** Stands in for `dotnet`: a marker for every run, when one is asked for, and the given versions. */
-function fakeDotnet(bin: string, sdks: string, runtime: string, marker?: string): Promise<string> {
-  const dotnetRoot = bin;
+/**
+ * Stands in for `dotnet`, rooted where it lies: the given versions, and with `recordRuns` a line in
+ * `dotnet-runs` beside it for every run.
+ */
+function fakeDotnet(
+  bin: string,
+  sdks: string,
+  runtime: string,
+  recordRuns = false,
+): Promise<string> {
   return writeExecutable(
     join(bin, "dotnet"),
     `#!/bin/sh
-${marker ? `echo "$*" >> "${marker}"` : ""}
+root="\${0%/*}"
+${recordRuns ? `echo "$*" >> "$root/dotnet-runs"` : ""}
 case "$1" in
-  --list-runtimes) echo "Microsoft.NETCore.App ${runtime} [${dotnetRoot}/shared/Microsoft.NETCore.App]" ;;
-  --list-sdks) echo "${sdks} [${dotnetRoot}/sdk]" ;;
+  --list-runtimes) echo "Microsoft.NETCore.App ${runtime} [$root/shared/Microsoft.NETCore.App]" ;;
+  --list-sdks) echo "${sdks} [$root/sdk]" ;;
   --version) [ -f global.json ] && exit 145; echo "${sdks}" ;;
   tool) [ -f "$HOME/.dotnet/toolResolverCache/1/csharp-ls" ] && echo "csharp-ls, 0.28.0.0" ;;
 esac
@@ -215,7 +218,7 @@ async function installToolchain(
   const bin = await makeDir("csharp-bin-");
   const dotnetRuns = join(bin, "dotnet-runs");
   if (options.dotnet !== false) {
-    await fakeDotnet(bin, options.sdk ?? "10.0.100", options.runtime ?? "10.0.0", dotnetRuns);
+    await fakeDotnet(bin, options.sdk ?? "10.0.100", options.runtime ?? "10.0.0", true);
   }
   if (options.csharpLs !== null) {
     await writeExecutable(join(bin, "csharp-ls"), fakeCSharpLs(options.csharpLs ?? "0.28.0"));

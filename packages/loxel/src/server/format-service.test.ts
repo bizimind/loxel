@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
+import { writeExecutable } from "@/test/executable";
 
 import type { FormatterFailure, LanguageFormatter } from "./language-formatter";
 
@@ -56,7 +57,7 @@ async function makeFakeVenv(
   const bin = join(venvDir, "bin", command);
   await mkdir(dirname(bin), { recursive: true });
   await writeFile(join(venvDir, "pyvenv.cfg"), "home = /usr/bin\n");
-  await writeFile(bin, script, { mode: 0o755 });
+  await writeExecutable(bin, script);
 }
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
@@ -240,8 +241,8 @@ describe("FormatService Python detection", () => {
     // A Pixi environment: no pyvenv.cfg, found only through the shared resolution.
     const pixi = join(wt, ".pixi/envs/default");
     await mkdir(join(pixi, "bin"), { recursive: true });
-    await writeFile(join(pixi, "bin/python"), "#!/bin/sh\n", { mode: 0o755 });
-    await writeFile(join(pixi, "bin/ruff"), ECHO_ARGS_SCRIPT, { mode: 0o755 });
+    await writeExecutable(join(pixi, "bin/python"));
+    await writeExecutable(join(pixi, "bin/ruff"), ECHO_ARGS_SCRIPT);
     await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
     expect(await findVenvBin(join(wt, "other"), wt, "ruff")).toBe(join(pixi, "bin"));
     expect(await findVenvBin(join(wt, "pkg"), wt, "ruff")).toBe(join(wt, "pkg/.venv/bin"));
@@ -352,8 +353,7 @@ describe("FormatService language modules", () => {
     `#!/bin/sh\necho "${label} cwd=$(pwd -P) env=$FAKE_FMT_ENV args=$*"\n`;
 
   async function installFormatter(dir: string, label: string): Promise<void> {
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "fake-fmt"), REPORT_SCRIPT(label), { mode: 0o755 });
+    await writeExecutable(join(dir, "fake-fmt"), REPORT_SCRIPT(label));
   }
 
   const FAKE_FORMATTER = { command: "fake-fmt", args: "--stdin-filepath {file}" };
@@ -498,9 +498,7 @@ describe("FormatService language modules", () => {
     expect(result.content).toStartWith("next ");
 
     // The root rule's deno, here from node_modules/.bin so the test needs no real one.
-    await writeFile(join(wt, "node_modules/.bin/deno"), REPORT_SCRIPT("root-rule"), {
-      mode: 0o755,
-    });
+    await writeExecutable(join(wt, "node_modules/.bin/deno"), REPORT_SCRIPT("root-rule"));
     const rootRule = await new FormatService([none]).format("x", path, wt, AUTO_DETECT);
     expect(rootRule.content).toStartWith("root-rule ");
   });
@@ -573,7 +571,7 @@ describe("FormatService language modules", () => {
 describe("FormatService language failure notices", () => {
   const MISSING = { command: "loxel-missing-formatter", args: "" };
   const failing = (script: string) => async (wt: string) => {
-    await writeFile(join(wt, "bad-fmt"), script, { mode: 0o755 });
+    await writeExecutable(join(wt, "bad-fmt"), script);
     return { command: "./bad-fmt", args: "" };
   };
   const exitsOne = failing('#!/bin/sh\necho "the reason" >&2\nexit 1\n');
@@ -674,7 +672,7 @@ describe("FormatService language failure notices", () => {
 
   test("a manual override still runs where the module declines", async () => {
     const wt = await makeWorktree({});
-    await writeFile(join(wt, "fmt"), "#!/bin/sh\necho overridden\n", { mode: 0o755 });
+    await writeExecutable(join(wt, "fmt"), "#!/bin/sh\necho overridden\n");
     setRepoTrusted(wt, true);
     const decline: LanguageFormatter = {
       extensions: ["fake"],
@@ -776,7 +774,7 @@ describe("a persistent backend's failure in an untrusted repository", () => {
   test("stays quiet when the project holds the formatter", async () => {
     const wt = await realpath(await makeWorktree({ ".prettierrc": "{}", "a.ts": "" }));
     await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
-    await writeFile(join(wt, "node_modules/.bin/prettier"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await writeExecutable(join(wt, "node_modules/.bin/prettier"), "#!/bin/sh\nexit 0\n");
     const result = await new FormatService([]).format("x", "a.ts", wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
@@ -793,7 +791,7 @@ describe("a manual override in an untrusted repository", () => {
   async function worktreeWithScript(): Promise<string> {
     const wt = await realpath(await makeWorktree({ "a.fake": "" }));
     await mkdir(join(wt, "scripts"));
-    await writeFile(join(wt, "scripts/fmt"), "#!/bin/sh\necho ran\n", { mode: 0o755 });
+    await writeExecutable(join(wt, "scripts/fmt"), "#!/bin/sh\necho ran\n");
     return wt;
   }
 

@@ -6,6 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import { writeExecutable } from "@/test/executable";
 
 import type { FileFormatter, FormatterDecline } from "./language-formatter";
 
@@ -302,9 +303,8 @@ describe("kotlinFormatter spawning", () => {
   const REPORT = '#!/bin/sh\necho "$(basename "$0") from $0 cwd=$(pwd -P) args=$*"\n';
 
   async function install(dir: string, command: string, script = REPORT): Promise<string> {
-    await mkdir(dir, { recursive: true });
     const file = join(dir, command);
-    await writeFile(file, script, { mode: 0o755 });
+    await writeExecutable(file, script);
     return file;
   }
 

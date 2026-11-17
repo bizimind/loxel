@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
 
 import { GO_ENV, refreshGoEnv, subscribeGoEnv } from "./go-env";
@@ -35,11 +36,6 @@ async function makeDir(prefix: string): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   roots.push(dir);
   return dir;
-}
-
-async function writeExecutable(file: string, script: string): Promise<void> {
-  await writeFile(file, script);
-  await chmod(file, 0o755);
 }
 
 // Stands in for gopls: asks for each section, then reports the answers and its environment.
@@ -375,7 +371,7 @@ describe("following the toolchain", () => {
       await next.untilFrame((frame) => frame.id === 1);
       const { code: reinstalled } = await repeatUntil(next.untilClosed(), async () => {
         await rm(join(bin, "gopls"));
-        await writeExecutable(join(bin, "gopls"), FAKE_GOPLS);
+        await writeExecutable(join(bin, "gopls"), FAKE_GOPLS, { newFile: true });
       });
       expect(reinstalled).toBe(LSP_RESTART_CLOSE_CODE);
     },

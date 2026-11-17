@@ -26,21 +26,6 @@ function advance(ms: number): void {
 }
 
 describe("stderr-throttle", () => {
-  test("allows up to capacity instantly as a burst", () => {
-    const throttle = createStderrThrottle({
-      capacity: 5,
-      refillPerSec: 1,
-      flushIntervalMs: 1000,
-      onSummary: () => {},
-    });
-    let emitted = 0;
-    for (let i = 0; i < 5; i++) {
-      if (throttle.tryConsume()) emitted++;
-    }
-    expect(emitted).toBe(5);
-    throttle.dispose();
-  });
-
   test("drops once bucket is exhausted and no time has passed", () => {
     const summaries: number[] = [];
     const throttle = createStderrThrottle({
