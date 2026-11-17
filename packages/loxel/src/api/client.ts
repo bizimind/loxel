@@ -50,7 +50,8 @@ import type {
   WorktreeRemovePlan,
   WorktreeRemoveResult,
 } from "./worktree-removal-model";
-import type { WsClientMessage, WsMessage } from "./ws-protocol";
+import type { ServerIdentity, WsClientMessage, WsMessage } from "./ws-protocol";
+import { type ConnectionState, reconnectDelay, sentAfterReconnect } from "./ws-reconnect";
 
 const API_BASE = "/api";
 
@@ -929,52 +930,70 @@ export async function deleteCommentThread(wt: string, threadId: string) {
 // stream offset of their first byte.
 type TerminalOutputHandler = (offset: number, data: Uint8Array) => void;
 
-// WebSocket singleton client with send support
-class WsClient {
+/** What reconnect listeners learn about the server the socket reconnected to. */
+export interface ReconnectInfo {
+  /** A new server process (its boot epoch changed), which kept nothing in memory from before. */
+  serverRestarted: boolean;
+}
+
+type ServerHello = Extract<WsMessage, { type: "server_hello" }>;
+
+/**
+ * The app's WebSocket to the server, as a singleton that survives disconnects. It retries with
+ * backoff, and on every connection waits for the server's hello before sending anything: a new
+ * version or a different server reloads the page; otherwise it re-subscribes the worktrees, runs
+ * the reconnect listeners, then sends what was queued meanwhile (see `sentAfterReconnect`).
+ */
+export class WsClient {
   private ws: WebSocket | null = null;
   private closed = false;
-  private wasConnected = false;
-  private knownVersion: string | null = null;
+  private state: ConnectionState = "connecting";
+  /** The server the last hello came from. */
+  private server: ServerHello | null = null;
+  private attempt = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeListenersAdded = false;
   private listeners = new Set<(msg: WsMessage) => void>();
-  private reconnectListeners = new Set<() => void>();
+  private reconnectListeners = new Set<(info: ReconnectInfo) => void>();
+  private stateListeners = new Set<() => void>();
   private terminalOutputHandlers = new Map<string, TerminalOutputHandler>();
-  private pendingMessages: (string | ArrayBuffer)[] = [];
+  private pendingMessages: WsClientMessage[] = [];
+  /** The worktrees this window is subscribed to, in order: the server takes the last as shown. */
+  private worktrees = new Set<string>();
 
   connect(): void {
     this.closed = false;
+    this.addWakeListeners();
     this.doConnect();
   }
 
   private doConnect(): void {
+    this.retryTimer = null;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
+    // Only the latest socket counts: one a disconnect left closing (as React's StrictMode does
+    // with its double effect) must not retry or deliver beside it.
+    this.ws = ws;
 
     ws.onopen = () => {
+      if (this.ws !== ws) return;
+      // Nothing is sent until the server's hello (its first message) says which server this is.
       postLogEntry({ level: "info", cat: "server", msg: "WebSocket connected" });
-      this.ws = ws;
-
-      if (this.wasConnected) {
-        // Server came back — check whether a different build is running (full page reload)
-        this.checkVersionAndRecover();
-      } else {
-        // First connection: record server version and flush pending messages
-        this.recordVersion();
-        for (const msg of this.pendingMessages) {
-          ws.send(msg);
-        }
-        this.pendingMessages = [];
-        this.wasConnected = true;
-      }
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       if (typeof event.data === "string") {
         // JSON text frame — control/git messages
         try {
           const raw: unknown = JSON.parse(event.data);
           if (typeof raw !== "object" || raw === null || !("type" in raw)) return;
           const message = raw as WsMessage;
+          if (message.type === "server_hello") {
+            this.handleHello(message);
+            return;
+          }
           for (const listener of this.listeners) {
             listener(message);
           }
@@ -999,11 +1018,12 @@ class WsClient {
     };
 
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       postLogEntry({ level: "warn", cat: "server", msg: "WebSocket disconnected" });
       this.ws = null;
-      if (!this.closed) {
-        setTimeout(() => this.doConnect(), 2000);
-      }
+      if (this.closed) return;
+      if (this.state === "connected") this.setState("reconnecting");
+      this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
     };
 
     ws.onerror = (err) => {
@@ -1016,64 +1036,133 @@ class WsClient {
     };
   }
 
-  /** Record the server version on first successful connection. */
-  private async recordVersion(): Promise<void> {
-    try {
-      const { version } = await getVersion();
-      this.knownVersion = version;
-    } catch {
-      /* best effort */
-    }
+  /**
+   * Waking from sleep or getting the network back usually means the server is reachable again, so
+   * the next attempt need not wait out the backoff.
+   */
+  private addWakeListeners(): void {
+    if (this.wakeListenersAdded) return;
+    this.wakeListenersAdded = true;
+    window.addEventListener("online", () => this.retryNow());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") this.retryNow();
+    });
+  }
+
+  /** Reconnect now instead of when the backoff says; a no-op unless a retry is waiting. */
+  retryNow(): void {
+    if (this.closed || this.retryTimer === null) return;
+    clearTimeout(this.retryTimer);
+    this.doConnect();
   }
 
   /**
-   * On reconnect, compare the server version to the one recorded at first connect.
-   * If the version changed (a different build of the server started), reload the page to pick
-   * up its renderer assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
+   * The server's hello opens every connection. A different version (a new build started) or a
+   * different server reloads the page to pick up its renderer and state. Otherwise the window
+   * re-creates its per-connection state on the server and catches up: the boot epoch tells the
+   * listeners whether the server restarted or this was only the socket.
    */
-  private async checkVersionAndRecover(): Promise<void> {
-    this.pendingMessages = [];
-
-    try {
-      const { version } = await getVersion();
-      if (this.knownVersion && version !== this.knownVersion) {
-        postLogEntry({
-          level: "info",
-          cat: "server",
-          msg: "Server version changed, reloading",
-          ctx: { oldVersion: this.knownVersion, newVersion: version },
-        });
-        window.location.reload();
-        return;
-      }
-      this.knownVersion = version;
-    } catch {
-      /* server may still be starting — fall through to normal reconnect */
+  private handleHello(hello: ServerHello): void {
+    const previous = this.server;
+    if (previous && (hello.version !== previous.version || hello.serverId !== previous.serverId)) {
+      postLogEntry({
+        level: "info",
+        cat: "server",
+        msg: "Server changed, reloading",
+        ctx: {
+          oldVersion: previous.version,
+          newVersion: hello.version,
+          sameServer: hello.serverId === previous.serverId,
+        },
+      });
+      window.location.reload();
+      return;
     }
+    this.server = hello;
+    this.attempt = 0;
+    for (const worktreePath of this.worktrees) {
+      this.sendNow({ type: "subscribe_worktree", worktreePath });
+    }
+    const queued = this.pendingMessages;
+    this.pendingMessages = [];
+    this.setState("connected");
 
-    // Version unchanged or check failed — normal reconnect
+    if (!previous) {
+      for (const msg of queued) this.sendNow(msg);
+      return;
+    }
+    const serverRestarted = hello.bootEpoch !== previous.bootEpoch;
+    postLogEntry({
+      level: "info",
+      cat: "server",
+      msg: serverRestarted ? "Reconnected to a restarted server" : "Reconnected",
+    });
     for (const listener of this.reconnectListeners) {
-      listener();
+      try {
+        listener({ serverRestarted });
+      } catch (err) {
+        postLogEntry({
+          level: "error",
+          cat: "server",
+          msg: "Reconnect listener failed",
+          ctx: { error: err instanceof Error ? { message: err.message } : undefined },
+        });
+      }
+    }
+    for (const msg of queued) {
+      if (sentAfterReconnect(msg)) this.sendNow(msg);
     }
   }
 
-  /** Send a JSON control message. */
+  private setState(state: ConnectionState): void {
+    if (state === this.state) return;
+    this.state = state;
+    for (const listener of this.stateListeners) {
+      try {
+        listener();
+      } catch (err) {
+        postLogEntry({
+          level: "error",
+          cat: "server",
+          msg: "Connection state listener failed",
+          ctx: { error: err instanceof Error ? { message: err.message } : undefined },
+        });
+      }
+    }
+  }
+
+  /** The connection state, for `useSyncExternalStore` with {@link onConnectionStateChange}. */
+  getConnectionState = (): ConnectionState => this.state;
+
+  /** Subscribe to connection state changes; returns the unsubscribe. */
+  onConnectionStateChange = (handler: () => void): (() => void) => {
+    this.stateListeners.add(handler);
+    return () => this.stateListeners.delete(handler);
+  };
+
+  private isOpen(): boolean {
+    return this.state === "connected" && this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  private sendNow(msg: WsClientMessage): void {
+    this.ws?.send(JSON.stringify(msg));
+  }
+
+  /** Send a JSON control message, or queue it until the socket is back. */
   send(msg: WsClientMessage): void {
-    const data = JSON.stringify(msg);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(data);
+    if (this.isOpen()) {
+      this.sendNow(msg);
     } else {
-      this.pendingMessages.push(data);
+      this.pendingMessages.push(msg);
     }
   }
 
   /** Send terminal input as a binary frame. */
   sendTerminalInput(terminalId: string, data: string): void {
-    const frame = encodeInputFrame(terminalId, new TextEncoder().encode(data));
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(frame as BufferSource);
-    }
     // Input is fire-and-forget; don't queue during disconnect
+    if (!this.isOpen()) return;
+    const frame = encodeInputFrame(terminalId, new TextEncoder().encode(data));
+    this.ws?.send(frame as BufferSource);
   }
 
   /** Subscribe to JSON messages (git notifications + terminal control). */
@@ -1088,27 +1177,45 @@ class WsClient {
     return () => this.terminalOutputHandlers.delete(terminalId);
   }
 
-  /** Subscribe to reconnection events. Listeners should re-create any server-side state. */
-  onReconnect(handler: () => void): () => void {
+  /**
+   * Subscribe to reconnection events, fired once the socket is back and its worktrees are
+   * re-subscribed. Listeners should re-create any other server-side state and catch up on what
+   * the window missed meanwhile.
+   */
+  onReconnect(handler: (info: ReconnectInfo) => void): () => void {
     this.reconnectListeners.add(handler);
     return () => this.reconnectListeners.delete(handler);
   }
 
-  /** Subscribe to worktree events. Server creates resources on first subscription. */
+  /**
+   * Subscribe to worktree events. The server creates resources on first subscription; this
+   * client subscribes again by itself after a reconnect, until unsubscribed.
+   */
   subscribeWorktree(worktreePath: string): void {
-    this.send({ type: "subscribe_worktree", worktreePath });
+    // Re-adding moves it last, so the shown worktree is subscribed last after a reconnect too.
+    this.worktrees.delete(worktreePath);
+    this.worktrees.add(worktreePath);
+    if (this.isOpen()) this.sendNow({ type: "subscribe_worktree", worktreePath });
   }
 
-  /** Unsubscribe from worktree events. Server tears down resources when no subscribers remain. */
+  /**
+   * Unsubscribe from worktree events. The server keeps the worktree's resources for a grace period
+   * after its last subscriber leaves.
+   */
   unsubscribeWorktree(worktreePath: string): void {
-    this.send({ type: "unsubscribe_worktree", worktreePath });
+    if (!this.worktrees.delete(worktreePath)) return;
+    if (this.isOpen()) this.sendNow({ type: "unsubscribe_worktree", worktreePath });
   }
 
   disconnect(): void {
     this.closed = true;
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     this.ws?.close();
     this.ws = null;
     this.pendingMessages = [];
+    // A later connect waits for its hello again, and treats it as a reconnect if one came before.
+    this.setState(this.server ? "reconnecting" : "connecting");
   }
 }
 
@@ -1136,6 +1243,6 @@ export async function getRunningTerminals(options: {
   return RunningTerminalsSchema.parse(raw).terminals;
 }
 
-export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
+export async function getVersion(): Promise<{ version: string; isDev: boolean } & ServerIdentity> {
   return fetchJson("/version");
 }

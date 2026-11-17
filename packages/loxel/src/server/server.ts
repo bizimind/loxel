@@ -54,6 +54,7 @@ import { SchemaConsent } from "./schema-consent";
 import { SchemaDownloads } from "./schema-downloads";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
+import { serverIdentity } from "./server-identity";
 import { createServerPerfMonitor } from "./server-perf-monitor";
 import {
   externalFolderConflict,
@@ -1534,6 +1535,8 @@ const server = Bun.serve<WsData>({
         log.info("Idle timer cancelled — client connected");
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
+      // First, so the client knows whether this is the server it saw before (see WsClient).
+      sendTo(ws, { type: "server_hello", version: getCurrentVersion(), ...serverIdentity });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
       sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
       log.debug(`Client connected (${clients.size} total)`);

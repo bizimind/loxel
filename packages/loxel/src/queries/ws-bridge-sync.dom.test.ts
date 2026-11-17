@@ -5,9 +5,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 
 import type { Query } from "@tanstack/react-query";
-import { cleanup, renderHook } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
-import { wsClient } from "@/api/client";
+import { type ReconnectInfo, wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
@@ -25,7 +25,12 @@ const WT = "/repo/.worktrees/wt";
 const setQueryData = spyOn(queryClient, "setQueryData");
 const invalidateQueries = spyOn(queryClient, "invalidateQueries");
 const refreshProjectWorktrees = mock(async () => {});
+const fetchProjects = mock(async () => {});
 let deliver: (message: WsMessage) => void = () => {};
+let reconnect: (info: ReconnectInfo) => void = () => {};
+// The stores are shared with other test files in the process; put their actions back after.
+const originalFetchProjects = useProjectStore.getState().fetchProjects;
+const originalRefreshProjectWorktrees = useWorktreeStore.getState().refreshProjectWorktrees;
 
 beforeAll(() => {
   spyOn(wsClient, "connect").mockImplementation(() => {});
@@ -34,7 +39,11 @@ beforeAll(() => {
     deliver = handler;
     return () => {};
   });
-  useProjectStore.setState({ projects: [{ path: PROJECT } as EnrichedProject] });
+  spyOn(wsClient, "onReconnect").mockImplementation((handler) => {
+    reconnect = handler;
+    return () => {};
+  });
+  useProjectStore.setState({ projects: [{ path: PROJECT } as EnrichedProject], fetchProjects });
   useWorktreeStore.setState({ refreshProjectWorktrees });
   renderHook(() => useWsBridge());
 });
@@ -43,10 +52,13 @@ afterEach(() => {
   setQueryData.mockClear();
   invalidateQueries.mockClear();
   refreshProjectWorktrees.mockClear();
+  fetchProjects.mockClear();
 });
 
 afterAll(() => {
   cleanup();
+  useProjectStore.setState({ fetchProjects: originalFetchProjects });
+  useWorktreeStore.setState({ refreshProjectWorktrees: originalRefreshProjectWorktrees });
 });
 
 /** The exact-key invalidations a message made. */
@@ -116,6 +128,28 @@ describe("useWsBridge git messages", () => {
   });
 });
 
+describe("useWsBridge after a reconnect", () => {
+  test.each([false, true])(
+    "refetches everything but file contents, and the projects (server restarted: %p)",
+    async (serverRestarted) => {
+      reconnect({ serverRestarted });
+
+      const keys = [
+        queryKeys.status(PROJECT, WT),
+        ["commits", PROJECT],
+        COMMIT_DIFF,
+        queryKeys.runningTerminals(),
+        queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
+      ];
+      // Editors with unsaved changes take new content through worktree_files_resynced instead.
+      expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
+      expect(fetchProjects).toHaveBeenCalledTimes(1);
+      // Worktrees removed meanwhile are released by the per-project refresh.
+      await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
+    },
+  );
+});
+
 describe("useWsBridge file messages", () => {
   test("worktree_files_resynced refetches what the paused watchers may have missed", () => {
     deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: PROJECT });
@@ -123,10 +157,22 @@ describe("useWsBridge file messages", () => {
     expect(invalidatedKeys()).toEqual([
       queryKeys.status(PROJECT, WT),
       queryKeys.worktreeStatuses(PROJECT),
-      ["diff", PROJECT],
-      ["dirContents", PROJECT],
       queryKeys.detachedFiles(PROJECT, WT),
       queryKeys.externalFiles(PROJECT, WT),
+    ]);
+    // Only this worktree's working-tree diffs and directory listings.
+    const otherWtDiff = queryKeys.diff(PROJECT, { type: "staged", worktree: `${WT}2` });
+    const ownDirs = [
+      queryKeys.dirContents(PROJECT, WT),
+      queryKeys.dirContents(PROJECT, `${WT}/src`),
+    ];
+    const otherDirs = [
+      queryKeys.dirContents(PROJECT, `${WT}2`),
+      queryKeys.dirContents("/other", WT),
+    ];
+    expect(matchedByPredicates([...DIFF_KEYS, otherWtDiff, ...ownDirs, ...otherDirs])).toEqual([
+      ...WORKING_TREE_DIFFS,
+      ...ownDirs,
     ]);
     expect(setQueryData).not.toHaveBeenCalled();
   });
