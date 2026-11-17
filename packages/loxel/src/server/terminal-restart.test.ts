@@ -33,8 +33,9 @@ import {
   encodeParentMessage,
 } from "@/parent-channel-protocol";
 import { sessionAuthorization } from "@/session-client";
-import { hostLogsDir, hostRunDir } from "@/terminal-host/host-files";
+import { hostLogsDir } from "@/terminal-host/host-files";
 import { retryUntil } from "@/test/git-sync-harness";
+import { hostPids, stopHosts } from "@/test/terminal-hosts";
 import { freePort, openPanel } from "@/test/terminal-panel";
 import { until } from "@/test/until";
 
@@ -121,18 +122,6 @@ describe("terminals across server restarts", () => {
       .join("");
   }
 
-  /** The PIDs of the running terminal hosts, from their entries. */
-  function hostPids(): number[] {
-    const runDir = hostRunDir(stateDir);
-    if (!existsSync(runDir)) return [];
-    return readdirSync(runDir)
-      .filter((name) => name.endsWith(".json"))
-      .map(
-        (name) =>
-          (JSON.parse(readFileSync(path.join(runDir, name), "utf8")) as { pid: number }).pid,
-      );
-  }
-
   beforeAll(() => {
     // Short, so the host's socket path fits the platform limit without the fallback.
     stateDir = realpathSync(mkdtempSync("/tmp/lx-restart-"));
@@ -181,13 +170,7 @@ describe("terminals across server restarts", () => {
     server?.kill("SIGKILL");
     await server?.exited;
     // Whatever the test left running ends with its host.
-    for (const pid of hostPids()) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // Already gone.
-      }
-    }
+    stopHosts(stateDir);
     rmSync(stateDir, { recursive: true, force: true });
   });
 
@@ -229,7 +212,7 @@ describe("terminals across server restarts", () => {
       fresh.close();
 
       // A quit still ends the terminals, and the host with them.
-      const hosts = hostPids();
+      const hosts = hostPids(stateDir);
       expect(hosts.length).toBe(1);
       server!.kill("SIGTERM");
       await server!.exited;
@@ -243,7 +226,7 @@ describe("terminals across server restarts", () => {
     async () => {
       await startServer({ asApp: true });
       const shell = await openShell();
-      const hosts = hostPids();
+      const hosts = hostPids(stateDir);
 
       await quitApp("keep");
       expect(isAlive(shell.shellPid)).toBe(true);
@@ -267,7 +250,7 @@ describe("terminals across server restarts", () => {
     async () => {
       await startServer({ asApp: true });
       const shell = await openShell();
-      const hosts = hostPids();
+      const hosts = hostPids(stateDir);
       // The app crashed, leaving the shell to the hosts' grace period.
       closeSync(appChannel!);
       expect(await server!.exited).toBe(0);

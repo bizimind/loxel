@@ -6,7 +6,9 @@
  *
  * `script` (in scripts/) writes `resources` (paths under build/). Each resource is staged by its
  * base name in build/language-servers/, which electron-builder.yml `extraResources` copies as a
- * whole. A manifest with `platforms` does not exist elsewhere.
+ * whole, as does the standalone server bundle (build-server-bundle.ts). A manifest with `platforms`
+ * does not exist elsewhere. `license`, `source`, `licenseFile` (under language-servers/) and `note`
+ * describe what ships, for the server bundle's notices.
  *
  *   build [manifest...]  run the scripts; with no names, also stage everything
  */
@@ -15,39 +17,34 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { $ } from "bun";
+import { z } from "zod";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
 const BUILD_DIR = path.join(LOXEL, "build");
-const STAGE_DIR = path.join(BUILD_DIR, "language-servers");
-const MANIFEST_DIR = path.join(import.meta.dir, "language-servers");
+export const STAGE_DIR = path.join(BUILD_DIR, "language-servers");
+export const MANIFEST_DIR = path.join(import.meta.dir, "language-servers");
 
-interface Manifest {
-  name: string;
-  script: string;
-  resources: string[];
-  platforms?: string[];
-}
+const ManifestSchema = z.object({
+  script: z.string(),
+  resources: z.array(z.string()),
+  platforms: z.array(z.string()).optional(),
+  license: z.string().optional(),
+  source: z.string().optional(),
+  licenseFile: z.string().optional(),
+  note: z.string().optional(),
+});
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
+type Manifest = z.infer<typeof ManifestSchema> & { name: string };
 
 async function readManifest(file: string): Promise<Manifest> {
   const raw: unknown = await Bun.file(path.join(MANIFEST_DIR, file)).json();
-  if (typeof raw !== "object" || raw === null) throw new Error(`${file}: not an object`);
-  const { script, resources, platforms } = raw as Record<string, unknown>;
-  if (
-    typeof script !== "string" ||
-    !isStringArray(resources) ||
-    (platforms !== undefined && !isStringArray(platforms))
-  ) {
-    throw new Error(`${file}: expected script, resources and optionally platforms`);
-  }
-  return { name: path.basename(file, ".json"), script, resources, platforms };
+  const parsed = ManifestSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`${file}: ${parsed.error.message}`, { cause: parsed.error });
+  return { name: path.basename(file, ".json"), ...parsed.data };
 }
 
 /** This platform's manifests, in name order so the build is the same everywhere. */
-async function readManifests(): Promise<Manifest[]> {
+export async function readManifests(): Promise<Manifest[]> {
   const files = readdirSync(MANIFEST_DIR).filter((file) => file.endsWith(".json"));
   const manifests = await Promise.all(files.toSorted().map(readManifest));
   return manifests.filter((m) => !m.platforms || m.platforms.includes(process.platform));
@@ -83,6 +80,8 @@ async function build(names: string[]): Promise<void> {
   if (names.length === 0) stage(manifests);
 }
 
-const [command, ...args] = Bun.argv.slice(2);
-if (command === "build") await build(args);
-else throw new Error(`Usage: language-server-binaries.ts build [manifest...]`);
+if (import.meta.main) {
+  const [command, ...args] = Bun.argv.slice(2);
+  if (command === "build") await build(args);
+  else throw new Error(`Usage: language-server-binaries.ts build [manifest...]`);
+}

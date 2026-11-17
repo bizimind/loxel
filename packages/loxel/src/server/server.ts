@@ -1489,6 +1489,11 @@ for (let i = 0; i < initResults.length; i++) {
 
 function findDistDir(): string | null {
   if (process.env.LOXEL_STATIC_DIR) return process.env.LOXEL_STATIC_DIR;
+  // A compiled server, as in the standalone server bundle: the renderer beside the binary.
+  if (Bun.main.startsWith("/$bunfs/")) {
+    const besideBinary = join(dirname(process.execPath), "renderer");
+    if (existsSync(join(besideBinary, "index.html"))) return besideBinary;
+  }
   const builtCandidate = resolve(import.meta.dir, "..");
   if (existsSync(join(builtCandidate, "index.html"))) return builtCandidate;
   const srcCandidate = resolve(import.meta.dir, "../../dist");

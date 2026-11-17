@@ -1,0 +1,158 @@
+name: Build loxel server bundle
+
+# The standalone Loxel server for Linux: the server, its terminal host, the language servers and the
+# renderer, in one tarball per platform (packages/loxel/docs/ELECTRON.md#standalone-server-bundle).
+# release-loxel.yml calls it with `upload` to publish each release's bundles and their manifest. A
+# manual run, or a pull request that changes how the bundle is built, builds and smoke-tests the
+# bundles without uploading anything: only the release's call can set `upload`.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "The ref to build (the release tag)"
+        type: string
+        required: true
+      upload:
+        description: "Upload the bundles and the server manifest to R2"
+        type: boolean
+        default: false
+  workflow_dispatch:
+  # The build scripts of everything the bundle packages; source changes are covered by ci.yml's tests.
+  pull_request:
+    paths:
+      - ".github/workflows/build-loxel-server.yml"
+      - "packages/loxel/scripts/build-server-bundle.ts"
+      - "packages/loxel/scripts/smoke-test-server-bundle.ts"
+      - "packages/loxel/scripts/build-server.ts"
+      - "packages/loxel/scripts/check-binary-arch.ts"
+      - "packages/loxel/scripts/language-server-binaries.ts"
+      - "packages/loxel/scripts/language-servers/**"
+      - "packages/loxel/scripts/build-*-lsp.ts"
+      - "packages/loxel/scripts/build-astro-ls.ts"
+      - "packages/loxel/scripts/build-eslint-language-server.ts"
+      - "packages/loxel/scripts/build-gopls.ts"
+      - "packages/loxel/scripts/build-terraform-ls.ts"
+      - "packages/loxel/scripts/download-*.ts"
+      - "packages/loxel/scripts/copy-typescript.ts"
+      - "packages/loxel/scripts/go-toolchain.ts"
+      - "packages/loxel/scripts/resolve-package.ts"
+      - "packages/loxel/scripts/*-module/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # Each on its own architecture: `bun build --compile`, the language server downloads and the
+        # Go builds all produce binaries for the machine they run on.
+        include:
+          - os: blacksmith-4vcpu-ubuntu-2404
+            platform: linux-x64
+            key: linux_x64
+          - os: blacksmith-4vcpu-ubuntu-2404-arm
+            platform: linux-arm64
+            key: linux_arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.bundle.outputs.version }}
+      sha256_linux_x64: ${{ steps.bundle.outputs.sha256_linux_x64 }}
+      sha256_linux_arm64: ${{ steps.bundle.outputs.sha256_linux_arm64 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # The ESLint language server's build runs under Node.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server standalone
+        run: pnpm -C packages/loxel run build:server:standalone
+
+      - name: Build renderer
+        run: pnpm -C packages/loxel exec vite build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Package bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          bun packages/loxel/scripts/build-server-bundle.ts
+          VERSION=$(jq -r .version packages/loxel/package.json)
+          NAME="loxel-server-${VERSION}-${{ matrix.platform }}"
+          # Named by the machine it built on: a runner of another architecture fails here.
+          test -f "packages/loxel/release/server/${NAME}.tar.gz"
+          {
+            echo "version=${VERSION}"
+            echo "name=${NAME}"
+            echo "sha256_${{ matrix.key }}=$(sha256sum "packages/loxel/release/server/${NAME}.tar.gz" | awk '{print $1}')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check binary architectures
+        run: bun packages/loxel/scripts/check-binary-arch.ts ${{ matrix.platform }} packages/loxel/release/server/${{ steps.bundle.outputs.name }}
+
+      - name: Smoke test
+        run: bun packages/loxel/scripts/smoke-test-server-bundle.ts packages/loxel/release/server/${{ steps.bundle.outputs.name }}
+        timeout-minutes: 5
+
+      - name: Upload to R2
+        if: inputs.upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          FILENAME="${{ steps.bundle.outputs.name }}.tar.gz"
+          aws s3 cp "packages/loxel/release/server/${FILENAME}" \
+            "s3://loxel/loxel/server/${{ matrix.platform }}/${FILENAME}" \
+            --content-type application/gzip
+
+  # Only once both platforms' bundles are uploaded, so the manifest never names a missing one.
+  manifest:
+    if: inputs.upload
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
+    steps:
+      - name: Generate manifest
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          BASE="https://loxel.bizimind.io/loxel/server"
+          jq -n \
+            --arg v "$VERSION" \
+            --arg base "$BASE" \
+            --arg sha_x64 "${{ needs.build.outputs.sha256_linux_x64 }}" \
+            --arg sha_arm64 "${{ needs.build.outputs.sha256_linux_arm64 }}" \
+            'if ($v == "" or $sha_x64 == "" or $sha_arm64 == "") then error("missing build output") else . end |
+            {
+              version: $v,
+              released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+              server: {
+                "linux-x64": {url: "\($base)/linux-x64/loxel-server-\($v)-linux-x64.tar.gz", sha256: $sha_x64},
+                "linux-arm64": {url: "\($base)/linux-arm64/loxel-server-\($v)-linux-arm64.tar.gz", sha256: $sha_arm64}
+              }
+            }' > manifest.json
+          cat manifest.json
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: aws s3 cp manifest.json s3://loxel/loxel/server/manifest.json --content-type application/json
