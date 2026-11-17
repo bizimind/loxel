@@ -56,7 +56,7 @@ Passes are coalesced per worktree: one runs at a time, and everything requested 
 
 The client refetches only working-tree diffs (staged, unstaged, uncommitted) on `status_changed` and ref/log events; commit and range diffs are keyed by full SHAs and never change. Full file contents are not refetched on `status_changed`: each `file_content_changed` invalidates that file's content queries, both an open editor's (keyed by absolute path) and the working-tree side of the side-by-side diff (keyed by worktree-relative path), whether or not the file is open in an editor.
 
-A client hears none of this while it is not subscribed to the worktree, so each `subscribe_worktree` answers that socket with `worktree_files_resynced`. The client refetches the worktree's status, diffs and file contents, and invalidates its directory listings, which are read again the next time the tree lists them (see [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)).
+A client hears none of this while it is not subscribed to the worktree, so each `subscribe_worktree` answers that socket with `worktree_files_resynced`. The client refetches the worktree's status, diffs and file contents, and the files tree lists each expanded folder again, which also has the server watch it again (see [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)).
 
 ## Working-tree file events
 
@@ -91,7 +91,7 @@ Ending terminals and deleting rows cannot be undone, while a missed removal only
 `completeWorktreeRemoval` in [server.ts](../src/server/server.ts) is the one routine both removal paths end in, covering every worktree the project had, subscribed or not:
 
 1. removes the path from each subscriber's subscription set and tears down its Git/file/detached/external watchers and related caches at once, even within the grace period that follows the last unsubscribe (see [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes)), stops its language servers waiting for a new connection, and deletes its jdtls workspace;
-2. ends its terminal sessions, at once for an in-app removal and after a delay otherwise (see [TERMINALS.md](TERMINALS.md#ownership-and-lifetime-in-serverts)) and dismisses their notifications;
+2. ends its terminal sessions, at once for an in-app removal and after a delay otherwise (see [TERMINALS.md](TERMINALS.md#clients-and-lifetime-in-serverts)) and dismisses their notifications;
 3. deletes its rows from `stores.db` ([worktree-rows.ts](../src/server/worktree-rows.ts)).
 
 It may run twice for an in-app removal, from the route and from the event that follows, or the other way round, and the second run finds nothing to do. A worktree removed while no server was watching has no event: `initializeProject` deletes the rows of any path under the worktrees directory that is neither registered nor on disk, and its jdtls workspace. Removed and added again at one path between two reads goes unnoticed, leaving the old shell running: the path is listed both times, and the safe failure is preferred over guessing.
@@ -141,13 +141,13 @@ When changing watcher behavior, verify:
 
 Three invariants must survive any change to this pipeline. Each has a suite against real temporary repositories, in both bare and regular layouts, and a smoke test and a renderer test cover the two ends:
 
-| Suite                                                                   | Locks                                                                                                                                      |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove                                              |
-| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing                                               |
-| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                                                              |
-| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process, what removing a worktree ends, and the grace period after its last window leaves |
-| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message, and a reconnect, writes or invalidates in the renderer                             |
+| Suite                                                                   | Locks                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove                                                                                                                                |
+| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing                                                                                                                                 |
+| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                                                                                                                                                |
+| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process, what removing a worktree ends, two windows subscribing at once, a window leaving or closing while it is created, and the grace period after its last window leaves |
+| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message, and a reconnect, writes or invalidates in the renderer                                                                                                               |
 
 The first three use [git-sync-harness.ts](../src/test/git-sync-harness.ts), which wires the real watchers and services the way `initializeProject` and `subscribeWorktree` do and captures what they would broadcast, plus what a client reads back after each message. A change to that wiring in `server.ts` has to be mirrored there; the smoke test runs a real server, for one pass, and is the only check of `server.ts` itself.
 

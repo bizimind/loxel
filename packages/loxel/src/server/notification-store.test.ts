@@ -106,14 +106,16 @@ describe("NotificationStore persistence", () => {
     const path = join(dir, "notifications.db");
     const first = new NotificationStore(path);
     const kept = first.add({ source: terminal, title: "done", urgency: "high" });
-    const dismissed = first.add({ source: { kind: "server" }, urgency: "normal" });
+    const dismissed = first.add({ source: terminal, title: "seen", urgency: "normal" });
     const inbox = first.add({ source: { kind: "inbox", worktreePath: "/wt" }, urgency: "normal" });
     first.addBrowser({ source: browser("a"), title: "build", urgency: "normal" });
+    first.add({ source: { kind: "server" }, title: "socket failed", urgency: "high" });
     first.dismiss(dismissed.id);
     first.close();
 
     const second = new NotificationStore(path);
-    // Newest first, as before. A browser page's is not kept: what sites write stays off disk.
+    // Newest first, as before. A browser page's is not kept: what sites write stays off disk. Nor
+    // is the server's own, which only described that process.
     expect(second.getAll()).toEqual([inbox, kept]);
     second.dismissAll();
     second.close();

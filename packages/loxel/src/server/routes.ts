@@ -29,13 +29,19 @@ import {
   type RemoveResult,
 } from "@bizimind/wt/lib";
 
+import {
+  type AgentOrigin,
+  AgentOriginSchema,
+  AgentTerminalAnswerSchema,
+  type AgentTerminalPolicy,
+} from "@/api/agent-terminal-model";
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import { HOME_KEY } from "@/api/home-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
-import type { PanelPlacement } from "@/api/panel-placement-model";
+import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
 import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type {
   BrowseEntry,
@@ -65,6 +71,7 @@ import { classifySchemaGlob, schemaFilePatterns } from "@/lib/schema-glob";
 import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
+import type { AgentTerminals, StoredAsk } from "./agent-terminals";
 import { config } from "./config";
 import type { DetachedFilesService } from "./detached-files-service";
 import { getDiagnostics } from "./diagnostics";
@@ -231,6 +238,10 @@ export interface RouteContext {
   ) => "sent" | "queued" | "full";
   /** Drop the queued panel of a terminal whose shell failed to start. */
   dropQueuedTerminal: (terminalId: string) => void;
+  /** The terminals agents asked for that wait for the user's answer, and where they always run. */
+  agentTerminals: AgentTerminals;
+  /** "When an Agent Starts a Terminal", read from the persisted settings on each call. */
+  agentTerminalPolicy: () => AgentTerminalPolicy;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -1047,12 +1058,38 @@ async function handleUnstageHunk(req: Request, ctx: RouteContext): Promise<Respo
   return json({ success: true });
 }
 
-// POST /api/file-write — Write file content to disk with nonce for loop prevention
+/** A conditional write found the file no longer holding what the client expected. */
+class DiskChangedError extends Error {}
+
+/**
+ * For a write with `expectedContent` (a save retried after merging with what it read): check, right
+ * before writing, that the file at `absolutePath` still holds that, so a change made since is
+ * merged by the client rather than overwritten.
+ */
+async function assertDiskHolds(absolutePath: string, expected: string | undefined): Promise<void> {
+  if (expected === undefined) return;
+  const file = Bun.file(absolutePath);
+  const current = (await file.exists()) ? await file.text() : null;
+  if (current !== expected) throw new DiskChangedError(`${absolutePath} changed on disk`);
+}
+
+// POST /api/file-write — Write file content to disk with nonce for loop prevention. A 409
+// `EDISKCHANGED` answers a write whose `expectedContent` the file no longer holds.
 async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Response> {
+  try {
+    return await writeFileFromRequest(req, ctx);
+  } catch (err) {
+    if (err instanceof DiskChangedError) return error(err.message, 409, "EDISKCHANGED");
+    throw err;
+  }
+}
+
+async function writeFileFromRequest(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const filePath = requireString(body, "path");
   let content = requireString(body, "content");
   const nonce = requireString(body, "nonce");
+  const expected = typeof body.expectedContent === "string" ? body.expectedContent : undefined;
   const shouldFormat = body.format === true;
   const formattingSettings = shouldFormat
     ? parseFormatOnSaveSettings(body.formattingSettings)
@@ -1077,10 +1114,12 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     );
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
+      await assertDiskHolds(filePath, expected);
       await resolved.service.writeFileContent(resolved.name, content, nonce);
       return json({ success: true });
     }
     if (resolved.type === "external") {
+      await assertDiskHolds(resolved.absolutePath, expected);
       await resolved.resources.externalFilesService.writeFileContent(
         resolved.absolutePath,
         content,
@@ -1094,6 +1133,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     // (Others folders, drafts and external files are written as-is).
     if (tree.root === resolved.wtPath) content = await maybeFormat(content, filePath, tree.root);
     await tree.filesService.writeFile(relativePath, nonce, async () => {
+      await assertDiskHolds(join(tree.root, relativePath), expected);
       await Bun.write(join(tree.root, relativePath), content);
     });
     void tree.filesService.trackFile(relativePath);
@@ -1106,14 +1146,16 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
 
   content = await maybeFormat(content, filePath, resolved.wtPath);
 
+  const write = async () => {
+    await assertDiskHolds(join(resolved.wtPath, filePath), expected);
+    await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
+  };
   const resources = ctx.getWorktreeResources(resolved.wtPath);
   if (resources) {
-    await resources.filesService.writeFile(filePath, nonce, () =>
-      git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content),
-    );
+    await resources.filesService.writeFile(filePath, nonce, write);
   } else {
     // Fallback for when no subscriber has activated resources yet
-    await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
+    await write();
   }
   return json({ success: true, content, formatNotice });
 }
@@ -2974,6 +3016,16 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 // Version route
 // ---------------------------------------------------------------------------
 
+// GET /api/session
+/**
+ * Answers a request that carries the app's session secret; the admission check answers one without
+ * it `401` (request-origin.ts). A window asks when its socket cannot connect, since a refused
+ * WebSocket upgrade does not say why.
+ */
+function handleGetSession(): Response {
+  return new Response(null, { status: 204 });
+}
+
 // GET /api/version
 function handleGetVersion(_req: Request, ctx: RouteContext): Response {
   return json(versionInfo(ctx.isShuttingDown()));
@@ -3024,7 +3076,7 @@ async function handlePathInfo(req: Request): Promise<Response> {
   const path = await canonicalPath(rawPath);
   const stats = path ? await stat(path).catch(() => null) : null;
   if (!path || !stats) return error("Path not found", 404);
-  return json({ path, isDir: stats.isDirectory() });
+  return json({ path, isDir: stats.isDirectory(), size: stats.size, mtimeMs: stats.mtimeMs });
 }
 
 // POST /api/external-folders/add { wt, path } — open a folder in the worktree's Others section
@@ -3103,6 +3155,7 @@ async function namedWorktree(ctx: RouteContext, path: unknown): Promise<string |
 }
 
 const NO_WINDOW = "No Loxel window is open";
+const NO_WINDOW_FOR_FOLDER = "No Loxel window is open to show the folder in";
 
 /**
  * The reply to an open no window can take. With `queue` (the `loxel` CLI expects no window to come
@@ -3126,6 +3179,140 @@ function openWithoutWindow(
 
 function inboxFull(): Response {
   return error("Too many opens are waiting for a Loxel window; open one to receive them", 429);
+}
+
+const AGENT_TERMINALS_BLOCKED =
+  "Loxel's settings do not let coding agents start terminals (Settings > Terminal > When an Agent Starts a Terminal is Never)";
+
+/** A terminal to open, resolved from a request: where its shell starts and how its panel opens. */
+interface TerminalLaunch extends PanelOpenOptions {
+  cwd: string;
+  worktreePath: string | null;
+  command?: string;
+  title?: string;
+  /** The agent that asked for it, for its tab's tooltip. */
+  origin?: AgentOrigin;
+}
+
+/**
+ * Open a terminal panel in `window` (the window in use) and start its shell with the command, or,
+ * with no window connected, keep the panel in the open inbox for the next one and start the shell
+ * anyway.
+ */
+async function launchTerminal(
+  ctx: RouteContext,
+  { cwd, worktreePath, command, title, placement, focus, origin }: TerminalLaunch,
+  window: ActiveWindow | null,
+  windowId: string | null,
+): Promise<Response> {
+  const terminalId = crypto.randomUUID();
+  const message: InboxMessage = {
+    type: "open_terminal",
+    data: {
+      terminalId,
+      cwd,
+      worktreePath,
+      ...(title ? { title } : {}),
+      ...(placement ? { placement } : {}),
+      ...(focus === false ? { focus } : {}),
+      ...(origin ? { origin } : {}),
+    },
+  };
+  // Sent, or queued, in the tick that found the window or none: a window that connects while the
+  // shell starts gets the inbox with it, and a full inbox starts no shell.
+  const outcome = window
+    ? ctx.sendToActiveWindow(windowId, message)
+      ? "sent"
+      : null
+    : ctx.queueForWindow(message, worktreePath);
+  if (outcome === null) return error(NO_WINDOW, 503);
+  if (outcome === "full") return inboxFull();
+  // Started here, not by the panel's attach: the panel may not mount for hours (a background
+  // tab, a worktree the user is not on, a window that is not painting, or none connected), and
+  // the command must run now. Started in the same tick as the send, so the panel's attach finds
+  // it.
+  try {
+    await ctx.startTerminal({
+      id: terminalId,
+      cwd,
+      ...(worktreePath ? { worktreePath } : {}),
+      ...(window?.windowId ? { windowId: window.windowId } : {}),
+      ...(command ? { command } : {}),
+    });
+  } catch (err) {
+    terminalLog.error("Failed to start terminal", { terminalId, error: err });
+    ctx.dropQueuedTerminal(terminalId);
+    return error("Failed to start the terminal", 500);
+  }
+  if (outcome === "sent") return json({ ok: true, terminalId });
+  return json({ ok: true, queued: true, terminalId }, 202);
+}
+
+/**
+ * Keep an agent's terminal for the user to answer, in the window in use, or, with none connected,
+ * in the next window to say hello. Nothing starts until they choose Run.
+ */
+function askForTerminal(
+  ctx: RouteContext,
+  { origin: _origin, placement, ...request }: TerminalLaunch,
+  origin: AgentOrigin,
+  window: ActiveWindow | null,
+): Response {
+  // The answer may come hours later, when the active tab is whatever the user works in then: a
+  // `--replace` would close it. The terminal opens beside it instead.
+  const { replace: _replace, ...kept } = placement ?? {};
+  const ask = ctx.agentTerminals.ask({
+    ...request,
+    ...(Object.keys(kept).length > 0 ? { placement: kept } : {}),
+    origin,
+    ...(window?.windowId ? { windowId: window.windowId } : {}),
+  });
+  if (!ask) {
+    return error("Too many agents' terminals are waiting for an answer in Loxel", 429);
+  }
+  return json({ ok: true, asked: true, ...(window ? {} : { queued: true }) }, 202);
+}
+
+// POST /api/agent-terminals/answer — the user's answer to an agent's terminal, from the window
+// that asked: `windowId` gets the terminal.
+async function handleAgentTerminalAnswer(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.id !== "string") return error("id must be a string", 400);
+  const answer = AgentTerminalAnswerSchema.safeParse(body.answer);
+  if (!answer.success) return error('answer must be "run", "always" or "decline"', 400);
+  const windowId = typeof body.windowId === "string" ? body.windowId : null;
+  // Checked before the request is taken: with no window to open it in, it stays to answer again.
+  const window = answer.data === "decline" ? null : ctx.activeWindow(windowId);
+  if (answer.data !== "decline" && !window) return error(NO_WINDOW, 503);
+  const ask = ctx.agentTerminals.take(body.id);
+  if (!ask) return error("This terminal was already answered, or has expired", 404);
+  if (!window) return json({ ok: true });
+  const response = await launchAsked(ctx, ask, window, windowId);
+  if (answer.data !== "always" || !ask.worktreePath || !response.ok) return response;
+  // "Always in this worktree": recorded once a terminal ran, and it covers the requests already
+  // waiting there too.
+  ctx.agentTerminals.runAlways(ask.worktreePath);
+  for (const waiting of ctx.agentTerminals.takeWorktree(ask.worktreePath)) {
+    const started = await launchAsked(ctx, waiting, window, windowId);
+    if (!started.ok) terminalLog.warn("An agent's terminal did not start", { cwd: waiting.cwd });
+  }
+  return response;
+}
+
+/** Open the terminal of an answered request in `window`. */
+function launchAsked(
+  ctx: RouteContext,
+  { id: _id, askedAt: _askedAt, windowId: _askedIn, homeWindowId: _home, ...request }: StoredAsk,
+  window: ActiveWindow,
+  windowId: string | null,
+): Promise<Response> {
+  return launchTerminal(ctx, request, window, windowId);
+}
+
+// POST /api/agent-terminals/clear-always — ask again in every worktree
+function handleClearAgentTerminalWorktrees(_req: Request, ctx: RouteContext): Response {
+  ctx.agentTerminals.clearAlways();
+  return json({ ok: true });
 }
 
 // POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
@@ -3175,6 +3362,17 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwd || !cwdStats) return error("Directory not found", 404);
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
+    let origin: AgentOrigin | undefined;
+    if (body.agent !== undefined) {
+      const parsed = AgentOriginSchema.safeParse(body.agent);
+      if (!parsed.success) return error("agent must be an object of strings", 400);
+      origin = parsed.data;
+    }
+    // A coding agent's terminal follows "When an Agent Starts a Terminal"; a person's always runs.
+    // Never is answered before waiting for a window, which would only delay the refusal.
+    const policy = origin ? ctx.agentTerminalPolicy() : "run";
+    if (policy === "never") return error(AGENT_TERMINALS_BLOCKED, 403);
+
     // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
     // window shows, else to Home (null), which a window shows with no worktree. With no window, the
     // terminal waits in the inbox for the next one, in Home unless a worktree holds it.
@@ -3182,40 +3380,19 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     const window = ctx.activeWindow(windowId);
     if (!window && !queue) return error(NO_WINDOW, 503);
     const worktreePath = owner ?? window?.worktreePath ?? null;
-
-    const terminalId = crypto.randomUUID();
-    const message: InboxMessage = {
-      type: "open_terminal",
-      data: { terminalId, cwd, worktreePath, ...(title ? { title } : {}), ...placed },
+    const request: TerminalLaunch = {
+      cwd,
+      worktreePath,
+      ...(typeof command === "string" && command ? { command } : {}),
+      ...(typeof title === "string" && title ? { title } : {}),
+      ...placed,
+      ...(origin ? { origin } : {}),
     };
-    // Sent, or queued, in the tick that found the window or none: a window that connects while the
-    // shell starts gets the inbox with it, and a full inbox starts no shell.
-    const outcome = window
-      ? ctx.sendToActiveWindow(windowId, message)
-        ? "sent"
-        : null
-      : ctx.queueForWindow(message, worktreePath);
-    if (outcome === null) return error(NO_WINDOW, 503);
-    if (outcome === "full") return inboxFull();
-    // Started here, not by the panel's attach: the panel may not mount for hours (a background
-    // tab, a worktree the user is not on, a window that is not painting, or none connected), and
-    // the command must run now. Started in the same tick as the send, so the panel's attach finds
-    // it.
-    try {
-      await ctx.startTerminal({
-        id: terminalId,
-        cwd,
-        ...(worktreePath ? { worktreePath } : {}),
-        ...(window?.windowId ? { windowId: window.windowId } : {}),
-        ...(command ? { command } : {}),
-      });
-    } catch (err) {
-      terminalLog.error("Failed to start terminal", { terminalId, error: err });
-      ctx.dropQueuedTerminal(terminalId);
-      return error("Failed to start the terminal", 500);
+
+    if (policy === "ask" && origin && !ctx.agentTerminals.runsAlways(worktreePath)) {
+      return askForTerminal(ctx, request, origin, window);
     }
-    if (outcome === "sent") return json({ ok: true, terminalId });
-    return json({ ok: true, queued: true, terminalId }, 202);
+    return launchTerminal(ctx, request, window, windowId);
   }
 
   // URL mode: open in browser panel
@@ -3286,10 +3463,13 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const reply = ignored
     ? { warning: `${ignored} apply to a folder; it opens in the file tree` }
     : {};
-  const message: InboxMessage = { type: "open_folder", data: { path } };
-  if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true, ...reply });
-  const place = (queue ? await owningWorktree(ctx, path) : null) ?? undefined;
-  return openWithoutWindow(ctx, queue, message, place, reply);
+  // Not kept for a window to come: a reveal is for the window in use, and the inbox's opens wait
+  // unfocused. A caller that would queue knows no window is coming: a final answer (409), not one
+  // to retry while a window comes (503).
+  if (ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } })) {
+    return json({ ok: true, ...reply });
+  }
+  return queue ? error(NO_WINDOW_FOR_FOLDER, 409) : error(NO_WINDOW, 503);
 }
 
 // ---------------------------------------------------------------------------
@@ -3689,6 +3869,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
     "/api/version": handleGetVersion,
+    "/api/session": handleGetSession,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
     "/api/repo-trust": handleGetRepoTrust,
@@ -3746,6 +3927,8 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/schemas/consent": handleSchemaConsent,
     "/api/schemas/never-fetch": handleSchemaNeverFetch,
     "/api/open": handleOpen,
+    "/api/agent-terminals/answer": handleAgentTerminalAnswer,
+    "/api/agent-terminals/clear-always": handleClearAgentTerminalWorktrees,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
     ...toolchainPostRoutes,

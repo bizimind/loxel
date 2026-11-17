@@ -26,6 +26,8 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -179,6 +181,9 @@ const server = Bun.spawn([process.execPath, "src/server/index.ts"], {
   },
 });
 
+/** The header with the session secret the server writes before it listens. */
+const authorization = () => sessionAuthorization(path.join(work, "state")).Authorization;
+
 const failures: string[] = [];
 function check(ok: boolean, label: string, detail?: unknown): void {
   console.log(
@@ -190,7 +195,7 @@ function check(ok: boolean, label: string, detail?: unknown): void {
 async function post(route: string, body: unknown): Promise<void> {
   const res = await fetch(`${base}${route}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: authorization() },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${route}: ${res.status} ${await res.text()}`);
@@ -199,7 +204,9 @@ async function post(route: string, body: unknown): Promise<void> {
 /** Open a session on the given config, lint a file, ask for its fixes, and close the session. */
 async function session(config: unknown, label: string, expectLint: boolean): Promise<void> {
   writeFileSync(path.join(project, "biome.json"), JSON.stringify(config));
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/biome-lsp?wt=${encodeURIComponent(project)}`);
+  const ws = bunWebSocket(`ws://127.0.0.1:${port}/ws/biome-lsp?wt=${encodeURIComponent(project)}`, {
+    authorization: authorization(),
+  });
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve);
     ws.addEventListener("error", reject);

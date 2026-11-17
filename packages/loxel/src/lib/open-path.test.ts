@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
 const { onLoxelEvent } = await import("./loxel-events");
-const { openFile, openPath, openUrl } = await import("./open-path");
+const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, dropInboxOpen } =
+  await import("./open-path");
+const { wsClient } = await import("@/api/client");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
 const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
@@ -138,6 +140,80 @@ describe("opens from outside the window", () => {
     expect(created).toEqual([]);
     expect(switched).toEqual([]);
     expect(pending(OTHER)).toEqual([{ kind: "url", url: URL_TARGET, focus: false }]);
+  });
+
+  test("an open from the inbox is done with once its panel is placed, and opens once", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    const message = {
+      type: "open_url" as const,
+      wtPath: OTHER,
+      data: { url: URL_TARGET, focus: false },
+    };
+
+    await openFromInbox("in-1", message);
+    // Sent again after a reconnect, before the user went to the worktree.
+    await openFromInbox("in-1", message);
+    expect(pending(OTHER)).toHaveLength(1);
+    expect(sent).toEqual([]);
+
+    for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
+      dispatchPendingOpen(open);
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    const done = { type: "inbox_open_done", inboxId: "in-1" };
+    expect(sent).toEqual([done]);
+
+    // The server missed the answer: it gets it again, and no second panel opens.
+    await openFromInbox("in-1", message);
+    expect(sent).toEqual([done, done]);
+    expect(created).toHaveLength(1);
+  });
+
+  test("an open from the inbox another window placed is not placed here", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    const message = {
+      type: "open_url" as const,
+      wtPath: OTHER,
+      data: { url: URL_TARGET, focus: false },
+    };
+
+    await openFromInbox("in-2", message);
+    dropInboxOpen("in-2");
+    for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
+      dispatchPendingOpen(open);
+    expect(created).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  test("an open from the inbox placed elsewhere while on its way is neither placed nor answered", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+
+    const opening = openFromInbox("in-3", {
+      type: "open_url",
+      wtPath: MAIN,
+      data: { url: URL_TARGET },
+    });
+    dropInboxOpen("in-3");
+    await opening;
+    expect(created).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  test("an open from the inbox that fails here is left to the other windows", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    // In Home, a file outside every worktree has nowhere to open.
+    useWorktreeStore.setState({ activeWorktreePath: null });
+
+    await openFromInbox("in-4", { type: "open_file", data: { filePath: "/elsewhere/notes.md" } });
+    expect(openedFiles).toEqual([]);
+    expect(sent).toEqual([]);
   });
 
   test("targets arriving during a switch keep their order in the new worktree", async () => {

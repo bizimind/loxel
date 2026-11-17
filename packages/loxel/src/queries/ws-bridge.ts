@@ -8,10 +8,11 @@ import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
+import { dropInboxOpen, openFromInbox, openRequest } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
+import { useAgentTerminalsStore } from "@/store/agent-terminals";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
@@ -319,14 +320,19 @@ export function useWsBridge(): void {
           invalidateEditorConfigBelow("");
 
           // A broad query invalidation refreshes clean editors. Dirty/saving editors
-          // need the same conflict-aware state-machine path as a normal file event.
+          // need the same conflict-aware state-machine path as a normal file event. Those with a
+          // save queued are the save outbox's: its retry reads the file and merges it.
           for (const [editorKey, entry] of editorStore.files) {
-            if (entry.state === "clean") continue;
+            if (entry.state === "clean" || entry.queued) continue;
             const path = entry.filePath;
             const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
             void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
           }
+          // For what the cache does not hold: the files tree reads its listings imperatively, so
+          // the invalidation above refreshes none of them, and the open files outside the
+          // worktree are registered with the server again.
+          dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: message.wtPath });
           break;
         }
 
@@ -349,19 +355,18 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data);
-          break;
-
         case "open_folder":
-          void openFolder(message.data.path);
-          break;
-
         case "open_terminal":
-          void openTerminal(message.data);
+        case "open_url":
+          void openRequest(message);
           break;
 
-        case "open_url":
-          void openUrl(message.wtPath, message.data);
+        case "open_from_inbox":
+          void openFromInbox(message.inboxId, message.message);
+          break;
+
+        case "inbox_open_placed":
+          dropInboxOpen(message.inboxId);
           break;
 
         // --- Project-scoped events (carry projectPath) ---
@@ -402,13 +407,8 @@ export function useWsBridge(): void {
               queryKey: ["localdb", projectPath, "views", message.data.tableId],
             });
           }
+          // The rows too, which every view of the project's tables shows.
           queryClient.invalidateQueries({ queryKey: ["localdb", projectPath] });
-          dispatchLoxelEvent("loxel-localdb-changed", {
-            projectPath,
-            tableName: message.data.tableName,
-            tableId: message.data.tableId,
-            scope: message.data.scope,
-          });
           break;
         }
 
@@ -440,6 +440,10 @@ export function useWsBridge(): void {
 
         case "schema_consent_changed":
           useSchemaConsentStore.setState(message.data);
+          break;
+
+        case "agent_terminals_changed":
+          useAgentTerminalsStore.setState(message.data);
           break;
 
         case "notifications_sync":
@@ -477,6 +481,7 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_notice":
         case "terminal_state":
+        case "terminal_size":
         case "error":
           break;
 

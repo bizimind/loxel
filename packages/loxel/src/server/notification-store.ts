@@ -5,10 +5,11 @@
  * are its sources, told apart by `source.kind`.
  *
  * Persisted: every change is written through to its SQLite file, so a restart keeps the list,
- * dismissals included. Browser pages' notifications are the exception, kept for the server's life
- * only: what a site writes in them (sign-in codes, chat and mail previews) stays off disk, as the
- * page object their clicks reach does not outlive the app. All connected clients are kept in sync
- * via WS broadcasts from the caller.
+ * dismissals included. Two kinds are kept for the server's life only. Browser pages': what a site
+ * writes in them (sign-in codes, chat and mail previews) stays off disk, as the page object their
+ * clicks reach does not outlive the app. The server's own: they describe this process (its CLI
+ * socket, the terminal hosts it ended), and the next server raises its own again if they still
+ * hold. All connected clients are kept in sync via WS broadcasts from the caller.
  */
 import {
   type BrowserNotificationSource,
@@ -27,6 +28,11 @@ const MAX_NOTIFICATIONS = 200;
  */
 const MAX_BROWSER_NOTIFICATIONS = 50;
 
+/** Whether a notification outlives the server; see the module comment. */
+function persists({ source }: ServerNotification): boolean {
+  return source.kind !== "browser" && source.kind !== "server";
+}
+
 export class NotificationStore {
   private notifications: ServerNotification[];
   private readonly persisted: PersistedList<ServerNotification>;
@@ -35,6 +41,8 @@ export class NotificationStore {
   constructor(path: string | null = null) {
     this.persisted = new PersistedList(path, ServerNotificationSchema);
     this.notifications = this.persisted.load().toReversed();
+    // Kinds kept for the server's life only, written by a build that persisted them.
+    this.removeWhere((n) => !persists(n));
     // A list persisted under a larger cap, or by a store whose trims did not reach the file.
     this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
   }
@@ -46,7 +54,7 @@ export class NotificationStore {
       timestamp: Date.now(),
     };
     this.notifications.unshift(notification);
-    if (notification.source.kind !== "browser") this.persisted.insert(notification);
+    if (persists(notification)) this.persisted.insert(notification);
     this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
     return notification;
   }

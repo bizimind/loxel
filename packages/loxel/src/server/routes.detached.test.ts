@@ -60,6 +60,8 @@ describe("detached file project destinations", () => {
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: () => "full",
       dropQueuedTerminal: () => {},
+      agentTerminals: {} as never,
+      agentTerminalPolicy: () => "run",
     };
   });
 

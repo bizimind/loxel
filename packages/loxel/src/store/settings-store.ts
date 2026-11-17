@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import {
+  type AgentTerminalPolicy,
+  DEFAULT_AGENT_TERMINAL_POLICY,
+  parseAgentTerminalPolicy,
+} from "@/api/agent-terminal-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
@@ -49,8 +54,8 @@ export type SidebarZone = "left" | "bottom" | "right";
  * them, and its background tabs mode falls back to its default when missing or unknown (the count
  * it replaced, `backgroundPages`, is dropped). The terminal's "When quitting Loxel" falls back to
  * its default when it is missing (a row from before it) or unknown, as main does with the value it
- * is sent, and bidirectional text is on only when
- * stored as true.
+ * is sent, and so does "When an Agent Starts a Terminal", as the server does; bidirectional text is
+ * on only when stored as true.
  */
 export function withValidSettings<T extends object>(slice: T): T {
   const valid: Record<string, unknown> = { ...(slice as Record<string, unknown>) };
@@ -60,6 +65,7 @@ export function withValidSettings<T extends object>(slice: T): T {
     valid.terminal = {
       ...valid.terminal,
       whenQuitting: parseWhenQuitting(valid.terminal.whenQuitting),
+      agentTerminals: parseAgentTerminalPolicy(valid.terminal.agentTerminals),
       bidiText: valid.terminal.bidiText === true,
     };
   }
@@ -79,6 +85,8 @@ export interface TerminalSettings {
   whenQuitting: WhenQuitting;
   /** Draw right-to-left text (Hebrew, Arabic, ...) in display order. */
   bidiText: boolean;
+  /** What a coding agent's `loxel terminal` does ("When an Agent Starts a Terminal"). */
+  agentTerminals: AgentTerminalPolicy;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -376,12 +384,6 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/deno.json", "jsonc"),
   fa("**/.vscode/*.json", "jsonc"),
   fa("**/*.code-workspace", "jsonc"),
-
-  // docker-bake files — *.hcl alone maps to terraform, but bake files
-  // must route to docker-language-server (dockerbake language).
-  fa("**/docker-bake.hcl", "dockerbake"),
-  fa("**/docker-bake.override.hcl", "dockerbake"),
-  fa("**/*.docker-bake.hcl", "dockerbake"),
 
   // pip requirements and constraints files (pip-tools inputs use .in).
   fa("**/requirements*.txt", "pip-requirements"),
@@ -787,6 +789,7 @@ export const useSettingsStore = create<SettingsState>()(
         activatePythonEnv: true,
         whenQuitting: DEFAULT_WHEN_QUITTING,
         bidiText: false,
+        agentTerminals: DEFAULT_AGENT_TERMINAL_POLICY,
       },
       themes: structuredClone(DEFAULT_THEME_SETTINGS),
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),

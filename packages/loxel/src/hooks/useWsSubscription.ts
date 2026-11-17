@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
+import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
@@ -10,8 +11,9 @@ import { useWorktreeStore } from "@/store/worktrees";
 /**
  * Subscribe to worktrees for push events.
  * Switching worktrees subscribes to the new one and defers unsubscribing the
- * old until all pending saves complete (via onWorktreeSavesDrained). This keeps
- * server resources alive so auto-save flushes during panel unmount succeed.
+ * old until its saves complete, in flight or waiting in the save outbox (via
+ * onWorktreeSavesDrained). This keeps server resources alive so auto-save flushes
+ * during panel unmount succeed, and queued saves are served when retried.
  * `wsClient` subscribes every one of them again after a reconnect.
  */
 export function useWsSubscription(activeWorktreePath: string | null): void {
@@ -39,10 +41,9 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     // The server forgets a worktree's open external files with its resources (after a reconnect,
     // say), so tell it again once it confirms the subscription: sent right after the subscribe, the
     // list would arrive before the resources exist and be dropped.
-    return wsClient.subscribe((message) => {
-      if (message.type !== "worktree_files_resynced") return;
+    return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
       const wt = useWorktreeStore.getState().activeWorktreePath;
-      if (message.wtPath !== wt) return;
+      if (wtPath !== wt) return;
       const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
         (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
       );

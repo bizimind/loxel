@@ -367,3 +367,15 @@ jobs:
         run: gh workflow run release-site.yml --repo "$GITHUB_REPOSITORY" --ref main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The standalone server bundle for Linux and its own manifest (loxel/server/manifest.json). Apart
+  # from the app's jobs: it neither waits for nor gates them, and the app's manifest is unchanged.
+  server-bundle:
+    needs: check-and-bump
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-loxel-server.yml
+    with:
+      ref: ${{ needs.check-and-bump.outputs.tag }}
+      upload: true
+    secrets: inherit

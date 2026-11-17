@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 import { withoutAgentEnv } from "../src/coding-agent-env";
+import { sessionAuthorization } from "../src/session-client";
 
 const LOXEL_ROOT = resolve(import.meta.dirname, "..");
 const BASE_PORT = 17434;
@@ -81,4 +82,8 @@ export default async function globalSetup() {
   process.env.LOXEL_PORT = String(port);
 
   await pollUntilReady(`http://localhost:${port}/api/version`);
+
+  // A server started without the app writes its session secret before it listens; the specs'
+  // pages and requests carry it (playwright.config.ts).
+  process.env.LOXEL_E2E_AUTHORIZATION = sessionAuthorization(stateDir).Authorization;
 }

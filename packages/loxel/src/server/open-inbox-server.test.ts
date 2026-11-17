@@ -1,6 +1,7 @@
 /**
- * The open inbox and the notifications across restarts of a real server process: what `server.ts`
- * wires up around open-inbox.ts and notification-store.ts. `LOXEL_DEV=1` keeps the server off the
+ * The open inbox and the notifications across restarts of a real server process, and an agent's
+ * terminal waiting for a window to ask in: what `server.ts` wires up around open-inbox.ts,
+ * notification-store.ts and agent-terminals.ts. `LOXEL_DEV=1` keeps the server off the
  * keychain, and a temporary state directory off the user's projects.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -11,6 +12,7 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { WsMessage } from "@/api/ws-protocol";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
 import { CaptureLog } from "@/test/git-sync-harness";
 
@@ -49,7 +51,7 @@ async function startServer(stateDir: string) {
     if (server.exitCode !== null) throw new Error(`Server exited: ${server.exitCode}`);
     await Bun.sleep(50);
   }
-  return { server, port };
+  return { server, port, auth: sessionAuthorization(stateDir) };
 }
 
 async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
@@ -58,9 +60,9 @@ async function stopServer(server: ReturnType<typeof Bun.spawn>): Promise<void> {
 }
 
 /** An app window's socket, recording every message the server sends it. */
-async function connectWindow(port: number) {
+async function connectWindow({ port, auth }: { port: number; auth: { Authorization: string } }) {
   const log = new CaptureLog<WsMessage>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = bunWebSocket(`ws://127.0.0.1:${port}/ws`, auth);
   ws.addEventListener("message", (event) => {
     log.add(JSON.parse(String(event.data)) as WsMessage);
   });
@@ -120,9 +122,12 @@ describe("a server with no window connected", () => {
       await stopServer(current.server);
 
       current = await startServer(stateDir);
-      const { ws, log } = await connectWindow(current.port);
-      ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
-      expect(await received(log, "open_file")).toEqual({
+      const windowA = crypto.randomUUID();
+      const hello = (windowId: string) => JSON.stringify({ type: "window_hello", windowId });
+      const { ws, log } = await connectWindow(current);
+      ws.send(hello(windowA));
+      const delivered = await received(log, "open_from_inbox");
+      expect(delivered.message).toEqual({
         type: "open_file",
         data: { filePath: file, focus: false },
       });
@@ -134,21 +139,115 @@ describe("a server with no window connected", () => {
       // Outside every worktree, the file opened in what the window showed.
       expect(added.data.source).toEqual({ kind: "inbox" });
       // The notification follows every delivery, so a terminal would have come before it.
-      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
+      expect(
+        log.entries.filter((message) => message.type === "open_from_inbox").map((m) => m.message),
+      ).toEqual([delivered.message]);
+
+      /** What `window` was sent until now: the server answers a socket's messages in order. */
+      const fence = async (window: Awaited<ReturnType<typeof connectWindow>>) => {
+        window.ws.send(JSON.stringify({ type: "subscribe_logs" }));
+        await received(window.log, "log_error_snapshot");
+      };
+      // A reloads before it places the panel: it gets the request again, with no second
+      // notification.
       ws.close();
+      const reloaded = await connectWindow(current);
+      reloaded.ws.send(hello(windowA));
+      expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
+      await fence(reloaded);
+      expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
+      // Every window that says hello gets it until one places the panel; then the others are told
+      // to drop their copy.
+      const windowB = await connectWindow(current);
+      windowB.ws.send(hello(crypto.randomUUID()));
+      expect(await received(windowB.log, "open_from_inbox")).toEqual(delivered);
+      reloaded.ws.send(JSON.stringify({ type: "inbox_open_done", inboxId: delivered.inboxId }));
+      expect(await received(windowB.log, "inbox_open_placed")).toEqual({
+        type: "inbox_open_placed",
+        inboxId: delivered.inboxId,
+      });
+      await fence(windowB);
+      expect(windowB.log.entries.some((m) => m.type === "notification_added")).toBe(false);
+      reloaded.ws.close();
+      windowB.ws.close();
       await stopServer(current.server);
 
-      // Delivered once, and the notification outlives another restart.
+      // Done with once placed, and the notification outlives another restart.
       current = await startServer(stateDir);
-      const next = await connectWindow(current.port);
-      next.ws.send(JSON.stringify({ type: "window_hello", windowId: crypto.randomUUID() }));
+      const next = await connectWindow(current);
+      next.ws.send(hello(crypto.randomUUID()));
       expect((await received(next.log, "notifications_sync")).data).toEqual([added.data]);
-      // Nothing more was delivered: the server answers a window's messages in order, so the reply
-      // to one sent after the hello comes after anything the hello brought.
-      next.ws.send(JSON.stringify({ type: "subscribe_logs" }));
-      await received(next.log, "log_error_snapshot");
-      expect(next.log.entries.some((message) => message.type === "open_file")).toBe(false);
+      await fence(next);
+      expect(next.log.entries.some((message) => message.type === "open_from_inbox")).toBe(false);
       next.ws.close();
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("an agent's terminal with Ask and no window connected", () => {
+  let stateDir: string;
+  let current: Awaited<ReturnType<typeof startServer>> | null = null;
+
+  beforeAll(() => {
+    stateDir = realpathSync(mkdtempSync(path.join(tmpdir(), "loxel-agent-ask-")));
+  });
+
+  afterAll(() => {
+    current?.server.kill("SIGKILL");
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  test(
+    "waits for the next window to say hello, asks there, and runs once it says Run",
+    async () => {
+      current = await startServer(stateDir);
+      // "When an Agent Starts a Terminal" is Ask, as a window saves it.
+      const saved = await fetch(`http://127.0.0.1:${current.port}/api/stores/settings`, {
+        method: "PUT",
+        headers: { ...current.auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value: JSON.stringify({ state: { terminal: { agentTerminals: "ask" } }, version: 1 }),
+        }),
+      });
+      expect(saved.ok).toBe(true);
+      const agent = { agent: "Claude Code" };
+      const res = await fetch("http://localhost/api/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminal: { cwd: stateDir, command: "true" }, agent, queue: true }),
+        unix: cliSocketPath(stateDir),
+      });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ ok: true, asked: true, queued: true });
+
+      const { ws, log } = await connectWindow(current);
+      const windowId = crypto.randomUUID();
+      ws.send(JSON.stringify({ type: "window_hello", windowId }));
+      const seq = await log.waitFor(
+        (message) =>
+          message.type === "agent_terminals_changed" && message.data.asks[0]?.windowId === windowId,
+        { label: "the ask, in this window" },
+      );
+      const changed = log.entries[seq] as Extract<WsMessage, { type: "agent_terminals_changed" }>;
+      const [ask] = changed.data.asks;
+      expect(ask).toMatchObject({ origin: agent, cwd: stateDir, command: "true" });
+      // Nothing started while it waited.
+      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
+
+      const answer = await fetch(`http://127.0.0.1:${current.port}/api/agent-terminals/answer`, {
+        method: "POST",
+        headers: { ...current.auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ id: ask!.id, answer: "run", windowId }),
+      });
+      expect(answer.status).toBe(200);
+      expect((await received(log, "open_terminal")).data).toMatchObject({
+        cwd: stateDir,
+        origin: agent,
+      });
+      ws.close();
+      // SIGTERM ends the terminal it started; a killed server's terminal host would outlive it.
+      await stopServer(current.server);
     },
     TEST_TIMEOUT_MS,
   );

@@ -11,5 +11,8 @@
     "linux-x86_64.zip": "1acc44e24201c1d2f5ccb4e43e7426ed0df6909207a81ff199810e2808104d89",
     "linux-aarch_64.zip": "0b88a49e83c2611282672f5123ce33abf1371c8e3c55cad6ee45ea00626ffa1b",
     "win32.zip": "7eaefaac68253b0ec8e0ad1f1c0f2d0755423d4e99e52497428b52f80df28eb7"
-  }
+  },
+  "source": "https://github.com/eclipse-lemminx/lemminx",
+  "licenseFile": "licenses/lemminx.txt",
+  "note": "The native LemMinX binary from the vscode-xml release its purl names, unmodified."
 }

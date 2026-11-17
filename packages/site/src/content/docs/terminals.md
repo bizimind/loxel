@@ -31,6 +31,10 @@ A program that ends while Loxel is away, an agent finishing its task for example
 
 In the rare case that the process keeping your terminals running stops unexpectedly, its terminals end with it, and each one's panel says **[Terminal ended: Loxel's terminal host stopped unexpectedly]** instead of an exit code. If it only stops responding for a while, its terminals keep running: each panel says **[Loxel's terminal host is not responding; this terminal continues once it does]**, new terminals start fine meanwhile, and the output picks up where it left off once it answers again. A terminal that cannot be opened at all says why in its panel.
 
+### One terminal in several windows
+
+A terminal can be open in more than one window at a time. Every window shows it live, and you can type in any of them. The window you last typed in, clicked or switched to sets the terminal's size, and the others show it at that size until you use them. Opening a terminal that another window is using, or reconnecting to it, never resizes it there: the new window shows it at its current size until you use it. Closing the terminal's tab in one window leaves it running in the others; it ends when you close it in the last one.
+
 ### Quitting without ending your terminals
 
 Your terminals can keep running while Loxel is closed, so agents and long-running commands go on working. When you open Loxel again, each panel reconnects to its terminal, scrollback included.
@@ -130,14 +134,15 @@ Terminals use the code font until you pick a terminal font of their own in **Set
 
 Every Loxel terminal starts with these environment variables already set:
 
-| Variable          | Value                                                                      |
-| ----------------- | -------------------------------------------------------------------------- |
-| `LOXEL`           | `1`                                                                        |
-| `LOXEL_SOCKET`    | Socket of the running Loxel server, which the `loxel` CLI connects to      |
-| `LOXEL_WORKTREE`  | Path of the worktree this terminal belongs to; not set in Home's terminals |
-| `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only)                                  |
+| Variable            | Value                                                                      |
+| ------------------- | -------------------------------------------------------------------------- |
+| `LOXEL`             | `1`                                                                        |
+| `LOXEL_SOCKET`      | Socket of the running Loxel server, which the `loxel` CLI connects to      |
+| `LOXEL_WORKTREE`    | Path of the worktree this terminal belongs to; not set in Home's terminals |
+| `LOXEL_WINDOW_ID`   | ID of the Loxel window (desktop app only)                                  |
+| `LOXEL_TERMINAL_ID` | ID of this terminal                                                        |
 
-`LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_SOCKET` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by agents that want to know which worktree they're in.
+`LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_SOCKET` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by agents that want to know which worktree they're in. `LOXEL_TERMINAL_ID` lets a terminal an agent starts with `loxel terminal` say which terminal it came from.
 
 ---
 
@@ -149,7 +154,7 @@ Claude Code, Codex and every other terminal agent run in Loxel terminals as they
 
 ## The `loxel` CLI
 
-Every Loxel terminal has the `loxel` CLI, already connected to its window: `loxel src/app.ts` opens a file, `loxel https://example.com` a page in a browser panel, and `loxel terminal -- pnpm dev` a new terminal running a command. See [Loxel CLI](/docs/cli) for every command and flag.
+Every Loxel terminal has the `loxel` CLI, already connected to its window: `loxel src/app.ts` opens a file, `loxel https://example.com` a page in a browser panel, and `loxel terminal -- pnpm dev` a new terminal running a command. See [Loxel CLI](/docs/cli) for every command and flag, and [Terminals your agents start](/docs/cli#terminals-your-agents-start) for whether an agent's `loxel terminal` runs at once, asks you first or is refused.
 
 ---
 

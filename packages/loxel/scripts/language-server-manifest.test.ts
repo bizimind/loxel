@@ -11,7 +11,6 @@ import {
 describe("pinnedGoModuleVersion", () => {
   test.each([
     ["gopls", "gopls-module", "golang.org/x/tools/gopls"],
-    ["docker-language-server", "docker-lsp-module", "github.com/docker/docker-language-server"],
     ["terraform-ls", "terraform-ls-module", "github.com/hashicorp/terraform-ls"],
   ])("%s's pinned go.mod requires its manifest's version", async (name, dir, modulePath) => {
     const version = await pinnedGoModuleVersion(name, path.join(import.meta.dir, dir), modulePath);

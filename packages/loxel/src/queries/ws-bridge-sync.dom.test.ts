@@ -7,11 +7,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } f
 import type { Query } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
-import { type ReconnectInfo, wsClient } from "@/api/client";
+import { wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type { EnrichedProject } from "@/api/project-model";
 import type { WsMessage } from "@/api/ws-protocol";
+import { onLoxelEvent } from "@/lib/loxel-events";
 import { queryClient } from "@/query-client";
 import { useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -27,7 +28,7 @@ const invalidateQueries = spyOn(queryClient, "invalidateQueries");
 const refreshProjectWorktrees = mock(async () => {});
 const fetchProjects = mock(async () => {});
 let deliver: (message: WsMessage) => void = () => {};
-let reconnect: (info: ReconnectInfo) => void = () => {};
+let reconnect: () => void = () => {};
 // The stores are shared with other test files in the process; put their actions back after.
 const originalFetchProjects = useProjectStore.getState().fetchProjects;
 const originalRefreshProjectWorktrees = useWorktreeStore.getState().refreshProjectWorktrees;
@@ -129,25 +130,22 @@ describe("useWsBridge git messages", () => {
 });
 
 describe("useWsBridge after a reconnect", () => {
-  test.each([false, true])(
-    "refetches everything but file contents, and the projects (server restarted: %p)",
-    async (serverRestarted) => {
-      reconnect({ serverRestarted });
+  test("refetches everything but file contents, and the projects", async () => {
+    reconnect();
 
-      const keys = [
-        queryKeys.status(PROJECT, WT),
-        ["commits", PROJECT],
-        COMMIT_DIFF,
-        queryKeys.runningTerminals(),
-        queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
-      ];
-      // Editors with unsaved changes take new content through worktree_files_resynced instead.
-      expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
-      expect(fetchProjects).toHaveBeenCalledTimes(1);
-      // Worktrees removed meanwhile are released by the per-project refresh.
-      await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
-    },
-  );
+    const keys = [
+      queryKeys.status(PROJECT, WT),
+      ["commits", PROJECT],
+      COMMIT_DIFF,
+      queryKeys.runningTerminals(),
+      queryKeys.fileContent(PROJECT, "a.ts", undefined, WT),
+    ];
+    // Editors with unsaved changes take new content through worktree_files_resynced instead.
+    expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
+    expect(fetchProjects).toHaveBeenCalledTimes(1);
+    // Worktrees removed meanwhile are released by the per-project refresh.
+    await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT));
+  });
 });
 
 describe("useWsBridge file messages", () => {
@@ -175,6 +173,19 @@ describe("useWsBridge file messages", () => {
       ...ownDirs,
     ]);
     expect(setQueryData).not.toHaveBeenCalled();
+  });
+
+  test("worktree_files_resynced tells the files tree once its listings are invalidated", () => {
+    const ownDir = queryKeys.dirContents(PROJECT, `${WT}/src`);
+    const seen: Array<{ wtPath: string; dirInvalidated: boolean }> = [];
+    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
+      seen.push({ wtPath, dirInvalidated: matchedByPredicates([ownDir]).length === 1 });
+    });
+
+    deliver({ type: "worktree_files_resynced", wtPath: WT, projectPath: PROJECT });
+    unsubscribe();
+
+    expect(seen).toEqual([{ wtPath: WT, dirInvalidated: true }]);
   });
 
   test("files_dir_changed writes that directory's listing", () => {

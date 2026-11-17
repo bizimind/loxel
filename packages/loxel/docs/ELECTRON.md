@@ -5,7 +5,7 @@ How the Electron shell fits around the Bun server and React renderer, how the ap
 ## Process model
 
 - **One app process, one server.** A packaged app takes Electron's single-instance lock, and the app spawns its server on launch: the compiled `loxel-server` binary in production, `bun run src/server/index.ts` with `LOXEL_DEV=1` in dev, on the mode's port (7433 prod, 7434 dev, 7435 + n for [demo](#demo-mode) instance n). The server lives as long as the app, and the terminals live in [terminal host](TERMINAL_HOST.md) processes the server starts detached, which outlive it. Every window connects to it, identifies itself with its window ID, and talks to it over REST and WebSocket. Startup, crash restarts, shutdown and state scopes are detailed in [SHARED_SERVER.md](SHARED_SERVER.md).
-- **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server).
+- **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server). Main adds the app's session secret to every request the windows send to that origin, and sends it on its own requests to the server ([ARCHITECTURE.md](ARCHITECTURE.md#request-admission)); browser panels' partition never gets it.
 - **Electron IPC is only for native integrations** (dock badge, window focus and fullscreen state, opening links in a browser panel, the default browser, keystrokes inside webviews, copying images from webviews, loading their favicons, measuring and freezing background webviews, page dialogs and notifications in webviews and their service workers, app updates, quitting and restarting with the question before a quit and the setting it follows, the theme). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
 
 ## Updates
@@ -82,3 +82,36 @@ Page visibility can't be measured the way the screenshot scripts drive a demo. m
 The server, the terminal host, language server scripts and Go builds all produce binaries for the machine they run on, so each macOS architecture builds on a runner of that architecture. [check-binary-arch.ts](../scripts/check-binary-arch.ts) reads the header of every file in the app and fails the release if a binary doesn't match.
 
 Each release publishes a CycloneDX SBOM of what each architecture's app ships, `Loxel-<version>-mac-<arch>.cdx.json`, written by [sbom.ts](../scripts/sbom.ts) on that architecture's build, since pnpm installs and lists only the machine's own platform packages (TypeScript's compiler is one). It is uploaded to R2 next to that architecture's installer and attached to the GitHub release; the manifest's `sbom` holds the URL per `<platform>-<arch>`, which the site's download page links to. Its base is pnpm's SBOM of this package's `dependencies`, which here are what ships (Vite bundles them, or a language server is built from them), so a shipped npm package goes in `dependencies` and a build-only tool in `devDependencies`. pnpm reads licenses from the installed packages, so it runs after `pnpm install`. `sbom.ts` adds what the lockfile does not hold: the patched Electron (a devDependency, as electron-builder requires), with its patches as pedigree; the Bun runtime from the root `.bun-version`, which `bun build --compile` puts in the server and the Bun-built language servers; and the component each [language server manifest](LANGUAGE_SERVERS.md#binary-resolution-and-packaging) names. It then reads the build info the Go linker embeds in every Go binary among the staged language servers ([go-build-info.ts](../scripts/go-build-info.ts), the data `go version -m` prints, read from the file so no Go toolchain is needed), and adds the Go standard library and each module compiled in as dependencies of that server's component, or of the root for one built from npm packages (TypeScript's `tsc`). It finds the binaries itself, so a new Go language server needs no change here, and it refuses to run before the language servers are built. pnpm's root names Loxel as an npm package, so its purl is replaced with the GitHub one. It fails when a manifest's npm package is not in `dependencies` or a component is listed twice, and [sbom.test.ts](../scripts/sbom.test.ts) checks every manifest's component is in it.
+
+### Standalone server bundle
+
+Each release also publishes the server without the app, for Linux: a bundle to run the server from on a Linux machine. Installing it and running it as a service are outside its scope. [build-loxel-server.yml](../../../.github/workflows/build-loxel-server.yml), which `release-loxel.yml` calls beside the app's jobs, builds it for `linux-x64` and `linux-arm64`, each on a runner of that architecture: `build:server:standalone`, a browser build of the renderer (`vite build`), then [build-server-bundle.ts](../scripts/build-server-bundle.ts), which packages them as `release/server/loxel-server-<version>-<platform>.tar.gz`. The tarball holds one directory, laid out like the app's `Resources`:
+
+| Path                           | What                                                                                                                                     |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `loxel-server`                 | The compiled server                                                                                                                      |
+| `loxel-terminal-host`          | The terminal host, which the server clones into its state directory before running it ([TERMINAL_HOST.md](TERMINAL_HOST.md#the-process)) |
+| `gopls`, `ruff`, `jdtls/`, ... | Every language server staged for the platform (`build/language-servers/`), found beside the server binary as in the app                  |
+| `renderer/`                    | The renderer, which a compiled server serves from beside itself when `LOXEL_STATIC_DIR` is unset                                         |
+| `LICENSE`, `licenses/`         | Loxel's license, and the license, source and license file each language server's manifest names                                          |
+
+Every binary in it must match the platform ([check-binary-arch.ts](../scripts/check-binary-arch.ts)), and [smoke-test-server-bundle.ts](../scripts/smoke-test-server-bundle.ts) starts it with a throwaway `LOXEL_STATE_DIR`, reads the session token it writes, checks `/api/version`, an `/api` route with and without the token and the renderer, and runs a command in a terminal through the bundled host. Only then are the tarballs uploaded to `loxel/server/<platform>/` on R2, followed by their manifest, `https://loxel.bizimind.io/loxel/server/manifest.json`, apart from the app's:
+
+```json
+{
+  "version": "0.1.379",
+  "released_at": "2026-11-18T12:00:00Z",
+  "server": {
+    "linux-x64": {
+      "url": "https://loxel.bizimind.io/loxel/server/linux-x64/loxel-server-0.1.379-linux-x64.tar.gz",
+      "sha256": "…"
+    },
+    "linux-arm64": {
+      "url": "https://loxel.bizimind.io/loxel/server/linux-arm64/loxel-server-0.1.379-linux-arm64.tar.gz",
+      "sha256": "…"
+    }
+  }
+}
+```
+
+A run of the workflow on its own (`gh workflow run build-loxel-server.yml --ref <branch>`, once it is on main), or a pull request that changes the workflow or a script that builds what the bundle packages, builds and smoke-tests both bundles without uploading anything. The two scripts also run on a Mac, building and testing a bundle for it, to try them locally.

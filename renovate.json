@@ -55,11 +55,6 @@
         "executionMode": "update"
       }
     },
-    {
-      "description": "Built from a commit of its main branch in a wrapper module that Dependabot raises.",
-      "matchPackageNames": ["github.com/docker/docker-language-server"],
-      "enabled": false
-    },
     { "matchDepNames": ["bun"], "semanticCommitScope": "deps" }
   ]
 }

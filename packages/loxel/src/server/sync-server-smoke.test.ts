@@ -25,6 +25,7 @@ import type { WorktreeEntry } from "@/api/git-models";
 import { encodeInputFrame } from "@/api/terminal-stream";
 import type { WsMessage } from "@/api/ws-protocol";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import {
   CaptureLog,
   createSyncRepo,
@@ -58,6 +59,8 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
   let server: ReturnType<typeof Bun.spawn>;
   let socket: WebSocket;
   let baseUrl: string;
+  /** The server's session secret, which every request and socket to it carries. */
+  let auth: { Authorization: string };
   let projectId: string;
 
   const waitFor = <K extends WsMessage["type"]>(
@@ -71,7 +74,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     );
 
   async function readJson<T>(url: string): Promise<T> {
-    const response = await fetch(`${baseUrl}${url}`);
+    const response = await fetch(`${baseUrl}${url}`, { headers: auth });
     if (!response.ok) throw new Error(`GET ${url}: ${response.status}`);
     return (await response.json()) as T;
   }
@@ -139,12 +142,13 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       },
       "the server to listen",
     );
+    auth = sessionAuthorization(stateDir);
     const { projects } = await readJson<{ projects: Array<{ id: string; path: string }> }>(
       "/api/projects",
     );
     projectId = projects.find((project) => project.path === repo.root)!.id;
 
-    socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    socket = bunWebSocket(`ws://127.0.0.1:${port}/ws`, auth);
     socket.addEventListener("message", (event) => {
       log.add(JSON.parse(String(event.data)) as WsMessage);
     });
@@ -245,7 +249,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     const putRow = (key: string, value = "{}") =>
       fetch(storeUrl(key), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...auth, "Content-Type": "application/json" },
         body: JSON.stringify({ value }),
       });
     const readRow = async (key: string) =>
@@ -264,7 +268,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     async function openTerminal(wtPath: string, id: string = crypto.randomUUID()) {
       const states: Array<{ epoch: string }> = [];
       const output: string[] = [];
-      const terminal = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+      const terminal = bunWebSocket(baseUrl.replace("http", "ws") + "/ws", auth);
       terminal.binaryType = "arraybuffer";
       terminal.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
@@ -457,7 +461,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         const remove = (force: boolean) =>
           fetch(`${baseUrl}/api/worktree/remove`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...auth, "Content-Type": "application/json" },
             body: JSON.stringify({
               projectPath: repo.root,
               path: wtPath,
@@ -476,7 +480,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         // Worktree hooks run only in a trusted repository.
         const trust = await fetch(`${baseUrl}/api/repo-trust`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({ worktreePath: wtPath, decision: "trusted" }),
         });
         expect(trust.ok).toBe(true);
@@ -509,6 +513,56 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
   });
 
   test(
+    "two windows subscribing to a worktree at once share one set of its resources",
+    async () => {
+      const { path: wtPath } = await executeAdd({ name: "smoke-twice", repoPath: repo.root });
+      const otherLog = new CaptureLog<WsMessage>();
+      const other = bunWebSocket(socket.url, auth);
+      other.addEventListener("message", (event) => {
+        otherLog.add(JSON.parse(String(event.data)) as WsMessage);
+      });
+      await new Promise((resolve, reject) => {
+        other.addEventListener("open", resolve);
+        other.addEventListener("error", reject);
+      });
+      const resynced = (message: WsMessage) =>
+        message.type === "worktree_files_resynced" && message.wtPath === wtPath;
+
+      // Both arrive while the first is still creating the resources.
+      const since = log.mark();
+      const subscribe = JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath });
+      socket.send(subscribe);
+      other.send(subscribe);
+      await Promise.all([
+        log.waitFor(resynced, { since, label: "the first window's resync" }),
+        otherLog.waitFor(resynced, { since: 0, label: "the second window's resync" }),
+      ]);
+
+      // Both are subscribers of the one set: a change of the worktree's status reaches both.
+      const gitDir = path.resolve(wtPath, await git(wtPath, "rev-parse", "--git-dir"));
+      const lock = path.join(gitDir, "index.lock");
+      const statusOf = (message: WsMessage) =>
+        message.type === "status_changed" && message.wtPath === wtPath;
+      const beforeLock = log.mark();
+      const otherBeforeLock = otherLog.mark();
+      await retryUntil(
+        () => {
+          writeFileSync(lock, "");
+          rmSync(lock);
+        },
+        async (timeoutMs) =>
+          (await log.seenWithin(statusOf, beforeLock, timeoutMs)) &&
+          (await otherLog.seenWithin(statusOf, otherBeforeLock, timeoutMs)),
+        "both windows to get the worktree's status",
+      );
+
+      other.close();
+      socket.send(JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath }));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "a worktree its last window left and came back to keeps its undo history",
     async () => {
       const { path: wtPath } = await executeAdd({ name: "smoke-undo", repoPath: repo.root });
@@ -519,7 +573,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       const post = (route: string, body: object) =>
         fetch(`${baseUrl}/api/files/${route}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({ wt: wtPath, ...body }),
         });
       const created = await post("create-file", { dir: "", name: "undo-me.txt" });
@@ -550,6 +604,60 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         },
         "the worktree's resources to be torn down",
       );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a window that leaves a worktree, or closes, while its resources are created is not kept",
+    async () => {
+      const { path: wtPath } = await executeAdd({ name: "smoke-leave", repoPath: repo.root });
+      const subscribe = JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath });
+      const unsubscribe = JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath });
+      const openSocket = async () => {
+        const opened = bunWebSocket(socket.url, auth);
+        await new Promise((resolve, reject) => {
+          opened.addEventListener("open", resolve);
+          opened.addEventListener("error", reject);
+        });
+        return opened;
+      };
+      /**
+       * This window subscribes and leaves once the others' subscribes are sent, which proves the
+       * creation they started has ended; with nobody left, the resources go after the grace period.
+       */
+      const expectTornDown = async () => {
+        const since = log.mark();
+        socket.send(subscribe);
+        await waitFor("worktree_files_resynced", (message) => message.wtPath === wtPath, since);
+        socket.send(unsubscribe);
+        await retryUntil(
+          () => {},
+          async (timeoutMs) => {
+            const response = await fetch(`${baseUrl}/api/files/undo`, {
+              method: "POST",
+              headers: { ...auth, "Content-Type": "application/json" },
+              body: JSON.stringify({ wt: wtPath }),
+            });
+            if (response.status === 503) return true;
+            await Bun.sleep(timeoutMs);
+            return false;
+          },
+          "the worktree's resources to be torn down",
+        );
+      };
+
+      // Switching on at once: the unsubscribe comes before the creation the subscribe started ends.
+      const leaving = await openSocket();
+      leaving.send(subscribe);
+      leaving.send(unsubscribe);
+      await expectTornDown();
+      leaving.close();
+
+      const closing = await openSocket();
+      closing.send(subscribe);
+      closing.close();
+      await expectTornDown();
     },
     TEST_TIMEOUT_MS,
   );

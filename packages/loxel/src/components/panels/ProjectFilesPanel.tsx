@@ -233,7 +233,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   // Reveal a folder opened via `loxel <folder>`, a terminal link, etc., or a path revealed from
   // another panel, once its tree lists it. Right after a worktree switch the server is still
   // creating the worktree's resources and its listing fails, so keep the request until a reveal
-  // succeeds and retry as listings arrive.
+  // succeeds and retry as listings arrive or the server confirms the subscription.
   const pendingReveal = useWorktreeUI((s) => s.pendingReveal);
   useEffect(() => {
     if (!pendingReveal || !getTreeRoot(pendingReveal.path)) return;
@@ -249,10 +249,14 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         .catch(() => {});
     };
     attempt();
-    const unsubscribe = onLoxelEvent("loxel-dir-changed", attempt);
+    const unsubscribes = [
+      onLoxelEvent("loxel-dir-changed", attempt),
+      // A subscription the server adopted within its grace period pushes no listing.
+      onLoxelEvent("loxel-worktree-files-resynced", attempt),
+    ];
     return () => {
       done = true;
-      unsubscribe();
+      for (const unsubscribe of unsubscribes) unsubscribe();
     };
   }, [pendingReveal, getTreeRoot, revealFileInTree]);
 
@@ -520,6 +524,16 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   useEffect(() => {
     return onLoxelEvent("loxel-dir-changed", ({ dir }) => {
       treeRef.current?.reloadSubtree(dir);
+    });
+  }, []);
+
+  // Changes made while the window was not subscribed to the worktree (a disconnect, a server
+  // restart) were pushed to nobody, and a server that dropped the worktree's resources no longer
+  // watches its expanded folders. Listing them again fixes both.
+  useEffect(() => {
+    return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
+      if (wtPath !== useWorktreeStore.getState().activeWorktreePath) return;
+      treeRef.current?.reloadExpanded();
     });
   }, []);
 

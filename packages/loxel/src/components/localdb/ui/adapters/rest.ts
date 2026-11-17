@@ -65,6 +65,7 @@ export function makeRestAdapter(baseUrl: string, project?: string | null): DataA
   }
 
   return {
+    queryKey: ["localdb", project ?? null],
     listTables: () => get<TableMeta[]>("/tables"),
     getSchema: (tableName) => get<TableSchema>(`/tables/${tableName}/schema`),
 

@@ -1,6 +1,6 @@
-import type { TableSchema, Page, TableViewDef, ValidationIssue } from "@bizimind/localdb-sdk";
+import type { TableSchema, TableViewDef, ValidationIssue } from "@bizimind/localdb-sdk";
 import type React from "react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
 import { groupIssuesByColumn } from "../../fields/issue-message.ts";
 import { getField, defaultComponentKeyForColumn } from "../../fields/registry.ts";
+import { useTableRows } from "../use-table-rows.ts";
 import { CellEditor } from "./CellEditor.tsx";
 
 interface Props {
@@ -19,8 +20,9 @@ interface Props {
 
 export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<Page<Record<string, unknown>> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const tableRows = useTableRows(adapter, schema.table.name, { page, pageSize });
+  const data = tableRows.page;
+  /** The last write's failure; the rows' own load failure is `tableRows.error`. */
   const [error, setError] = useState<string | null>(null);
   const [addingRow, setAddingRow] = useState(false);
   const [newRow, setNewRow] = useState<Record<string, unknown>>({});
@@ -44,22 +46,6 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
       ]
     : visibleCols;
 
-  function reload() {
-    setLoading(true);
-    adapter
-      .query(schema.table.name, { page, pageSize })
-      .then((result) => {
-        setData(result as Page<Record<string, unknown>>);
-        setError(null);
-      })
-      .catch((err: unknown) => setError(String(err)))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    reload();
-  }, [schema.table.name, page, pageSize]);
-
   async function saveNewRow() {
     setSaving(true);
     try {
@@ -77,7 +63,7 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
       setNewRow({});
       setNewRowIssues({});
       setAddingRow(false);
-      reload();
+      void tableRows.refresh();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -110,40 +96,35 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
     const { rowId, column } = editingCell;
     setSavingCell(true);
     const previousData = data;
+    const restore = () => {
+      if (previousData) tableRows.setPage(() => previousData);
+    };
     const patchValue = toPayloadValue(editingValue);
-    setData((current) =>
-      current
-        ? {
-            ...current,
-            rows: current.rows.map((row) =>
-              row["id"] === rowId ? { ...row, [column]: patchValue } : row,
-            ),
-          }
-        : current,
-    );
+    tableRows.setPage((current) => ({
+      ...current,
+      rows: current.rows.map((row) =>
+        row["id"] === rowId ? { ...row, [column]: patchValue } : row,
+      ),
+    }));
     try {
       const result = await adapter.update<Record<string, unknown>>(schema.table.name, rowId, {
         [column]: patchValue,
       });
       if (!result.ok) {
-        setData(previousData);
+        restore();
         setEditingIssues(result.issues.filter((issue) => issue.path[0] === column));
         return;
       }
-      setData((current) =>
-        current
-          ? {
-              ...current,
-              rows: current.rows.map((row) => (row["id"] === rowId ? result.row : row)),
-            }
-          : current,
-      );
+      tableRows.setPage((current) => ({
+        ...current,
+        rows: current.rows.map((row) => (row["id"] === rowId ? result.row : row)),
+      }));
       setEditingCell(null);
       setEditingValue(null);
       setEditingIssues([]);
       setError(null);
     } catch (err) {
-      setData(previousData);
+      restore();
       setError(String(err));
     } finally {
       setSavingCell(false);
@@ -162,8 +143,12 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
     .filter(([key]) => !orderedCols.some((col) => col!.name === key))
     .flatMap(([, issues]) => issues);
 
-  if (error) return <div className="text-destructive px-4 py-2 text-sm">Error: {error}</div>;
-  if (loading) return <div className="text-muted-foreground px-4 py-2 text-sm">Loading…</div>;
+  const shownError = error ?? tableRows.error;
+  if (shownError) {
+    return <div className="text-destructive px-4 py-2 text-sm">Error: {shownError}</div>;
+  }
+  if (tableRows.loading)
+    return <div className="text-muted-foreground px-4 py-2 text-sm">Loading…</div>;
   if (!data) return null;
 
   return (

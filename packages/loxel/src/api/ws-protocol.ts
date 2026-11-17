@@ -1,5 +1,6 @@
 import type { OpenTerminalRequest } from "@/open-request";
 
+import type { AgentOrigin, AgentTerminalsState } from "./agent-terminal-model";
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { BrowserNotificationSource, ServerNotification } from "./notification-model";
@@ -44,6 +45,19 @@ export interface ServerIdentity {
   bootEpoch: string;
 }
 
+/** What `POST /api/open` (`loxel <path>`, `loxel terminal`) sends a window. */
+export type OpenRequestMessage =
+  // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
+  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
+  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
+  // Window-scoped (sent to the window the user is working in)
+  | { type: "open_file"; data: OpenFilePanel }
+  | { type: "open_folder"; data: { path: string } }
+  | { type: "open_terminal"; data: OpenTerminalPanel };
+
+/** What the open inbox keeps for a window to come: any open request but a folder's. */
+export type InboxOpenMessage = Exclude<OpenRequestMessage, { type: "open_folder" }>;
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // First message on every connection; the client resyncs from it (see `WsClient`)
@@ -62,13 +76,15 @@ export type WsMessage =
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | ToolchainChangedMessage
-  // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
-  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
-  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
-  // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: OpenFilePanel }
-  | { type: "open_folder"; data: { path: string } }
-  | { type: "open_terminal"; data: OpenTerminalPanel }
+  | OpenRequestMessage
+  /**
+   * An open request the server kept in its open inbox while no window was connected. The window
+   * answers `inbox_open_done` once it has placed the panel (or the open failed); until then the
+   * server keeps the request, and gives it to every window that says hello.
+   */
+  | { type: "open_from_inbox"; inboxId: string; message: InboxOpenMessage }
+  /** A window placed the panel of an `open_from_inbox` request: the others drop their copy. */
+  | { type: "inbox_open_placed"; inboxId: string }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }
@@ -84,6 +100,12 @@ export type WsMessage =
   | ({ type: "terminal_exit"; id: string } & TerminalEnd)
   | ({ type: "terminal_notice"; id: string } & TerminalNotice)
   | ({ type: "terminal_state" } & TerminalState)
+  /**
+   * The terminal's PTY size, sent to every client attached to it but the active one (the one that
+   * last claimed it, or attached with no other client attached), which render at that size; also
+   * sent to a client whose attach joined other clients, which does not claim the terminal.
+   */
+  | { type: "terminal_size"; id: string; cols: number; rows: number }
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
   | { type: "terminals_changed" }
   | { type: "log_entries"; data: LogEntry[] }
@@ -97,6 +119,8 @@ export type WsMessage =
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
   | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
   | { type: "schema_consent_changed"; data: SchemaConsentState }
+  /** Agents' terminals waiting for an answer, or the worktrees that always run them, changed. */
+  | { type: "agent_terminals_changed"; data: AgentTerminalsState }
   // Some repository's trust or restrictions changed (global, like the worktrees sharing it)
   | { type: "repo_trust_changed" };
 
@@ -126,6 +150,8 @@ export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelO
 export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
   terminalId: string;
   worktreePath: string | null;
+  /** The coding agent that started it (`loxel terminal`), for its tab's tooltip. */
+  origin?: AgentOrigin;
 } & PanelOpenOptions;
 
 /** A terminal session and where its shell starts, as the panel sends it when attaching. */
@@ -151,8 +177,9 @@ export type WsClientMessage =
   | ({
       /**
        * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
-       * exist. The {@link TerminalSpawnTarget} fields apply only when spawning, except
-       * `scrollbackLines`, which is applied on every attach like `cols` and `rows`.
+       * exist. It claims the terminal only when no other client is attached to it. The
+       * {@link TerminalSpawnTarget} fields apply only when spawning, except `scrollbackLines`,
+       * which is applied on every attach like `cols` and `rows`.
        * `sinceEpoch`/`sinceOffset` identify the session and stream offset the client's xterm is
        * already current to (a reconnect with a live xterm); omit them for a fresh xterm.
        */
@@ -164,6 +191,11 @@ export type WsClientMessage =
     } & TerminalSpawnTarget)
   /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
   | { type: "terminal_detach"; id: string }
+  /**
+   * The client's size. The client becomes the terminal's active one: the PTY takes its size, and
+   * only its input is written. Sent on a refit, and when the user types, clicks or focuses the
+   * terminal, before the input that follows.
+   */
   | { type: "terminal_resize"; id: string; cols: number; rows: number }
   | { type: "terminal_destroy"; id: string }
   /**
@@ -177,6 +209,8 @@ export type WsClientMessage =
   // Window identity and focus (target requests such as `loxel <folder>` at the window in use)
   | { type: "window_hello"; windowId: string }
   | { type: "window_focused" }
+  /** The window placed the panel of an `open_from_inbox` request (or the open failed). */
+  | { type: "inbox_open_done"; inboxId: string }
   // Notifications
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }

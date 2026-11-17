@@ -31,7 +31,8 @@ bun e2e/theme/fixture.ts "$FIXTURE" >/dev/null
   done
 ) &
 SERVER=$!
-VITE_SCREENSHOT=1 node_modules/.bin/vite --mode development >"$WORK/vite.log" 2>&1 &
+# Vite's proxy adds the session secret from the stack server's token file, in its state dir.
+LOXEL_STATE_DIR="$WORK/state" VITE_SCREENSHOT=1 node_modules/.bin/vite --mode development >"$WORK/vite.log" 2>&1 &
 VITE=$!
 trap 'pkill -P $SERVER; kill $SERVER $VITE 2>/dev/null' EXIT INT TERM
 
@@ -43,7 +44,8 @@ if ! pgrep -P "$SERVER" | grep -qx "$LISTENER"; then
   echo "the server on port 7434 (pid $LISTENER) is not this stack's; not seeding it" >&2
   exit 1
 fi
-bun e2e/theme/seed.ts "$WORK"
+# Seeding goes through Vite's proxy.
 until curl -sf http://127.0.0.1:5173/ >/dev/null; do sleep 0.5; done
+bun e2e/theme/seed.ts "$WORK"
 echo "theme stack ready: http://127.0.0.1:5173 (fixture $FIXTURE)"
 wait

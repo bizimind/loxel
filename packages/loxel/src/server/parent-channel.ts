@@ -17,6 +17,8 @@ import { logger } from "./logger";
 const log = logger.child("server");
 
 export interface ParentListener {
+  /** The app's session secret, its first message. */
+  session(secret: string): void;
   /** The app asked the server to shut down, doing `terminals` to the terminals. */
   shutdown(terminals: ShutdownTerminals): void;
   /** The channel closed without a shutdown: the app is gone. */
@@ -32,7 +34,8 @@ export function listenToParent(input: Readable, listener: ParentListener): void 
       log.warn("Ignoring a line on the app's channel that is not a message");
       return;
     }
-    listener.shutdown(message.terminals);
+    if (message.type === "session") listener.session(message.secret);
+    else listener.shutdown(message.terminals);
   });
   reader.on("close", () => listener.closed());
 }

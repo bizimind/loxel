@@ -20,6 +20,8 @@ import path from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import type { ServerNotification } from "@/api/notification-model";
+import { sessionTokenPath } from "@/app-session";
+import { bunWebSocket, sessionAuthorization } from "@/session-client";
 import { cliSocketPath } from "@/socket-paths";
 import { leaveStaleSocket } from "@/test/stale-socket";
 
@@ -61,7 +63,7 @@ async function startServer(stateDir: string) {
     if (server.exitCode !== null) throw new Error(`Server exited: ${server.exitCode}`);
     await Bun.sleep(50);
   }
-  return { server, port, baseUrl };
+  return { server, port, baseUrl, auth: sessionAuthorization(stateDir) };
 }
 
 const tempStateDir = () => realpathSync(mkdtempSync(path.join(tmpdir(), "loxel-cli-socket-")));
@@ -71,6 +73,7 @@ describe("a server's CLI socket", () => {
   let stateDir: string;
   let socket: string;
   let baseUrl: string;
+  let auth: { Authorization: string };
   let server: ReturnType<typeof Bun.spawn>;
 
   const overSocket = (pathname: string, init: RequestInit = {}) =>
@@ -82,7 +85,7 @@ describe("a server's CLI socket", () => {
     // What a server killed with SIGKILL leaves behind.
     mkdirSync(path.dirname(socket), { recursive: true, mode: 0o700 });
     await leaveStaleSocket(socket);
-    ({ server, baseUrl } = await startServer(stateDir));
+    ({ server, baseUrl, auth } = await startServer(stateDir));
   }, STARTUP_TIMEOUT_MS);
 
   afterAll(() => {
@@ -123,15 +126,28 @@ describe("a server's CLI socket", () => {
   });
 
   test("leaves the loopback port as it was", async () => {
-    expect((await fetch(`${baseUrl}/api/projects`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/projects`, { headers: auth })).status).toBe(200);
+  });
+
+  test("keeps its session token beside the socket, readable only by this user", () => {
+    expect(path.dirname(sessionTokenPath(stateDir))).toBe(path.dirname(socket));
+    expect(statSync(sessionTokenPath(stateDir)).mode & 0o777).toBe(0o600);
+  });
+
+  test("serves the loopback port's API only with the session secret", async () => {
+    expect((await fetch(`${baseUrl}/api/projects`)).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/version`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/session`, { headers: auth })).status).toBe(204);
   });
 
   test(
-    "removes the socket when it shuts down",
+    "leaves the socket's name for the next server, and removes its session token, when it shuts down",
     async () => {
       server.kill("SIGTERM");
       await server.exited;
-      expect(existsSync(socket)).toBe(false);
+      // Nothing listens there any more: the CLI's connection is refused, which is no server.
+      expect(existsSync(socket)).toBe(true);
+      expect(existsSync(sessionTokenPath(stateDir))).toBe(false);
     },
     SHUTDOWN_TIMEOUT_MS,
   );
@@ -143,8 +159,9 @@ describe("a server that cannot listen on its CLI socket", () => {
 
   beforeAll(async () => {
     stateDir = tempStateDir();
-    // A file where the socket's directory goes.
-    writeFileSync(path.dirname(cliSocketPath(stateDir)), "");
+    // A directory where the socket goes, which nothing can be renamed over.
+    mkdirSync(cliSocketPath(stateDir), { recursive: true });
+    writeFileSync(path.join(cliSocketPath(stateDir), "occupied"), "");
     started = await startServer(stateDir);
   }, STARTUP_TIMEOUT_MS);
 
@@ -154,11 +171,12 @@ describe("a server that cannot listen on its CLI socket", () => {
   });
 
   test("still serves the app on its loopback port", async () => {
-    expect((await fetch(`${started.baseUrl}/api/projects`)).status).toBe(200);
+    const response = await fetch(`${started.baseUrl}/api/projects`, { headers: started.auth });
+    expect(response.status).toBe(200);
   });
 
   test("tells the app's windows the loxel command cannot reach it, and why", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${started.port}/ws`);
+    const ws = bunWebSocket(`ws://127.0.0.1:${started.port}/ws`, started.auth);
     const synced = new Promise<ServerNotification[]>((resolve, reject) => {
       ws.addEventListener("error", () => reject(new Error("WebSocket error")));
       ws.addEventListener("message", (event) => {

@@ -1,19 +1,18 @@
 import type { TableSchema, CalendarViewDef } from "@bizimind/localdb-sdk";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
 import { RecordForm } from "../form/RecordForm.tsx";
+import { useTableRows } from "../use-table-rows.ts";
 
 interface Props {
   schema: TableSchema;
   viewDef: CalendarViewDef;
   adapter: DataAdapter;
 }
-
-type Row = Record<string, unknown>;
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -29,35 +28,22 @@ export function CalendarView({ schema, viewDef, adapter }: Props) {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
   const [openRecord, setOpenRecord] = useState<number | "new" | null>(null);
   const [newDateValue, setNewDateValue] = useState<string | null>(null);
 
   const firstDay = currentMonth;
   const lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
 
-  async function fetchRows() {
-    setLoading(true);
-    try {
-      const page = await adapter.query<Row>(tableName, {
-        pageSize: 1000,
-        filter: {
-          AND: [
-            { column: dateColumn, op: "gte", value: isoDate(firstDay) },
-            { column: dateColumn, op: "lte", value: isoDate(lastDay) },
-          ],
-        },
-      });
-      setRows(page.rows);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void fetchRows();
-  }, [tableName, currentMonth.getTime()]);
+  const tableRows = useTableRows(adapter, tableName, {
+    pageSize: 1000,
+    filter: {
+      AND: [
+        { column: dateColumn, op: "gte", value: isoDate(firstDay) },
+        { column: dateColumn, op: "lte", value: isoDate(lastDay) },
+      ],
+    },
+  });
+  const rows = tableRows.page?.rows ?? [];
 
   // Build calendar grid
   const startDow = firstDay.getDay(); // 0=Sun
@@ -101,7 +87,7 @@ export function CalendarView({ schema, viewDef, adapter }: Props) {
   function closeOverlay() {
     setOpenRecord(null);
     setNewDateValue(null);
-    void fetchRows();
+    void tableRows.refresh();
   }
 
   const monthLabel = currentMonth.toLocaleString("default", { month: "long", year: "numeric" });
@@ -146,7 +132,6 @@ export function CalendarView({ schema, viewDef, adapter }: Props) {
               )}
             >
               <div className="text-muted-foreground mb-0.5 text-[0.85em]">{date.getDate()}</div>
-              {loading && inMonth && dayRows.length === 0 && null}
               {dayRows.map((r) => (
                 <div
                   key={String(r.id)}

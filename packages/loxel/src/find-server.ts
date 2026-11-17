@@ -3,7 +3,7 @@
  * own account can open (see src/server/cli-socket.ts). The CLI never uses the server's TCP port.
  * See docs/TERMINALS.md#the-loxel-cli.
  */
-import { statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { cliSocketPath } from "./socket-paths";
@@ -55,6 +55,31 @@ function outsideSandbox(path: string): string {
   return `Loxel's socket ${path} is outside this sandbox: allow it in the sandbox's settings`;
 }
 
+/**
+ * Whether the CLI may connect to the socket at `path`: only when its directory is a directory of
+ * this user's that no one else can enter (0700). Whoever owns that directory decides what listens
+ * in it, which matters for the temporary directory a deep state directory's socket falls back to,
+ * whose name anyone can predict. A missing directory is no server, without connecting: another
+ * account could put one in place between this check and the connection.
+ */
+function checkSocketDir(path: string): { ok: true } | { ok: false; reason: string | null } {
+  const dir = dirname(path);
+  let stat;
+  try {
+    stat = lstatSync(dir, { throwIfNoEntry: false });
+  } catch (err) {
+    return { ok: false, reason: blockedReason(err, path) };
+  }
+  if (!stat) return { ok: false, reason: null };
+  const isPrivate =
+    stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o777) === 0o700;
+  if (isPrivate) return { ok: true };
+  return {
+    ok: false,
+    reason: `${dir} is not a private directory of this user's, so the loxel CLI does not use the socket in it`,
+  };
+}
+
 type Probe =
   | { state: "up" }
   | { state: "draining" }
@@ -64,9 +89,11 @@ type Probe =
 /**
  * Whether a Loxel server answers on the socket at `path`, or one that is shutting down (`draining`),
  * whose replacement is the one to talk to. A missing or stale socket file (a refused connection)
- * means none does.
+ * means none does. A socket in a directory that is not private to this user is never connected to.
  */
 async function probe(path: string): Promise<Probe> {
+  const dir = checkSocketDir(path);
+  if (!dir.ok) return dir.reason ? { state: "blocked", reason: dir.reason } : { state: "down" };
   try {
     const res = await fetch(`${SOCKET_URL}/api/version`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),

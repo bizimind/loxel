@@ -1,19 +1,17 @@
 /**
- * Proves at the socket level that the bundled docker-language-server sends nothing off the machine
- * when it runs behind the real `loxel-server`. macOS only. Run it after changing the server's pin or
- * its manager; it exits non-zero on any outbound attempt or a missing language feature.
+ * Proves at the socket level that the bundled Dockerfile language server (dockerfile-language-
+ * server-nodejs, built as `docker-langserver`) sends nothing off the machine when it runs behind the
+ * real `loxel-server`. macOS only. Run it after upgrading the server or changing its build or
+ * manager; it exits non-zero on any outbound attempt or a missing language feature.
  *
  *   pnpm -C packages/loxel run build:server:standalone
- *   bun scripts/network-audit/audit-docker-lsp.ts [--binary <path>] [--inlay-hint] [--dwell <seconds>]
+ *   bun scripts/network-audit/audit-docker-lsp.ts [--binary <path>]
  *
- * `--binary` audits another build; Docker's release binary is the positive control and must fail,
- * as must `--inlay-hint`, which sends a request Loxel's client never sends to exercise the proxy
- * failsafe. Both fail by reaching the failsafe's dead port: the manager's environment keeps them
- * from leaving, and connect-log.c would block them if it did not. The dwell spans the periodic
- * flushes of the server's telemetry and session clients.
+ * `--binary` audits another build. The positive control is the package compiled without the build's
+ * offline registry client, which must fail by asking Docker Hub for the image's tags when completing
+ * one after `FROM alpine:` (connect-log.c blocks the lookup):
  *
- * The audit covers the server process, which is all there is: its `PATH` holds no `docker`, so the
- * Dockerfile lint that would run `docker buildx` never starts a child to audit.
+ *   bun build node_modules/dockerfile-language-server-nodejs/lib/server.js --compile --outfile <path>
  */
 
 import { randomBytes } from "node:crypto";
@@ -24,16 +22,17 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
+import { bunWebSocket, sessionAuthorization } from "../../src/session-client";
+
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
 const REQUEST_TIMEOUT_MS = 15_000;
-const FAILSAFE_TARGET = "127.0.0.1:9";
+const BINARY = "docker-langserver";
 
 const { values } = parseArgs({
   options: {
-    binary: { type: "string", default: path.join(BUILD, "docker-language-server") },
-    dwell: { type: "string", default: "70" },
-    "inlay-hint": { type: "boolean", default: false },
+    binary: { type: "string", default: path.join(BUILD, BINARY) },
+    dwell: { type: "string", default: "5" },
   },
 });
 
@@ -47,7 +46,6 @@ interface RpcMessage {
 
 /** The Monaco client's side of the connection, over the server's real WebSocket route. */
 class LspClient {
-  readonly serverRequests: string[] = [];
   readonly diagnostics = new Map<string, unknown[]>();
   private nextId = 1;
   private readonly pending = new Map<number, (message: RpcMessage) => void>();
@@ -58,7 +56,6 @@ class LspClient {
       if (message.method === "textDocument/publishDiagnostics" && message.params?.uri) {
         this.diagnostics.set(message.params.uri, message.params.diagnostics ?? []);
       } else if (message.method !== undefined && message.id !== undefined) {
-        this.serverRequests.push(message.method);
         this.notify({ id: message.id, result: null });
       } else if (message.id !== undefined) {
         const resolve = this.pending.get(message.id);
@@ -89,7 +86,7 @@ class LspClient {
 
 function connect(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = bunWebSocket(url, { authorization: authorization() });
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error(`Cannot connect to ${url}`)));
   });
@@ -117,7 +114,7 @@ await $`clang -dynamiclib -w -o ${dylib} ${path.join(import.meta.dir, "connect-l
 // The server finds language servers next to itself, so a copy of it audits any binary. An ad-hoc
 // signature drops the hardened runtime of a signed binary, which would ignore the logger.
 const serverPath = path.join(work, "loxel-server");
-const lspPath = path.join(work, "docker-language-server");
+const lspPath = path.join(work, BINARY);
 copyFileSync(path.join(BUILD, "loxel-server"), serverPath);
 copyFileSync(values.binary, lspPath);
 await $`codesign -s - -f ${serverPath} ${lspPath}`.quiet();
@@ -125,13 +122,11 @@ await $`codesign -s - -f ${serverPath} ${lspPath}`.quiet();
 const repo = path.join(work, "repo");
 await $`git init -q ${repo}`;
 await $`git -C ${repo} remote add origin https://example.invalid/x.git`;
-const dockerfileText = "FROM alpine:3.12\nRUN echo hi\n";
-const bakeText =
-  'target "app" {\n  dockerfile = "Dockerfile"\n  target = "nope"\n  tags = ["alpine:3.12"]\n}\n';
+// Two CMDs and a MAINTAINER draw dockerfile-utils warnings; the link and tag positions are the
+// features that name Docker Hub.
+const dockerfileText = 'FROM alpine:3\nMAINTAINER me\nRUN echo hi\nCMD ["a"]\nCMD ["b"]\n';
 writeFileSync(path.join(repo, "Dockerfile"), dockerfileText);
-writeFileSync(path.join(repo, "docker-bake.hcl"), bakeText);
 const dockerfile = `file://${repo}/Dockerfile`;
-const bake = `file://${repo}/docker-bake.hcl`;
 
 // The server's secret store needs a key; this one only ever opens the audit's own empty state.
 const dekFile = path.join(work, "dek");
@@ -151,6 +146,9 @@ const server = Bun.spawn([serverPath], {
   },
 });
 
+/** The header with the session secret the server writes before it listens. */
+const authorization = () => sessionAuthorization(path.join(work, "state")).Authorization;
+
 const failures: string[] = [];
 function check(ok: boolean, label: string, detail?: unknown): void {
   console.log(
@@ -168,87 +166,74 @@ try {
     processId: null,
     rootUri: `file://${repo}`,
     clientInfo: { name: "network-audit", version: "0" },
-    capabilities: { textDocument: { inlayHint: {}, hover: {}, completion: {} } },
+    capabilities: {
+      workspace: { applyEdit: true, workspaceEdit: { documentChanges: true } },
+      textDocument: {
+        hover: { contentFormat: ["markdown"] },
+        completion: { completionItem: { snippetSupport: true } },
+      },
+    },
   });
   const capabilities = (init.result as { capabilities: Record<string, unknown> }).capabilities;
-  check(capabilities.inlayHintProvider === undefined, "inlay hints are not advertised");
   check(capabilities.hoverProvider !== undefined, "hover is advertised");
   check(capabilities.completionProvider !== undefined, "completion is advertised");
 
   client.notify({ method: "initialized", params: {} });
-  for (const [uri, languageId, text] of [
-    [dockerfile, "dockerfile", dockerfileText],
-    [bake, "dockerbake", bakeText],
-  ]) {
-    client.notify({
-      method: "textDocument/didOpen",
-      params: { textDocument: { uri, languageId, version: 1, text } },
-    });
-  }
-  // The server pulls each document's configuration before computing its diagnostics.
-  const diagnosticsDeadline = Date.now() + REQUEST_TIMEOUT_MS;
-  while (!client.diagnostics.has(bake)) {
-    if (Date.now() > diagnosticsDeadline) throw new Error("No diagnostics for the bake file");
-    await Bun.sleep(50);
-  }
-
-  const scoutHover = await client.request("textDocument/hover", {
-    textDocument: { uri: dockerfile },
-    position: { line: 0, character: 7 },
-  });
-  check(
-    scoutHover.result === null && !scoutHover.error,
-    "a FROM image gets no Scout hover",
-    scoutHover.result,
-  );
-
-  const bakeHover = await client.request("textDocument/hover", {
-    textDocument: { uri: bake },
-    position: { line: 1, character: 4 },
-  });
-  check(Boolean(bakeHover.result), "bake hover works", bakeHover.result);
-
-  const completion = await client.request("textDocument/completion", {
-    textDocument: { uri: bake },
-    position: { line: 1, character: 2 },
-  });
-  const items = (completion.result as { items?: unknown[] } | null)?.items?.length ?? 0;
-  check(items > 0, "bake completion works", `${items} items`);
-  check(
-    (client.diagnostics.get(bake)?.length ?? 0) > 0,
-    "bake diagnostics work",
-    client.diagnostics.get(bake),
-  );
-
   client.notify({
-    method: "textDocument/didChange",
+    method: "textDocument/didOpen",
     params: {
-      textDocument: { uri: dockerfile, version: 2 },
-      contentChanges: [{ text: "FROM node:20\nRUN echo bye\n" }],
+      textDocument: { uri: dockerfile, languageId: "dockerfile", version: 1, text: dockerfileText },
     },
   });
-
-  if (values["inlay-hint"]) {
-    await client.request("textDocument/inlayHint", {
-      textDocument: { uri: dockerfile },
-      range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } },
-    });
+  const diagnosticsDeadline = Date.now() + REQUEST_TIMEOUT_MS;
+  while (!client.diagnostics.has(dockerfile)) {
+    if (Date.now() > diagnosticsDeadline) throw new Error("No diagnostics for the Dockerfile");
+    await Bun.sleep(50);
   }
-
-  // Past the end of the bake file the server panics, which is where crash reports would be sent.
-  await client.request("textDocument/hover", {
-    textDocument: { uri: bake },
-    position: { line: 99, character: 99 },
-  });
-
-  console.log(`     dwelling ${values.dwell}s for periodic flushes`);
-  await Bun.sleep(Number(values.dwell) * 1000);
   check(
-    !client.serverRequests.includes("workspace/configuration"),
-    "the manager answers workspace/configuration itself",
+    (client.diagnostics.get(dockerfile)?.length ?? 0) > 0,
+    "Dockerfile diagnostics work",
+    client.diagnostics.get(dockerfile)?.length,
   );
 
-  // Closing drops a document's configuration, and the server publishes telemetry on shutdown.
+  const hover = await client.request("textDocument/hover", {
+    textDocument: { uri: dockerfile },
+    position: { line: 2, character: 1 },
+  });
+  check(Boolean(hover.result), "hover works");
+
+  const keywords = await client.request("textDocument/completion", {
+    textDocument: { uri: dockerfile },
+    position: { line: 5, character: 0 },
+  });
+  const items = Array.isArray(keywords.result) ? keywords.result.length : 0;
+  check(items > 0, "completion works", `${items} items`);
+
+  // The request that asks Docker Hub for alpine's tags, unless the build replaced its client.
+  const tags = await client.request("textDocument/completion", {
+    textDocument: { uri: dockerfile },
+    position: { line: 0, character: 13 },
+  });
+  check(!tags.error, "image tag completion answers", tags.error);
+
+  const links = await client.request("textDocument/documentLink", {
+    textDocument: { uri: dockerfile },
+  });
+  const [link] = Array.isArray(links.result) ? links.result : [];
+  check(link !== undefined, "the FROM image gets a link");
+  if (link !== undefined) {
+    const resolved = await client.request("documentLink/resolve", link);
+    check(!resolved.error, "resolving the link answers", resolved.error);
+  }
+
+  const formatting = await client.request("textDocument/formatting", {
+    textDocument: { uri: dockerfile },
+    options: { tabSize: 4, insertSpaces: true },
+  });
+  check(!formatting.error, "formatting answers", formatting.error);
+
+  console.log(`     dwelling ${values.dwell}s`);
+  await Bun.sleep(Number(values.dwell) * 1000);
   client.notify({ method: "textDocument/didClose", params: { textDocument: { uri: dockerfile } } });
   await client.request("shutdown", null);
 } finally {
@@ -259,16 +244,14 @@ try {
 // Only the language server's own lines: the Loxel server's traffic is another audit's.
 const logged = readFileSync(logPath, { flag: "a+", encoding: "utf8" })
   .split("\n")
-  .filter((line) => line !== "" && line.split(" ")[1] === "docker-language-server");
+  .filter((line) => line !== "" && line.split(" ")[1] === BINARY);
 check(
   logged.some((line) => line.split(" ")[2] === "loaded"),
-  "the logger loaded into docker-language-server",
+  `the logger loaded into ${BINARY}`,
 );
 const lines = logged.filter((line) => line.split(" ")[2] !== "loaded");
-const outbound = lines.filter(
-  (line) => line.endsWith(" BLOCKED") || line.includes(` ${FAILSAFE_TARGET} `),
-);
-console.log(`     ${lines.length} socket events from docker-language-server`);
+const outbound = lines.filter((line) => line.endsWith(" BLOCKED"));
+console.log(`     ${lines.length} socket events from ${BINARY}`);
 for (const line of new Set(lines.map((entry) => entry.split(" ").slice(2).join(" ")))) {
   console.log(`     ${line}`);
 }

@@ -15,7 +15,8 @@ import type {
 import { InProcessTerminalHost } from "@/terminal-host";
 import { until } from "@/test/until";
 
-import type { TerminalManagerHooks, TerminalSink } from "./terminal-manager";
+import type { TerminalSink, TerminalSize } from "./terminal-fanout";
+import type { TerminalManagerHooks } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { ToolchainEnvContributor } from "./toolchain-env-contributor";
 
@@ -26,17 +27,20 @@ function createRecordingSink() {
   const output: Uint8Array[] = [];
   const exits: TerminalEnd[] = [];
   const notices: TerminalNotice[] = [];
+  const sizes: TerminalSize[] = [];
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: ({ data }) => output.push(data),
     sendExit: (end) => exits.push(end),
     sendNotice: (notice) => notices.push(notice),
+    sendSize: (size) => sizes.push(size),
   };
   return {
     sink,
     states,
     exits,
     notices,
+    sizes,
     outputText: () => output.map((o) => textDecoder.decode(o)).join(""),
   };
 }
@@ -115,7 +119,7 @@ describe("TerminalManager commands", () => {
     await until(() => processGone(firstSession!.pid));
     expect(manager.get(id)).toBeDefined();
     expect((await host.list()).map((s) => s.epoch)).not.toContain(firstSession!.epoch);
-    manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
+    manager.write(id, second.sink, new TextEncoder().encode("echo done-$((1+1))\n"));
     await until(() => second.outputText().includes("done-2"));
     expect(second.outputText()).not.toContain("hello-from-42");
   });
@@ -337,8 +341,9 @@ describe("TerminalManager toolchain environments", () => {
     process.env.SHELL = "/bin/sh";
     const { manager, release } = gatedManager();
     const id = crypto.randomUUID();
-    const attached = manager.attach(id, createRecordingSink().sink, attachOptions);
-    manager.detach(id);
+    const { sink } = createRecordingSink();
+    const attached = manager.attach(id, sink, attachOptions);
+    manager.detach(id, sink);
     release();
     await attached;
     expect(manager.get(id)?.attached).toBe(false);
@@ -354,8 +359,8 @@ describe("TerminalManager toolchain environments", () => {
       ...attachOptions,
       command: "echo first-$((1+1))",
     });
-    manager.write(id, new TextEncoder().encode("echo second-$((2+2))\n"));
-    manager.resize(id, 100, 30);
+    manager.write(id, sink.sink, new TextEncoder().encode("echo second-$((2+2))\n"));
+    manager.resize(id, sink.sink, 100, 30);
     release();
     await attached;
     await until(() => sink.outputText().includes("second-4"));
@@ -526,6 +531,10 @@ class FakeTerminalHost implements TerminalHost {
   readonly spawns: TerminalSpawnRequest[] = [];
   readonly attaches: TerminalAttachRequest[] = [];
   readonly destroyed: string[] = [];
+  readonly detached: string[] = [];
+  readonly writes: string[] = [];
+  readonly resizes: { cols: number; rows: number }[] = [];
+  readonly acks: { syncOffset: number; bytes: number }[] = [];
   /** When set, spawns wait for `answerSpawns()` instead of succeeding at once. */
   holdSpawns = false;
   private held: { resolve: () => void; reject: (err: Error) => void }[] = [];
@@ -554,11 +563,19 @@ class FakeTerminalHost implements TerminalHost {
     this.attaches.push(request);
     return Promise.resolve();
   }
-  detach(): void {}
-  write(): void {}
-  resize(): void {}
+  detach(id: string): void {
+    this.detached.push(id);
+  }
+  write(_id: string, data: Uint8Array): void {
+    this.writes.push(textDecoder.decode(data));
+  }
+  resize(_id: string, cols: number, rows: number): void {
+    this.resizes.push({ cols, rows });
+  }
   setScrollback(): void {}
-  ack(): void {}
+  ack(_id: string, syncOffset: number, bytes: number): void {
+    this.acks.push({ syncOffset, bytes });
+  }
   destroy(id: string): void {
     this.destroyed.push(id);
   }
@@ -595,29 +612,28 @@ describe("TerminalManager with events in flight", () => {
     return { type: "output", id, offset, data: frame.subarray(BIN_OUTPUT_HEADER_SIZE), frame };
   };
 
-  test("a client gets only its own attach's states, and output only after its state", async () => {
+  test("a client gets only its own attachment's states, and output only after its state", async () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
-    const first = createRecordingSink();
-    const second = createRecordingSink();
-    await manager.attach(id, first.sink, attachOptions);
-    await manager.attach(id, second.sink, attachOptions);
+    const client = createRecordingSink();
+    await manager.attach(id, client.sink, attachOptions);
+    manager.detach(id, client.sink);
+    expect(host.detached).toEqual([id]);
+    await manager.attach(id, client.sink, attachOptions);
     const [older, newer] = host.attaches.map((a) => a.attachment);
     expect(newer).not.toBe(older);
 
-    // Still on its way from before the second attach: the first client's resync and output.
+    // Still on its way from before the detach: the earlier attachment's state and output.
     host.emit({ type: "state", attachment: older!, state: state(id, "epoch-1", 0) });
     host.emit(output(id, 0));
-    expect(first.states).toEqual([]);
-    expect(second.states).toEqual([]);
-    expect(second.outputText()).toBe("");
+    expect(client.states).toEqual([]);
+    expect(client.outputText()).toBe("");
 
     host.emit({ type: "state", attachment: newer!, state: state(id, "epoch-1", 1) });
     host.emit(output(id, 1));
-    expect(second.states.map((s) => s.offset)).toEqual([1]);
-    expect(second.outputText()).toBe("a");
-    expect(first.outputText()).toBe("");
+    expect(client.states.map((s) => s.offset)).toEqual([1]);
+    expect(client.outputText()).toBe("a");
   });
 
   test("events from an earlier spawn under the same ID do not touch its replacement", async () => {
@@ -700,6 +716,34 @@ describe("TerminalManager with events in flight", () => {
     expect(manager.hasOrphanSessions()).toBe(true);
   });
 
+  test("only a running session with no client attached and not kept is an orphan", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const [shared, queued, orphan] = [0, 1, 2].map(() => crypto.randomUUID());
+    for (const id of [shared, queued, orphan]) await manager.ensureSpawned(id!, attachOptions);
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(shared!, first.sink, attachOptions);
+    await manager.attach(shared!, second.sink, attachOptions);
+    // One of its two windows leaving leaves it attached, so it is no orphan, kept or not.
+    manager.detach(shared!, first.sink);
+    const kept = (id: string) => id === queued;
+
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(
+      manager
+        .running()
+        .map((session) => session.id)
+        .toSorted(),
+    ).toEqual([shared!, queued!].toSorted());
+    expect(manager.hasOrphanSessions(kept)).toBe(false);
+
+    // Once its last window leaves too, it is an orphan like any other.
+    manager.detach(shared!, second.sink);
+    expect(manager.destroyOrphans(kept)).toBe(1);
+    expect(manager.running().map((session) => session.id)).toEqual([queued!]);
+  });
+
   test("a session found ended on a reconnect is recorded at once, and drained when its panel mounts", async () => {
     const host = new FakeTerminalHost();
     let changes = 0;
@@ -752,10 +796,10 @@ describe("TerminalManager with events in flight", () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
-    const { attached } = await attachWhileSpawning(host, manager, id);
+    const { first, attached } = await attachWhileSpawning(host, manager, id);
     expect(manager.hasOrphanSessions()).toBe(false);
 
-    manager.detach(id);
+    manager.detach(id, first.sink);
     expect(manager.hasOrphanSessions()).toBe(true);
     host.answerSpawns();
     await attached;
@@ -763,7 +807,7 @@ describe("TerminalManager with events in flight", () => {
     expect(manager.get(id)?.attached).toBe(false);
   });
 
-  test("of two attaches before the spawn's answer, the later one gets the session", async () => {
+  test("two attaches before the spawn's answer share the one attach in the host", async () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
@@ -777,7 +821,7 @@ describe("TerminalManager with events in flight", () => {
     const { attachment } = host.attaches[0]!;
     host.emit({ type: "state", attachment, state: state(id, host.spawns[0]!.epoch, 0) });
     expect(second.states).toHaveLength(1);
-    expect(first.states).toEqual([]);
+    expect(first.states).toHaveLength(1);
   });
 
   test("a spawn the host refuses fails every attach waiting on it", async () => {
@@ -811,10 +855,12 @@ describe("TerminalManager with events in flight", () => {
       windowId: "w1",
       command: "echo hi",
     });
-    manager.write(id, new TextEncoder().encode("typed"));
-    manager.resize(id, 100, 30);
+    const client = createRecordingSink().sink;
+    const attached = manager.attach(id, client, attachOptions);
+    manager.write(id, client, new TextEncoder().encode("typed"));
+    manager.resize(id, client, 100, 30);
     release();
-    await started;
+    await Promise.all([started, attached]);
 
     const [spawned] = host.spawns;
     expect(spawned).toMatchObject({
@@ -828,6 +874,406 @@ describe("TerminalManager with events in flight", () => {
     });
     expect(textDecoder.decode(spawned!.input)).toBe("echo hi\ntyped");
     expect(Object.values(spawned!.env).every((value) => typeof value === "string")).toBe(true);
+  });
+});
+
+describe("TerminalManager with several clients", () => {
+  const epoch = "epoch-1";
+  const snapshot = (id: string, offset: number): TerminalState => ({
+    id,
+    epoch,
+    mode: "snapshot",
+    offset,
+    snapshot: "screen",
+    cols: 80,
+    rows: 24,
+  });
+  /** `bytes` bytes of output at `offset`, all "a". */
+  const output = (id: string, offset: number, bytes = 1): TerminalHostEvent => {
+    const frame = encodeOutputFrame(id, offset, new Uint8Array(bytes).fill(0x61));
+    return { type: "output", id, offset, data: frame.subarray(BIN_OUTPUT_HEADER_SIZE), frame };
+  };
+  /** The attachment of the host's latest attach. */
+  const lastAttachment = (host: FakeTerminalHost) => host.attaches.at(-1)!.attachment;
+
+  /** A session `id` with two clients attached, `first` then `second`, both synced at offset 0. */
+  async function twoClients(host: FakeTerminalHost, manager: TerminalManager, id: string) {
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 0) });
+    await manager.attach(id, second.sink, attachOptions);
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 0) });
+    return { first, second };
+  }
+
+  test("a client joins with a snapshot while the one attached carries on", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 0) });
+    host.emit(output(id, 0));
+
+    const second = createRecordingSink();
+    await manager.attach(id, second.sink, attachOptions);
+    expect(host.attaches.map((a) => a.since)).toEqual([undefined, undefined]);
+    // Output already on its way under the first attachment goes on to the first client.
+    host.emit(output(id, 1));
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 2) });
+    host.emit(output(id, 2));
+
+    expect(first.states.map((s) => s.offset)).toEqual([0]);
+    expect(first.outputText()).toBe("aaa");
+    expect(second.states.map((s) => s.offset)).toEqual([2]);
+    expect(second.outputText()).toBe("a");
+    expect(manager.get(id)?.attached).toBe(true);
+  });
+
+  test("clients that share a point resume from it, and one joining meanwhile waits for a snapshot", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    await manager.ensureSpawned(id, attachOptions);
+    const since = { sinceEpoch: epoch, sinceOffset: 5 };
+    const [first, second, joining] = [0, 1, 2].map(() => createRecordingSink());
+    void manager.attach(id, first!.sink, { ...attachOptions, ...since });
+    void manager.attach(id, second!.sink, { ...attachOptions, ...since });
+    await until(() => host.attaches.length === 1);
+    expect(host.attaches[0]!.since).toEqual({ epoch, offset: 5 });
+
+    // Joins while that resume is on its way, from no point: its attach waits for the next one.
+    let joined = false;
+    void manager.attach(id, joining!.sink, attachOptions).then(() => (joined = true));
+    const resume: TerminalState = { ...snapshot(id, 5), mode: "resume", snapshot: undefined };
+    host.emit({ type: "state", attachment: lastAttachment(host), state: resume });
+    expect(first!.states).toEqual([resume]);
+    expect(second!.states).toEqual([resume]);
+    expect(joining!.states).toEqual([]);
+    await until(() => host.attaches.length === 2);
+    expect(host.attaches[1]!.since).toBeUndefined();
+    expect(joined).toBe(false);
+
+    host.emit(output(id, 5));
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 6) });
+    await until(() => joined);
+    expect(joining!.states.map((s) => s.offset)).toEqual([6]);
+    expect(first!.states).toHaveLength(1);
+    expect(first!.outputText()).toBe("a");
+  });
+
+  test("clients waiting from different points get one snapshot", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    await manager.ensureSpawned(id, attachOptions);
+    const reconnected = createRecordingSink();
+    const fresh = createRecordingSink();
+    void manager.attach(id, reconnected.sink, {
+      ...attachOptions,
+      sinceEpoch: epoch,
+      sinceOffset: 5,
+    });
+    void manager.attach(id, fresh.sink, attachOptions);
+    await until(() => host.attaches.length === 1);
+    expect(host.attaches[0]!.since).toBeUndefined();
+    host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 9) });
+    expect(reconnected.states.map((s) => s.offset)).toEqual([9]);
+    expect(fresh.states.map((s) => s.offset)).toEqual([9]);
+    expect(host.attaches).toHaveLength(1);
+  });
+
+  test("only the active client's input is written, and the PTY takes its size", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    // Joining a terminal another client uses does not resize it: it renders at the PTY's size.
+    await manager.attach(id, second.sink, { ...attachOptions, cols: 100, rows: 30 });
+    expect(host.resizes).toEqual([]);
+    expect(second.sizes).toEqual([{ cols: 80, rows: 24 }]);
+    expect(first.sizes).toEqual([]);
+
+    // The second client's xterm answers the program's queries too; only the active one counts.
+    const type = (client: TerminalSink, text: string) =>
+      manager.write(id, client, new TextEncoder().encode(text));
+    type(first.sink, "from-first");
+    type(second.sink, "from-second");
+    expect(host.writes).toEqual(["from-first"]);
+
+    // Its user typing claims the terminal, at its own size.
+    manager.resize(id, second.sink, 100, 30);
+    type(second.sink, "typed");
+    type(first.sink, "reply");
+    expect(host.writes).toEqual(["from-first", "typed"]);
+    expect(host.resizes).toEqual([{ cols: 100, rows: 30 }]);
+    expect(first.sizes).toEqual([{ cols: 100, rows: 30 }]);
+    // A claim that changes nothing sends nothing.
+    manager.resize(id, second.sink, 100, 30);
+    expect(host.resizes).toHaveLength(1);
+    expect(first.sizes).toHaveLength(1);
+
+    // The active client leaving hands input to the other, at the size it already renders at.
+    manager.detach(id, second.sink);
+    type(first.sink, "now-first");
+    expect(host.writes.at(-1)).toBe("now-first");
+    expect(host.resizes).toHaveLength(1);
+  });
+
+  test("the active client leaving hands its input over silently, and coming back joins passive", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    await manager.attach(id, second.sink, attachOptions);
+    const type = (client: TerminalSink, text: string) =>
+      manager.write(id, client, new TextEncoder().encode(text));
+
+    // As the server does on a re-attach (a worktree switch and back): the old sink goes, and a
+    // new one attaches. Meanwhile the remaining client's xterm answers the program's queries (a
+    // reply carries no claim), and nobody is resized or told.
+    manager.detach(id, first.sink);
+    type(second.sink, "reply");
+    expect(host.writes).toEqual(["reply"]);
+    const again = createRecordingSink();
+    void manager.attach(id, again.sink, { ...attachOptions, cols: 90, rows: 20 });
+    expect(host.resizes).toEqual([]);
+    expect(again.sizes).toEqual([{ cols: 80, rows: 24 }]);
+    expect(second.sizes).toEqual([{ cols: 80, rows: 24 }]);
+
+    manager.resize(id, again.sink, 90, 20);
+    type(again.sink, "typed");
+    expect(host.writes).toEqual(["reply", "typed"]);
+    expect(host.resizes).toEqual([{ cols: 90, rows: 20 }]);
+  });
+
+  test("a client detaching leaves the others attached; the last one leaves an orphan", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const { first, second } = await twoClients(host, manager, id);
+
+    manager.detach(id, first.sink);
+    host.emit(output(id, 0));
+    expect(second.outputText()).toBe("a");
+    expect(first.outputText()).toBe("");
+    expect(host.detached).toEqual([]);
+    expect(manager.hasOrphanSessions()).toBe(false);
+
+    manager.detach(id, second.sink);
+    expect(host.detached).toEqual([id]);
+    expect(manager.hasOrphanSessions()).toBe(true);
+  });
+
+  test("every attached client gets the exit and the host's notices", async () => {
+    const host = new FakeTerminalHost();
+    const manager = createManager([], host);
+    const id = crypto.randomUUID();
+    const { first, second } = await twoClients(host, manager, id);
+    const { epoch: spawned } = host.spawns[0]!;
+    host.emit({ type: "unresponsive", id, epoch: spawned });
+    host.emit({ type: "exit", id, epoch: spawned, exitCode: 3 });
+    for (const client of [first, second]) {
+      expect(client.notices).toEqual([{ notice: "host_unresponsive" }]);
+      expect(client.exits).toEqual([{ reason: "exited", exitCode: 3, outputLost: false }]);
+    }
+  });
+
+  describe("flow control", () => {
+    const KIB = 1024;
+    const flow = { highWaterBytes: 100 * KIB, lowWaterBytes: 10 * KIB };
+
+    test("a client that acknowledges output as it is sent is never paused", async () => {
+      const host = new FakeTerminalHost();
+      // Any chunk passes a one-byte budget: only an ack applied after the chunk is counted keeps
+      // this client streaming, as an ack sent from inside `sendOutput` is.
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        { highWaterBytes: 1, lowWaterBytes: 0 },
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      const recording = createRecordingSink();
+      const acking: TerminalSink = {
+        ...recording.sink,
+        sendOutput: (chunk) => {
+          recording.sink.sendOutput(chunk);
+          manager.ack(id, acking, 0, chunk.data.byteLength);
+        },
+      };
+      const attached = manager.attach(id, acking, attachOptions);
+      await until(() => host.attaches.length === 1);
+      host.emit({ type: "state", attachment: lastAttachment(host), state: snapshot(id, 0) });
+      await attached;
+      host.emit(output(id, 0, 10));
+      host.emit(output(id, 10, 10));
+      expect(recording.outputText()).toHaveLength(20);
+    });
+
+    test("a slow client is paused and caught up with a snapshot, and never holds up the fast one", async () => {
+      const host = new FakeTerminalHost();
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        flow,
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      const { first: fast, second: slow } = await twoClients(host, manager, id);
+      const chunk = 64 * KIB;
+
+      // The fast client acks everything; the slow one nothing, until it is past its budget.
+      for (const offset of [0, chunk, 2 * chunk]) {
+        host.emit(output(id, offset, chunk));
+        manager.ack(id, fast.sink, 0, chunk);
+      }
+      expect(fast.outputText()).toHaveLength(3 * chunk);
+      expect(slow.outputText()).toHaveLength(2 * chunk);
+      // The host is acknowledged as far as the fast client parsed, so it keeps sending.
+      expect(host.acks).toEqual([0, 1, 2].map(() => ({ syncOffset: 0, bytes: chunk })));
+
+      // Once its acks bring it under the low water mark, it alone gets a snapshot.
+      manager.ack(id, slow.sink, 0, 2 * chunk - 5 * KIB);
+      expect(host.acks).toHaveLength(3);
+      expect(host.attaches).toHaveLength(3);
+      host.emit({
+        type: "state",
+        attachment: lastAttachment(host),
+        state: snapshot(id, 3 * chunk),
+      });
+      host.emit(output(id, 3 * chunk));
+      expect(slow.states.map((s) => s.offset)).toEqual([0, 3 * chunk]);
+      expect(fast.states.map((s) => s.offset)).toEqual([0]);
+      expect(slow.outputText()).toHaveLength(2 * chunk + 1);
+      expect(fast.outputText()).toHaveLength(3 * chunk + 1);
+    });
+
+    test("a client paused when its program exits gets the end of the output before the exit", async () => {
+      process.env.SHELL = "/bin/sh";
+      // The host's budget is the clients': it pauses with them, and resyncs before the exit.
+      const host = new InProcessTerminalHost({ log: createNoopLogger(), flowControl: flow });
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        flow,
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      // Never acks: it is paused past 100 KiB of the 150 KB the command prints.
+      const client = createRecordingSink();
+      await manager.attach(id, client.sink, {
+        ...attachOptions,
+        command: "head -c 150000 /dev/zero | tr '\\0' a; echo; echo THE-''END; exit 0",
+      });
+      await until(() => client.exits.length > 0, 30_000);
+      expect(client.states.length).toBeGreaterThan(1);
+      const shown = (client.states.at(-1)?.snapshot ?? "") + client.outputText();
+      expect(shown).toContain("THE-END");
+    });
+
+    test("a client paused next to one keeping up gets the end of the output before the exit", async () => {
+      process.env.SHELL = "/bin/sh";
+      const host = new InProcessTerminalHost({ log: createNoopLogger(), flowControl: flow });
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        flow,
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      // Never acks: it is paused past 100 KiB of the 150 KB the command prints.
+      const slow = createRecordingSink();
+      await manager.attach(id, slow.sink, {
+        ...attachOptions,
+        command: "read go; head -c 150000 /dev/zero | tr '\\0' a; echo; echo THE-''END; exit 0",
+      });
+      // Acks each chunk as it gets it. A single PTY read larger than the budget can still pause it
+      // (CI delivers those), so how many states it gets is not the point: both end with the tail.
+      const fast = createRecordingSink();
+      const acking: TerminalSink = {
+        ...fast.sink,
+        sendOutput: (output) => {
+          fast.sink.sendOutput(output);
+          manager.ack(id, acking, fast.states.at(-1)!.offset, output.data.byteLength);
+        },
+      };
+      await manager.attach(id, acking, attachOptions);
+      manager.resize(id, acking, attachOptions.cols, attachOptions.rows);
+      manager.write(id, acking, new TextEncoder().encode("\n"));
+
+      await until(() => slow.exits.length > 0 && fast.exits.length > 0, 30_000);
+      const shows = (client: typeof slow) =>
+        (client.states.at(-1)?.snapshot ?? "") + client.outputText();
+      expect(shows(fast)).toContain("THE-END");
+      expect(shows(slow)).toContain("THE-END");
+      // The slow client got the final snapshot before the exit, not only its attach's state.
+      expect(slow.states.length).toBeGreaterThan(1);
+    });
+  });
+});
+
+describe("TerminalManager with several clients of a real shell", () => {
+  const originalShell = process.env.SHELL;
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  test("both clients see the output, and either can type once it claims the terminal", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const id = crypto.randomUUID();
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    await manager.attach(id, first.sink, attachOptions);
+    await manager.attach(id, second.sink, attachOptions);
+    const typeIn = (client: TerminalSink, line: string) => {
+      manager.resize(id, client, attachOptions.cols, attachOptions.rows);
+      manager.write(id, client, new TextEncoder().encode(`${line}\n`));
+    };
+    /** What the client shows: its latest snapshot, then the output after it. */
+    const shows = (client: ReturnType<typeof createRecordingSink>) =>
+      (client.states.at(-1)?.snapshot ?? "") + client.outputText();
+
+    // Quoted apart, so the echo of the typed line itself never reads as the output.
+    typeIn(first.sink, 'echo fr""om-first');
+    await until(() => shows(first).includes("from-first\r\n"));
+    await until(() => shows(second).includes("from-first\r\n"));
+    typeIn(second.sink, 'echo fr""om-second');
+    await until(() => shows(first).includes("from-second\r\n"));
+    await until(() => shows(second).includes("from-second\r\n"));
+
+    // One leaving leaves the other attached to the same shell.
+    manager.detach(id, first.sink);
+    typeIn(second.sink, 'echo st""ill-here');
+    await until(() => shows(second).includes("still-here\r\n"));
+    expect(shows(first)).not.toContain("still-here");
+    expect(manager.get(id)?.attached).toBe(true);
   });
 });
 

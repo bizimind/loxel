@@ -17,11 +17,13 @@ import {
   type WsClientMessage,
   type WsMessage,
 } from "@/api/ws-protocol";
+import { newSessionSecret } from "@/app-session";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
 
-import { type CliSocket, takeOverSocket } from "./cli-socket";
+import { AgentTerminals } from "./agent-terminals";
+import { takeOverSocket } from "./cli-socket";
 import { config, getDetachedDir, getHomeDraftsDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { endedHostsNotice } from "./ended-hosts-notice";
@@ -41,14 +43,19 @@ import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-s
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
-import { OpenInbox, deliveredNotices } from "./open-inbox";
+import { OpenInbox, deliveredNotices, sweepOrphans } from "./open-inbox";
 import { listenToParent, parentChannelInput } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
 import { RegisteredWorktrees } from "./registered-worktrees";
 import { onRepoTrustStatusChange } from "./repo-trust";
-import { type Principal, type RequestOriginPolicy, checkRequest } from "./request-origin";
+import {
+  type Principal,
+  type RequestOriginPolicy,
+  checkRequest,
+  tcpPrincipal,
+} from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
@@ -73,14 +80,20 @@ import type {
   WorktreeResources,
   WsData,
 } from "./server-state";
+import { removeSessionToken, writeSessionToken } from "./session-token";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
 import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
-import type { TerminalSink, TerminalSpawnOptions } from "./terminal-manager";
+import type { TerminalSink } from "./terminal-fanout";
+import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
-import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
+import {
+  agentTerminalPolicy,
+  isNotificationSequenceEnabled,
+  terminalSpawnSettings,
+} from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { getCurrentVersion } from "./version";
@@ -92,11 +105,12 @@ import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
 
-// --- Exit with the desktop app ---
-// The app stops its server when it quits with a shutdown message on its channel, which says what
-// happens to the terminals. The channel closing without one, or the server being reparented,
-// means the app crashed or was killed. Set up first, so a quit while the server is still starting
-// stops it too.
+// --- The desktop app's channel ---
+// The app's first message is its session secret, which this server waits for before it serves the
+// app over TCP (see request-origin.ts). The app stops its server when it quits with a shutdown
+// message on its channel, which says what happens to the terminals. The channel closing without
+// one, or the server being reparented, means the app crashed or was killed. Set up first, so a
+// quit while the server is still starting stops it too.
 
 const PARENT_CHECK_MS = 2000;
 
@@ -170,8 +184,12 @@ function holdPortWhileStopping(): boolean {
   }
 }
 
+/** The app's session secret, from its channel: requests over TCP must carry it. */
+const appSecret = Promise.withResolvers<string>();
+
 if (config.parentPid !== null) {
   listenToParent(parentChannelInput(), {
+    session: (secret) => appSecret.resolve(secret),
     shutdown: (terminals) => {
       log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
       leaveWithApp(terminals);
@@ -191,12 +209,26 @@ if (config.parentPid !== null) {
     log.info("The desktop app that started this server is gone, shutting down");
     leaveWithApp("drop");
   }, PARENT_CHECK_MS).unref();
+} else {
+  // Started without the app: its own secret, which its token file gives the tools that drive it.
+  appSecret.resolve(newSessionSecret());
 }
 
 // --- Multi-project state (no "active" or "focused" concept) ---
 
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
+/**
+ * The worktrees whose resources a first subscribe is creating: a subscribe meanwhile joins them,
+ * rather than create a second set that would replace the first, leaking its watchers and leaving
+ * its subscriber out.
+ */
+const wtResourcesCreating = new Map<string, Promise<WorktreeResources>>();
+/**
+ * The windows waiting on a creation in `wtResourcesCreating`, the first included. An unsubscribe or
+ * a close meanwhile takes its window out, so the creation does not subscribe it when it ends.
+ */
+const wtPendingSubscribers = new Map<string, Set<ServerWebSocket<WsData>>>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
 /** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
@@ -341,6 +373,8 @@ function terminalSpawnTarget(
   // A Home terminal has no worktree: the `loxel` CLI then sends its pages to the window.
   if (msg.worktreePath) envOverrides.LOXEL_WORKTREE = msg.worktreePath;
   if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
+  // Tells Loxel which terminal an agent's `loxel terminal` came from.
+  envOverrides.LOXEL_TERMINAL_ID = msg.id;
 
   // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
   // after a server restart; start in the worktree then rather than failing the attach.
@@ -386,15 +420,21 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
 }
 
 /**
- * Hand the open inbox to a window that just said hello, the first after a time with none. Each
- * request opens as it would have then, focus included, and one notification per worktree says what
- * opened: a panel opened without focus waits unseen in its worktree.
+ * Hand the open inbox to a window that just said hello: every request no window has placed yet,
+ * oldest first, each without focus (the inbox keeps them so), so it waits in its worktree and
+ * switches no window there, until a window says it placed the panel (`inbox_open_done`), which
+ * tells every window to drop its copy. A window that reloads or closes first gets it again, or
+ * leaves it for the next. One notification per worktree says what opened the first time a request
+ * is handed over, since the panel waits unseen in a worktree the user may not be on.
  */
 function deliverInbox(ws: ServerWebSocket<WsData>): void {
-  const entries = openInbox.takeAll();
+  const entries = openInbox.list();
   if (entries.length === 0) return;
-  for (const { message } of entries) sendTo(ws, message);
-  for (const { worktreePath, title, body } of deliveredNotices(entries)) {
+  for (const { id, message } of entries)
+    sendTo(ws, { type: "open_from_inbox", inboxId: id, message });
+  const fresh = entries.filter((entry) => !entry.delivered);
+  openInbox.markDelivered(fresh.map((entry) => entry.id));
+  for (const { worktreePath, title, body } of deliveredNotices(fresh)) {
     const notification = notificationStore.add({
       source: { kind: "inbox", worktreePath },
       title,
@@ -629,6 +669,16 @@ function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectP
 }
 
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
+  const creating = wtResourcesCreating.get(wtPath);
+  const joining = wtPendingSubscribers.get(wtPath);
+  if (creating && joining) {
+    // Subscribed to what it creates; one that failed is tried again here. A window that left the
+    // worktree or closed meanwhile subscribes to nothing.
+    joining.add(ws);
+    await creating.catch(() => {});
+    if (!joining.has(ws)) return;
+    return subscribeWorktree(ws, wtPath);
+  }
   const existing = wtResources.get(wtPath);
   if (existing) {
     // Within its grace period the worktree is adopted as it is, undo history included.
@@ -652,6 +702,60 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     return;
   }
 
+  const creation = createWorktreeResources(ws, wtPath, project);
+  const pending = new Set([ws]);
+  wtResourcesCreating.set(wtPath, creation);
+  wtPendingSubscribers.set(wtPath, pending);
+  let resources: WorktreeResources;
+  try {
+    resources = await creation;
+  } finally {
+    wtResourcesCreating.delete(wtPath);
+    wtPendingSubscribers.delete(wtPath);
+  }
+  // The window left the worktree or closed while they were being created: unless a window that
+  // joined meanwhile subscribes, they start their grace period at once.
+  if (!pending.has(ws)) {
+    unsubscribeWorktree(ws, wtPath);
+    return;
+  }
+  const clientState = clients.get(ws);
+  if (clientState) clientState.subscribedWorktrees.add(wtPath);
+  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
+  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
+  project.worktreeStatuses.invalidate();
+
+  // Push initial root directory listing so the file tree isn't empty.
+  // The client may have already requested GET /api/files before resources existed
+  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
+  resources.filesService
+    .getDirContents("", wtPath)
+    .then((entries) => {
+      broadcastToSubscribers(wtPath, {
+        type: "files_dir_changed",
+        wtPath,
+        data: { dir: wtPath, entries },
+      });
+    })
+    .catch(() => {});
+
+  // Push initial detached files listing (same race condition as above).
+  broadcastToSubscribers(wtPath, {
+    type: "detached_files_changed",
+    wtPath,
+    data: { entries: resources.detachedFilesService.listFiles() },
+  });
+  // Same for the Others section, which starts with the folders restored from the last session.
+  broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
+}
+
+/** Create the resources of `wtPath`, with `ws` as their first subscriber. */
+async function createWorktreeResources(
+  ws: ServerWebSocket<WsData>,
+  wtPath: string,
+  project: ProjectState,
+): Promise<WorktreeResources> {
   log.info(`Creating worktree resources for ${wtPath}`);
 
   // A linked worktree keeps its own index/HEAD under <common>/worktrees/<name>, which the
@@ -714,38 +818,11 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   };
 
   wtResources.set(wtPath, resources);
-  const clientState = clients.get(ws);
-  if (clientState) clientState.subscribedWorktrees.add(wtPath);
-  log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
-  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
-  project.worktreeStatuses.invalidate();
-
-  // Push initial root directory listing so the file tree isn't empty.
-  // The client may have already requested GET /api/files before resources existed
-  // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
-  filesService
-    .getDirContents("", wtPath)
-    .then((entries) => {
-      broadcastToSubscribers(wtPath, {
-        type: "files_dir_changed",
-        wtPath,
-        data: { dir: wtPath, entries },
-      });
-    })
-    .catch(() => {});
-
-  // Push initial detached files listing (same race condition as above).
-  broadcastToSubscribers(wtPath, {
-    type: "detached_files_changed",
-    wtPath,
-    data: { entries: detachedFilesService.listFiles() },
-  });
-  // Same for the Others section, which starts with the folders restored from the last session.
-  broadcastOthers(wtPath);
-  sendFilesResynced(ws, wtPath, project.cwd);
+  return resources;
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
+  wtPendingSubscribers.get(wtPath)?.delete(ws);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
 
@@ -792,6 +869,7 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
   for (const { from, to } of moved) {
     log.info(`Worktree moved: ${from} -> ${to}`);
     terminalManager.retargetWorktree(from, to);
+    agentTerminals.moveWorktree(from, to);
     releaseWorktreeResources(from);
   }
   // Its directory is gone but nothing says it was removed (deleted by hand, say). Nothing is lost by
@@ -830,9 +908,7 @@ function releaseWorktreeResources(wtPath: string): void {
 function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
   releaseWorktreeResources(wtPath);
   terminalManager.endWorktreeSessions(wtPath, terminalDelayMs, (id) => {
-    const owner = terminalOwners.get(id);
-    if (owner) clients.get(owner)?.terminals.delete(id);
-    terminalOwners.delete(id);
+    forgetTerminal(id);
     // Anything it raised during the delay; the rest went with the worktree.
     if (notificationStore.dismissByPanel(id)) {
       broadcastAll({ type: "notification_panel_dismissed", panelId: id });
@@ -842,12 +918,16 @@ function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
   deleteWorktreeRows(wtPath);
 }
 
-/** Dismiss what a removed worktree's panels raised, and drop the opens waiting for it. */
+/**
+ * Dismiss what a removed worktree's panels raised, drop the opens and agents' terminals waiting for
+ * it, and forget that its agents' terminals always run.
+ */
 function forgetWorktreeNotifications(wtPath: string): void {
   const { panelIds, inboxIds } = notificationStore.dismissByWorktree(wtPath);
   for (const panelId of panelIds) broadcastAll({ type: "notification_panel_dismissed", panelId });
   for (const id of inboxIds) broadcastAll({ type: "notification_dismissed", id });
   openInbox.dropWhere((entry) => entry.worktreePath === wtPath);
+  agentTerminals.dropWorktree(wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -896,6 +976,7 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
 
 /** Unsubscribe a client from all worktrees (on disconnect). */
 function unsubscribeAllWorktrees(ws: ServerWebSocket<WsData>): void {
+  for (const pending of wtPendingSubscribers.values()) pending.delete(ws);
   const clientState = clients.get(ws);
   if (!clientState) return;
   for (const wtPath of clientState.subscribedWorktrees) {
@@ -1040,7 +1121,6 @@ let shuttingDown = false;
 // --- Stable infrastructure ---
 
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
-const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 /** The terminal hosts, which run every terminal in processes that outlive this server. */
 const terminalHosts = new TerminalHostPool({
@@ -1069,10 +1149,8 @@ const terminalManager = new TerminalManager(terminalHosts, {
   },
   onSessionsChanged: () => broadcastAll({ type: "terminals_changed" }),
   onExit: (id) => {
-    // The manager already sent terminal_exit to the attached client.
-    const owner = terminalOwners.get(id);
-    if (owner) clients.get(owner)?.terminals.delete(id);
-    terminalOwners.delete(id);
+    // The manager already sent terminal_exit to the attached clients.
+    forgetTerminal(id);
     dropQueuedTerminal(id);
   },
 });
@@ -1081,6 +1159,16 @@ const notificationStore = new NotificationStore(join(config.stateDir, "notificat
 const openInbox = new OpenInbox({ path: join(config.stateDir, "open-inbox.db") });
 /** A panel for the terminal is waiting in the inbox: it is not an orphan. */
 const queuedTerminal = (id: string) => openInbox.holdsTerminal(id);
+const AGENT_TERMINAL_WORKTREES_STORE_KEY = "agent-terminal-worktrees";
+/** The terminals agents asked for while the user has to answer, and where they always run. */
+const agentTerminals = new AgentTerminals({
+  loadAlways: () => getStore(AGENT_TERMINAL_WORKTREES_STORE_KEY),
+  saveAlways: (json) => putStore(AGENT_TERMINAL_WORKTREES_STORE_KEY, json),
+  onChange: (data) => broadcastAll({ type: "agent_terminals_changed", data }),
+});
+/** Whether a window with this ID is connected. */
+const isWindowConnected = (windowId: string) =>
+  [...clients.values()].some((state) => state.windowId === windowId);
 /** Longest title or body a browser panel page's notification keeps (main caps them shorter). */
 const MAX_BROWSER_NOTIFICATION_TEXT = 4_000;
 const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
@@ -1187,8 +1275,16 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       if (!clientState) break;
       clientState.windowId = msg.windowId;
       deliverInbox(ws);
+      // What waits for an answer with no window to ask in is asked in this one.
+      agentTerminals.windowConnected(msg.windowId, isWindowConnected);
       break;
     }
+
+    case "inbox_open_done":
+      if (openInbox.remove(msg.inboxId)) {
+        broadcastAll({ type: "inbox_open_placed", inboxId: msg.inboxId });
+      }
+      break;
 
     case "window_focused":
       lastFocusedClient = ws;
@@ -1198,16 +1294,15 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       const clientState = clients.get(ws);
       if (!clientState) return;
 
-      // Take ownership before attaching: the session delivers through the sink immediately.
-      const previousOwner = terminalOwners.get(msg.id);
-      if (previousOwner && previousOwner !== ws) {
-        clients.get(previousOwner)?.terminals.delete(msg.id);
-      }
-      clientState.terminals.add(msg.id);
-      terminalOwners.set(msg.id, ws);
+      // Several sockets can be attached to one terminal, each streaming to its own sink; an
+      // attach again from this one replaces its earlier sink.
+      const previous = clientState.terminals.get(msg.id);
+      if (previous) terminalManager.detach(msg.id, previous);
+      const sink = createTerminalSink(ws, msg.id);
+      clientState.terminals.set(msg.id, sink);
 
       terminalManager
-        .attach(msg.id, createTerminalSink(ws, msg.id), {
+        .attach(msg.id, sink, {
           ...terminalSpawnTarget(msg),
           cols: msg.cols,
           rows: msg.rows,
@@ -1217,8 +1312,10 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         })
         .catch((err: unknown) => {
           log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
-          clientState.terminals.delete(msg.id);
-          if (terminalOwners.get(msg.id) === ws) terminalOwners.delete(msg.id);
+          if (clientState.terminals.get(msg.id) === sink) {
+            clientState.terminals.delete(msg.id);
+            terminalManager.detach(msg.id, sink);
+          }
           // The panel says why, a terminal host that did not answer in time for one.
           const message = err instanceof Error ? err.message : String(err);
           sendTo(ws, { type: "terminal_notice", id: msg.id, notice: "attach_failed", message });
@@ -1227,36 +1324,27 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     }
 
     case "terminal_detach":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.detach(msg.id);
-        clients.get(ws)?.terminals.delete(msg.id);
-        terminalOwners.delete(msg.id);
-      }
+      detachTerminal(ws, msg.id);
       break;
 
-    case "terminal_resize":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.resize(msg.id, msg.cols, msg.rows);
-      }
-      break;
-
-    case "terminal_ack":
-      if (terminalOwners.get(msg.id) === ws) {
-        terminalManager.ack(msg.id, msg.syncOffset, msg.bytes);
-      }
-      break;
-
-    case "terminal_destroy": {
-      // The panel may already have detached (unmount runs before the panel-removed handler), so
-      // an ownerless session is destroyable too; only another window's session is protected.
-      const owner = terminalOwners.get(msg.id);
-      if (owner === undefined || owner === ws) {
-        terminalManager.destroy(msg.id);
-        clients.get(ws)?.terminals.delete(msg.id);
-        terminalOwners.delete(msg.id);
-      }
+    case "terminal_resize": {
+      const sink = clients.get(ws)?.terminals.get(msg.id);
+      if (sink) terminalManager.resize(msg.id, sink, msg.cols, msg.rows);
       break;
     }
+
+    case "terminal_ack": {
+      const sink = clients.get(ws)?.terminals.get(msg.id);
+      if (sink) terminalManager.ack(msg.id, sink, msg.syncOffset, msg.bytes);
+      break;
+    }
+
+    case "terminal_destroy":
+      // The panel has usually detached already (unmount runs before the panel-removed handler).
+      // A terminal another window still shows keeps running there; the last one to close ends it.
+      detachTerminal(ws, msg.id);
+      if (!terminalManager.hasClients(msg.id)) terminalManager.destroy(msg.id);
+      break;
 
     // --- Notifications ---
 
@@ -1315,32 +1403,41 @@ function handleBinaryMessage(ws: ServerWebSocket<WsData>, data: Buffer) {
   const { type, terminalId } = parseBinaryHeader(
     new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
   );
-  if (type === BIN_MSG_INPUT) {
-    if (terminalOwners.get(terminalId) !== ws) return;
-    terminalManager.write(terminalId, data.subarray(BIN_HEADER_SIZE));
-  }
+  if (type !== BIN_MSG_INPUT) return;
+  const sink = clients.get(ws)?.terminals.get(terminalId);
+  if (sink) terminalManager.write(terminalId, sink, data.subarray(BIN_HEADER_SIZE));
+}
+
+/** Detach this socket from terminal `id`; the session keeps running, for any other client too. */
+function detachTerminal(ws: ServerWebSocket<WsData>, id: string): void {
+  const clientState = clients.get(ws);
+  const sink = clientState?.terminals.get(id);
+  if (!sink) return;
+  clientState?.terminals.delete(id);
+  terminalManager.detach(id, sink);
 }
 
 /**
- * Detach (not destroy) all terminals owned by this client.
+ * Detach (not destroy) all terminals this client is attached to.
  * Sessions stay alive so they can be reattached on reconnect.
  */
 function detachClientTerminals(ws: ServerWebSocket<WsData>) {
-  const clientState = clients.get(ws);
-  if (!clientState) return;
-  terminalManager.detachAll(clientState.terminals);
-  for (const id of clientState.terminals) {
-    terminalOwners.delete(id);
-  }
+  for (const id of [...(clients.get(ws)?.terminals.keys() ?? [])]) detachTerminal(ws, id);
 }
 
-/** Deliver a terminal session's messages to the socket that attached it. */
+/** A session that ended: no socket is attached to it any more. */
+function forgetTerminal(id: string): void {
+  for (const clientState of clients.values()) clientState.terminals.delete(id);
+}
+
+/** Deliver a terminal session's messages to one socket attached to it. */
 function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSink {
   return {
     sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
     sendOutput: ({ frame }) => ws.send(frame),
     sendExit: (end) => sendTo(ws, { type: "terminal_exit", id, ...end }),
     sendNotice: (notice) => sendTo(ws, { type: "terminal_notice", id, ...notice }),
+    sendSize: (size) => sendTo(ws, { type: "terminal_size", id, ...size }),
   };
 }
 
@@ -1392,6 +1489,11 @@ for (let i = 0; i < initResults.length; i++) {
 
 function findDistDir(): string | null {
   if (process.env.LOXEL_STATIC_DIR) return process.env.LOXEL_STATIC_DIR;
+  // A compiled server, as in the standalone server bundle: the renderer beside the binary.
+  if (Bun.main.startsWith("/$bunfs/")) {
+    const besideBinary = join(dirname(process.execPath), "renderer");
+    if (existsSync(join(besideBinary, "index.html"))) return besideBinary;
+  }
   const builtCandidate = resolve(import.meta.dir, "..");
   if (existsSync(join(builtCandidate, "index.html"))) return builtCandidate;
   const srcCandidate = resolve(import.meta.dir, "../../dist");
@@ -1454,6 +1556,8 @@ const routeContext: RouteContext = {
     return openInbox.add(message, worktreePath) ? "queued" : "full";
   },
   dropQueuedTerminal,
+  agentTerminals,
+  agentTerminalPolicy,
   listTerminals: async ({ programs }) => {
     const running = terminalManager.running();
     const foreground = programs ? await terminalManager.foregroundProcesses() : {};
@@ -1498,16 +1602,33 @@ terminalHostsReached.resolve((terminals) => terminalHosts.disconnectAll(terminal
 // land first, but never let a slow or hung shell config hold up startup (it still applies later).
 await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 
+// The app sends its secret as soon as it has started this server, so it is here long before
+// startup is done. Nothing is served over TCP without it. An app that is gone by now closed the
+// channel, which stops this server instead.
+const sessionSecret = await appSecret.promise;
+
 // Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
 // from here to `serving = true` waits, so a stop cannot arrive in between.
 if (stoppingInStartup) await new Promise<never>(() => {});
+
+// A server the app started keeps the secret to itself, except a demo's, which scripts/demo drives.
+// Written before the server listens, so a tool that finds it answering finds the file too.
+const writesSessionToken = config.parentPid === null || config.isDemo;
+if (writesSessionToken) {
+  try {
+    writeSessionToken(config.stateDir, sessionSecret);
+  } catch (err) {
+    // The app still reaches this server; only tools that read the token file cannot.
+    log.error("Could not write the session token file", { error: err });
+  }
+}
 
 /**
  * Listen for the `loxel` CLI, taking the socket over from any older server. Null when that fails:
  * the app still works over TCP, and the user is told the CLI cannot reach it. There is no fallback
  * to the TCP port, which the CLI never uses.
  */
-function listenForCli(): CliSocket | null {
+function listenForCli(): { stop: () => unknown } | null {
   const path = config.cliSocketPath;
   try {
     return takeOverSocket(path, (unix) =>
@@ -1532,8 +1653,9 @@ function listenForCli(): CliSocket | null {
 }
 
 /**
- * Serve a request from either listener: `principal` is the one it arrived on (see
- * request-origin.ts), the loopback port's `app` or the CLI socket's `cli`.
+ * Serve a request from either listener: `principal` is decided by the one it arrived on (see
+ * request-origin.ts): the loopback port's `app` or `anonymous`, by its session secret, or the CLI
+ * socket's `cli`.
  */
 async function serveRequest(
   req: Request,
@@ -1595,14 +1717,16 @@ async function serveRequest(
     return new Response(Bun.file(join(distDir, "index.html")));
   }
 
-  return handleRequest(req, routeContext);
+  return error("Not found", 404);
 }
 
 const server = Bun.serve<WsData>({
   port: config.port,
   hostname: "127.0.0.1",
   fetch: (req, server) =>
-    serveRequest(req, "app", (upgraded, data) => server.upgrade(upgraded, { data })),
+    serveRequest(req, tcpPrincipal(req.headers, sessionSecret), (upgraded, data) =>
+      server.upgrade(upgraded, { data }),
+    ),
 
   websocket: {
     open(ws) {
@@ -1624,11 +1748,12 @@ const server = Bun.serve<WsData>({
         idleTimer = null;
         log.info("Idle timer cancelled — client connected");
       }
-      clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
+      clients.set(ws, { terminals: new Map(), subscribedWorktrees: new Set() });
       // First, so the client knows whether this is the server it saw before (see WsClient).
       sendTo(ws, { type: "server_hello", version: getCurrentVersion(), ...serverIdentity });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
       sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
+      sendTo(ws, { type: "agent_terminals_changed", data: agentTerminals.state() });
       log.debug(`Client connected (${clients.size} total)`);
     },
 
@@ -1647,6 +1772,8 @@ const server = Bun.serve<WsData>({
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
+      // What this window was asking moves to the window in use, or waits for the next one.
+      agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
@@ -1700,8 +1827,9 @@ logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count",
 recoverOrphanLayoutSessions();
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
-// the last window closes gives them time to.
+// the last window closes gives them time to. Ones the open inbox holds wait for their requests.
 if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
+else if (config.parentPid !== null) cleanUpOrphans();
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);
@@ -1732,10 +1860,12 @@ function startIdleTimer(): void {
       `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
     );
     idleTimer = setTimeout(() => {
+      if (ownedByApp) {
+        cleanUpOrphans();
+        return;
+      }
       idleTimer = null;
-      const destroyed = terminalManager.destroyOrphans(queuedTerminal);
-      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-      if (ownedByApp) return;
+      terminalManager.destroyOrphans(queuedTerminal);
       log.info("Idle timeout reached, shutting down");
       shutdown();
     }, ORPHAN_CLEANUP_MS);
@@ -1746,6 +1876,19 @@ function startIdleTimer(): void {
     log.info("Idle timeout reached, shutting down");
     shutdown();
   }, IDLE_SHUTDOWN_MS);
+}
+
+/**
+ * Destroy the orphaned terminals, and, while the open inbox holds some, do it again once the first
+ * request holding one expires: its terminal is an ordinary orphan then.
+ */
+function cleanUpOrphans(): void {
+  idleTimer = null;
+  const { destroyed, nextSweepInMs } = sweepOrphans(openInbox, (kept) =>
+    terminalManager.destroyOrphans(kept),
+  );
+  if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+  if (nextSweepInMs !== null) idleTimer = setTimeout(cleanUpOrphans, nextSweepInMs);
 }
 
 // --- API requests in flight, drained before shutdown ---
@@ -1830,12 +1973,12 @@ function tearDown(exitCode: number, terminals: TerminalsOnShutdown) {
   perfMonitor.dispose();
   stress.dispose();
   server.stop();
-  // Removes the socket file unless a newer server took it over. Nothing here may keep the process
-  // from exiting below.
+  // Leaves the socket's name behind, for the next server to take over.
+  cliSocket?.stop();
   try {
-    cliSocket?.stop();
+    if (writesSessionToken) removeSessionToken(config.stateDir, sessionSecret);
   } catch (err) {
-    log.warn(`Could not remove ${config.cliSocketPath}`, { error: err });
+    log.warn("Could not remove the session token file", { error: err });
   }
   // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
   // not even SIGKILL ends right away (stuck in the kernel).

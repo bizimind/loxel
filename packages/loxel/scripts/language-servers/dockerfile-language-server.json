@@ -1,0 +1,5 @@
+{
+  "script": "build-dockerfile-lsp.ts",
+  "resources": ["docker-langserver"],
+  "npm": ["dockerfile-language-server-nodejs"]
+}

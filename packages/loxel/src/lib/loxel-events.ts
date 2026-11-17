@@ -32,13 +32,15 @@ export interface LoxelEventMap {
   "loxel-file-moved": { oldPath: string; newPath: string };
   "loxel-file-deleted": { filePath: string };
   "loxel-dir-changed": { dir: string };
+  /** The server confirmed a worktree subscription; listings shown for it may have missed changes. */
+  "loxel-worktree-files-resynced": { wtPath: string };
+  /**
+   * A worktree left this window's lists (removed or moved, anywhere, or its project removed from
+   * Loxel): nothing of it is served any more. `discarded`: the user removed it, or deleted its
+   * project, in Loxel, giving up what it held.
+   */
+  "loxel-worktree-gone": { wtPath: string; discarded: boolean };
   "loxel-reveal-in-explorer": { filePath: string };
-  "loxel-localdb-changed": {
-    projectPath: string;
-    tableName?: string;
-    tableId?: number;
-    scope: "schema" | "data" | "views";
-  };
 }
 
 /** Type-safe event dispatch. */

@@ -393,8 +393,10 @@ export class TerminalSession {
     // Encoded once here: the frame goes to the renderer as is, and `data` is a view of it.
     const frame = encodeOutputFrame(this.id, offset, data);
     const payload = frame.subarray(BIN_OUTPUT_HEADER_SIZE);
-    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
+    // Counted before it is sent: an in-process client can acknowledge it before `emit` returns,
+    // and an ack applied first would be lost, pausing a client that keeps up.
     this.unacked += data.byteLength;
+    this.options.emit({ type: "output", id: this.id, offset, data: payload, frame });
     if (this.unacked > this.highWater && !this.paused) {
       this.paused = true;
       this.log.info(
@@ -487,9 +489,12 @@ export class TerminalSession {
     // A program that exits while a snapshot is being produced (a short command, or a resync) would
     // otherwise get its exit to the client before that snapshot and the output after it.
     while (this.snapshotSync) await this.snapshotSync.catch(() => {});
-    // A paused client is still behind; without this final snapshot the tail of the output would
-    // be lost, since the host may destroy the session (ring and emulator) right after onExit.
-    if (this.attachment !== null && this.paused) await this.sync(this.attachment);
+    // A client may still be behind: this one when paused, or, behind it, one of the server's other
+    // clients, while the server acknowledges as far as its fastest one has parsed. Without this
+    // final snapshot the tail of the output would be lost to them, since the host may destroy the
+    // session (ring and emulator) right after onExit. The server passes it on only to the clients
+    // not already at its offset.
+    if (this.attachment !== null) await this.sync(this.attachment);
     this.options.onExit(exitCode);
   }
 }

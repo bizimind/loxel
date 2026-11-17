@@ -2,8 +2,8 @@
  * Builds and stages what ships next to `loxel-server` for language servers. Each binary is one
  * manifest in scripts/language-servers/ (see language-server-manifest.ts), so a new one edits no
  * shared file. Each resource is staged by its base name in build/language-servers/, which
- * electron-builder.yml `extraResources` copies as a whole. A manifest with `platforms` does not
- * exist elsewhere.
+ * electron-builder.yml `extraResources` copies as a whole, as does the standalone server bundle
+ * (build-server-bundle.ts). A manifest with `platforms` does not exist elsewhere.
  *
  *   build [manifest...]  run the scripts; with no names, also stage everything
  */
@@ -17,7 +17,7 @@ import { type Manifest, readManifests } from "./language-server-manifest";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
 const BUILD_DIR = path.join(LOXEL, "build");
-const STAGE_DIR = path.join(BUILD_DIR, "language-servers");
+export const STAGE_DIR = path.join(BUILD_DIR, "language-servers");
 
 /** A resource's built path; download scripts add `.exe` on Windows. */
 function builtPath(resource: string): string {
@@ -49,6 +49,8 @@ async function build(names: string[]): Promise<void> {
   if (names.length === 0) stage(manifests);
 }
 
-const [command, ...args] = Bun.argv.slice(2);
-if (command === "build") await build(args);
-else throw new Error(`Usage: language-server-binaries.ts build [manifest...]`);
+if (import.meta.main) {
+  const [command, ...args] = Bun.argv.slice(2);
+  if (command === "build") await build(args);
+  else throw new Error(`Usage: language-server-binaries.ts build [manifest...]`);
+}

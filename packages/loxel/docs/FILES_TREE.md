@@ -105,6 +105,8 @@ If the target cannot be found after loading the known path, `revealPath()` retur
 
 `reloadSubtree(path)` refreshes a loaded subtree under the same path identity the renderer reads.
 
+`reloadExpanded()` calls `loadSubtree` again for every expanded directory the tree shows, for a caller whose listings may have missed changes. A directory keeps its current rows until its new listing arrives, and an expanded directory under a collapsed one is skipped.
+
 `handlePathsRenamed(oldPrefix, newPrefix)` remaps expansion state, cached children, and collapsed paths. Callers are responsible for remapping their own external selection state.
 
 ## Tests

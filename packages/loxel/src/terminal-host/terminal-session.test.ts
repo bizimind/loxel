@@ -403,6 +403,34 @@ describe("TerminalSession", () => {
     expect(resync.offset).toBe(session.outputOffset);
   });
 
+  test("a client that acknowledges output as it is sent is never paused", async () => {
+    // Any chunk passes a one-byte budget, so only an ack applied after the chunk is counted keeps
+    // this client streaming, as the in-process host's caller acknowledges inside the emit.
+    const recorder = createRecorder();
+    let syncOffset = 0;
+    const session: TerminalSession = new TerminalSession({
+      id: crypto.randomUUID(),
+      epoch: crypto.randomUUID(),
+      argv: ["/bin/sh", "-c", "head -c 20000 /dev/zero | tr '\\0' a; exec sleep 30"],
+      cwd: "/tmp",
+      env: { ...definedProcessEnv(), TERM: "xterm-256color" },
+      cols: 80,
+      rows: 24,
+      scrollbackLines: 1_000,
+      runtime: { log: createNoopLogger(), flowControl: { highWaterBytes: 1, lowWaterBytes: 0 } },
+      emit: (event) => {
+        recorder.emit(event);
+        if (event.type === "state") syncOffset = event.state.offset;
+        if (event.type === "output") session.ack(syncOffset, event.data.byteLength);
+      },
+      onExit: () => {},
+    });
+    sessions.push(session);
+    await session.attach(1);
+    await until(() => recorder.client(1).outputText().split("a").length > 20_000);
+    expect(recorder.client(1).states).toHaveLength(1);
+  });
+
   test("destroy settles every attach whose snapshot is still pending", async () => {
     const { session, recorder } = spawnScript("exec sleep 30");
     const attach1 = session.attach(1);

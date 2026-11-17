@@ -46,7 +46,7 @@ open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree
 
 ## Finding Loxel
 
-`loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, `loxel` says so.
+`loxel` talks to Loxel through a socket in Loxel's state directory, `~/.local/state/loxel/loxel/run/cli.sock` (`loxel-dev` instead of `loxel` in dev mode). Only your own user account can open it, so other accounts on the same Mac can't use it to drive your Loxel; if the Loxel it finds runs as another user, or the socket's folder is open to other accounts, `loxel` says so and doesn't use it.
 
 Inside a Loxel terminal, `loxel` connects to the socket in `LOXEL_SOCKET`, the one of the Loxel that terminal belongs to. While that Loxel restarts or installs an update, `loxel` waits for it to come back. If you quit Loxel and kept your terminals, `loxel` in one of them waits a few seconds, then launches Loxel in the background, and your file opens once Loxel is ready. Elsewhere it looks for a running Loxel on its socket, the regular one first, then dev mode's, and, when the open takes focus (see [Focus](#focus)), brings Loxel to the front. If no Loxel is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
 
@@ -90,6 +90,20 @@ Everything after the flags (or after `--`) is a command typed into the shell onc
 
 The CLI returns once the shell is running; it does not wait for the command. The command runs right away, even if you never look at the new tab, and if the shell can't be started the CLI exits with an error instead. The command is typed before your shell finishes starting, so a startup script that reads from the terminal would consume it. Since `terminal` is a subcommand, open a file or folder of that name as `loxel ./terminal`.
 
+### Terminals your agents start
+
+When a coding agent runs `loxel terminal` (Loxel recognizes agents as described in [Focus](#focus)), the **When an Agent Starts a Terminal** setting in **Settings > Terminal** decides what happens:
+
+- **Run** (the default): the terminal starts at once, like one you start yourself.
+- **Ask**: nothing starts yet. A prompt in the window names the agent, the worktree and the command, and the folder the shell starts in when that isn't the worktree, with **Run**, **Always in this worktree** and **Don't run**. **Always in this worktree** runs this terminal, the ones already waiting for that worktree, and every later one an agent starts there, without asking; **Settings > Terminal** lists those worktrees, and **Clear** makes Loxel ask in them again. The agent isn't kept waiting: `loxel` prints that Loxel is asking you, and exits with status 3. If no window is open, the next window you open asks. A terminal that runs after you answer opens beside your active tab rather than replacing it, even if the agent asked to replace a tab. Requests still waiting when Loxel quits or restarts are dropped, and the agent has to ask again.
+- **Never**: `loxel` prints that the setting blocks it and exits with status 1.
+
+Your own `loxel terminal` commands always run, whatever the setting. Opening files, folders and URLs isn't affected either.
+
+Every terminal an agent started says so in its tab's tooltip: which agent, and, when the agent ran in a Loxel terminal, which terminal and worktree it came from.
+
+This setting keeps agents polite; it isn't a security boundary. It applies to agents that run `loxel terminal` as Loxel recognizes them, and any program running as you can start a shell without asking Loxel. If your agents run their commands in a sandbox and you let it reach Loxel's socket (see [Agents in a sandbox](#agents-in-a-sandbox)), **Never** (or **Ask**) keeps an agent's `loxel terminal` from starting a shell outside that sandbox; an agent set on getting out could still hide what it is, so where the sandbox must hold, don't let it reach the socket at all.
+
 ---
 
 ## Layout flags
@@ -116,7 +130,7 @@ With focus, an open shows you what it opened: Loxel comes to the front when you 
 
 On macOS, Loxel keeps running after you close its last window, and agents keep working in its terminals. What `loxel` opens then isn't lost: it waits for the next Loxel window, and the CLI prints `loxel: no Loxel window is open; this will open in the next window to connect` and succeeds. A `loxel terminal` command starts running right away, without its panel.
 
-When you open a window (click Loxel in the Dock, for example), everything that waited opens in it, in the order it was asked for, and a notification for each worktree says what opened while you were away, such as **2 terminals and a file opened while you were away**. Opens without focus wait in their worktree as usual, so click the notification to go there. Opens wait through a restart of Loxel, up to 100 of them, for at most 3 days. A terminal still has to be running to open: one that ended in the meantime, for example because you quit Loxel and ended its terminals, is dropped.
+When you open a window (click Loxel in the Dock, for example), everything that waited opens in it, in the order it was asked for, each in its worktree without switching the window there, and a notification for each worktree says what opened while you were away, such as **2 terminals and a file opened while you were away**. Click the notification to go there. Until you go there, they stay safe: if the window reloads or closes first, they open in the next one. Opens wait through a restart of Loxel, up to 100 of them, for at most 3 days. A folder doesn't wait: `loxel <folder>` reveals it in an open window, so with none it fails right away with **No Loxel window is open to show the folder in**. A terminal still has to be running to open: one that ended in the meantime, for example because you quit Loxel and ended its terminals, is dropped.
 
 When `loxel` brings Loxel to the front, or launches it, it waits for the window that comes up instead, as long as 30 seconds, so your own opens show up the moment the window does.
 

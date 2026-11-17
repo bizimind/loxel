@@ -407,7 +407,7 @@ export function ExcalidrawEditor({
       className="flex h-full w-full flex-col"
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
-      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
       <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />

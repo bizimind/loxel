@@ -71,6 +71,11 @@ export interface FilesTreeHandle {
   expandPath: (path: string) => void;
   revealPath: (path: string) => Promise<void>;
   reloadSubtree: (path: string) => void;
+  /**
+   * List every expanded directory the tree shows again, keeping its current rows until the new
+   * listing arrives. For when the caller's listings may have missed changes (a resync).
+   */
+  reloadExpanded: () => void;
   clearSubtree: (path: string) => void;
   handlePathsRenamed: (oldPrefix: string, newPrefix: string) => void;
   focusPath: (path: string) => void;
@@ -481,6 +486,18 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
           return next;
         });
         loadAndCache(path);
+      },
+
+      reloadExpanded: () => {
+        if (!loadSubtree) return;
+        const expanded = expandedPathsRef.current;
+        for (const path of expanded) {
+          const node = findNode(nodes, childrenCache, path);
+          if (!node?.isDir || node.children) continue;
+          // An expanded directory under a collapsed one is not shown.
+          const ancestors = findAncestorDirs(nodes, childrenCache, path);
+          if (ancestors.every((dir) => expanded.has(dir))) void loadAndCache(path);
+        }
       },
 
       clearSubtree: clearSubtreeCache,

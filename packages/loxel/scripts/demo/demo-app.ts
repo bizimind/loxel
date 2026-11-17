@@ -11,6 +11,7 @@ import { $ } from "bun";
 import type { RepoTrustDecision } from "../../src/api/repo-trust-model";
 import { withoutAgentEnv } from "../../src/coding-agent-env";
 import { demoPort, demoStateName } from "../../src/demo-instance";
+import { sessionAuthorization } from "../../src/session-client";
 import { DEMO_PROJECTS, DEMO_ROOT, demoWorktree } from "./demo-projects";
 
 export const LOXEL_ROOT = resolve(import.meta.dirname, "../..");
@@ -70,10 +71,12 @@ export const demoServerAnswers = (instance: number): Promise<boolean> =>
 
 /** Register the demo projects with demo app `instance`, their default branches trusted. */
 export async function registerDemoProjects(instance: number): Promise<void> {
+  // A demo's server writes its session secret to its token file, unlike the installed app's.
+  const auth = sessionAuthorization(demoStateDir(instance));
   const post = async (path: string, body: object) => {
     const res = await fetch(`${demoServer(instance)}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auth },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`POST ${path} failed (${res.status}): ${await res.text()}`);

@@ -790,7 +790,7 @@ export function CodeEditorPanel({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
       {contentUnknown && isError && (
         <EditorBanner
           tone="danger"

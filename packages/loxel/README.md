@@ -63,7 +63,7 @@ pnpm run e2e              # Playwright tests against an isolated server
 pnpm run typecheck
 ```
 
-Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
+Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server's `/api` and `/ws` take only requests that carry its session secret: a server you start yourself writes it to `<stateDir>/run/session-token`, which the Vite dev proxy adds to what it forwards, so open the app through Vite (port 5173), not the server's port; a script that calls the server sends it as `Authorization: Bearer <secret>`. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
 
 To run a second web dev instance beside one already on the default ports (for example from another worktree), give it its own ports and state directory: `LOXEL_SERVE_PORT=7444 LOXEL_VITE_PORT=5183 LOXEL_STATE_DIR=~/.local/state/loxel/loxel-dev-2 pnpm run dev`, then open `http://127.0.0.1:5183`.
 
@@ -71,22 +71,22 @@ Demo mode (`LOXEL_DEMO=1`, set by the demo scripts) runs beside the installed ap
 
 ### Environment variables
 
-| Variable              | Purpose                                                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                                 |
-| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                                |
-| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state                 |
-| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                                         |
-| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                                    |
-| `LOXEL_SERVE_PORT`    | Override the server port (standalone server and Vite's proxy only; the app uses 7433/7434/7435 + n) |
-| `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                            |
-| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`)                            |
+| Variable              | Purpose                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                                               |
+| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                                              |
+| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state                               |
+| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                                                       |
+| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                                                  |
+| `LOXEL_SERVE_PORT`    | Override the server port (standalone server and Vite's proxy only; the app uses 7433/7434/7435 + n)               |
+| `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                                          |
+| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`; compiled: `renderer/` beside the binary) |
 
 Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the renderer inside the installed app. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_SOCKET`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 
 ### Releases
 
-`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads, a zip that installed apps update from, and a CycloneDX SBOM of what each architecture's app ships ([docs/ELECTRON.md](docs/ELECTRON.md#build-and-release)), and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges.
+`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads, a zip that installed apps update from, and a CycloneDX SBOM of what each architecture's app ships ([docs/ELECTRON.md](docs/ELECTRON.md#build-and-release)), and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges. Each release also publishes a standalone server bundle for Linux (`linux-x64`, `linux-arm64`) with its own manifest; see [docs/ELECTRON.md](docs/ELECTRON.md#standalone-server-bundle).
 
 ## Data storage
 
@@ -108,7 +108,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Platform**
 
-- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration, the default browser, and building and releasing the app with its SBOM
+- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration, the default browser, and building and releasing the app with its SBOM and the standalone Linux server bundle
 - [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: one app process, starting, restarting and stopping the server, the app's channel to it, the quit modes and the question before a quit, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
@@ -127,7 +127,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, code block highlighting, mermaid previews, peek widgets, EditorConfig, indentation and its status item, disk sync and saving, file operations, drafts, Others files, localdb, search
 - [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), repository trust and the trust policy for what runs untrusted, URI schemes, formatting, toolchain status items, JSON/YAML/TOML schemas, highlighting and editing behavior; per-language detail in docs/languages/ ([Python](docs/languages/python.md): environment, interpreter choice and trust rule, mypy in place of basedpyright's type checks; [TypeScript](docs/languages/typescript.md): its manager and diagnostics; [JavaScript](docs/languages/javascript.md): Node version, formatters, ESLint, oxlint and Biome; [Go](docs/languages/go.md): gopls, its toolchain and golangci-lint; [Rust](docs/languages/rust.md): toolchain and the user's rust-analyzer; [C and C++](docs/languages/c-cpp.md): clangd and compile databases; [Java](docs/languages/java.md): jdtls on the user's JDK, Maven and Gradle import, Checkstyle diagnostics; [Kotlin](docs/languages/kotlin.md): formatters and detekt and ktlint diagnostics; [C#](docs/languages/csharp.md): the user's csharp-ls and its gate; [TOML](docs/languages/toml.md): Tombi)
 - [docs/THEMES.md](docs/THEMES.md) — color themes: the model and its storage, the UI token stylesheet, terminal colors, syntax colors in Monaco and Shiki, theme.json, ANSI colors from other terminals' scheme files
-- [docs/TERMINALS.md](docs/TERMINALS.md) — terminal sessions and their emulator in the terminal host, with attach, snapshot and resume, login-shell environment capture, toolchain environments (Python activation), the terminal WebSocket protocol, xterm.js client and its colors, notifications, the `loxel` CLI
+- [docs/TERMINALS.md](docs/TERMINALS.md) — terminal sessions and their emulator in the terminal host, with attach, snapshot and resume, several windows on one session, login-shell environment capture, toolchain environments (Python activation), the terminal WebSocket protocol, xterm.js client and its colors, notifications, the `loxel` CLI and the setting that decides whether an agent's `loxel terminal` runs
 - [docs/TERMINAL_HOST.md](docs/TERMINAL_HOST.md) — the terminal host: what owns the sessions versus the server's terminal policy, the `TerminalHost` interface and its events, ordering, the detached `loxel-terminal-host` process, its socket protocol and compatibility, versioning and capabilities, generations, lifetime and grace period, reconnecting, files on disk, the import boundary
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs, file comparisons and patches, synchronized scrolling, intra-line highlights, gutter connectors

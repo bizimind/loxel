@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
-import { type ReconnectInfo, WsClient } from "./client";
+import { until } from "@/test/until";
+
+import { WsClient } from "./client";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 
 /** A WebSocket the test opens, feeds and closes by hand. */
@@ -51,11 +53,23 @@ const lastSocket = (): FakeSocket => {
   return socket;
 };
 
+/** What `GET /api/session` answers: the server accepts the window's session unless set to 401. */
+let sessionStatus = 204;
+/** How many times the client asked. */
+let sessionChecks = 0;
+
 beforeAll(() => {
   globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
   // postLogEntry reports to the server; there is none here.
   spyOn(globalThis, "fetch").mockImplementation(
-    Object.assign(async () => new Response(), { preconnect: globalThis.fetch.preconnect }),
+    Object.assign(
+      async (input: string | URL | Request) => {
+        if (String(input) !== "/api/session") return new Response();
+        sessionChecks++;
+        return new Response(null, { status: sessionStatus });
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    ),
   );
 });
 
@@ -65,6 +79,8 @@ afterAll(() => {
 
 beforeEach(() => {
   FakeSocket.instances = [];
+  sessionStatus = 204;
+  sessionChecks = 0;
 });
 
 /** A client connected to its first server, with its socket. */
@@ -152,15 +168,15 @@ describe("WsClient", () => {
     expect(client.getConnectionState()).toBe("connected");
   });
 
-  test("tells the reconnect listeners whether the server restarted", () => {
+  test("runs the reconnect listeners after a reconnect, whether the server restarted or not", () => {
     const { client } = connected();
-    const infos: ReconnectInfo[] = [];
-    client.onReconnect((info) => infos.push(info));
+    let reconnects = 0;
+    client.onReconnect(() => reconnects++);
 
     dropAndReopen(client).receive(hello("boot-1"));
     dropAndReopen(client).receive(hello("boot-2"));
 
-    expect(infos).toEqual([{ serverRestarted: false }, { serverRestarted: true }]);
+    expect(reconnects).toBe(2);
   });
 
   test("reloads instead of resyncing when a new version of the server answers", () => {
@@ -195,6 +211,42 @@ describe("WsClient", () => {
     current.open();
     current.receive(hello());
     expect(client.getConnectionState()).toBe("connected");
+  });
+
+  test("a socket that never got a hello is retried while the server accepts the window", async () => {
+    const client = new WsClient();
+    client.connect();
+    lastSocket().close();
+
+    await until(() => sessionChecks === 1);
+    // The retry waits out the backoff; retryNow runs it now, which it can only once one is set.
+    await until(() => {
+      client.retryNow();
+      return FakeSocket.instances.length === 2;
+    });
+    expect(client.getConnectionState()).toBe("connecting");
+  });
+
+  test("expires, and stops retrying, when the server no longer accepts the window", async () => {
+    const { client } = connected();
+    sessionStatus = 401;
+    lastSocket().close();
+    expect(sessionChecks).toBe(0);
+    client.retryNow();
+    lastSocket().close();
+
+    await until(() => client.getConnectionState() === "expired");
+    client.retryNow();
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  test("expires at once when told, closing its socket", () => {
+    const { client, socket } = connected();
+    client.expireSession();
+    expect(client.getConnectionState()).toBe("expired");
+    expect(socket.readyState).toBe(3);
+    client.retryNow();
+    expect(FakeSocket.instances).toHaveLength(1);
   });
 
   test("reports each state change to its subscribers", () => {

@@ -13,6 +13,12 @@ import type {
  * Implement this to connect the UI to any backend: REST, WebSocket, Convex, or in-process SDK.
  */
 export interface DataAdapter {
+  /**
+   * The prefix of the TanStack Query keys the views cache this adapter's data under: invalidating
+   * it refreshes every view of it.
+   */
+  readonly queryKey: readonly unknown[];
+
   // Schema
   listTables(): Promise<TableMeta[]>;
   getSchema(tableName: string): Promise<TableSchema>;

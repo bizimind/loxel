@@ -2,6 +2,7 @@ import type { FormattingSettings } from "@/lib/formatting-model";
 import type { SchemaFileMatch } from "@/lib/schema-glob";
 import type { OpenRequest, OpenResult } from "@/open-request";
 
+import type { AgentTerminalAnswer } from "./agent-terminal-model";
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
 import type { EditorConfigResponse } from "./editorconfig-model";
@@ -83,11 +84,20 @@ export function isFileMissingError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
 }
 
+/**
+ * The server refused a write with `expectedContent` because the file no longer held it (`409`
+ * with `code: "EDISKCHANGED"`): it changed on disk since the client read it.
+ */
+export function isDiskChangedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && err.code === "EDISKCHANGED";
+}
+
 export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
+  if (response.status === 401) wsClient.expireSession();
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -278,6 +288,11 @@ export async function writeFileContent(options: {
   worktreePath?: string;
   format?: boolean;
   formattingSettings?: FormattingSettings;
+  /**
+   * Write only if the file still holds this (what a retried save was merged onto); otherwise the
+   * server refuses with {@link isDiskChangedError}.
+   */
+  expectedContent?: string;
 }) {
   // `formatNotice`: why a save requested with `format` went out unformatted, when the user can
   // act on it (formatter not installed, timed out).
@@ -396,9 +411,12 @@ export async function removeExternalFolder(wt: string, path: string) {
   });
 }
 
-/** Resolve a path (`~/` expanded) and report whether it is a directory. Throws when missing. */
+/**
+ * Resolve a path (`~/` expanded) and report whether it is a directory, its size and modification
+ * time. Throws when missing.
+ */
 export async function getPathInfo(path: string) {
-  return fetchJson<{ path: string; isDir: boolean }>(
+  return fetchJson<{ path: string; isDir: boolean; size: number; mtimeMs: number }>(
     `/path-info?${new URLSearchParams({ path }).toString()}`,
   );
 }
@@ -672,6 +690,25 @@ export async function resolveSchema(url: string, baseDir?: string): Promise<unkn
   }
 }
 
+// --- Agents' terminals API ---
+
+/** Answer an agent's terminal request; `windowId` (this window) gets the terminal. */
+export async function answerAgentTerminal(
+  id: string,
+  answer: AgentTerminalAnswer,
+  windowId: string,
+): Promise<void> {
+  await fetchJson("/agent-terminals/answer", {
+    method: "POST",
+    body: JSON.stringify({ id, answer, windowId }),
+  });
+}
+
+/** Ask again in every worktree where the user chose "Always in this worktree". */
+export async function clearAgentTerminalWorktrees(): Promise<void> {
+  await fetchJson("/agent-terminals/clear-always", { method: "POST" });
+}
+
 // --- Worktree API ---
 
 export type { AddPlan as AddWorktreePlan, AddResult as AddWorktreeResult } from "@bizimind/wt/lib";
@@ -930,12 +967,6 @@ export async function deleteCommentThread(wt: string, threadId: string) {
 // stream offset of their first byte.
 type TerminalOutputHandler = (offset: number, data: Uint8Array) => void;
 
-/** What reconnect listeners learn about the server the socket reconnected to. */
-export interface ReconnectInfo {
-  /** A new server process (its boot epoch changed), which kept nothing in memory from before. */
-  serverRestarted: boolean;
-}
-
 type ServerHello = Extract<WsMessage, { type: "server_hello" }>;
 
 /**
@@ -954,7 +985,7 @@ export class WsClient {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeListenersAdded = false;
   private listeners = new Set<(msg: WsMessage) => void>();
-  private reconnectListeners = new Set<(info: ReconnectInfo) => void>();
+  private reconnectListeners = new Set<() => void>();
   private stateListeners = new Set<() => void>();
   private terminalOutputHandlers = new Map<string, TerminalOutputHandler>();
   private pendingMessages: WsClientMessage[] = [];
@@ -972,6 +1003,8 @@ export class WsClient {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
+    /** Whether the server's hello came on this socket. */
+    let greeted = false;
     // Only the latest socket counts: one a disconnect left closing (as React's StrictMode does
     // with its double effect) must not retry or deliver beside it.
     this.ws = ws;
@@ -991,6 +1024,7 @@ export class WsClient {
           if (typeof raw !== "object" || raw === null || !("type" in raw)) return;
           const message = raw as WsMessage;
           if (message.type === "server_hello") {
+            greeted = true;
             this.handleHello(message);
             return;
           }
@@ -1023,7 +1057,18 @@ export class WsClient {
       this.ws = null;
       if (this.closed) return;
       if (this.state === "connected") this.setState("reconnecting");
-      this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
+      if (greeted) {
+        this.scheduleRetry();
+        return;
+      }
+      // A refused upgrade does not say why: ask whether the server still accepts this window's
+      // session, or is only not there.
+      void sessionRefused().then((refused) => {
+        // Unless something else has moved on meanwhile (disconnect, a new connect).
+        if (this.closed || this.ws !== null || this.retryTimer !== null) return;
+        if (refused) this.expireSession();
+        else this.scheduleRetry();
+      });
     };
 
     ws.onerror = (err) => {
@@ -1034,6 +1079,28 @@ export class WsClient {
         ctx: err instanceof ErrorEvent && err.message ? { message: err.message } : undefined,
       });
     };
+  }
+
+  private scheduleRetry(): void {
+    this.retryTimer = setTimeout(() => this.doConnect(), reconnectDelay(this.attempt++));
+  }
+
+  /**
+   * The server answered `401`: it does not take this window's session secret, which happens only
+   * once a server with another one has replaced the one the window loaded from. Retrying cannot
+   * help; the window says so and offers a reload.
+   */
+  expireSession(): void {
+    if (this.state === "expired") return;
+    // Not to the server, which refuses the window's requests now and logs each refusal itself.
+    console.warn("The Loxel server no longer accepts this window's session; reload to reconnect");
+    this.closed = true;
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    const ws = this.ws;
+    this.ws = null;
+    ws?.close();
+    this.setState("expired");
   }
 
   /**
@@ -1059,8 +1126,8 @@ export class WsClient {
   /**
    * The server's hello opens every connection. A different version (a new build started) or a
    * different server reloads the page to pick up its renderer and state. Otherwise the window
-   * re-creates its per-connection state on the server and catches up: the boot epoch tells the
-   * listeners whether the server restarted or this was only the socket.
+   * re-creates its per-connection state on the server and catches up, the same way whether the
+   * server restarted (its boot epoch changed, which is logged) or only the socket dropped.
    */
   private handleHello(hello: ServerHello): void {
     const previous = this.server;
@@ -1091,15 +1158,17 @@ export class WsClient {
       for (const msg of queued) this.sendNow(msg);
       return;
     }
-    const serverRestarted = hello.bootEpoch !== previous.bootEpoch;
     postLogEntry({
       level: "info",
       cat: "server",
-      msg: serverRestarted ? "Reconnected to a restarted server" : "Reconnected",
+      msg:
+        hello.bootEpoch === previous.bootEpoch
+          ? "Reconnected"
+          : "Reconnected to a restarted server",
     });
     for (const listener of this.reconnectListeners) {
       try {
-        listener({ serverRestarted });
+        listener();
       } catch (err) {
         postLogEntry({
           level: "error",
@@ -1182,7 +1251,7 @@ export class WsClient {
    * re-subscribed. Listeners should re-create any other server-side state and catch up on what
    * the window missed meanwhile.
    */
-  onReconnect(handler: (info: ReconnectInfo) => void): () => void {
+  onReconnect(handler: () => void): () => void {
     this.reconnectListeners.add(handler);
     return () => this.reconnectListeners.delete(handler);
   }
@@ -1220,6 +1289,18 @@ export class WsClient {
 }
 
 export const wsClient = new WsClient();
+
+/**
+ * Whether the server refuses this window's session secret, which `GET /api/session` answers with
+ * `401`. False when no server answers either: then it is down, and retrying is right.
+ */
+async function sessionRefused(): Promise<boolean> {
+  try {
+    return (await fetch(`${API_BASE}/session`)).status === 401;
+  } catch {
+    return false;
+  }
+}
 
 // --- Version API ---
 

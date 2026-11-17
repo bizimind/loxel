@@ -1,21 +1,19 @@
 /**
  * The open inbox: what `loxel` asked to open while no window was connected, kept until a window
- * connects and delivered to it then. See docs/TERMINALS.md#the-open-inbox.
+ * has placed its panel. See docs/TERMINALS.md#the-open-inbox.
  */
 import { basename } from "node:path";
 
 import { z } from "zod";
 
+import { AgentOriginSchema } from "@/api/agent-terminal-model";
 import { parsePanelPlacement } from "@/api/panel-placement-model";
-import type { WsMessage } from "@/api/ws-protocol";
+import type { InboxOpenMessage } from "@/api/ws-protocol";
 
 import { PersistedList } from "./persisted-list";
 
-/** The requests the inbox holds: the messages `POST /api/open` sends a window. */
-export type InboxMessage = Extract<
-  WsMessage,
-  { type: "open_file" | "open_folder" | "open_terminal" | "open_url" }
->;
+/** The requests the inbox holds; see `InboxOpenMessage`. */
+export type InboxMessage = InboxOpenMessage;
 
 /**
  * Enough for a burst of agents' requests over a night away, while a runaway loop cannot grow the
@@ -43,7 +41,6 @@ const InboxMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("open_file"),
     data: z.object({ filePath: z.string(), worktreePath: z.string().optional(), ...openOptions }),
   }),
-  z.object({ type: z.literal("open_folder"), data: z.object({ path: z.string() }) }),
   z.object({
     type: z.literal("open_terminal"),
     data: z.object({
@@ -51,6 +48,7 @@ const InboxMessageSchema = z.discriminatedUnion("type", [
       cwd: z.string(),
       worktreePath: z.string().nullable(),
       title: z.string().optional(),
+      origin: AgentOriginSchema.optional(),
       ...openOptions,
     }),
   }),
@@ -75,6 +73,8 @@ const InboxEntrySchema = z.object({
   /** The worktree the panel opens in, null for Home, or absent for whatever the window shows. */
   worktreePath: z.string().nullable().optional(),
   message: InboxMessageSchema,
+  /** A window got it, and a notification said so; it waits for a window to place its panel. */
+  delivered: z.boolean().optional(),
 });
 export type InboxEntry = z.infer<typeof InboxEntrySchema>;
 
@@ -96,14 +96,18 @@ export class OpenInbox {
     this.expire();
   }
 
-  /** Queue `message` for the next window. Returns false, queueing nothing, when the inbox is full. */
+  /**
+   * Queue `message` for the next window, without focus: when a window comes, the user is no longer
+   * looking at it, so it waits in its worktree, with a notification, and switches no window there.
+   * Returns false, queueing nothing, when the inbox is full.
+   */
   add(message: InboxMessage, worktreePath: string | null | undefined): boolean {
     if (!this.hasRoom()) return false;
     const entry: InboxEntry = {
       id: crypto.randomUUID(),
       queuedAt: this.now(),
       ...(worktreePath === undefined ? {} : { worktreePath }),
-      message,
+      message: unfocused(message),
     };
     this.entries.push(entry);
     this.persisted.insert(entry);
@@ -124,13 +128,40 @@ export class OpenInbox {
     );
   }
 
-  /** Take every request still current, oldest first, emptying the inbox. */
-  takeAll(): InboxEntry[] {
+  /**
+   * How long until the first request holding a terminal has expired (it is expired once strictly
+   * older than the TTL), or null when none holds one.
+   */
+  msUntilTerminalExpires(): number | null {
     this.expire();
-    const taken = this.entries;
-    this.entries = [];
-    this.persisted.clear();
-    return taken;
+    const queuedAt = this.entries
+      .filter(({ message }) => message.type === "open_terminal")
+      .map((entry) => entry.queuedAt);
+    if (queuedAt.length === 0) return null;
+    return Math.min(...queuedAt) + ENTRY_TTL_MS + 1 - this.now();
+  }
+
+  /** Every request still current, oldest first. */
+  list(): readonly InboxEntry[] {
+    this.expire();
+    return this.entries;
+  }
+
+  /** Remember that windows got the requests `ids`, so they are not announced again. */
+  markDelivered(ids: readonly string[]): void {
+    const marked = new Set(ids);
+    for (const entry of this.entries) {
+      if (!marked.has(entry.id) || entry.delivered) continue;
+      entry.delivered = true;
+      this.persisted.insert(entry);
+    }
+  }
+
+  /** A window placed the request's panel: it is done with. Returns whether it was still here. */
+  remove(id: string): boolean {
+    const before = this.entries.length;
+    this.dropWhere((entry) => entry.id === id);
+    return this.entries.length < before;
   }
 
   /**
@@ -158,8 +189,36 @@ export class OpenInbox {
   }
 }
 
+/**
+ * Destroy the orphaned terminals no request in `inbox` holds, with `destroyOrphans` (the terminal
+ * manager's), and say when to sweep again: just after the first request holding one expires, which
+ * makes its terminal an ordinary orphan; null when no request holds one.
+ */
+export function sweepOrphans(
+  inbox: OpenInbox,
+  destroyOrphans: (kept: (id: string) => boolean) => number,
+): { destroyed: number; nextSweepInMs: number | null } {
+  const destroyed = destroyOrphans((id) => inbox.holdsTerminal(id));
+  return { destroyed, nextSweepInMs: inbox.msUntilTerminalExpires() };
+}
+
+function unfocused(message: InboxMessage): InboxMessage {
+  switch (message.type) {
+    case "open_file":
+      return { ...message, data: { ...message.data, focus: false } };
+    case "open_terminal":
+      return { ...message, data: { ...message.data, focus: false } };
+    case "open_url":
+      return { ...message, data: { ...message.data, focus: false } };
+    default: {
+      const unknown: never = message;
+      throw new Error(`Unknown inbox message: ${String(unknown)}`);
+    }
+  }
+}
+
 /** What a request opens, for the notification that says it did. */
-type OpenKind = "terminal" | "file" | "folder" | "page";
+type OpenKind = "terminal" | "file" | "page";
 
 function openKind(message: InboxMessage): OpenKind {
   switch (message.type) {
@@ -167,8 +226,6 @@ function openKind(message: InboxMessage): OpenKind {
       return "terminal";
     case "open_file":
       return "file";
-    case "open_folder":
-      return "folder";
     case "open_url":
       return "page";
     default: {
@@ -185,8 +242,6 @@ function openName(message: InboxMessage): string | null {
       return message.data.title ?? null;
     case "open_file":
       return basename(message.data.filePath);
-    case "open_folder":
-      return basename(message.data.path);
     case "open_url":
       return URL.parse(message.data.url)?.host ?? null;
     default: {
@@ -196,7 +251,7 @@ function openName(message: InboxMessage): string | null {
   }
 }
 
-const ORDER: readonly OpenKind[] = ["terminal", "file", "folder", "page"];
+const ORDER: readonly OpenKind[] = ["terminal", "file", "page"];
 const MAX_NAMES = 5;
 
 /** "2 terminals and a file", "3 pages". */
