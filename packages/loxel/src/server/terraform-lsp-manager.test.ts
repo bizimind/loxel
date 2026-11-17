@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -105,6 +105,9 @@ describe.skipIf(!canRun)("TerraformLspManager and repository trust", () => {
       `found=${join(root, "shim", "terraform")} tfenv=false proxy=http://127.0.0.1:9 no_proxy= ` +
         `terraform=${USER_PROXY} registry.terraform.io`,
     );
+    // The shim holds the user's proxy settings, which can carry credentials.
+    expect((await stat(join(root, "shim"))).mode & 0o777).toBe(0o700);
+    expect((await stat(join(root, "shim", "terraform"))).mode & 0o777).toBe(0o700);
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });

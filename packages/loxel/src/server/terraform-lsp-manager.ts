@@ -76,13 +76,17 @@ export class TerraformLspManager extends WorktreeLspManager {
     return { ...options, env: { ...env, PATH: `${this.shimDir}${path.delimiter}${userPath}` } };
   }
 
-  /** Writes the `terraform` that terraform-ls runs, replacing it whole so a running one is kept. */
+  /**
+   * Writes the `terraform` that terraform-ls runs, replacing it whole so a running one is kept.
+   * Only the user may read it, since a proxy URL can carry credentials.
+   */
   private writeShim(terraform: string, userEnv: Env): void {
-    mkdirSync(this.shimDir, { recursive: true });
+    mkdirSync(this.shimDir, { recursive: true, mode: 0o700 });
+    chmodSync(this.shimDir, 0o700);
     const shim = path.join(this.shimDir, TERRAFORM);
     const tmp = `${shim}.${process.pid}.tmp`;
-    writeFileSync(tmp, terraformShim(terraform, userEnv));
-    chmodSync(tmp, 0o755);
+    writeFileSync(tmp, terraformShim(terraform, userEnv), { mode: 0o700 });
+    chmodSync(tmp, 0o700);
     renameSync(tmp, shim);
   }
 
