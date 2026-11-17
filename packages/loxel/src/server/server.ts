@@ -18,6 +18,7 @@ import {
   type WsMessage,
 } from "@/api/ws-protocol";
 import { newSessionSecret } from "@/app-session";
+import { awakeTimeout } from "@/lib/awake-timer";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
 import { isStorableFavicon } from "@/url-utils";
@@ -419,19 +420,23 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
  * so it does not open them too. Only for this process, which is when they were taken.
  */
 const inboxRevoked = new Map<string, Set<string>>();
-/** When each window that held inbox requests lost its socket, by `windowId`. */
+/**
+ * When each window that held inbox requests lost its socket, by `windowId`, on the monotonic clock:
+ * time the machine slept, when no window could say hello, does not count as away.
+ */
 const windowAwaySince = new Map<string, number>();
 /** Away since then, for a window from before this process that has not said hello since. */
-const inboxStartedAt = Date.now();
+const inboxStartedAt = performance.now();
 
 /**
- * Whether the window `windowId` has been away long enough (`config.inboxHoldGraceMs`) not to be
- * coming back: not a reload, a dropped socket or a server restart, after which it says hello again.
+ * Whether the window `windowId` has been away long enough (`config.inboxHoldGraceMs`, awake) not to
+ * be coming back: not a reload, a dropped socket or a server restart, after which it says hello
+ * again.
  */
 function windowGone(windowId: string): boolean {
   if (isWindowConnected(windowId)) return false;
   const since = windowAwaySince.get(windowId) ?? inboxStartedAt;
-  return Date.now() - since >= config.inboxHoldGraceMs;
+  return performance.now() - since >= config.inboxHoldGraceMs;
 }
 
 /**
@@ -479,12 +484,13 @@ function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
  * window in use; without one, it waits for the next window to say hello.
  */
 function moveInboxFromAwayWindow(windowId: string): void {
-  setTimeout(() => {
+  // Restarted by a sleep, and run after the I/O pending on wake, so a hello read then comes first.
+  awakeTimeout(config.inboxHoldGraceMs, () => {
     if (!windowGone(windowId)) return;
     const [next] = activeWindowSockets(null);
     const nextId = next ? clients.get(next)?.windowId : undefined;
     if (next && nextId) deliverInbox(next, nextId);
-  }, config.inboxHoldGraceMs);
+  });
 }
 
 /**
@@ -1800,7 +1806,7 @@ const server = Bun.serve<WsData>({
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
       if (closedWindowId && openInbox.holds(closedWindowId)) {
-        windowAwaySince.set(closedWindowId, Date.now());
+        windowAwaySince.set(closedWindowId, performance.now());
         moveInboxFromAwayWindow(closedWindowId);
       }
       // What this window was asking moves to the window in use, or waits for the next one.
