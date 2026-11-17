@@ -246,9 +246,13 @@ describe("POST /api/open terminals and placement", () => {
       await open({ url: "https://example.com", wtPath: root, queue: true }),
     ];
 
-    // A folder is only revealed in the window in use; with none, there is nothing to reveal later.
-    expect(replies.map((res) => res.status)).toEqual([202, 503, 202]);
+    // A folder is only revealed in the window in use; with none, there is nothing to reveal later,
+    // which the caller is told as final (409), not as worth retrying (503).
+    expect(replies.map((res) => res.status)).toEqual([202, 409, 202]);
     expect(await replies[0]!.json()).toEqual({ ok: true, queued: true });
+    expect(await replies[1]!.json()).toEqual({
+      error: "No Loxel window is open to show the folder in",
+    });
     expect(queued).toEqual([
       {
         message: { type: "open_file", data: { filePath: join(root, "file.txt"), focus: false } },

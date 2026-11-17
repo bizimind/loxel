@@ -3155,6 +3155,7 @@ async function namedWorktree(ctx: RouteContext, path: unknown): Promise<string |
 }
 
 const NO_WINDOW = "No Loxel window is open";
+const NO_WINDOW_FOR_FOLDER = "No Loxel window is open to show the folder in";
 
 /**
  * The reply to an open no window can take. With `queue` (the `loxel` CLI expects no window to come
@@ -3463,11 +3464,12 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     ? { warning: `${ignored} apply to a folder; it opens in the file tree` }
     : {};
   // Not kept for a window to come: a reveal is for the window in use, and the inbox's opens wait
-  // unfocused.
+  // unfocused. A caller that would queue knows no window is coming: a final answer (409), not one
+  // to retry while a window comes (503).
   if (ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } })) {
     return json({ ok: true, ...reply });
   }
-  return error(NO_WINDOW, 503);
+  return queue ? error(NO_WINDOW_FOR_FOLDER, 409) : error(NO_WINDOW, 503);
 }
 
 // ---------------------------------------------------------------------------
