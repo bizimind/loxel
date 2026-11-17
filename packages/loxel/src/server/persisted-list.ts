@@ -4,7 +4,7 @@
  * mirrors its inserts and deletes, in insertion order.
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { z } from "zod";
@@ -20,7 +20,7 @@ interface Identified {
 
 export class PersistedList<T extends Identified> {
   private db: Database | null = null;
-  /** Logged once, then the list goes on in memory only, as before persistence. */
+  /** A write failed: the list goes on in memory only, as before persistence, until a restart. */
   private failed = false;
 
   /** `path` null keeps nothing (tests, and a list nothing needs to survive). */
@@ -80,18 +80,40 @@ export class PersistedList<T extends Identified> {
   }
 
   /**
-   * Run `action` on the database, opening it first. A failure is logged once and turns persistence
-   * off: the list in memory stays right for this server, and only a restart would lose it.
+   * Run `action` on the database, opening it first. A file that cannot be read is moved aside, so
+   * the list starts empty in a new one. A write that fails turns persistence off for this server,
+   * whose list in memory stays right, and removes the file, which no longer matches it: the next
+   * server starts empty rather than bring back what was delivered or dismissed since.
    */
   private run(what: "read" | "write", action: (db: Database) => void): void {
-    if (this.path === null || this.failed) return;
+    const { path } = this;
+    if (path === null || this.failed) return;
     try {
-      action(this.open(this.path));
+      action(this.open(path));
     } catch (err) {
+      this.close();
+      if (what === "read") {
+        log.error(`Could not read ${path}; moved it aside to ${path}.unreadable`, { error: err });
+        this.discard(path, (file) => renameSync(file, `${file}.unreadable`));
+        return;
+      }
       this.failed = true;
-      log.error(`Could not ${what} ${this.path}; it is kept in memory only until a restart`, {
+      log.error(`Could not write ${path}; the list is kept in memory only until a restart`, {
         error: err,
       });
+      this.discard(path, (file) => rmSync(file, { force: true }));
+    }
+  }
+
+  /** Apply `remove` to the database file and its WAL files, logging what it cannot remove. */
+  private discard(path: string, remove: (file: string) => void): void {
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      try {
+        remove(file);
+      } catch (err) {
+        if (err instanceof Error && "code" in err && err.code === "ENOENT") continue;
+        log.warn(`Could not remove ${file}`, { error: err });
+      }
     }
   }
 
@@ -101,6 +123,9 @@ export class PersistedList<T extends Identified> {
     const db = new Database(path);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA busy_timeout = 5000");
+    // No fsync per write: a terminal program can raise notifications as fast as it prints, and
+    // what a power loss could cost (the last few changes) is not worth that. A crash loses nothing.
+    db.exec("PRAGMA synchronous = NORMAL");
     // `seq` keeps insertion order, which timestamps alone do not within one millisecond.
     db.exec(`CREATE TABLE IF NOT EXISTS items (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,

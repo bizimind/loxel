@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -107,17 +107,14 @@ describe("NotificationStore persistence", () => {
     const first = new NotificationStore(path);
     const kept = first.add({ source: terminal, title: "done", urgency: "high" });
     const dismissed = first.add({ source: { kind: "server" }, urgency: "normal" });
-    const page = first.addBrowser({
-      source: browser("a"),
-      title: "build",
-      urgency: "normal",
-    }).added;
+    const inbox = first.add({ source: { kind: "inbox", worktreePath: "/wt" }, urgency: "normal" });
+    first.addBrowser({ source: browser("a"), title: "build", urgency: "normal" });
     first.dismiss(dismissed.id);
     first.close();
 
     const second = new NotificationStore(path);
-    // Newest first, as before, and a browser page's keeps its ref: main ignores a stale one.
-    expect(second.getAll()).toEqual([page, kept]);
+    // Newest first, as before. A browser page's is not kept: what sites write stays off disk.
+    expect(second.getAll()).toEqual([inbox, kept]);
     second.dismissAll();
     second.close();
 
@@ -139,9 +136,23 @@ describe("NotificationStore persistence", () => {
   });
 
   test("goes on in memory when its file cannot be opened", () => {
-    // A directory where the file should be.
-    const store = new NotificationStore(dir);
+    // A file where the database's directory should be.
+    const blocked = join(dir, "blocked");
+    writeFileSync(blocked, "");
+    const store = new NotificationStore(join(blocked, "notifications.db"));
     const added = store.add({ source: terminal, urgency: "normal" });
     expect(store.getAll()).toEqual([added]);
+  });
+
+  test("starts empty, keeping it, from a file it cannot read", () => {
+    const path = join(dir, "notifications.db");
+    writeFileSync(path, "not a database");
+
+    const store = new NotificationStore(path);
+    const added = store.add({ source: terminal, urgency: "normal" });
+    store.close();
+
+    expect(readFileSync(`${path}.unreadable`, "utf8")).toBe("not a database");
+    expect(new NotificationStore(path).getAll()).toEqual([added]);
   });
 });

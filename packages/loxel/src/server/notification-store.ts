@@ -5,7 +5,10 @@
  * are its sources, told apart by `source.kind`.
  *
  * Persisted: every change is written through to its SQLite file, so a restart keeps the list,
- * dismissals included. All connected clients are kept in sync via WS broadcasts from the caller.
+ * dismissals included. Browser pages' notifications are the exception, kept for the server's life
+ * only: what a site writes in them (sign-in codes, chat and mail previews) stays off disk, as the
+ * page object their clicks reach does not outlive the app. All connected clients are kept in sync
+ * via WS broadcasts from the caller.
  */
 import {
   type BrowserNotificationSource,
@@ -43,7 +46,7 @@ export class NotificationStore {
       timestamp: Date.now(),
     };
     this.notifications.unshift(notification);
-    this.persisted.insert(notification);
+    if (notification.source.kind !== "browser") this.persisted.insert(notification);
     this.removeWhere((_, index) => index >= MAX_NOTIFICATIONS);
     return notification;
   }

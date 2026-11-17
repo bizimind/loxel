@@ -61,11 +61,19 @@ const InboxMessageSchema = z.discriminatedUnion("type", [
   }),
 ]) satisfies z.ZodType<InboxMessage>;
 
+/**
+ * Both ways: a field added to the messages must be added here too, or a restart would strip it from
+ * the requests read back.
+ */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+const schemaMatchesMessages: Same<z.output<typeof InboxMessageSchema>, InboxMessage> = true;
+void schemaMatchesMessages;
+
 const InboxEntrySchema = z.object({
   id: z.string(),
   queuedAt: z.number(),
-  /** The worktree the panel opens in, or null for Home or whatever the window shows. */
-  worktreePath: z.string().nullable(),
+  /** The worktree the panel opens in, null for Home, or absent for whatever the window shows. */
+  worktreePath: z.string().nullable().optional(),
   message: InboxMessageSchema,
 });
 export type InboxEntry = z.infer<typeof InboxEntrySchema>;
@@ -89,12 +97,12 @@ export class OpenInbox {
   }
 
   /** Queue `message` for the next window. Returns false, queueing nothing, when the inbox is full. */
-  add(message: InboxMessage, worktreePath: string | null): boolean {
+  add(message: InboxMessage, worktreePath: string | null | undefined): boolean {
     if (!this.hasRoom()) return false;
     const entry: InboxEntry = {
       id: crypto.randomUUID(),
       queuedAt: this.now(),
-      worktreePath,
+      ...(worktreePath === undefined ? {} : { worktreePath }),
       message,
     };
     this.entries.push(entry);
@@ -205,7 +213,7 @@ function countPhrase(counts: Map<OpenKind, number>): string {
 /** The notifications to raise for requests delivered at once: one per worktree (or Home). */
 export function deliveredNotices(
   entries: readonly InboxEntry[],
-): Array<{ worktreePath: string | null; title: string; body?: string }> {
+): Array<{ worktreePath?: string | null; title: string; body?: string }> {
   const groups = Map.groupBy(entries, (entry) => entry.worktreePath);
   return [...groups].map(([worktreePath, group]) => {
     const counts = new Map<OpenKind, number>();
@@ -217,7 +225,7 @@ export function deliveredNotices(
     const shown = names.slice(0, MAX_NAMES).join(", ");
     const more = names.length > MAX_NAMES ? ` and ${names.length - MAX_NAMES} more` : "";
     return {
-      worktreePath,
+      ...(worktreePath === undefined ? {} : { worktreePath }),
       title: `${countPhrase(counts)} opened while you were away`,
       ...(names.length > 0 ? { body: shown + more } : {}),
     };

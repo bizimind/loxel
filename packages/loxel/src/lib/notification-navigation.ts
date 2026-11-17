@@ -27,10 +27,11 @@ function activatePanelById(panelId: string, retries = 1): void {
 export function navigateToNotification(notification: ServerNotification): void {
   const { source } = notification;
 
-  // Panels the inbox opened: go to where they opened. The notification has done its job.
+  // Panels the inbox opened: go to the worktree (or Home) they opened in, unless they opened in
+  // whatever the window showed. The notification has done its job.
   if (source.kind === "inbox") {
     usePanelNotificationStore.getState().dismiss(notification.id);
-    showPlace(source.worktreePath, () => {});
+    if (source.worktreePath !== undefined) showPlace(source.worktreePath, () => {});
     return;
   }
 
@@ -42,7 +43,7 @@ export function navigateToNotification(notification: ServerNotification): void {
   // `notificationclick`, runs (to open the chat or build it was about). A page in another worktree
   // or Home kept running there, so after a switch the click waits for its layout to mount, and what
   // the page opens lands next to it. Main ignores refs with nothing left to click (the page was
-  // closed, unloaded or reloaded, a service worker that showed it is gone, or Loxel restarted since).
+  // closed, unloaded or reloaded, and no service worker showed it).
   const activate = (afterSwitch: boolean) => {
     if (source.kind !== "browser") return activatePanelById(panelId);
     const click = (slot: PageSlot | null) => {

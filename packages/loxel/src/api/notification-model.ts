@@ -1,6 +1,6 @@
 /**
- * The notifications the server keeps and sends every window. The server persists them, so it
- * parses what it reads back with these schemas.
+ * The notifications the server keeps and sends every window. The server persists all but browser
+ * pages' ones, so it parses what it reads back with these schemas.
  */
 import { z } from "zod";
 
@@ -21,11 +21,7 @@ export const BrowserNotificationSourceSchema = z.object({
   worktreePath: z.string().nullable(),
   /** The page's origin, like `http://localhost:5173`. */
   origin: z.string(),
-  /**
-   * Main-process id of the page's `Notification` object, for its `click` event and `close()`. Only
-   * the app launch that showed it knows it: later, a click still goes to the panel, and main ignores
-   * the ref.
-   */
+  /** Main-process id of the page's `Notification` object, for its `click` event and `close()`. */
   ref: z.string(),
   /** The page's `tag`: a new notification replaces the origin's earlier one with the same tag. */
   tag: z.string().optional(),
@@ -36,11 +32,11 @@ export type BrowserNotificationSource = z.infer<typeof BrowserNotificationSource
 
 /**
  * Panels that `loxel` asked for while no window was open, opened in a window that connected later:
- * in the worktree named, or in Home (null).
+ * in the worktree named, in Home (null), or, when absent, in whatever the window showed.
  */
 export const InboxNotificationSourceSchema = z.object({
   kind: z.literal("inbox"),
-  worktreePath: z.string().nullable(),
+  worktreePath: z.string().nullable().optional(),
 });
 export type InboxNotificationSource = z.infer<typeof InboxNotificationSourceSchema>;
 

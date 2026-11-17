@@ -1409,8 +1409,13 @@ const routeContext: RouteContext = {
       command,
     });
   },
-  queueForWindow: (message, worktreePath) => openInbox.add(message, worktreePath),
-  inboxHasRoom: () => openInbox.hasRoom(),
+  // A window may have connected while the route awaited: it gets the request now, since the inbox
+  // goes out only on a window's hello.
+  queueForWindow: (message, worktreePath) => {
+    if (clients.size > 0 && sendToActiveWindow(null, message)) return "sent";
+    return openInbox.add(message, worktreePath) ? "queued" : "full";
+  },
+  dropQueuedTerminal,
   listTerminals: async ({ programs }) => {
     const running = terminalManager.running();
     const foreground = programs ? await terminalManager.foregroundProcesses() : {};

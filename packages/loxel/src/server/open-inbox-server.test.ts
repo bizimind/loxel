@@ -113,6 +113,10 @@ describe("a server with no window connected", () => {
       expect(await res.json()).toEqual({ ok: true, queued: true });
       // Without `queue`, as from an older CLI or the app itself, it still waits for a window.
       expect((await overSocket({ filePath: file })).status).toBe(503);
+      // A terminal starts at once, and its shell ends with this server (SIGTERM ends terminals): the
+      // next server drops its panel rather than show a new shell in it.
+      const terminal = await overSocket({ terminal: { cwd: stateDir }, queue: true });
+      expect(terminal.status).toBe(202);
       await stopServer(current.server);
 
       current = await startServer(stateDir);
@@ -124,10 +128,13 @@ describe("a server with no window connected", () => {
       });
       const added = await received(log, "notification_added");
       expect(added.data).toMatchObject({
-        source: { kind: "inbox", worktreePath: null },
         title: "A file opened while you were away",
         body: "plan.md",
       });
+      // Outside every worktree, the file opened in what the window showed.
+      expect(added.data.source).toEqual({ kind: "inbox" });
+      // The notification follows every delivery, so a terminal would have come before it.
+      expect(log.entries.some((message) => message.type === "open_terminal")).toBe(false);
       ws.close();
       await stopServer(current.server);
 

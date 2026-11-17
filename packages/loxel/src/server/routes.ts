@@ -222,11 +222,15 @@ export interface RouteContext {
   listTerminals: (options: { programs: boolean }) => Promise<RunningTerminals>;
   /**
    * Keep an open for the next window to connect, in the open inbox: `worktreePath` is where it
-   * opens (null for Home or what the window shows). Returns false when the inbox is full.
+   * opens (null for Home, undefined for what the window shows). A window that connected since the
+   * caller found none gets it at once (`sent`); a full inbox takes nothing (`full`).
    */
-  queueForWindow: (message: InboxMessage, worktreePath: string | null) => boolean;
-  /** Whether the open inbox has room for another request. */
-  inboxHasRoom: () => boolean;
+  queueForWindow: (
+    message: InboxMessage,
+    worktreePath: string | null | undefined,
+  ) => "sent" | "queued" | "full";
+  /** Drop the queued panel of a terminal whose shell failed to start. */
+  dropQueuedTerminal: (terminalId: string) => void;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -3109,12 +3113,15 @@ function openWithoutWindow(
   ctx: RouteContext,
   queue: boolean,
   message: InboxMessage,
-  worktreePath: string | null,
+  worktreePath: string | null | undefined,
   reply: { warning?: string } = {},
 ): Response {
   if (!queue) return error(NO_WINDOW, 503);
-  if (!ctx.queueForWindow(message, worktreePath)) return inboxFull();
-  return json({ ok: true, queued: true, ...reply }, 202);
+  const outcome = ctx.queueForWindow(message, worktreePath);
+  if (outcome === "full") return inboxFull();
+  return outcome === "sent"
+    ? json({ ok: true, ...reply })
+    : json({ ok: true, queued: true, ...reply }, 202);
 }
 
 function inboxFull(): Response {
@@ -3174,7 +3181,6 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     const owner = pinned ?? (await owningWorktree(ctx, cwd));
     const window = ctx.activeWindow(windowId);
     if (!window && !queue) return error(NO_WINDOW, 503);
-    if (!window && !ctx.inboxHasRoom()) return inboxFull();
     const worktreePath = owner ?? window?.worktreePath ?? null;
 
     const terminalId = crypto.randomUUID();
@@ -3182,7 +3188,15 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       type: "open_terminal",
       data: { terminalId, cwd, worktreePath, ...(title ? { title } : {}), ...placed },
     };
-    if (window && !ctx.sendToActiveWindow(windowId, message)) return error(NO_WINDOW, 503);
+    // Sent, or queued, in the tick that found the window or none: a window that connects while the
+    // shell starts gets the inbox with it, and a full inbox starts no shell.
+    const outcome = window
+      ? ctx.sendToActiveWindow(windowId, message)
+        ? "sent"
+        : null
+      : ctx.queueForWindow(message, worktreePath);
+    if (outcome === null) return error(NO_WINDOW, 503);
+    if (outcome === "full") return inboxFull();
     // Started here, not by the panel's attach: the panel may not mount for hours (a background
     // tab, a worktree the user is not on, a window that is not painting, or none connected), and
     // the command must run now. Started in the same tick as the send, so the panel's attach finds
@@ -3197,10 +3211,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       });
     } catch (err) {
       terminalLog.error("Failed to start terminal", { terminalId, error: err });
+      ctx.dropQueuedTerminal(terminalId);
       return error("Failed to start the terminal", 500);
     }
-    if (window) return json({ ok: true, terminalId });
-    if (!ctx.queueForWindow(message, worktreePath)) return inboxFull();
+    if (outcome === "sent") return json({ ok: true, terminalId });
     return json({ ok: true, queued: true, terminalId }, 202);
   }
 
@@ -3219,7 +3233,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
         data: { url: body.url, ...placed },
       };
       if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true });
-      return openWithoutWindow(ctx, queue, message, null);
+      return openWithoutWindow(ctx, queue, message, undefined);
     }
 
     const wtPath = await namedWorktree(ctx, body.wtPath);
@@ -3259,7 +3273,8 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       data: { filePath: path, ...(worktreePath ? { worktreePath } : {}), ...placed },
     };
     if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true });
-    const place = worktreePath ?? (queue ? await owningWorktree(ctx, path) : null);
+    // Where it opens, for the notification: outside every worktree, in what the window shows.
+    const place = worktreePath ?? (queue ? await owningWorktree(ctx, path) : null) ?? undefined;
     return openWithoutWindow(ctx, queue, message, place);
   }
 
@@ -3273,7 +3288,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     : {};
   const message: InboxMessage = { type: "open_folder", data: { path } };
   if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true, ...reply });
-  const place = queue ? await owningWorktree(ctx, path) : null;
+  const place = (queue ? await owningWorktree(ctx, path) : null) ?? undefined;
   return openWithoutWindow(ctx, queue, message, place, reply);
 }
 

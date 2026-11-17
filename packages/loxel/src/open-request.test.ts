@@ -144,8 +144,7 @@ describe("requestOpen", () => {
       SERVER,
       { filePath: "/a" },
       { windowWaitMs: 60_000, queueAfterMs: 15_000 },
-    );
-    clock.mockRestore();
+    ).finally(() => clock.mockRestore());
 
     expect(result).toEqual({ queued: true });
     expect(bodies).toEqual([{ filePath: "/a" }, { filePath: "/a", queue: true }]);

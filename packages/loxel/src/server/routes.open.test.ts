@@ -15,7 +15,7 @@ import { handleRequest } from "./routes";
 import { TerminalManager } from "./terminal-manager";
 
 type StartedTerminal = Parameters<RouteContext["startTerminal"]>[0];
-type QueuedOpen = { message: InboxMessage; worktreePath: string | null };
+type QueuedOpen = { message: InboxMessage; worktreePath: string | null | undefined };
 
 function git(cwd: string, ...args: string[]): void {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe" });
@@ -73,11 +73,15 @@ describe("POST /api/open terminals and placement", () => {
       },
       listTerminals: async () => ({ terminals: [] }),
       queueForWindow: (message, worktreePath) => {
-        if (queued.length >= inboxRoom) return false;
+        if (queued.length >= inboxRoom) return "full";
         queued.push({ message, worktreePath });
-        return true;
+        return "queued";
       },
-      inboxHasRoom: () => queued.length < inboxRoom,
+      dropQueuedTerminal: (id) => {
+        queued = queued.filter(
+          ({ message }) => message.type !== "open_terminal" || message.data.terminalId !== id,
+        );
+      },
     };
   });
 
@@ -179,6 +183,33 @@ describe("POST /api/open terminals and placement", () => {
         worktreePath: null,
       },
     ]);
+  });
+
+  test("queues the terminal before its shell starts, and drops it if the shell fails", async () => {
+    window = null;
+    const queuedAtStart: number[] = [];
+    ctx.startTerminal = async () => {
+      queuedAtStart.push(queued.length);
+      throw new Error("no pty");
+    };
+
+    const res = await open({ terminal: { cwd: root, command: "ls" }, queue: true });
+
+    expect(res.status).toBe(500);
+    // Queued in the tick that found no window, so one connecting while the shell starts gets it.
+    expect(queuedAtStart).toEqual([1]);
+    expect(queued).toEqual([]);
+  });
+
+  test("a window that connected meanwhile takes the open at once", async () => {
+    window = null;
+    ctx.queueForWindow = () => "sent";
+
+    const terminal = await open({ terminal: { cwd: root }, queue: true });
+    const file = await open({ filePath: join(root, "file.txt"), queue: true });
+
+    expect(terminal.status).toBe(200);
+    expect(await file.json()).toEqual({ ok: true });
   });
 
   test("starts no shell when the inbox is full", async () => {

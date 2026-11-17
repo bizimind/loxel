@@ -85,8 +85,8 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       homeDrafts: {} as never,
       startTerminal: async () => {},
       listTerminals: async () => ({ terminals: [] }),
-      queueForWindow: () => false,
-      inboxHasRoom: () => false,
+      queueForWindow: () => "full",
+      dropQueuedTerminal: () => {},
     };
   });
 
