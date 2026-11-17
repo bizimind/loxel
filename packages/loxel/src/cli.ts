@@ -1,9 +1,16 @@
 #!/usr/bin/env bun
+import type { AgentOrigin } from "./api/agent-terminal-model";
 import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
-import { isCodingAgent } from "./coding-agent-env";
+import { codingAgentName, isCodingAgent } from "./coding-agent-env";
 import { SOCKET_URL, findServer, givenServerGone, waitForServer } from "./find-server";
 import { WINDOW_WAIT_MS, requestOpenAll } from "./open-request";
 import { isHttpUrl } from "./url-utils";
+
+/**
+ * The exit status when an agent's terminal waits for the user's answer in Loxel ("When an Agent
+ * Starts a Terminal" is Ask): nothing started, and nothing failed either.
+ */
+const ASKED_EXIT_CODE = 3;
 
 async function detectWorktree(dir: string): Promise<string> {
   const proc = Bun.spawn(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
@@ -41,7 +48,8 @@ async function main(): Promise<void> {
       : parseOpenArgs(args, process.cwd());
   // Focus follows the caller unless a flag says otherwise: a coding agent's opens must not pull
   // the user away from what they are looking at, while a user's own opens show what they asked for.
-  const focus = parsed.focus ?? !isCodingAgent(process.env);
+  const codingAgent = isCodingAgent(process.env);
+  const focus = parsed.focus ?? !codingAgent;
 
   // Check env vars (inside loxel terminal)
   const isInsideLoxel = process.env.LOXEL === "1";
@@ -91,12 +99,29 @@ async function main(): Promise<void> {
   const windowId = isInsideLoxel && envWindowId ? envWindowId : undefined;
   const options = { focus, ...(windowId ? { windowId } : {}) };
   const pin = pinnedWorktree ? { pinWtPath: pinnedWorktree } : {};
+  // A coding agent's terminal says which agent asked, and from which Loxel terminal: Loxel's
+  // setting decides whether it runs, and its tab says where it came from.
+  const terminalId = process.env.LOXEL_TERMINAL_ID;
+  const agentName = codingAgentName(process.env);
+  const agent: AgentOrigin | null = codingAgent
+    ? {
+        ...(agentName ? { agent: agentName } : {}),
+        ...(isInsideLoxel && terminalId ? { terminalId } : {}),
+        ...(isInsideLoxel && envWorktree ? { worktreePath: envWorktree } : {}),
+      }
+    : null;
   const opens =
     "terminal" in parsed
       ? [
           {
             label: "",
-            request: { terminal: parsed.terminal, placement: parsed.placement, ...pin, ...options },
+            request: {
+              terminal: parsed.terminal,
+              placement: parsed.placement,
+              ...pin,
+              ...options,
+              ...(agent ? { agent } : {}),
+            },
           },
         ]
       : planOpens(parsed, {
@@ -114,13 +139,23 @@ async function main(): Promise<void> {
   // Launching Loxel brings a window (one starts with the app, and activating it opens one), so the
   // opens wait for it as long as a cold start takes. Otherwise none is coming: with no window open,
   // they wait in Loxel's inbox for the next one instead.
-  const { warnings, queued, failures } = await requestOpenAll(
+  const { warnings, queued, asked, failures } = await requestOpenAll(
     SOCKET_URL,
     sendable.map((open) => open.request),
     { unix: socket, onWaiting: announceWaiting, queueAfterMs: launched ? WINDOW_WAIT_MS : 0 },
   );
   for (const warning of warnings) process.stderr.write(`loxel: warning: ${warning}\n`);
-  if (queued > 0) {
+  if (asked > 0) {
+    // Only `loxel terminal` is asked about, and it sends one request.
+    const where =
+      queued > 0
+        ? "No Loxel window is open: the next one to open asks the user."
+        : "Loxel is asking the user now.";
+    process.stderr.write(
+      `loxel: Loxel asks the user before a coding agent starts a terminal. ${where} The terminal has not started, and starts only if they choose Run. Do not retry: tell the user it waits for their answer in Loxel.\n`,
+    );
+    process.exitCode = ASKED_EXIT_CODE;
+  } else if (queued > 0) {
     const all = queued === sendable.length;
     const what = all ? (queued === 1 ? "this" : "these") : `${queued} of these`;
     process.stderr.write(

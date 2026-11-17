@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   createNotificationSequencesCache,
+  parseAgentTerminalSetting,
   parseNotificationSequences,
   parseTerminalSpawnSettings,
 } from "./terminal-settings";
@@ -67,5 +68,20 @@ describe("parseTerminalSpawnSettings", () => {
     expect(parseTerminalSpawnSettings("not json")).toEqual({});
     const raw = JSON.stringify({ state: { terminal: { scrollbackLines: "a lot" } } });
     expect(parseTerminalSpawnSettings(raw)).toEqual({});
+  });
+});
+
+describe("parseAgentTerminalSetting", () => {
+  const persisted = (terminal: unknown) => JSON.stringify({ state: { terminal }, version: 12 });
+
+  test("reads the setting", () => {
+    expect(parseAgentTerminalSetting(persisted({ agentTerminals: "ask" }))).toBe("ask");
+    expect(parseAgentTerminalSetting(persisted({ agentTerminals: "never" }))).toBe("never");
+  });
+
+  test("runs when the setting is missing or unknown", () => {
+    expect(parseAgentTerminalSetting(null)).toBe("run");
+    expect(parseAgentTerminalSetting(persisted({}))).toBe("run");
+    expect(parseAgentTerminalSetting(persisted({ agentTerminals: "sometimes" }))).toBe("run");
   });
 });

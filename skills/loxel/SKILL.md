@@ -18,12 +18,13 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 - **One layout per worktree.** In each window, every worktree keeps its own panel layout (open editors, terminals, browser tabs). The window shows one worktree at a time. Switching swaps the whole layout, and terminals in the other worktrees keep running, so the user may be looking at a different worktree than yours. Removing a worktree ends its terminals, even if you run `wt rm` from one of them: the removal finishes, and your terminal ends about a minute later, so finish anything else first and make it among your last commands.
 - **Your terminal's environment.** Loxel sets these variables in every terminal it opens:
 
-| Variable          | Value                                                                                                                      |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `LOXEL`           | `1`                                                                                                                        |
-| `LOXEL_WORKTREE`  | Absolute path of the worktree whose layout holds this terminal; not set in a terminal in Home, the layout with no worktree |
-| `LOXEL_SOCKET`    | Socket of the running Loxel; the CLI connects through it                                                                   |
-| `LOXEL_WINDOW_ID` | The Loxel window this terminal is in; the CLI targets it                                                                   |
+| Variable            | Value                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `LOXEL`             | `1`                                                                                                                        |
+| `LOXEL_WORKTREE`    | Absolute path of the worktree whose layout holds this terminal; not set in a terminal in Home, the layout with no worktree |
+| `LOXEL_SOCKET`      | Socket of the running Loxel; the CLI connects through it                                                                   |
+| `LOXEL_WINDOW_ID`   | The Loxel window this terminal is in; the CLI targets it                                                                   |
+| `LOXEL_TERMINAL_ID` | This terminal; the CLI sends it with `loxel terminal` so the new tab says where it came from                               |
 
 ## The `loxel` CLI
 
@@ -77,6 +78,7 @@ Files, folders and URLs can be mixed in one command, and shell patterns work. Th
 - `loxel terminal` opens a new terminal tab in your window, with its shell started in `--cwd <dir>` (default: your current directory). The tab goes to the worktree that contains the directory, or to the window's current worktree for a directory outside every worktree, or to Home when the window shows none. Its command starts right away, even when the tab opens in the background or in a worktree the user isn't looking at. A worktree created moments ago inside the project's directory is picked up.
 - The new shell is a fresh login shell, like any new tab. It has the user's aliases and shell config but not your environment, so put any variables the command needs in the command itself. The shell stays open after the command exits, and the user can watch the output, scroll back and take over.
 - The CLI returns as soon as the tab is requested. It does not wait for the command, and it reports neither the command's output nor its exit code. Run the command yourself when you need its result. Use a new terminal for long-running processes the user should see (dev servers, watchers, log tails) or for handing work to another agent.
+- The user decides whether your `loxel terminal` runs (Settings > Terminal > When an Agent Starts a Terminal). By default it runs at once. If they chose Ask, nothing starts yet: the CLI prints `loxel: Loxel asks the user before a coding agent starts a terminal. ...` and exits **3**. The terminal starts only if the user chooses Run in Loxel, and you are not told when. Don't retry and don't work around it: tell the user what the terminal is for and that it waits for their answer. If they chose Never, the CLI prints `loxel: Loxel's settings do not let coding agents start terminals ...` and exits 1: run the command yourself if you can, or ask the user to. The tab of a terminal you started names you, and the terminal you ran in, as its origin.
 - The command is typed into the shell as keystrokes, so keep it on one line. With one argument, that argument is a shell command line used as is (`&&`, pipes and `cd` work). With several arguments, each one is quoted where needed and they are joined into one command, which makes a separate argument the safe way to pass a long prompt. `--` ends `loxel`'s own flags; put it before the command to be safe. `--title` names the tab.
 
 ```sh
