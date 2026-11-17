@@ -21,7 +21,8 @@ const RESTRICTION =
 const ORIGINAL_PATH = process.env.PATH;
 const canRun = process.platform !== "win32";
 
-let root: string;
+/** The test's scratch directory; empty until a test makes one. */
+let root = "";
 let manager: InstanceType<typeof TerraformLspManager> | undefined;
 
 const ORIGINAL_PROXY = process.env.HTTPS_PROXY;
@@ -40,7 +41,8 @@ afterEach(async () => {
   restoreEnv("NO_PROXY", ORIGINAL_NO_PROXY);
   await manager?.destroy();
   manager = undefined;
-  await rm(root, { recursive: true, force: true });
+  if (root) await rm(root, { recursive: true, force: true });
+  root = "";
 });
 
 afterAll(async () => {
