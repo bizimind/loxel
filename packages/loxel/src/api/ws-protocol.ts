@@ -106,11 +106,6 @@ export type WsMessage =
    * sent to a client whose attach joined other clients, which does not claim the terminal.
    */
   | { type: "terminal_size"; id: string; cols: number; rows: number }
-  /**
-   * The active client of the terminal left and this one took its place: its size is the PTY's
-   * from its next refit on.
-   */
-  | { type: "terminal_active"; id: string }
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
   | { type: "terminals_changed" }
   | { type: "log_entries"; data: LogEntry[] }

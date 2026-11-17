@@ -29,8 +29,6 @@ export interface TerminalSink {
    * at it.
    */
   sendSize(size: TerminalSize): void;
-  /** The active client left and this one, which claimed before it (or joined), took its place. */
-  sendActive(): void;
 }
 
 /** A client's flow-control budget: unacknowledged bytes that pause it, and that resync it. */
@@ -68,8 +66,12 @@ interface Client {
 }
 
 export class TerminalFanout {
-  /** In the order they last claimed the terminal: the last one is the active client. */
   private readonly clients = new Map<TerminalSink, Client>();
+  /**
+   * The client whose size the PTY has and whose input is written: the one that claimed it last,
+   * or attached alone. None once it leaves, until another claims.
+   */
+  private active: TerminalSink | null = null;
   /** The PTY's size: the latest the active client asked for, clamped as the host clamps it. */
   private size: TerminalSize;
   /** Where the live clients are in the stream; null until the host attachment's first state. */
@@ -103,9 +105,8 @@ export class TerminalFanout {
     return this.clients.get(sink)?.status === "waiting";
   }
 
-  /** The client whose size the PTY has and whose input is written: the one that claimed it last. */
   isActive(sink: TerminalSink): boolean {
-    return [...this.clients.keys()].at(-1) === sink;
+    return this.active === sink;
   }
 
   /**
@@ -117,16 +118,12 @@ export class TerminalFanout {
    */
   attach(sink: TerminalSink, size: TerminalSize, since?: StreamPoint): boolean {
     this.clients.delete(sink);
-    const client: Client = { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 };
-    if (this.clients.size === 0) {
-      this.clients.set(sink, client);
+    const alone = this.clients.size === 0;
+    this.clients.set(sink, { status: "waiting", since, syncOffset: 0, unacked: 0, parsed: 0 });
+    if (alone) {
+      this.active = sink;
       return this.setSize(size, true);
     }
-    // First in claim order: once the active client leaves, a client that claimed takes over.
-    const others = [...this.clients];
-    this.clients.clear();
-    this.clients.set(sink, client);
-    for (const [other, state] of others) this.clients.set(other, state);
     sink.sendSize(this.size);
     return false;
   }
@@ -136,27 +133,22 @@ export class TerminalFanout {
    * client, at `size`. Returns whether the PTY's size changed; a sink not attached changes nothing.
    */
   claim(sink: TerminalSink, size: TerminalSize): boolean {
-    const client = this.clients.get(sink);
-    if (!client) return false;
+    if (!this.clients.has(sink)) return false;
     const activeChanged = !this.isActive(sink);
-    if (activeChanged) {
-      this.clients.delete(sink);
-      this.clients.set(sink, client);
-    }
+    this.active = sink;
     return this.setSize(size, activeChanged);
   }
 
   /**
-   * Remove `sink`; returns whether it was attached. The client that claimed the terminal before
-   * it (or the first to join) becomes the active one, at the size the PTY has, which it already
-   * renders at, and is told so: it refits from then on. Once the last client is gone the stream
-   * starts over with the next attach.
+   * Remove `sink`; returns whether it was attached. When it was the active client none is
+   * afterwards: the PTY keeps its size, which the others already render at, and the next claim
+   * takes over, so a window leaving (or switching worktree and back) reflows nothing. Once the
+   * last client is gone the stream starts over with the next attach.
    */
   detach(sink: TerminalSink): boolean {
-    const wasActive = this.isActive(sink);
     if (!this.clients.delete(sink)) return false;
+    if (this.active === sink) this.active = null;
     if (this.clients.size === 0) this.offset = null;
-    else if (wasActive) [...this.clients.keys()].at(-1)?.sendActive();
     return true;
   }
 

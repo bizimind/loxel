@@ -28,18 +28,15 @@ function createRecordingSink() {
   const exits: TerminalEnd[] = [];
   const notices: TerminalNotice[] = [];
   const sizes: TerminalSize[] = [];
-  let actives = 0;
   const sink: TerminalSink = {
     sendState: (state) => states.push(state),
     sendOutput: ({ data }) => output.push(data),
     sendExit: (end) => exits.push(end),
     sendNotice: (notice) => notices.push(notice),
     sendSize: (size) => sizes.push(size),
-    sendActive: () => void actives++,
   };
   return {
     sink,
-    actives: () => actives,
     states,
     exits,
     notices,
@@ -1019,14 +1016,17 @@ describe("TerminalManager with several clients", () => {
     expect(host.resizes).toHaveLength(1);
     expect(first.sizes).toHaveLength(1);
 
-    // The active client leaving hands input to the other, at the size it already renders at.
+    // The active client leaving hands input to none until the other claims, at the size it
+    // already renders at.
     manager.detach(id, second.sink);
+    type(first.sink, "unclaimed");
+    manager.resize(id, first.sink, 100, 30);
     type(first.sink, "now-first");
-    expect(host.writes.at(-1)).toBe("now-first");
+    expect(host.writes).toEqual(["from-first", "typed", "now-first"]);
     expect(host.resizes).toHaveLength(1);
   });
 
-  test("a window attaching again next to another joins passive, and takes over once it leaves", async () => {
+  test("the active client leaving makes none active, and the next claim takes over", async () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
@@ -1034,18 +1034,24 @@ describe("TerminalManager with several clients", () => {
     const second = createRecordingSink();
     await manager.attach(id, first.sink, attachOptions);
     await manager.attach(id, second.sink, attachOptions);
+    const type = (client: TerminalSink, text: string) =>
+      manager.write(id, client, new TextEncoder().encode(text));
 
-    // As the server does on a re-attach or a reconnect: the old sink goes, a new one attaches.
-    const again = createRecordingSink();
+    // As the server does on a re-attach (a worktree switch and back): the old sink goes, and a
+    // new one attaches, joining the other client without resizing anything.
     manager.detach(id, first.sink);
-    expect(second.actives()).toBe(1);
+    type(second.sink, "reply");
+    expect(host.writes).toEqual([]);
+    const again = createRecordingSink();
     void manager.attach(id, again.sink, { ...attachOptions, cols: 90, rows: 20 });
     expect(host.resizes).toEqual([]);
     expect(again.sizes).toEqual([{ cols: 80, rows: 24 }]);
+    expect(second.sizes).toEqual([{ cols: 80, rows: 24 }]);
 
-    // A passive client leaving promotes nobody.
-    manager.detach(id, again.sink);
-    expect(second.actives()).toBe(1);
+    manager.resize(id, again.sink, 90, 20);
+    type(again.sink, "typed");
+    expect(host.writes).toEqual(["typed"]);
+    expect(host.resizes).toEqual([{ cols: 90, rows: 20 }]);
   });
 
   test("a client detaching leaves the others attached; the last one leaves an orphan", async () => {
