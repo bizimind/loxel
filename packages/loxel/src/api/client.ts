@@ -2,6 +2,7 @@ import type { FormattingSettings } from "@/lib/formatting-model";
 import type { SchemaFileMatch } from "@/lib/schema-glob";
 import type { OpenRequest, OpenResult } from "@/open-request";
 
+import type { AgentTerminalAnswer } from "./agent-terminal-model";
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
 import type { EditorConfigResponse } from "./editorconfig-model";
@@ -670,6 +671,25 @@ export async function resolveSchema(url: string, baseDir?: string): Promise<unkn
   } catch {
     return null;
   }
+}
+
+// --- Agents' terminals API ---
+
+/** Answer an agent's terminal request; `windowId` (this window) gets the terminal. */
+export async function answerAgentTerminal(
+  id: string,
+  answer: AgentTerminalAnswer,
+  windowId: string,
+): Promise<void> {
+  await fetchJson("/agent-terminals/answer", {
+    method: "POST",
+    body: JSON.stringify({ id, answer, windowId }),
+  });
+}
+
+/** Ask again in every worktree where the user chose "Always in this worktree". */
+export async function clearAgentTerminalWorktrees(): Promise<void> {
+  await fetchJson("/agent-terminals/clear-always", { method: "POST" });
 }
 
 // --- Worktree API ---

@@ -1,9 +1,11 @@
 /**
  * Server-side view of the terminal settings the renderer persists in the `settings` store
  * (zustand persist JSON: `{ state: { terminal: { ... } }, version }`). Notification sequences are
- * detected on the server, so it has to know which ones are enabled, and a shell the server starts
- * with no panel attached (`loxel terminal`) needs the settings a panel would send.
+ * detected on the server, so it has to know which ones are enabled, a shell the server starts with
+ * no panel attached (`loxel terminal`) needs the settings a panel would send, and the server decides
+ * what an agent's `loxel terminal` does.
  */
+import { type AgentTerminalPolicy, parseAgentTerminalPolicy } from "@/api/agent-terminal-model";
 import type { NotificationSequence, NotificationSequences } from "@/api/ws-protocol";
 import { DEFAULT_NOTIFICATION_SEQUENCES, NOTIFICATION_SEQUENCES } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
@@ -81,4 +83,14 @@ export function isNotificationSequenceEnabled(sequence: NotificationSequence): b
 /** The terminal settings for a shell the server starts itself; read on each call. */
 export function terminalSpawnSettings(): TerminalSpawnSettings {
   return parseTerminalSpawnSettings(getStore(SETTINGS_STORE_KEY));
+}
+
+/** "When an Agent Starts a Terminal" in a persisted settings JSON string; the default if unset. */
+export function parseAgentTerminalSetting(raw: string | null): AgentTerminalPolicy {
+  return parseAgentTerminalPolicy(terminalSection(raw)?.agentTerminals);
+}
+
+/** What an agent's `loxel terminal` does, from the persisted settings; read on each call. */
+export function agentTerminalPolicy(): AgentTerminalPolicy {
+  return parseAgentTerminalSetting(getStore(SETTINGS_STORE_KEY));
 }
