@@ -70,7 +70,9 @@ class LspClient {
     if (message.method !== undefined && message.id !== undefined) {
       this.notify({ id: message.id, result: null });
     } else if (message.id !== undefined) {
-      this.pending.get(message.id)?.(message);
+      // Only a reply to a request of ours: an id from the server never picks what runs.
+      const resolve = this.pending.get(message.id);
+      if (typeof resolve === "function") resolve(message);
     }
   }
 
