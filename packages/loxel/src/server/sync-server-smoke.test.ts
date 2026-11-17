@@ -121,6 +121,8 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         LOXEL_STATE_DIR: stateDir,
         LOXEL_SERVE_PORT: String(port),
         LOXEL_REMOVED_WORKTREE_TERMINAL_DELAY_MS: "100",
+        // Long enough that a subscribe sent right after an unsubscribe always adopts.
+        LOXEL_WORKTREE_GRACE_MS: "3000",
       },
       stdin: "ignore",
       stdout: "ignore",
@@ -505,6 +507,52 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       TEST_TIMEOUT_MS,
     );
   });
+
+  test(
+    "a worktree its last window left and came back to keeps its undo history",
+    async () => {
+      const { path: wtPath } = await executeAdd({ name: "smoke-undo", repoPath: repo.root });
+      let since = log.mark();
+      socket.send(JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath }));
+      await waitFor("files_dir_changed", ({ data }) => data.dir === wtPath, since);
+
+      const post = (route: string, body: object) =>
+        fetch(`${baseUrl}/api/files/${route}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wt: wtPath, ...body }),
+        });
+      const created = await post("create-file", { dir: "", name: "undo-me.txt" });
+      expect(created.ok).toBe(true);
+      const file = path.join(wtPath, "undo-me.txt");
+      expect(existsSync(file)).toBe(true);
+
+      // A reload: the window's last subscriber leaves, then subscribes again. One socket keeps the
+      // order, which a close and a new socket would not.
+      since = log.mark();
+      socket.send(JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath }));
+      socket.send(JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath }));
+      await waitFor("worktree_files_resynced", (message) => message.wtPath === wtPath, since);
+
+      const undone = await post("undo", {});
+      expect(undone.ok).toBe(true);
+      expect(((await undone.json()) as { result: unknown }).result).not.toBeNull();
+      expect(existsSync(file)).toBe(false);
+
+      // Nobody comes back: once the grace period has passed, its resources are gone.
+      socket.send(JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath }));
+      await retryUntil(
+        () => {},
+        async (timeoutMs) => {
+          if ((await post("undo", {})).status === 503) return true;
+          await Bun.sleep(timeoutMs);
+          return false;
+        },
+        "the worktree's resources to be torn down",
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   test(
     "the changes panel and explorer follow an edit, a stage and a commit",

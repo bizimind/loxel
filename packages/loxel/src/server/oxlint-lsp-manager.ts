@@ -15,11 +15,10 @@ import {
   type LinterLaunch,
   type LinterNoLaunch,
   ProjectLinterLspManager,
-  sendWarning,
 } from "./project-linter-lsp-manager";
 import { ReliedTrust } from "./project-scan";
 import { isRepoTrusted } from "./repo-trust";
-import type { WtLspContext, WtLspSession } from "./stdio-lsp-manager";
+import { sendWarning, type WtLspContext, type WtLspSession } from "./stdio-lsp-manager";
 import { documentPath, textDocumentUri } from "./ts-lsp-manager";
 
 /** The first version with `--lsp`; older ones ship a separate server. */
@@ -178,7 +177,7 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
     if (message.id === undefined) return;
     const result =
       message.method === "textDocument/diagnostic" ? { kind: "full", items: [] } : null;
-    session.ws.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    this.sendToClient(session, JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   }
 
   /** Decided once per session, since what decides it restarts the session. */

@@ -9,6 +9,7 @@ import { getNodeEnv, subscribeNodeEnv } from "./node-env";
 import { onRepoTrustChange, reportRepoRestriction, isRepoTrusted } from "./repo-trust";
 import {
   answerWithoutServer,
+  sendWarning,
   type SpawnOptions,
   WorktreeLspManager,
   type WtLspContext,
@@ -21,9 +22,6 @@ import {
   toClientUris,
   toServerUris,
 } from "./ts-lsp-manager";
-
-/** LSP `MessageType.Warning`. */
-const MESSAGE_TYPE_WARNING = 2;
 
 /** How to run a linter: under which Node, or null for a native binary, plus what its manager needs. */
 export interface LinterLaunch {
@@ -285,6 +283,16 @@ export abstract class ProjectLinterLspManager<
     return { cwd: path.parse(context.wtPath).root, env: { MISE_NOT_FOUND_AUTO_INSTALL: "0" } };
   }
 
+  /** A running linter is taken over only by a connection that would launch it the same way. */
+  protected override canAdoptSession(session: WtLspSession, context: WtLspContext): boolean {
+    const running = this.sessionContexts.get(session);
+    return (
+      super.canAdoptSession(session, context) &&
+      running !== undefined &&
+      Bun.deepEquals(this.launches.get(running), this.launches.get(context))
+    );
+  }
+
   protected override buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
@@ -323,15 +331,6 @@ export abstract class ProjectLinterLspManager<
 
 export function isInNodeModules(file: string): boolean {
   return file.split(path.sep).includes("node_modules");
-}
-
-function send(ws: ServerWebSocket<unknown>, message: Record<string, unknown>): void {
-  ws.send(JSON.stringify({ jsonrpc: "2.0", ...message }));
-}
-
-/** The client shows each distinct message once, after the server's name. */
-export function sendWarning(ws: ServerWebSocket<unknown>, message: string): void {
-  send(ws, { method: "window/showMessage", params: { type: MESSAGE_TYPE_WARNING, message } });
 }
 
 function setDidOpenLanguageId(message: Record<string, unknown>): void {

@@ -35,6 +35,7 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { gitExecClient } from "./git-exec-client";
+import { GracePeriods } from "./grace-periods";
 import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -195,6 +196,8 @@ const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
+/** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
+const worktreeGrace = new GracePeriods<string>(config.worktreeGraceMs);
 
 /** Find the project that owns the given path: under its cwd or its worktrees dir. */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
@@ -577,13 +580,25 @@ function createFilesService(
 
 // --- Subscription management ---
 
+/**
+ * Tell a new subscriber to refetch the worktree's file queries: whatever it cached was not kept up
+ * to date while it was not subscribed (a reload, a reconnect, a look at another worktree), and the
+ * directories it lists again are the ones whose changes reach it from now on.
+ */
+function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectPath: string): void {
+  sendTo(ws, { type: "worktree_files_resynced", wtPath, projectPath });
+}
+
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
   const existing = wtResources.get(wtPath);
   if (existing) {
+    // Within its grace period the worktree is adopted as it is, undo history included.
+    if (worktreeGrace.cancel(wtPath)) log.info(`Worktree resources adopted: ${wtPath}`);
     existing.subscribers.add(ws);
     const clientState = clients.get(ws);
     if (clientState) clientState.subscribedWorktrees.add(wtPath);
     log.debug(`Client subscribed to ${wtPath} (${existing.subscribers.size} subscribers)`);
+    sendFilesResynced(ws, wtPath, existing.projectPath);
     return;
   }
 
@@ -688,6 +703,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   });
   // Same for the Others section, which starts with the folders restored from the last session.
   broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
@@ -699,13 +715,17 @@ function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void 
   if (clientState) clientState.subscribedWorktrees.delete(wtPath);
 
   if (resources.subscribers.size === 0) {
-    teardownWorktreeResources(wtPath, resources);
+    log.info(`Worktree resources kept for ${config.worktreeGraceMs} ms: ${wtPath}`);
+    worktreeGrace.start(wtPath, () => {
+      if (wtResources.get(wtPath) === resources) teardownWorktreeResources(wtPath, resources);
+    });
   } else {
     log.debug(`Client unsubscribed from ${wtPath} (${resources.subscribers.size} remaining)`);
   }
 }
 
 function teardownWorktreeResources(wtPath: string, resources: WorktreeResources): void {
+  worktreeGrace.cancel(wtPath);
   suspendedWorktrees.delete(wtPath);
   resources.worktreeWatcher?.stop();
   resources.filesService.stop();
@@ -750,6 +770,7 @@ function forgetWorktreeInLanguageServers(wtPath: string): void {
 
 /** Stop serving a worktree path that no longer exists. */
 function releaseWorktreeResources(wtPath: string): void {
+  for (const manager of worktreeLspManagers) manager.stopWaitingSessions?.(wtPath);
   forgetWorktreeInLanguageServers(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;

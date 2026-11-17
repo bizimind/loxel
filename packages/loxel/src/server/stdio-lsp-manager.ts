@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type { FileSink, ServerWebSocket, Subprocess } from "bun";
@@ -11,8 +12,10 @@ import {
 } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
+import { GracePeriods } from "./grace-periods";
 import { ProcessTreeRecord, killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
+import { LspClientHandover } from "./lsp-client-handover";
 import { fileUri } from "./lsp-file-uri";
 import {
   type FileEvent,
@@ -78,6 +81,14 @@ interface LspContentChange {
 /** How long a server has to exit after SIGTERM before it gets SIGKILL; a hung one never exits. */
 export const SERVER_STOP_GRACE_MS = 3000;
 
+/**
+ * How long a worktree's server outlives its socket, for a new socket to take it over instead of
+ * starting and indexing another. A client reconnects within seconds after a reload, and its
+ * backoff gives up after about 15 s; a minute covers both and a short network blip without
+ * keeping a large server (tsserver, jdtls) around long for a window that is gone.
+ */
+export const LSP_SESSION_GRACE_MS = 60_000;
+
 /** A WebSocket close frame's limit on its reason, in UTF-8 bytes (RFC 6455). */
 const MAX_CLOSE_REASON_BYTES = 123;
 
@@ -100,6 +111,7 @@ export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
  * Public API (stable across subclasses):
  *   - handleMessage(ws, data)  — forward a WS frame into the LSP
  *   - detach(ws)               — stop and forget a session
+ *   - releaseClient(ws)        — the socket went: keep a keyed server for the next one a while
  *   - destroy()                — stop every session (server shutdown)
  *
  * Subclasses expose their own public entry points (e.g. `attach(ws)` or
@@ -118,6 +130,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly stopping = new Set<Promise<unknown>>();
   /** Sessions whose process trees were ended, so that a second release leaves a newer one's alone. */
   private readonly treesEnded = new WeakSet<TSession>();
+  /** What lets each session's server be handed to a new socket, see `lsp-client-handover.ts`. */
+  private readonly handovers = new Map<TSession, LspClientHandover>();
+  /** How long a keyed session whose socket went waits for a new one; tests shorten it. */
+  protected readonly sessionGraceMs: number = LSP_SESSION_GRACE_MS;
+  /** Sessions whose socket went, each stopped once its grace period has passed. */
+  private sessionGraceTimers: GracePeriods<TSession> | undefined;
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(readonly name: LspName) {
@@ -133,7 +151,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     }
     const session = this.sessions.get(ws);
     if (!session) return;
-    this.handleClientData(session, frame);
+    this.receiveFromClient(session, frame);
   }
 
   /**
@@ -180,8 +198,31 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     this.sessions.delete(ws);
   }
 
+  /**
+   * The client's socket went (closed, or the client disconnected). A keyed session whose client
+   * finished its handshake keeps its server for {@link sessionGraceMs}, for a new socket with the
+   * same key to take over (see {@link startSession}); anything else is stopped now, as
+   * {@link detach} does.
+   */
+  releaseClient(ws: ServerWebSocket<unknown>): void {
+    const session = this.sessions.get(ws);
+    const handover = session && this.handovers.get(session);
+    if (!session || !handover?.canAdopt || this.keyOf(ws) === undefined) {
+      this.detach(ws);
+      return;
+    }
+    this.disconnectClient(session, handover);
+    this.log.info(`Keeping ${this.name} for ${this.sessionGraceMs} ms for a new connection`);
+    this.sessionGrace.start(session, () => {
+      if (!this.isSessionLive(session)) return;
+      this.log.info(`No new connection took ${this.name} over, stopping it`);
+      this.detach(session.ws);
+    });
+  }
+
   /** Stop every session. Settles once every server stopped so far has exited. */
   async destroy(): Promise<void> {
+    this.sessionGraceTimers?.clear();
     for (const session of this.sessions.values()) {
       this.killSession(session);
     }
@@ -544,6 +585,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected onClientInitialized(_session: TSession): void {}
 
   /**
+   * Fired once a client that took over a running server has finished its handshake, in place of
+   * {@link onClientInitialized}, which the server has had already. Override to tell the new window
+   * what the last one was told (warnings sent once per session).
+   */
+  protected onClientAdopted(_session: TSession): void {}
+
+  /**
    * Fired once a session is gone: detached, destroyed, or its process
    * exited. May fire more than once for the same session, so overrides must
    * be idempotent. Override to release per-session resources.
@@ -632,7 +680,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
               return;
             }
             msg.params.registrations = filtered;
-            session.ws.send(JSON.stringify(parsed));
+            this.sendToClient(session, JSON.stringify(parsed));
             return;
           }
 
@@ -645,7 +693,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
               .filter((key) => key in caps);
             if (present.length > 0) {
               for (const key of present) delete caps[key];
-              session.ws.send(JSON.stringify(parsed));
+              this.sendToClient(session, JSON.stringify(parsed));
               return;
             }
           }
@@ -654,7 +702,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         // Not JSON — fall through to raw forward.
       }
     }
-    session.ws.send(body);
+    this.sendToClient(session, body);
   }
 
   // ---------------------------------------------------------------------------
@@ -671,12 +719,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     if (key) {
       const existingWs = this._sessionsByKey.get(key);
       if (existingWs && existingWs !== ws) {
-        this.detach(existingWs);
-        try {
-          existingWs.close(LSP_REPLACED_CLOSE_CODE, "Replaced by newer connection");
-        } catch (err) {
-          this.log.debug("close() on replaced WebSocket threw (already closed)", { error: err });
+        const existing = this.sessions.get(existingWs);
+        // A server another socket started, running or waiting for a new socket, is taken over.
+        if (existing && this.isAdoptable(existing, context)) {
+          this.adoptSession(existing, ws, key);
+          return;
         }
+        const waiting = existing !== undefined && this.sessionGrace.has(existing);
+        this.detach(existingWs);
+        if (!waiting) closeReplaced(existingWs, this.log);
       }
       this._sessionsByKey.set(key, ws);
     }
@@ -703,7 +754,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         for (const frame of frames) {
           // A frame can end the session (see `failStart`); the rest then have nowhere to go.
           if (!this.isSessionLive(session)) break;
-          this.handleClientData(session, frame);
+          this.receiveFromClient(session, frame);
         }
       });
   }
@@ -765,6 +816,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       throw err;
     }
     this.sessions.set(ws, session);
+    this.handovers.set(session, new LspClientHandover());
     if (this.stopsProcessTree(session))
       this.processTrees.set(session, new ProcessTreeRecord(proc.pid));
     // From the start, so changes made before the server registers its watchers reach it too.
@@ -813,13 +865,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       // Still live: it exited on its own (crash, out of memory, killed outside Loxel), not through
       // `detach` / `destroy`. The socket would otherwise stay open with nothing answering it, so
       // release the session's key and close the socket, which tells the client to reconnect.
+      // The socket is the session's latest: another may have taken the server over since.
       if (!this.isSessionLive(session)) return;
-      this.detach(ws);
+      const current = session.ws;
+      this.detach(current);
       try {
         const how = proc.signalCode
           ? `was killed by ${proc.signalCode}`
           : `exited with code ${code}`;
-        ws.close(LSP_EXITED_CLOSE_CODE, this.failureCloseReason(context, `${this.name} ${how}`));
+        current.close(
+          LSP_EXITED_CLOSE_CODE,
+          this.failureCloseReason(context, `${this.name} ${how}`),
+        );
       } catch (err) {
         this.log.debug("close() on an exited server's WebSocket threw (already closed)", {
           error: err,
@@ -863,6 +920,32 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   /** True while `session` is still the live session of its WebSocket. */
   protected isSessionLive(session: TSession): boolean {
     return this.sessions.get(session.ws) === session;
+  }
+
+  /**
+   * Whether a new connection in `context` may take over `session`'s running server rather than
+   * start its own. Default: always, for a session with the same key; a manager whose server
+   * depends on more than its key (repository trust, a chosen runtime) compares that.
+   */
+  protected canAdoptSession(_session: TSession, _context: TContext): boolean {
+    return true;
+  }
+
+  /**
+   * Send the client a frame the server sent, or an answer to one of the client's requests made
+   * here. Every such frame goes through this, so that a server handed to a new socket answers it
+   * with its own request ids (see `lsp-client-handover.ts`). Notifications made here, and requests
+   * whose answers the manager takes back itself, may go to `session.ws` directly.
+   */
+  protected sendToClient(session: TSession, frame: string): void {
+    const handover = this.handovers.get(session);
+    if (!handover) {
+      session.ws.send(frame);
+      return;
+    }
+    const { toClient, toServer } = handover.fromServer(frame);
+    for (const answer of toServer) this.writeToStdin(session, answer);
+    if (toClient !== null) session.ws.send(toClient);
   }
 
   /**
@@ -921,8 +1004,76 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   // ---------------------------------------------------------------------------
 
   private killSession(session: TSession): void {
+    this.sessionGraceTimers?.cancel(session);
+    this.handovers.delete(session);
     this.releaseSession(session);
     this.stopProcess(session.proc);
+  }
+
+  private get sessionGrace(): GracePeriods<TSession> {
+    this.sessionGraceTimers ??= new GracePeriods(this.sessionGraceMs);
+    return this.sessionGraceTimers;
+  }
+
+  /** Whether `session`'s socket went and its server waits for a new one. */
+  protected isWaitingForClient(session: TSession): boolean {
+    return this.sessionGraceTimers?.has(session) === true;
+  }
+
+  private keyOf(ws: ServerWebSocket<unknown>): string | undefined {
+    for (const [key, mappedWs] of this._sessionsByKey) {
+      if (mappedWs === ws) return key;
+    }
+    return undefined;
+  }
+
+  private isAdoptable(session: TSession, context: TContext): boolean {
+    return (
+      this.handovers.get(session)?.canAdopt === true &&
+      !this.isContextOutdated(context) &&
+      this.canAdoptSession(session, context)
+    );
+  }
+
+  /** A frame from the client, through the session's handover to {@link handleClientData}. */
+  private receiveFromClient(session: TSession, frame: string): void {
+    const handover = this.handovers.get(session);
+    if (!handover) {
+      this.handleClientData(session, frame);
+      return;
+    }
+    const { toServer, toClient, adopted } = handover.fromClient(frame);
+    for (const answer of toClient) session.ws.send(answer);
+    if (toServer !== null) this.handleClientData(session, toServer);
+    if (adopted) this.onClientAdopted(session);
+  }
+
+  /**
+   * Tell the server its client went: its requests are cancelled, the server's requests to it
+   * answered, and its documents closed through {@link handleClientData}, as if the client had
+   * closed them, so a manager tracking them sees it.
+   */
+  private disconnectClient(session: TSession, handover: LspClientHandover): void {
+    const { toServer, didClose } = handover.disconnect();
+    for (const frame of toServer) this.writeToStdin(session, frame);
+    for (const frame of didClose) this.handleClientData(session, frame);
+    session.documentContents.clear();
+  }
+
+  /** Hand `session`'s server from its socket, open or gone, to `ws`. */
+  private adoptSession(session: TSession, ws: ServerWebSocket<unknown>, key: string): void {
+    const handover = this.handovers.get(session);
+    if (!handover) return;
+    const previous = session.ws;
+    const waiting = this.sessionGrace.cancel(session);
+    if (!waiting) this.disconnectClient(session, handover);
+    this.sessions.delete(previous);
+    session.ws = ws;
+    this.sessions.set(ws, session);
+    this._sessionsByKey.set(key, ws);
+    handover.adopt();
+    this.log.info(`A new connection took ${this.name} over`);
+    if (!waiting) closeReplaced(previous, this.log);
   }
 
   /** Ask the server to exit, and force it after {@link SERVER_STOP_GRACE_MS} if it has not. */
@@ -1216,7 +1367,22 @@ export abstract class WorktreeSessionLspManager<
   }
 
   destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
+    const session = this.sessions.get(ws);
+    // No new socket will come for a worktree that is gone.
+    if (session && !existsSync(session.wtPath)) this.detach(ws);
+    else this.releaseClient(ws);
+  }
+
+  /** Stop the servers of `wtPath` waiting for a new socket now: the worktree was removed. */
+  stopWaitingSessions(wtPath: string): void {
+    for (const session of [...this.sessions.values()]) {
+      if (session.wtPath === wtPath && this.isWaitingForClient(session)) this.detach(session.ws);
+    }
+  }
+
+  /** A server started without the repository's trust, or with it, stays that way. */
+  protected override canAdoptSession(session: TSession, context: WtLspContext): boolean {
+    return session.repoTrusted === context.repoTrusted;
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
@@ -1297,6 +1463,27 @@ function mergeInitOptions(
     }
   }
   return out;
+}
+
+/** LSP's `MessageType.Warning`. */
+const MESSAGE_TYPE_WARNING = 2;
+
+/**
+ * Warn the user through the client's `window/showMessage`; a client created with `showMessages`
+ * shows each distinct message once, after the server's name.
+ */
+export function sendWarning(ws: ServerWebSocket<unknown>, message: string): void {
+  const params = { type: MESSAGE_TYPE_WARNING, message };
+  ws.send(JSON.stringify({ jsonrpc: "2.0", method: "window/showMessage", params }));
+}
+
+/** Tell a socket a newer one took its worktree's server over; its client then stays stopped. */
+function closeReplaced(ws: ServerWebSocket<unknown>, log: ReturnType<typeof logger.child>): void {
+  try {
+    ws.close(LSP_REPLACED_CLOSE_CODE, "Replaced by newer connection");
+  } catch (err) {
+    log.debug("close() on replaced WebSocket threw (already closed)", { error: err });
+  }
 }
 
 /**

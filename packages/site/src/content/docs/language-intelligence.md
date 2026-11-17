@@ -27,7 +27,7 @@ A language feature that depends on running a repository's own code waits until y
 
 ### When a language server stops
 
-If a language server crashes, Loxel starts it again within a few seconds and the editor picks up where it left off: diagnostics, hover and completions come back for the files you have open. The same happens when Loxel itself restarts. A server that keeps crashing right after it starts is given a few tries, then left stopped, with a notification saying so.
+If a language server crashes, Loxel starts it again within a few seconds and the editor picks up where it left off: diagnostics, hover and completions come back for the files you have open. The same happens when Loxel itself restarts. Reloading a window or a short network drop doesn't restart anything: the language servers keep running for a minute, and the window picks them back up without indexing the project again. A server that keeps crashing right after it starts is given a few tries, then left stopped, with a notification saying so.
 
 Opening the same worktree in a second window moves its language servers to that window. The first window keeps editing normally, without language features for that worktree, and does not take them back on its own, so two windows never fight over them.
 

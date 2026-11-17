@@ -95,7 +95,7 @@ export class DockerLspManager extends WorktreeLspManager {
           msg.error.message === "Internal server error"
         ) {
           this.log.warn(`Swallowing docker-lsp panic for request ${msg.id}`, { error: msg.error });
-          session.ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }));
+          this.sendToClient(session, JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }));
           return;
         }
       }
