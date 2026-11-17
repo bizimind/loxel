@@ -37,25 +37,26 @@ describe("OpenInbox", () => {
     const [first, second] = inbox.list();
     expect([first?.message, second?.message]).toEqual([file("/wt/a.ts"), terminal("t1")]);
     inbox.handTo([first!.id, second!.id], "w1");
-    inbox.remove(first!.id);
+    inbox.placedBy(first!.id, "w2"); // not the window holding it
+    expect(inbox.list()).toHaveLength(2);
+    inbox.placedBy(first!.id, "w1");
     expect(inbox.list()).toEqual([{ ...second!, delivered: true, heldBy: "w1" }]);
   });
 
-  test("gives a request to the window holding it, or to any while that one is away", () => {
+  test("gives a request to the window holding it, or to any once that one is gone", () => {
     const inbox = new OpenInbox({ now: clock });
     inbox.add(file("/wt/a.ts"), "/wt");
-    const connected = new Set(["w1", "w2"]);
-    const isConnected = (id: string) => connected.has(id);
-    const [entry] = inbox.forWindow("w1", isConnected);
+    const gone = new Set<string>();
+    const isGone = (id: string) => gone.has(id);
+    const [entry] = inbox.forWindow("w1", isGone);
     inbox.handTo([entry!.id], "w1");
 
     expect(inbox.holds("w1")).toBe(true);
-    expect(inbox.forWindow("w2", isConnected)).toEqual([]);
-    expect(inbox.forWindow("w1", isConnected).map((e) => e.id)).toEqual([entry!.id]);
-    connected.delete("w1");
-    expect(inbox.forWindow("w2", isConnected).map((e) => [e.id, e.heldBy])).toEqual([
-      [entry!.id, "w1"],
-    ]);
+    expect([...inbox.holders()]).toEqual(["w1"]);
+    expect(inbox.forWindow("w2", isGone)).toEqual([]);
+    expect(inbox.forWindow("w1", isGone).map((e) => e.id)).toEqual([entry!.id]);
+    gone.add("w1");
+    expect(inbox.forWindow("w2", isGone).map((e) => [e.id, e.heldBy])).toEqual([[entry!.id, "w1"]]);
   });
 
   test("holds a queued terminal until its panel is placed", () => {
@@ -69,7 +70,7 @@ describe("OpenInbox", () => {
       "w1",
     );
     expect(inbox.holdsTerminal("t1")).toBe(true);
-    inbox.remove(inbox.list()[0]!.id);
+    inbox.placedBy(inbox.list()[0]!.id, "w1");
     expect(inbox.holdsTerminal("t1")).toBe(false);
   });
 
@@ -119,7 +120,7 @@ describe("OpenInbox", () => {
       [terminal("t1", "claude"), "w1"],
       [page("http://localhost:5173/"), undefined],
     ]);
-    for (const entry of second.list()) second.remove(entry.id);
+    for (const entry of second.list()) second.placedBy(entry.id, entry.heldBy);
     second.close();
 
     const third = new OpenInbox({ path, now: clock });

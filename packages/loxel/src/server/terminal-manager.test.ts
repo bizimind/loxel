@@ -1149,14 +1149,14 @@ describe("TerminalManager with several clients", () => {
         ...attachOptions,
         command: "read go; head -c 150000 /dev/zero | tr '\\0' a; echo; echo THE-''END; exit 0",
       });
-      // Acks all it gets, so the host never pauses, and makes no final resync of its own.
+      // Acks each chunk as it gets it, so it never falls behind (each chunk is far under the
+      // budget), the host never pauses, and makes no final resync of its own.
       const fast = createRecordingSink();
       const acking: TerminalSink = {
         ...fast.sink,
         sendOutput: (output) => {
           fast.sink.sendOutput(output);
-          const syncOffset = fast.states.at(-1)!.offset;
-          queueMicrotask(() => manager.ack(id, acking, syncOffset, output.data.byteLength));
+          manager.ack(id, acking, fast.states.at(-1)!.offset, output.data.byteLength);
         },
       };
       await manager.attach(id, acking, attachOptions);

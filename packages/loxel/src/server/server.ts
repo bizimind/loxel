@@ -419,13 +419,25 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
  * so it does not open them too. Only for this process, which is when they were taken.
  */
 const inboxRevoked = new Map<string, Set<string>>();
-/** How long a window may be away (a reload, a dropped socket) before what it holds moves on. */
-const INBOX_HOLD_GRACE_MS = 15_000;
+/** When each window that held inbox requests lost its socket, by `windowId`. */
+const windowAwaySince = new Map<string, number>();
+/** Away since then, for a window from before this process that has not said hello since. */
+const inboxStartedAt = Date.now();
+
+/**
+ * Whether the window `windowId` has been away long enough (`config.inboxHoldGraceMs`) not to be
+ * coming back: not a reload, a dropped socket or a server restart, after which it says hello again.
+ */
+function windowGone(windowId: string): boolean {
+  if (isWindowConnected(windowId)) return false;
+  const since = windowAwaySince.get(windowId) ?? inboxStartedAt;
+  return Date.now() - since >= config.inboxHoldGraceMs;
+}
 
 /**
  * Hand the open inbox to a window that just said hello: the requests it holds (it reloaded or
- * reconnected before placing their panels), those no window holds, and those of a window that is
- * not connected, which is told on its next hello. Each opens as it would have then, focus
+ * reconnected before placing their panels), those no window holds, and those of a window gone for
+ * longer than a grace period, which is told if it comes back. Each opens as it would have then, focus
  * included, and the window holds it until it says it placed the panel (`inbox_open_done`). One
  * notification per worktree says what opened the first time a request is handed over: a panel
  * opened without focus waits unseen in its worktree.
@@ -434,7 +446,8 @@ function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
   const revoked = inboxRevoked.get(windowId);
   inboxRevoked.delete(windowId);
   if (revoked) sendTo(ws, { type: "inbox_open_revoked", inboxIds: [...revoked] });
-  const entries = openInbox.forWindow(windowId, isWindowConnected);
+  windowAwaySince.delete(windowId);
+  const entries = openInbox.forWindow(windowId, windowGone);
   if (entries.length === 0) return;
   for (const { id, heldBy } of entries) {
     if (heldBy === undefined || heldBy === windowId) continue;
@@ -461,17 +474,17 @@ function deliverInbox(ws: ServerWebSocket<WsData>, windowId: string): void {
 }
 
 /**
- * The window `windowId` lost its socket. If it is still away after a grace period (not a reload or
- * a dropped socket, then), what it held goes to the window in use; without one, it waits for the
- * next window to say hello.
+ * The window `windowId`, holding inbox requests, is away: its socket closed, or it held them
+ * before this server started. Once it has been gone for the grace period, what it held goes to the
+ * window in use; without one, it waits for the next window to say hello.
  */
 function moveInboxFromAwayWindow(windowId: string): void {
   setTimeout(() => {
-    if (isWindowConnected(windowId)) return;
+    if (!windowGone(windowId)) return;
     const [next] = activeWindowSockets(null);
     const nextId = next ? clients.get(next)?.windowId : undefined;
     if (next && nextId) deliverInbox(next, nextId);
-  }, INBOX_HOLD_GRACE_MS);
+  }, config.inboxHoldGraceMs);
 }
 
 /**
@@ -1301,7 +1314,7 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     }
 
     case "inbox_open_done":
-      openInbox.remove(msg.inboxId);
+      openInbox.placedBy(msg.inboxId, clients.get(ws)?.windowId);
       break;
 
     case "window_focused":
@@ -1786,8 +1799,10 @@ const server = Bun.serve<WsData>({
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
-      if (closedWindowId && openInbox.holds(closedWindowId))
+      if (closedWindowId && openInbox.holds(closedWindowId)) {
+        windowAwaySince.set(closedWindowId, Date.now());
         moveInboxFromAwayWindow(closedWindowId);
+      }
       // What this window was asking moves to the window in use, or waits for the next one.
       agentTerminals.windowClosed(isWindowConnected, activeWindow(null)?.windowId ?? null);
       log.debug(`Client disconnected (${clients.size} remaining)`);
@@ -1846,6 +1861,8 @@ recoverOrphanLayoutSessions();
 // the last window closes gives them time to. Ones the open inbox holds wait for their requests.
 if (terminalManager.hasOrphanSessions(queuedTerminal)) startIdleTimer();
 else if (config.parentPid !== null) cleanUpOrphans();
+// Windows from before this server hold inbox requests: theirs move on if they do not come back.
+for (const holder of openInbox.holders()) moveInboxFromAwayWindow(holder);
 
 log.info(`Server listening on http://${server.hostname}:${server.port}`);
 if (cliSocket) log.info(`Listening for the loxel CLI on ${config.cliSocketPath}`);

@@ -86,4 +86,9 @@ export const config = {
    * back, short enough that idle watchers do not pile up.
    */
   worktreeGraceMs: Number(process.env.LOXEL_WORKTREE_GRACE_MS ?? 5 * 60_000),
+  /**
+   * How long a window may be away (a reload, a dropped socket, a server restart) before another
+   * window takes the open inbox requests it holds; tests shorten it.
+   */
+  inboxHoldGraceMs: Number(process.env.LOXEL_INBOX_HOLD_GRACE_MS ?? 15_000),
 } as const;

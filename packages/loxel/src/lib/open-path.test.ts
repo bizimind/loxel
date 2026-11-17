@@ -188,6 +188,22 @@ describe("opens from outside the window", () => {
     expect(sent).toEqual([]);
   });
 
+  test("an open from the inbox revoked while on its way is neither placed nor answered", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+
+    const opening = openFromInbox("in-3", {
+      type: "open_url",
+      wtPath: MAIN,
+      data: { url: URL_TARGET },
+    });
+    revokeInboxOpens(["in-3"]);
+    await opening;
+    expect(created).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   test("targets arriving during a switch keep their order in the new worktree", async () => {
     await openFile({ filePath: `${OTHER}/a.md` });
     await openUrl(OTHER, { url: URL_TARGET });

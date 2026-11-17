@@ -82,7 +82,8 @@ const InboxEntrySchema = z.object({
   delivered: z.boolean().optional(),
   /**
    * The window (`windowId`) it was handed to, which has not placed its panel yet: it gets it again
-   * after a reload or a reconnect, and another window takes it only while it is away.
+   * after a reload, a reconnect or a server restart, and another window takes it only once it has
+   * been away for a grace period.
    */
   heldBy: z.string().optional(),
 });
@@ -155,13 +156,17 @@ export class OpenInbox {
 
   /**
    * The requests the window `windowId` gets on saying hello: those it holds, those nobody holds,
-   * and those of a window that is not connected (`isConnected`), which a window that closed, or
-   * died, never comes back for.
+   * and those of a window that has been away too long to be coming back (`gone`).
    */
-  forWindow(windowId: string, isConnected: (windowId: string) => boolean): readonly InboxEntry[] {
+  forWindow(windowId: string, gone: (holder: string) => boolean): readonly InboxEntry[] {
     return this.list().filter(
-      ({ heldBy }) => heldBy === undefined || heldBy === windowId || !isConnected(heldBy),
+      ({ heldBy }) => heldBy === undefined || heldBy === windowId || gone(heldBy),
     );
+  }
+
+  /** The windows holding requests. */
+  holders(): Set<string> {
+    return new Set(this.list().flatMap(({ heldBy }) => (heldBy === undefined ? [] : [heldBy])));
   }
 
   /** Whether the window `windowId` holds a request. */
@@ -180,9 +185,12 @@ export class OpenInbox {
     }
   }
 
-  /** A window placed the request's panel: it is done with. */
-  remove(id: string): void {
-    this.dropWhere((entry) => entry.id === id);
+  /**
+   * The window `windowId` placed the request's panel: it is done with, unless another window holds
+   * it now (it took it while this one was away).
+   */
+  placedBy(id: string, windowId: string | undefined): void {
+    this.dropWhere((entry) => entry.id === id && entry.heldBy === windowId);
   }
 
   /**

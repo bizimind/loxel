@@ -40,7 +40,8 @@ function inOrder<T>(open: () => Promise<T>): Promise<T | undefined> {
 const inboxOpens = new Map<string, boolean>();
 
 function inboxOpenDone(inboxId: string): void {
-  if (inboxOpens.get(inboxId) === true) return;
+  // Revoked while its open was on its way: another window holds it now.
+  if (!inboxOpens.has(inboxId) || inboxOpens.get(inboxId) === true) return;
   inboxOpens.set(inboxId, true);
   api.wsClient.send({ type: "inbox_open_done", inboxId });
 }

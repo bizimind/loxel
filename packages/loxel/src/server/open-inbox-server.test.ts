@@ -41,6 +41,8 @@ async function startServer(stateDir: string) {
       LOXEL_DEV: "1",
       LOXEL_STATE_DIR: stateDir,
       LOXEL_SERVE_PORT: String(port),
+      // Short, so a window's requests move on once it is gone within the test.
+      LOXEL_INBOX_HOLD_GRACE_MS: "500",
     },
     stdin: "ignore",
     stdout: "ignore",
@@ -156,8 +158,8 @@ describe("a server with no window connected", () => {
       expect(await received(reloaded.log, "open_from_inbox")).toEqual(delivered);
       await fence(reloaded);
       expect(reloaded.log.entries.some((m) => m.type === "notification_added")).toBe(false);
-      // A window that says hello while A is away takes it over, and A is told when it is back, so
-      // it does not open it too.
+      // Once A has been gone for the grace period, the window in use takes it over, and A is told
+      // if it comes back, so it does not open it too.
       reloaded.ws.close();
       const windowB = await connectWindow(current);
       windowB.ws.send(hello(crypto.randomUUID()));
