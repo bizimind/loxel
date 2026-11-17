@@ -38,27 +38,44 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The modules gopls and docker-language-server are built from (packages/loxel/scripts/*-module/).
-  # Every requirement there but the server is indirect, so `allow` has to include indirect ones.
-  # The servers themselves are pinned in their language server manifests too, so their own bumps
-  # stay manual; the Go toolchain they build with is GO_VERSION in scripts/go-toolchain.ts.
+  # The modules gopls and docker-language-server are built from (packages/loxel/scripts/*-module/),
+  # one entry and so one pull request each. Every requirement there but the server is indirect, so
+  # `allow` has to include indirect ones. Upgrading a server is a deliberate step (see its build
+  # script), and so are major versions, which change APIs the server's own code calls.
   - package-ecosystem: gomod
-    directories:
-      - /packages/loxel/scripts/gopls-module
-      - /packages/loxel/scripts/docker-lsp-module
+    directory: /packages/loxel/scripts/gopls-module
     schedule:
       interval: weekly
       day: monday
     cooldown:
       default-days: 7
-      semver-major-days: 14
     open-pull-requests-limit: 5
     allow:
       - dependency-type: all
     ignore:
-      - dependency-name: golang.org/x/tools/gopls
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # gopls compiles against golang.org/x/tools internals at the commit its release pins, and each
+      # golang.org/x module's new release requires the others' latest, so they move only with gopls.
+      - dependency-name: golang.org/x/*
+    groups:
+      gopls-module:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /packages/loxel/scripts/docker-lsp-module
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: all
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       - dependency-name: github.com/docker/docker-language-server
     groups:
-      # Without `group-by`, a group gets one pull request per directory: one per server.
-      go-modules:
+      docker-lsp-module:
         patterns: ["*"]

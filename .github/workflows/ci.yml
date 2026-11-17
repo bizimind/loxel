@@ -240,21 +240,22 @@ jobs:
       # changed, and their build skips a binary the cache restored (its `.source` record matches).
       - if: matrix.package.name == 'loxel'
         id: go-servers
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
-          path: |
+          path: &go-servers-path |
             packages/loxel/build/gopls
             packages/loxel/build/gopls.source
             packages/loxel/build/docker-language-server
             packages/loxel/build/docker-language-server.source
           key: go-servers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/build-gopls.ts', 'packages/loxel/scripts/build-docker-lsp.ts', 'packages/loxel/scripts/gopls-module/**', 'packages/loxel/scripts/docker-lsp-module/**') }}
       # Only for a compile: the toolchain (go-<version>), the module downloads (go re-extracts them)
-      # and the build cache, from the last compile with the same toolchain, so a bump recompiles
-      # only what it changed.
+      # and the build cache, from the last compile on main with the same toolchain, so a bump
+      # recompiles only what it changed.
       - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        id: go-build
+        uses: actions/cache/restore@v6
         with:
-          path: |
+          path: &go-build-path |
             packages/loxel/build/go-*.*
             packages/loxel/build/go-path/pkg/mod/cache/download
             packages/loxel/build/go-cache
@@ -263,6 +264,18 @@ jobs:
       - if: matrix.package.name == 'loxel'
         name: Build the language servers the tests run
         run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff tombi gopls docker-language-server
+      # Saved once built, so a failing test does not throw the compile away. The Go caches, over a
+      # gigabyte, are saved from main only; a pull request starts from main's.
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-servers-path
+          key: ${{ steps.go-servers.outputs.cache-primary-key }}
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true' && steps.go-build.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-build-path
+          key: ${{ steps.go-build.outputs.cache-primary-key }}
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
 

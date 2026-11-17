@@ -5,8 +5,9 @@
  * gopls and its dependencies are pinned by the go.mod and go.sum in `gopls-module/`.
  *
  * The module names gopls in a `tool` directive, so `go mod tidy` keeps its requirements, and
- * Dependabot raises its dependencies (.github/dependabot.yml). To upgrade gopls itself, run
- * `go get golang.org/x/tools/gopls@<version>` and `go mod tidy` in the module directory.
+ * Dependabot raises its dependencies outside `golang.org/x` (.github/dependabot.yml), which move
+ * with gopls. To upgrade gopls, run `go get golang.org/x/tools/gopls@<version>` and `go mod tidy`
+ * in the module directory.
  */
 
 import path from "node:path";
