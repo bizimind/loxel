@@ -6,5 +6,6 @@
   "purl": "pkg:github/clangd/clangd@{version}",
   "license": "Apache-2.0 WITH LLVM-exception",
   "source": "https://github.com/llvm/llvm-project/tree/llvmorg-{version}",
-  "licenseFile": "licenses/clangd.txt"
+  "licenseFile": "licenses/clangd.txt",
+  "sha256": { "23.1.0/mac": "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253" }
 }

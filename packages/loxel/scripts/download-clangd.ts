@@ -5,9 +5,10 @@
  * matter for linking. Its `include` holds the compiler headers, and its `share` the sanitizer
  * ignorelists, whose absence is an error on a project built with `-fsanitize=cfi`. The manager
  * passes that directory as `--resource-dir`, whose layout has no version in it, so an upgrade
- * changes no path: only the manifest's version (and license, if it changed) and SHA256 here.
+ * changes no path: only the manifest's version (and license, if it changed) and SHA256.
  *
- * clangd publishes no checksum files, so the digest is pinned from the release asset.
+ * The release's `clangd-mac-<version>.zip` is pinned by SHA256 in `language-servers/clangd.json`,
+ * which Renovate bumps (renovate.json).
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -16,14 +17,13 @@ import path from "node:path";
 import { $ } from "bun";
 
 import { BUILD_DIR, downloadReleaseBinary } from "./download-release-binary";
-import { manifestVersion } from "./language-server-manifest";
+import { manifestSha256, manifestVersion } from "./language-server-manifest";
 
 const VERSION = await manifestVersion("clangd");
 /** The major version, the name of clangd's resource directory (`lib/clang/<major>`). */
 const MAJOR = VERSION.slice(0, VERSION.indexOf("."));
-
-/** Pinned SHA256 digest of the manifest version's `clangd-mac-<version>.zip`, a universal binary. */
-const SHA256 = "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253";
+/** The release's `clangd-mac-<version>.zip`, a universal binary. */
+const SHA256 = await manifestSha256("clangd", "mac");
 
 const outBinary = path.join(BUILD_DIR, "clangd");
 const outResourceDir = path.join(BUILD_DIR, "clangd-resource");

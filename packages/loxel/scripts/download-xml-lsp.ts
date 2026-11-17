@@ -4,7 +4,8 @@
  * so it can ship alongside `loxel-server` via electron-builder extraResources.
  *
  * LemMinX is compiled to a native binary via GraalVM — no JRE required at
- * runtime. SHA256 digests are pinned per platform from the release assets.
+ * runtime. The zip for each platform is pinned by SHA256 in `language-servers/lemminx.json`, which
+ * Renovate bumps (renovate.json).
  */
 
 import { createHash } from "node:crypto";
@@ -12,20 +13,11 @@ import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { installedFrom, recordInstalledFrom } from "./download-release-binary";
-import { manifestVersion } from "./language-server-manifest";
+import { manifestSha256, manifestVersion } from "./language-server-manifest";
 
 const VERSION = await manifestVersion("lemminx");
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");
-
-/** Pinned SHA256 digests of the zip archives from the manifest version's release. */
-const SHA256: Record<string, string> = {
-  "osx-aarch_64": "185db5630ce85be43ea0fab034e7841b1327c2793db05ab481e029cf493d86ce",
-  "osx-x86_64": "9e56123194b5c1fdc7d87f1bd21c83cc996ba7be913def3a2836a13305bcd273",
-  "linux-x86_64": "1acc44e24201c1d2f5ccb4e43e7426ed0df6909207a81ff199810e2808104d89",
-  "linux-aarch_64": "0b88a49e83c2611282672f5123ce33abf1371c8e3c55cad6ee45ea00626ffa1b",
-  win32: "7eaefaac68253b0ec8e0ad1f1c0f2d0755423d4e99e52497428b52f80df28eb7",
-};
 
 function platformKey(): string {
   const arch = process.arch === "arm64" ? "aarch_64" : "x86_64";
@@ -36,11 +28,8 @@ function platformKey(): string {
 }
 
 const key = platformKey();
-const expectedHash = SHA256[key];
-if (!expectedHash) {
-  console.error(`No pinned SHA256 for platform ${key}`);
-  process.exit(1);
-}
+if (!key) throw new Error(`LemMinX has no build for ${process.platform}`);
+const expectedHash = await manifestSha256("lemminx", key);
 
 const isWindows = process.platform === "win32";
 const binaryName = isWindows ? `lemminx-${key}.exe` : `lemminx-${key}`;

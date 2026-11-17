@@ -14,6 +14,9 @@ import {
   recordInstalledFrom,
 } from "./download-release-binary";
 
+// Renovate (renovate.json) bumps GO_VERSION alone, since go.dev is not a source it can hash: the
+// person completing its pull request copies the new archives' digests from the URL below. Until
+// then the toolchain download fails its hash check.
 export const GO_VERSION = "1.27.4";
 
 /** Pinned SHA256 digests from https://go.dev/dl/?mode=json */

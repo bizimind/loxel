@@ -11,7 +11,9 @@
  *
  * To upgrade: change the version in `language-servers/eslint-language-server.json` and the hash
  * here, raise any dependency below what its `server/package.json` names, and run that test against
- * the new bundle.
+ * the new bundle. Renovate (renovate.json) opens a pull request that changes only the version, since
+ * it cannot hash a source tarball: the rest is left to the person completing it, and until then
+ * the download fails its hash check.
  */
 
 import { createHash } from "node:crypto";
@@ -26,8 +28,14 @@ const SHA256 = "f82fb2aab96eede6273af2d9aafeb9a29c5723c5af5a9819e37c61d7f51cc052
 const URL = `https://codeload.github.com/microsoft/vscode-eslint/tar.gz/refs/tags/${TAG}`;
 const ARCHIVE_ROOT = `vscode-eslint-${TAG.replace("/", "-")}`;
 
-// Under `build/`, so that imports resolve from this package's node_modules.
-const SOURCE_DIR = path.join(BUILD_DIR, "eslint-language-server-source", SHA256);
+// Under `build/`, so that imports resolve from this package's node_modules. Keyed on the tag as well
+// as the hash, so a version bump that has not updated the hash yet downloads, and fails its check,
+// instead of building the old source.
+const SOURCE_DIR = path.join(
+  BUILD_DIR,
+  "eslint-language-server-source",
+  `${ARCHIVE_ROOT}-${SHA256}`,
+);
 const OUT_DIR = path.join(BUILD_DIR, "eslint-language-server");
 
 async function fetchSource(): Promise<void> {
