@@ -1,4 +1,5 @@
 {
   "script": "build-basedpyright-lsp.ts",
-  "resources": ["basedpyright-langserver", "typeshed-fallback"]
+  "resources": ["basedpyright-langserver", "typeshed-fallback"],
+  "npm": ["basedpyright"]
 }

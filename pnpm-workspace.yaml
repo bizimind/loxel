@@ -1,6 +1,10 @@
 packages:
   - "packages/*"
 
+catalog:
+  # The root's typechecker and the tsc Loxel ships (packages/loxel/scripts/copy-typescript.ts).
+  "@typescript/native": npm:typescript@7.1.0-dev.20261117.1
+
 # Delay newly published versions to reduce supply-chain risk. The pnpm this repo requires also checks
 # every entry of an existing lockfile against this window, so `pnpm install --frozen-lockfile` in CI
 # rejects a lockfile that carries a too-new version, transitive ones included; pnpm 10 skipped that

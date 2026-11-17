@@ -86,7 +86,7 @@ Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which po
 
 ### Releases
 
-`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads and a zip that installed apps update from, and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges. Each release also publishes a standalone server bundle for Linux (`linux-x64`, `linux-arm64`) with its own manifest; see [docs/ELECTRON.md](docs/ELECTRON.md#standalone-server-bundle).
+`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads, a zip that installed apps update from, and a CycloneDX SBOM of what each architecture's app ships ([docs/ELECTRON.md](docs/ELECTRON.md#build-and-release)), and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges. Each release also publishes a standalone server bundle for Linux (`linux-x64`, `linux-arm64`) with its own manifest; see [docs/ELECTRON.md](docs/ELECTRON.md#standalone-server-bundle).
 
 ## Data storage
 
@@ -108,7 +108,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Platform**
 
-- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration, the default browser, and building and releasing the app and the standalone Linux server bundle
+- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration, the default browser, and building and releasing the app with its SBOM and the standalone Linux server bundle
 - [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: one app process, starting, restarting and stopping the server, the app's channel to it, the quit modes and the question before a quit, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it

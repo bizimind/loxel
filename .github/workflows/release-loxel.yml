@@ -148,6 +148,14 @@ jobs:
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
 
+      # CycloneDX SBOM of what this architecture's app ships: pnpm installs only this machine's
+      # platform packages, so each leg writes its own. After `pnpm install`, since pnpm reads
+      # licenses from the installed packages, and after the language servers are built and staged,
+      # since it lists their manifests and reads the Go modules compiled into the Go binaries among
+      # them. Uploaded with the installers; the release job attaches both.
+      - name: Generate SBOM
+        run: bun packages/loxel/scripts/sbom.ts "packages/loxel/build/Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json"
+
       - name: Import signing certificate
         run: |
           echo "$LOXEL_CERTIFICATE" | base64 --decode > certificate.p12
@@ -257,6 +265,9 @@ jobs:
               "s3://loxel/loxel/app/darwin-${{ matrix.arch }}/$FILENAME" \
               --content-type application/octet-stream
           done
+          SBOM="Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json"
+          aws s3 cp "packages/loxel/build/$SBOM" "s3://loxel/loxel/app/darwin-${{ matrix.arch }}/$SBOM" \
+            --content-type application/vnd.cyclonedx+json
 
   release:
     needs: [check-and-bump, build-electron]
@@ -278,7 +289,8 @@ jobs:
           fi
 
           # `app` holds the installers the site links to; `update` the zips the app updates from;
-          # `terminal_host_protocol` what the app updater decides the terminals' fate by.
+          # `terminal_host_protocol` what the app updater decides the terminals' fate by; `sbom` each
+          # architecture's CycloneDX SBOM, which the site's download page links to.
           jq -n \
             --arg v "$VERSION" \
             --arg protocol "$PROTOCOL" \
@@ -293,6 +305,10 @@ jobs:
               version: $v,
               released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
               terminal_host_protocol: $protocol,
+              sbom: {
+                "darwin-arm64": "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.cdx.json",
+                "darwin-x64": "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.cdx.json"
+              },
               app: {
                 "darwin-arm64": {url: "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.dmg", sha256: $dmg_sha_arm64},
                 "darwin-x64": {url: "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.dmg", sha256: $dmg_sha_x64}
@@ -316,11 +332,17 @@ jobs:
         run: |
           VERSION="${{ needs.check-and-bump.outputs.version }}"
           BASE="https://loxel.bizimind.io/loxel"
+          LINKS=""
+          SBOMS=()
+          for ARCH in arm64 x64; do
+            SBOM="Loxel-${VERSION}-mac-${ARCH}.cdx.json"
+            aws s3 cp "s3://loxel/loxel/app/darwin-${ARCH}/$SBOM" "$SBOM"
+            SBOMS+=("$SBOM")
+            LINKS="${LINKS}- [macOS ${ARCH}](${BASE}/app/darwin-${ARCH}/Loxel-${VERSION}-mac-${ARCH}.dmg) ([SBOM](${BASE}/app/darwin-${ARCH}/${SBOM}))"$'\n'
+          done
 
-          LINKS="- [macOS arm64](${BASE}/app/darwin-arm64/Loxel-${VERSION}-mac-arm64.dmg)"$'\n'
-          LINKS="${LINKS}- [macOS x64](${BASE}/app/darwin-x64/Loxel-${VERSION}-mac-x64.dmg)"$'\n'
-
-          gh release create "${{ needs.check-and-bump.outputs.tag }}" \
+          # The SBOMs are attached too, where SBOM tooling looks for them.
+          gh release create "${{ needs.check-and-bump.outputs.tag }}" "${SBOMS[@]}" \
             --title "loxel ${VERSION}" \
             --generate-notes \
             --notes "## Downloads
@@ -328,6 +350,9 @@ jobs:
           ${LINKS}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
 
   # The site reads the manifest at build time, so rebuild it to show the new version.
   # Separate job so a failed dispatch can be re-run without re-running the release.

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Bumps the versions Dependabot cannot read: the language-server manifests in packages/loxel/scripts/language-servers/, the Go toolchain and Bun. Runs self-hosted, weekly, from .github/workflows/renovate.yml, which is its schedule. Dependabot keeps everything it covers (.github/dependabot.yml), so only custom managers run here. See packages/loxel/docs/LANGUAGE_SERVERS.md.",
+  "enabledManagers": ["custom.jsonata", "custom.regex"],
+  "dependencyDashboard": false,
+  "minimumReleaseAge": "7 days",
+  "labels": ["dependencies"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "loxel",
+  "commitMessageAction": "bump",
+  "commitMessageTopic": "{{{depName}}}",
+  "commitMessageExtra": "from {{{currentValue}}} to {{{newValue}}}",
+  "customManagers": [
+    {
+      "customType": "jsonata",
+      "description": "A manifest's version, from the registry its pkg:golang or pkg:github purl names: Go modules, or a GitHub repository's releases when it downloads a release asset and its tags otherwise. The tag is the purl's version, so the text around {version} is stripped.",
+      "fileFormat": "json",
+      "managerFilePatterns": ["/^packages/loxel/scripts/language-servers/[^/]+\\.json$/"],
+      "matchStrings": [
+        "$exists(version) and $exists(purl) ? ($repo := $substringBefore($substringAfter(purl, '/'), '@'); $tag := $decodeUrlComponent($substringAfter(purl, '@')); $prefix := $substringBefore($tag, '{version}'); $type := $substringBefore(purl, '/'); $type in ['pkg:golang', 'pkg:github'] ? {'depName': $repo, 'currentValue': version, 'datasource': $type = 'pkg:golang' ? 'go' : $contains($string(download), '/releases/download/') ? 'github-releases' : 'github-tags', 'extractVersion': $prefix != '' ? '^' & $prefix & '(?<version>.+)$'})"
+      ]
+    },
+    {
+      "customType": "jsonata",
+      "description": "The Go toolchain the Go language servers build with.",
+      "fileFormat": "json",
+      "managerFilePatterns": ["/^packages/loxel/scripts/go-toolchain\\.json$/"],
+      "matchStrings": ["{'depName': 'go', 'currentValue': version, 'datasource': 'golang-version'}"]
+    },
+    {
+      "customType": "regex",
+      "description": "Bun, which CI installs from .bun-version and compiles into loxel-server and the CLIs.",
+      "managerFilePatterns": ["/^\\.bun-version$/"],
+      "matchStrings": ["^(?<currentValue>\\S+)"],
+      "depNameTemplate": "bun",
+      "packageNameTemplate": "oven-sh/bun",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^bun-v(?<version>.+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Pins the new version's SHA256s. The workflow's allowedCommands admits exactly this command.",
+      "matchFileNames": [
+        "packages/loxel/scripts/language-servers/*.json",
+        "packages/loxel/scripts/go-toolchain.json"
+      ],
+      "postUpgradeTasks": {
+        "commands": ["bun packages/loxel/scripts/pin-hashes.ts {{{packageFile}}}"],
+        "fileFilters": [
+          "packages/loxel/scripts/language-servers/*.json",
+          "packages/loxel/scripts/go-toolchain.json"
+        ],
+        "executionMode": "update"
+      }
+    },
+    { "matchDepNames": ["bun"], "semanticCommitScope": "deps" }
+  ]
+}

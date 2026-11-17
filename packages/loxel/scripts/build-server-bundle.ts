@@ -17,7 +17,8 @@ import { $ } from "bun";
 import { z } from "zod";
 
 import { TERMINAL_HOST_BINARY } from "../src/terminal-host/host-files";
-import { MANIFEST_DIR, STAGE_DIR, readManifests } from "./language-server-binaries";
+import { STAGE_DIR } from "./language-server-binaries";
+import { MANIFEST_DIR, readManifests, shippedComponent } from "./language-server-manifest";
 
 const packageRoot = path.resolve(import.meta.dir, "..");
 const repoRoot = path.resolve(packageRoot, "../..");
@@ -40,9 +41,11 @@ async function writeNotices(bundleDir: string): Promise<void> {
     "",
   ];
   for (const manifest of await readManifests()) {
-    if (!manifest.license) continue;
-    lines.push(`- ${manifest.name}: ${manifest.license}`);
-    if (manifest.source) lines.push(`  Source: ${manifest.source}`);
+    // Its license and source, with the manifest's version in place of `{version}`.
+    const shipped = shippedComponent(manifest);
+    if (!shipped) continue;
+    lines.push(`- ${manifest.name}: ${shipped.license}`);
+    if (shipped.source) lines.push(`  Source: ${shipped.source}`);
     if (manifest.note) lines.push(`  ${manifest.note}`);
     if (manifest.licenseFile) {
       const licenseFile = `${manifest.name}.txt`;

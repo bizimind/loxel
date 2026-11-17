@@ -1,0 +1,59 @@
+name: Renovate
+
+# Bumps what renovate.json tracks: the language-server manifests, the Go toolchain and Bun, with
+# Dependabot's 7-day cooldown. Self-hosted, so its post-upgrade task (pin-hashes.ts) can pin each new
+# version's SHA256s in the same pull request. It runs as the repository's Renovate GitHub App, whose
+# token (unlike GITHUB_TOKEN's) makes those pull requests run CI: the app's ID is the
+# RENOVATE_APP_ID variable and its private key the RENOVATE_APP_PRIVATE_KEY secret. This cron is
+# Renovate's schedule; run it now with `gh workflow run renovate.yml`.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+
+jobs:
+  renovate:
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    steps:
+      # For .bun-version only: Renovate clones the repository itself.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # pin-hashes.ts runs under Bun, in Renovate's checkout and with no install.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+      - name: Run Renovate
+        env:
+          RENOVATE_VERSION: 44.206.2
+          RENOVATE_TOKEN: ${{ steps.app-token.outputs.token }}
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          # Exactly the post-upgrade task renovate.json runs, for one manifest or the Go toolchain.
+          RENOVATE_ALLOWED_COMMANDS: '["^bun packages/loxel/scripts/pin-hashes\\.ts packages/loxel/scripts/(language-servers/[a-z0-9-]+|go-toolchain)\\.json$"]'
+          # pin-hashes.ts reads release digests from the GitHub API.
+          RENOVATE_CUSTOM_ENV_VARIABLES: '{"GITHUB_TOKEN": "${{ steps.app-token.outputs.token }}"}'
+          LOG_LEVEL: info
+        # The same 7-day cooldown on Renovate's own dependencies as pnpm-workspace.yaml sets here.
+        run: pnpm --config.minimum-release-age=10080 dlx "renovate@$RENOVATE_VERSION"

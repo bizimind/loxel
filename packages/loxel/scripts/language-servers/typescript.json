@@ -1,1 +1,1 @@
-{ "script": "copy-typescript.ts", "resources": ["typescript-lib"] }
+{ "script": "copy-typescript.ts", "resources": ["typescript-lib"], "npm": ["@typescript/native"] }
