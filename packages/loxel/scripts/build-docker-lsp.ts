@@ -28,7 +28,7 @@ const MODULE_DIR = path.join(import.meta.dir, "docker-lsp-module");
 
 // The version the module pins, which the server reports as its own.
 const goMod = await Bun.file(path.join(MODULE_DIR, "go.mod")).text();
-const version = new RegExp(`^require ${MODULE} (\\S+)$`, "m").exec(goMod)?.[1];
+const version = new RegExp(`^require ${MODULE} (\\S+)\\r?$`, "m").exec(goMod)?.[1];
 if (!version) throw new Error(`docker-lsp-module/go.mod does not require ${MODULE}`);
 
 await buildPinnedGoModule({

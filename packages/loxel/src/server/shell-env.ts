@@ -23,7 +23,7 @@ const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 /** Shell session state rather than configuration; never copied from the captured environment. */
 const SESSION_VARS = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
 
-type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined>;
 
 export interface LoginShellEnvOptions {
   /** The shell to run; defaults to `$SHELL` (else `/bin/zsh`) at capture time. */
@@ -270,6 +270,9 @@ export function buildSpawnEnv(): Env {
 export const NO_OUTBOUND_HTTP_ENV = {
   HTTP_PROXY: "http://127.0.0.1:9",
   HTTPS_PROXY: "http://127.0.0.1:9",
+  // Windows names are case-insensitive, so a user's lowercase ones must not survive beside these.
+  http_proxy: "http://127.0.0.1:9",
+  https_proxy: "http://127.0.0.1:9",
   NO_PROXY: "",
   no_proxy: "",
 };

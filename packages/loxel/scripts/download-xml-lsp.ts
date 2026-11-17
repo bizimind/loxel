@@ -11,6 +11,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
+import { installedFrom, recordInstalledFrom } from "./download-release-binary";
+
 const VERSION = "0.29.3";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");
@@ -43,7 +45,7 @@ const isWindows = process.platform === "win32";
 const binaryName = isWindows ? `lemminx-${key}.exe` : `lemminx-${key}`;
 const outBinary = path.join(OUTDIR, isWindows ? "lemminx.exe" : "lemminx");
 
-if (existsSync(outBinary)) {
+if (installedFrom(outBinary, expectedHash)) {
   console.log(`lemminx already present at ${outBinary}, skipping download`);
   process.exit(0);
 }
@@ -95,5 +97,6 @@ if (extractedPath !== outBinary) {
 }
 
 chmodSync(outBinary, 0o755);
+recordInstalledFrom(outBinary, expectedHash);
 rmSync(zipPath);
 console.log(`Installed: ${outBinary}`);

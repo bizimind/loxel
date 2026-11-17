@@ -11,6 +11,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
+import { installedFrom, recordInstalledFrom } from "./download-release-binary";
+
 const VERSION = "0.39.1";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build");
@@ -49,7 +51,7 @@ const url = `https://releases.hashicorp.com/terraform-ls/${VERSION}/terraform-ls
 const binaryName = process.platform === "win32" ? "terraform-ls.exe" : "terraform-ls";
 const outBinary = path.join(OUTDIR, binaryName);
 
-if (existsSync(outBinary)) {
+if (installedFrom(outBinary, expectedHash)) {
   console.log(`terraform-ls already present at ${outBinary}, skipping download`);
   process.exit(0);
 }
@@ -98,5 +100,6 @@ if (!existsSync(extracted)) {
 
 renameSync(extracted, outBinary);
 chmodSync(outBinary, 0o755);
+recordInstalledFrom(outBinary, expectedHash);
 rmSync(tmpDir, { recursive: true, force: true });
 console.log(`Installed: ${outBinary}`);

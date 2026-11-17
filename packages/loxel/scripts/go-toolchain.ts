@@ -4,10 +4,15 @@
  */
 
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { BUILD_DIR, downloadReleaseBinary } from "./download-release-binary";
+import {
+  BUILD_DIR,
+  downloadReleaseBinary,
+  installedFrom,
+  recordInstalledFrom,
+} from "./download-release-binary";
 
 export const GO_VERSION = "1.27.4";
 
@@ -53,6 +58,9 @@ export async function ensureGoToolchain(): Promise<GoToolchain> {
 }
 
 const MODULE_FILES = ["go.mod", "go.sum"];
+// A read-only module cache would make the cache directory hard to delete.
+const PINNED_BUILD_GOFLAGS = "-modcacherw -mod=readonly";
+const PINNED_BUILD_CGO = "0";
 
 export interface PinnedGoBuild {
   /** Directory holding the go.mod and go.sum that pin the program and all its dependencies. */
@@ -71,20 +79,18 @@ export interface PinnedGoBuild {
  */
 export async function buildPinnedGoModule(build: PinnedGoBuild): Promise<void> {
   const name = path.basename(build.outBinary);
-  // Records what `outBinary` was built from: one from an older checkout must not be kept.
-  const stampFile = `${build.outBinary}.source`;
-  const hash = createHash("sha256").update(`${GO_VERSION}\0${build.pkg}\0${build.ldflags}`);
+  const flags = ["-trimpath", `-ldflags=${build.ldflags}`];
+  const hash = createHash("sha256").update(
+    JSON.stringify([GO_VERSION, build.pkg, flags, PINNED_BUILD_GOFLAGS, PINNED_BUILD_CGO]),
+  );
   for (const file of MODULE_FILES) {
     hash.update(await Bun.file(path.join(build.moduleDir, file)).text());
   }
-  const stamp = hash.digest("hex");
-
-  const stamped = Bun.file(stampFile);
-  if (existsSync(build.outBinary) && (await stamped.exists()) && (await stamped.text()) === stamp) {
+  const source = hash.digest("hex");
+  if (installedFrom(build.outBinary, source)) {
     console.log(`${name} already built at ${build.outBinary}, skipping`);
     return;
   }
-  rmSync(stampFile, { force: true });
 
   const { goRoot, go } = await ensureGoToolchain();
   const home = path.join(BUILD_DIR, "go-home");
@@ -97,40 +103,42 @@ export async function buildPinnedGoModule(build: PinnedGoBuild): Promise<void> {
       cpSync(path.join(build.moduleDir, file), path.join(moduleDir, file));
     }
     console.log(`Building ${build.pkg} with Go ${GO_VERSION}...`);
-    const proc = Bun.spawn(
-      [go, "build", "-trimpath", `-ldflags=${build.ldflags}`, "-o", tmpBinary, build.pkg],
-      {
-        cwd: moduleDir,
-        stdout: "inherit",
-        stderr: "inherit",
-        // Nothing of the machine's own Go setup: no `go env` file, GOFLAGS, GOPROXY or GOWORK.
-        env: {
-          PATH: process.env.PATH,
-          TMPDIR: process.env.TMPDIR,
-          TMP: process.env.TMP,
-          TEMP: process.env.TEMP,
-          SYSTEMROOT: process.env.SYSTEMROOT,
-          // Where the go command keeps its own files besides those named here.
-          HOME: home,
-          USERPROFILE: home,
-          LOCALAPPDATA: home,
-          GOENV: "off",
-          GOWORK: "off",
-          GOTOOLCHAIN: "local",
-          GOROOT: goRoot,
-          GOPATH: path.join(BUILD_DIR, "go-path"),
-          GOCACHE: path.join(BUILD_DIR, "go-cache"),
-          // A read-only module cache would make the cache directory hard to delete.
-          GOFLAGS: "-modcacherw -mod=readonly",
-          CGO_ENABLED: "0",
-        },
+    const proc = Bun.spawn([go, "build", ...flags, "-o", tmpBinary, build.pkg], {
+      cwd: moduleDir,
+      stdout: "inherit",
+      stderr: "inherit",
+      // Nothing of the machine's own Go setup: no `go env` file, GOFLAGS, GOPROXY or GOWORK.
+      // The proxy and CA settings only decide how modules are fetched; go.sum checks them all.
+      env: {
+        PATH: process.env.PATH,
+        TMPDIR: process.env.TMPDIR,
+        TMP: process.env.TMP,
+        TEMP: process.env.TEMP,
+        SYSTEMROOT: process.env.SYSTEMROOT,
+        HTTP_PROXY: process.env.HTTP_PROXY,
+        HTTPS_PROXY: process.env.HTTPS_PROXY,
+        NO_PROXY: process.env.NO_PROXY,
+        SSL_CERT_FILE: process.env.SSL_CERT_FILE,
+        SSL_CERT_DIR: process.env.SSL_CERT_DIR,
+        // Where the go command keeps its own files besides those named here.
+        HOME: home,
+        USERPROFILE: home,
+        LOCALAPPDATA: home,
+        GOENV: "off",
+        GOWORK: "off",
+        GOTOOLCHAIN: "local",
+        GOROOT: goRoot,
+        GOPATH: path.join(BUILD_DIR, "go-path"),
+        GOCACHE: path.join(BUILD_DIR, "go-cache"),
+        GOFLAGS: PINNED_BUILD_GOFLAGS,
+        CGO_ENABLED: PINNED_BUILD_CGO,
       },
-    );
+    });
     if ((await proc.exited) !== 0) throw new Error(`go build of ${build.pkg} failed`);
     renameSync(tmpBinary, build.outBinary);
   } finally {
     rmSync(moduleDir, { recursive: true, force: true });
   }
-  await Bun.write(stampFile, stamp);
+  recordInstalledFrom(build.outBinary, source);
   console.log(`Installed: ${build.outBinary}`);
 }

@@ -62,6 +62,8 @@ export const config = {
   tombiSchemaCacheDir: join(stateDir, "schema-cache", "tombi"),
   /** LemMinX's `xml.server.workDir`; see `SchemaDownloads`. */
   lemminxWorkDir: join(stateDir, "schema-cache", "lemminx"),
+  /** Holds the `terraform` shim terraform-ls runs in a trusted repository; see `TerraformLspManager`. */
+  terraformShimDir: join(stateDir, "terraform-ls"),
   port,
   /** The Vite dev server's port, whose origin a dev server also admits; null outside dev mode. */
   viteDevPort: isDev ? vitePort(process.env) : null,
