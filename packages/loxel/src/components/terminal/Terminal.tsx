@@ -494,12 +494,13 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     });
 
     // Typing, clicking or focusing here takes the terminal over from another window showing it,
-    // at this view's size.
+    // at this view's size. A view that is already the active one has nothing to claim: another
+    // view's claim reaches it as `terminal_size`, which makes the next event here claim again.
     const claim = (event: Event) => {
-      if (!attachedRef.current || exitedRef.current) return;
+      if (!attachedRef.current || exitedRef.current || activeRef.current) return;
       // A modifier on its own sends nothing; it only starts a shortcut, which may not be for here.
       if (event instanceof KeyboardEvent && MODIFIER_KEYS.has(event.key)) return;
-      if (!activeRef.current && isOnScreen(panelApi)) fitAddon.fit();
+      if (isOnScreen(panelApi)) fitAddon.fit();
       activeRef.current = true;
       sendResize(terminalId, terminal);
     };

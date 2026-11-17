@@ -1127,6 +1127,47 @@ describe("TerminalManager with several clients", () => {
       const shown = (client.states.at(-1)?.snapshot ?? "") + client.outputText();
       expect(shown).toContain("THE-END");
     });
+
+    test("a client paused next to one keeping up gets the end of the output before the exit", async () => {
+      process.env.SHELL = "/bin/sh";
+      const host = new InProcessTerminalHost({ log: createNoopLogger(), flowControl: flow });
+      const manager = new TerminalManager(
+        host,
+        {
+          isSequenceEnabled: () => false,
+          onNotification: () => {},
+          onExit: () => {},
+          toolchainEnvs: [],
+        },
+        flow,
+      );
+      managers.push(manager);
+      const id = crypto.randomUUID();
+      // Never acks: it is paused past 100 KiB of the 150 KB the command prints.
+      const slow = createRecordingSink();
+      await manager.attach(id, slow.sink, {
+        ...attachOptions,
+        command: "read go; head -c 150000 /dev/zero | tr '\\0' a; echo; echo THE-''END; exit 0",
+      });
+      // Acks all it gets, so the host never pauses, and makes no final resync of its own.
+      const fast = createRecordingSink();
+      const acking: TerminalSink = {
+        ...fast.sink,
+        sendOutput: (output) => {
+          fast.sink.sendOutput(output);
+          const syncOffset = fast.states.at(-1)!.offset;
+          queueMicrotask(() => manager.ack(id, acking, syncOffset, output.data.byteLength));
+        },
+      };
+      await manager.attach(id, acking, attachOptions);
+      manager.write(id, acking, new TextEncoder().encode("\n"));
+
+      await until(() => slow.exits.length > 0 && fast.exits.length > 0, 30_000);
+      expect(fast.states).toHaveLength(1);
+      expect(fast.outputText()).toContain("THE-END");
+      const shown = (slow.states.at(-1)?.snapshot ?? "") + slow.outputText();
+      expect(shown).toContain("THE-END");
+    });
   });
 });
 

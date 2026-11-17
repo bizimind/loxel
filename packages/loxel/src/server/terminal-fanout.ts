@@ -221,8 +221,8 @@ export class TerminalFanout {
 
   /**
    * Flow control: the client has parsed `bytes` more bytes under the sync at `syncOffset`. The
-   * host is acknowledged as far as the furthest client has parsed, so it pauses, and resyncs on
-   * its own before an exit, only when every client is behind, as with a single slow client.
+   * host is acknowledged as far as the furthest client has parsed, so it pauses only when every
+   * client is behind, as with a single slow client.
    */
   ack(sink: TerminalSink, syncOffset: number, bytes: number): AckOutcome {
     const none: AckOutcome = { resync: false, hostAck: null };
