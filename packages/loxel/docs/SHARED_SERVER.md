@@ -48,7 +48,7 @@ The server keeps state at these scopes (`src/server/server-state.ts`):
 | `ProjectState`           | per registered repo, server lifetime  | Yes — one watcher, review database and worktree status list per repo                                                                               |
 | `WorktreeResources`      | first subscriber to last              | Yes — file services and undo/redo history are shared by every window on the worktree                                                               |
 | `ClientState`            | per app WebSocket connection          | No — its terminals, subscriptions and window ID belong to that connection                                                                          |
-| Terminal sessions        | create to destroy, in a terminal host | No — output goes to the owning connection; sessions detach on disconnect and can be reattached, also by the next server process                    |
+| Terminal sessions        | create to destroy, in a terminal host | No — output goes to every connection attached to it; sessions detach on disconnect and can be reattached, also by the next server process          |
 | Language-server sessions | per language-server WebSocket         | Partly — worktree-scoped managers keep one process per worktree path (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
 
 Undo/redo is per worktree, so two windows on the same worktree share one history; that matches the single filesystem they both edit.

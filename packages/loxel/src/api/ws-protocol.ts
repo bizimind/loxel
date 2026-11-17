@@ -72,6 +72,11 @@ export type WsMessage =
   | ({ type: "terminal_exit"; id: string } & TerminalEnd)
   | ({ type: "terminal_notice"; id: string } & TerminalNotice)
   | ({ type: "terminal_state" } & TerminalState)
+  /**
+   * The terminal's PTY size, sent to every client attached to it but the active one (the one that
+   * last attached, resized, or had its user type, click or focus it), which render at that size.
+   */
+  | { type: "terminal_size"; id: string; cols: number; rows: number }
   /** A terminal session started or ended: what `GET /api/terminals` lists changed. */
   | { type: "terminals_changed" }
   | { type: "log_entries"; data: LogEntry[] }
@@ -152,6 +157,11 @@ export type WsClientMessage =
     } & TerminalSpawnTarget)
   /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
   | { type: "terminal_detach"; id: string }
+  /**
+   * The client's size. The client becomes the terminal's active one: the PTY takes its size, and
+   * only its input is written. Sent on a refit, and when the user types, clicks or focuses the
+   * terminal, before the input that follows.
+   */
   | { type: "terminal_resize"; id: string; cols: number; rows: number }
   | { type: "terminal_destroy"; id: string }
   /**

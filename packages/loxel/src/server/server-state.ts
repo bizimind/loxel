@@ -14,6 +14,7 @@ import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
 import type { RegisteredWorktrees } from "./registered-worktrees";
 import type { ReviewDb } from "./review-db";
+import type { TerminalSink } from "./terminal-fanout";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
 /** Lightweight, always-running state per registered project. */
@@ -134,7 +135,8 @@ export type ResolvedFilePath =
 
 /** Per-client tracking for cleanup on disconnect. */
 export interface ClientState {
-  terminals: Set<string>;
+  /** The terminals this socket is attached to, by ID, with the sink each streams to. */
+  terminals: Map<string, TerminalSink>;
   subscribedWorktrees: Set<string>;
   /** The window this socket belongs to (its terminals carry it as `LOXEL_WINDOW_ID`). */
   windowId?: string;
