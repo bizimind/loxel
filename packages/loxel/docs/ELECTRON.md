@@ -80,3 +80,36 @@ Page visibility can't be measured the way the screenshot scripts drive a demo. m
 `pnpm run build:app` compiles the standalone server and terminal host ([build-server.ts](../scripts/build-server.ts), which embeds the host build ID in both), builds the renderer and packages the app with electron-builder into `release/`, on macOS for this machine's architecture (`build:app:local` builds an unpacked arm64 app only). `release-loxel.yml` releases on every merge to main that touches `packages/loxel/**`; see the [README](../README.md#releases). Releases package a patched Electron rather than the npm package's binary; see [PATCHED_ELECTRON.md](PATCHED_ELECTRON.md).
 
 The server, the terminal host, language server scripts and Go builds all produce binaries for the machine they run on, so each macOS architecture builds on a runner of that architecture. [check-binary-arch.ts](../scripts/check-binary-arch.ts) reads the header of every file in the app and fails the release if a binary doesn't match.
+
+### Standalone server bundle
+
+Each release also publishes the server without the app, for Linux: a bundle to run the server from on a Linux machine. Installing it and running it as a service are outside its scope. [build-loxel-server.yml](../../../.github/workflows/build-loxel-server.yml), which `release-loxel.yml` calls beside the app's jobs, builds it for `linux-x64` and `linux-arm64`, each on a runner of that architecture: `build:server:standalone`, a browser build of the renderer (`vite build`), then [build-server-bundle.ts](../scripts/build-server-bundle.ts), which packages them as `release/server/loxel-server-<version>-<platform>.tar.gz`. The tarball holds one directory, laid out like the app's `Resources`:
+
+| Path                           | What                                                                                                                                     |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `loxel-server`                 | The compiled server                                                                                                                      |
+| `loxel-terminal-host`          | The terminal host, which the server clones into its state directory before running it ([TERMINAL_HOST.md](TERMINAL_HOST.md#the-process)) |
+| `gopls`, `ruff`, `jdtls/`, ... | Every language server staged for the platform (`build/language-servers/`), found beside the server binary as in the app                  |
+| `renderer/`                    | The renderer, which a compiled server serves from beside itself when `LOXEL_STATIC_DIR` is unset                                         |
+| `LICENSE`, `licenses/`         | Loxel's license, and the license, source and license file each language server's manifest names                                          |
+
+Every binary in it must match the platform ([check-binary-arch.ts](../scripts/check-binary-arch.ts)), and [smoke-test-server-bundle.ts](../scripts/smoke-test-server-bundle.ts) starts it with a throwaway `LOXEL_STATE_DIR`, reads the session token it writes, checks `/api/version`, an `/api` route with and without the token and the renderer, and runs a command in a terminal through the bundled host. Only then are the tarballs uploaded to `loxel/server/<platform>/` on R2, followed by their manifest, `https://loxel.bizimind.io/loxel/server/manifest.json`, apart from the app's:
+
+```json
+{
+  "version": "0.1.379",
+  "released_at": "2026-11-18T12:00:00Z",
+  "server": {
+    "linux-x64": {
+      "url": "https://loxel.bizimind.io/loxel/server/linux-x64/loxel-server-0.1.379-linux-x64.tar.gz",
+      "sha256": "…"
+    },
+    "linux-arm64": {
+      "url": "https://loxel.bizimind.io/loxel/server/linux-arm64/loxel-server-0.1.379-linux-arm64.tar.gz",
+      "sha256": "…"
+    }
+  }
+}
+```
+
+A run of the workflow on its own (`gh workflow run build-loxel-server.yml --ref <branch>`, once it is on main), or a pull request that changes the workflow or a script that builds what the bundle packages, builds and smoke-tests both bundles without uploading anything. The two scripts also run on a Mac, building and testing a bundle for it, to try them locally.

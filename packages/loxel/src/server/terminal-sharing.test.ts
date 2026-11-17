@@ -6,14 +6,14 @@
  * port keep it and its terminal host apart from any real one.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { RunningTerminalsSchema } from "@/api/running-terminals-model";
 import { sessionAuthorization } from "@/session-client";
-import { hostRunDir } from "@/terminal-host/host-files";
+import { stopHosts } from "@/test/terminal-hosts";
 import { freePort, openPanel } from "@/test/terminal-panel";
 import { until } from "@/test/until";
 
@@ -70,16 +70,7 @@ describe("a terminal shown in several windows", () => {
     server?.kill("SIGKILL");
     await server?.exited;
     // Whatever the test left running ends with its host.
-    const runDir = hostRunDir(stateDir);
-    const entries = existsSync(runDir) ? readdirSync(runDir) : [];
-    for (const name of entries.filter((entry) => entry.endsWith(".json"))) {
-      const { pid } = JSON.parse(readFileSync(path.join(runDir, name), "utf8")) as { pid: number };
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // Already gone.
-      }
-    }
+    stopHosts(stateDir);
     rmSync(stateDir, { recursive: true, force: true });
   });
 

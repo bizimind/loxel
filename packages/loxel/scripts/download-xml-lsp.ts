@@ -13,6 +13,7 @@ import path from "node:path";
 
 import { installedFrom, recordInstalledFrom } from "./download-release-binary";
 
+// A bump also updates the release named in language-servers/lemminx.json, which the server bundle's notices list.
 const VERSION = "0.29.3";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build", "lemminx");

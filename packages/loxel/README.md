@@ -71,22 +71,22 @@ Demo mode (`LOXEL_DEMO=1`, set by the demo scripts) runs beside the installed ap
 
 ### Environment variables
 
-| Variable              | Purpose                                                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                                 |
-| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                                |
-| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state                 |
-| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                                         |
-| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                                    |
-| `LOXEL_SERVE_PORT`    | Override the server port (standalone server and Vite's proxy only; the app uses 7433/7434/7435 + n) |
-| `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                            |
-| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`)                            |
+| Variable              | Purpose                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `LOXEL_DEV`           | `1` for dev mode: dev state directory and port 7434                                                               |
+| `LOXEL_DEMO`          | `1` for demo mode: demo state and data directories and port 7435 + n                                              |
+| `LOXEL_DEMO_INSTANCE` | Which demo app (default 0), so several run at once: port 7435 + n and its own state                               |
+| `LOXEL_DEMO_HIDDEN`   | `1` for a demo window that never shows itself, for captures                                                       |
+| `LOXEL_STATE_DIR`     | Override the state directory (see [Data storage](#data-storage))                                                  |
+| `LOXEL_SERVE_PORT`    | Override the server port (standalone server and Vite's proxy only; the app uses 7433/7434/7435 + n)               |
+| `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                                          |
+| `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`; compiled: `renderer/` beside the binary) |
 
 Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the renderer inside the installed app. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_SOCKET`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 
 ### Releases
 
-`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads and a zip that installed apps update from, and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges.
+`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads and a zip that installed apps update from, and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater, [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning, and [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) for the patched Electron each release packages, which must be built and uploaded before a change to it merges. Each release also publishes a standalone server bundle for Linux (`linux-x64`, `linux-arm64`) with its own manifest; see [docs/ELECTRON.md](docs/ELECTRON.md#standalone-server-bundle).
 
 ## Data storage
 
@@ -108,7 +108,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Platform**
 
-- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration and the default browser
+- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, the native theme, browser panels, macOS integration, the default browser, and building and releasing the app and the standalone Linux server bundle
 - [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: one app process, starting, restarting and stopping the server, the app's channel to it, the quit modes and the question before a quit, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
