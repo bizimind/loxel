@@ -25,9 +25,12 @@ let unserved = new Set<string>();
 let afterNextRead: (() => void) | null = null;
 /** Runs as each write reaches the server. */
 let onWrite: (() => void) | null = null;
+/** The projects the server lists. */
+let projects: Array<import("@/api/project-model").EnrichedProject> = [];
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
+  getProjects: async () => ({ projects, homeDir: "/home", homeDraftsDir: "/home/drafts" }),
   getFileContentByPath: async (path: string) => {
     if (serverDown) throw new TypeError("Failed to fetch");
     if (unserved.has(path)) throw new actualClient.ApiError("Not in any worktree", 404);
@@ -72,6 +75,7 @@ const { dispatchLoxelEvent } = await import("./loxel-events");
 type OutboxEntry = import("./save-outbox").OutboxEntry;
 type OutboxStorage = import("./save-outbox").OutboxStorage;
 const { useEditorStateStore } = await import("@/store/editor-state");
+const { useProjectStore } = await import("@/store/projects");
 
 const FILE = "/repo/a.ts";
 
@@ -143,6 +147,7 @@ beforeEach(() => {
   unserved = new Set();
   afterNextRead = null;
   onWrite = null;
+  projects = [];
 });
 
 afterEach(() => {
@@ -657,5 +662,119 @@ describe("queue", () => {
     await retryQueuedSaves();
     expect(disk[FILE]).toBe("a\nb\n");
     expect(outboxEntriesForTests().map((e) => [e.filePath, e.status])).toEqual([[other, "queued"]]);
+  });
+});
+
+describe("a worktree that is gone", () => {
+  async function queueSave(): Promise<void> {
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    serverDown = false;
+  }
+
+  const statuses = () => outboxEntriesForTests().map((entry) => entry.status);
+
+  test("drops its saves when the user removed it in Loxel, and says so", async () => {
+    await queueSave();
+    useEditorStateStore.getState().closeFile(FILE);
+
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: true });
+    expect(outboxEntriesForTests()).toEqual([]);
+    expect(toasts).toEqual(["Unsaved edits to a.ts were discarded with their worktree"]);
+    await retryQueuedSaves();
+    expect(writes).toEqual([]);
+  });
+
+  test("keeps a save for review when it went any other way, neither retried nor holding it", async () => {
+    await queueSave();
+    let drained = false;
+    onWorktreeSavesDrained("/repo", () => (drained = true));
+
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: false });
+    expect(statuses()).toEqual(["review"]);
+    expect(drained).toBe(true);
+    await retryQueuedSaves();
+    expect(writes).toEqual([]);
+  });
+
+  test("settles a save that fails after it went, instead of queuing it", async () => {
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: false });
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    expect(statuses()).toEqual(["review"]);
+  });
+
+  test("a removal in Loxel stays discarded when the list that follows it shows the worktree gone", async () => {
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: true });
+    dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: false });
+    // The editor's unmount flush, sent after the server removed the worktree.
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    expect(outboxEntriesForTests()).toEqual([]);
+  });
+
+  test("keeps retrying saves recovered at start under a project listed without worktrees", async () => {
+    const subscribe = spyOn(actualClient.wsClient, "subscribeWorktree");
+    const wt = "/proj/.worktrees/x";
+    const file = `${wt}/a.ts`;
+    try {
+      // What the server lists for a project it could not initialize (a volume not mounted yet).
+      projects = [
+        {
+          id: "p2",
+          path: "/proj",
+          name: "proj",
+          addedAt: new Date(0).toISOString(),
+          isBare: true,
+          worktrees: [],
+          worktreesDir: null,
+          worktreeMetadata: false,
+        },
+      ];
+      await useProjectStore.getState().fetchProjects();
+      unserved.add(file);
+      const { storage, stored } = memoryStorage();
+      stored.set("e1", leftBehind({ worktreePath: wt, filePath: file, editorKey: file }));
+
+      await initSaveOutbox({ storage });
+      await retryQueuedSaves();
+      expect(outboxEntriesForTests().map((entry) => entry.status)).toEqual(["queued"]);
+    } finally {
+      subscribe.mockRestore();
+      useProjectStore.setState({ projects: [] });
+    }
+  });
+
+  test("keeps saves recovered at start for review once the projects no longer list it", async () => {
+    const subscribe = spyOn(actualClient.wsClient, "subscribeWorktree");
+    try {
+      projects = [
+        {
+          id: "p1",
+          path: "/other",
+          name: "other",
+          addedAt: new Date(0).toISOString(),
+          isBare: false,
+          worktrees: [],
+          worktreesDir: null,
+          worktreeMetadata: false,
+        },
+      ];
+      await useProjectStore.getState().fetchProjects();
+      unserved.add(FILE);
+      const { storage, stored } = memoryStorage();
+      stored.set("e1", leftBehind());
+
+      await initSaveOutbox({ storage });
+      await until(() => stored.get("e1")?.status === "review");
+      await retryQueuedSaves();
+      expect(writes).toEqual([]);
+    } finally {
+      subscribe.mockRestore();
+      useProjectStore.setState({ projects: [] });
+    }
   });
 });

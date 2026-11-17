@@ -3,7 +3,8 @@
  * confirms it. A save that fails because the server cannot be reached (it is restarting, or not
  * subscribed to the worktree yet) stays queued and is retried once its worktree is served again and
  * on a backoff timer, after reading the file and merging with whatever is on disk by then. It
- * survives its tab closing and the window reloading or quitting. See docs/EDITOR.md, "Save outbox".
+ * survives its tab closing and the window reloading or quitting, and is settled once its worktree
+ * is gone. See docs/EDITOR.md, "Save outbox".
  */
 
 import * as api from "@/api/client";
@@ -21,7 +22,8 @@ import {
 } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { type EditorFileEntry, diskBase, useEditorStateStore } from "@/store/editor-state";
-import { useWorktreeStore } from "@/store/worktrees";
+import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { isListedWorktree, useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("files");
 
@@ -86,6 +88,11 @@ const recovered = new Set<string>();
 const recoveredSaved: string[] = [];
 /** The worktree each entry not yet saved holds subscribed (`holdWorktree`), by entry id. */
 const heldWorktrees = new Map<string, string>();
+/**
+ * Worktrees gone from this window's lists (`loxel-worktree-gone`), until served again, and whether
+ * the user discarded them: their saves can no longer be sent, so they are settled, not retried.
+ */
+const goneWorktrees = new Map<string, boolean>();
 
 /**
  * Why a failed request may succeed later: `unreachable`, the server could not be reached (or
@@ -176,6 +183,7 @@ useEditorStateStore.subscribe(onEditorsChanged);
 // A worktree is served again (subscribed, after a reconnect or a server restart): retry its saves
 // at once. The timer is left for the rest, such as a server that answered with an error.
 onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
+  goneWorktrees.delete(wtPath); // created again at the same path
   const waiting = [...entries.values()].some(
     (entry) => entry.status === "queued" && entry.worktreePath === wtPath,
   );
@@ -183,6 +191,45 @@ onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
   failedRounds = 0;
   scheduleRetry(0);
 });
+
+onLoxelEvent("loxel-worktree-gone", ({ wtPath, discarded }) => {
+  // A removal in Loxel is also seen in the list that follows it: that must not undo the discard.
+  goneWorktrees.set(wtPath, discarded || goneWorktrees.get(wtPath) === true);
+  settleGoneSaves();
+});
+
+function isGone(entry: OutboxEntry): boolean {
+  return entry.worktreePath !== null && goneWorktrees.has(entry.worktreePath);
+}
+
+/**
+ * Settle the saves of gone worktrees, which can no longer be sent. The user removed the worktree in
+ * Loxel (`discarded`): they are dropped, and the user is told. Gone any other way (removed outside
+ * Loxel, moved, its project only removed from Loxel), the files may still be somewhere: a waiting
+ * save is kept for review, without being retried or holding the worktree, and shown when its file's
+ * tab next opens. A save in flight is settled when it fails.
+ */
+function settleGoneSaves(): void {
+  const dropped: string[] = [];
+  for (const entry of [...entries.values()]) {
+    if (!entry.worktreePath) continue;
+    const discarded = goneWorktrees.get(entry.worktreePath);
+    if (discarded === undefined) continue;
+    if (discarded && (entry.status === "queued" || entry.status === "review")) {
+      dropped.push(getDisplayFilename(entry.filePath));
+      removeEntry(entry);
+    } else if (entry.status === "queued") {
+      entry.status = "review";
+      entry.disk = null;
+      recovered.delete(entry.id);
+      void persist(entry);
+    }
+  }
+  entriesChanged();
+  if (dropped.length === 0) return;
+  log.info("Dropped unsaved edits of a removed worktree", { count: dropped.length });
+  showToast(`Unsaved edits to ${dropped.join(", ")} were discarded with their worktree`, "info");
+}
 
 /** Bring what follows from the entries in step with them: editors' flags, worktrees held. */
 function entriesChanged(): void {
@@ -289,6 +336,10 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
   entry.status = "queued";
   void persist(entry);
   entriesChanged();
+  if (isGone(entry)) {
+    settleGoneSaves();
+    return;
+  }
   // Saves fail on every autosave while the server is down; that must not keep pushing the retry.
   ensureRetryScheduled();
 }
@@ -421,7 +472,11 @@ export function retryQueuedSaves(): Promise<void> {
   })().finally(() => {
     currentRun = null;
     reportRecovered();
-    if ([...entries.values()].some((e) => e.status === "queued")) scheduleRetry(retryDelay());
+    // Saves of a worktree that went while they were retried are settled instead.
+    settleGoneSaves();
+    if ([...entries.values()].some((e) => e.status === "queued" && !isGone(e))) {
+      scheduleRetry(retryDelay());
+    }
   });
   return currentRun;
 }
@@ -440,12 +495,12 @@ export function ensureRetryScheduled(): void {
  */
 async function retryRound(): Promise<"done" | "failed" | "changed"> {
   const queued = [...entries.values()]
-    .filter((e) => e.status === "queued")
+    .filter((e) => e.status === "queued" && !isGone(e))
     .sort((a, b) => a.seq - b.seq);
   let failed = false;
   let changed = false;
   for (const entry of queued) {
-    if (entries.get(entry.id) !== entry || entry.status !== "queued") continue;
+    if (entries.get(entry.id) !== entry || entry.status !== "queued" || isGone(entry)) continue;
     const editor = ownerEditor(entry);
     const outcome = editor ? await retryInEditor(entry, editor) : await retryClosed(entry);
     if (outcome === "unreachable") return "failed";
@@ -755,6 +810,28 @@ function subscribeRecoveredWorktrees(taken: readonly OutboxEntry[]): void {
 }
 
 /**
+ * Once the project lists are known, settle the recovered saves of worktrees no longer in them
+ * (gone while Loxel was closed, so not discarded in it), as a worktree going while Loxel runs
+ * settles its own. A failed fetch leaves no project listed, and a project the server could not
+ * initialize (a volume not mounted yet) lists no worktree: then nothing is known to be gone.
+ * Their worktrees were subscribed already, before the one the window shows; a gone one only
+ * answers with an error.
+ */
+async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Promise<void> {
+  await whenProjectsLoaded();
+  const { projects } = useProjectStore.getState();
+  if (projects.length === 0) return;
+  for (const entry of taken) {
+    if (!entry.worktreePath || isListedWorktree(entry.worktreePath)) continue;
+    const owner = deriveProject(entry.worktreePath, projects);
+    const project = projects.find((candidate) => candidate.path === owner?.path);
+    if (project && project.worktrees.length === 0) continue;
+    goneWorktrees.set(entry.worktreePath, goneWorktrees.get(entry.worktreePath) === true);
+  }
+  settleGoneSaves();
+}
+
+/**
  * Load the outbox and take over the entries of windows that are gone (an earlier run, or a
  * window that crashed), then start retrying. Call once, before the editors mount, so a tab
  * restored with the layout can take over its file's entry.
@@ -794,6 +871,7 @@ export async function initSaveOutbox(
   log.info("Recovered unsaved edits from an earlier session", { count: taken.length });
   entriesChanged();
   subscribeRecoveredWorktrees(taken);
+  void settleRecoveredOfGoneWorktrees(taken);
   scheduleRetry(0);
   // Saves that need the user are shown in their tabs once the app is up.
   for (const entry of taken) if (entry.status === "review") toReview(entry, entry.disk);
@@ -807,6 +885,7 @@ export function resetSaveOutboxForTests(): void {
   confirmedSeq.clear();
   recovered.clear();
   recoveredSaved.length = 0;
+  goneWorktrees.clear();
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
   failedRounds = 0;

@@ -10,6 +10,7 @@ import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-m
 import { showToast } from "@/components/ui/toast";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { frontendLog } from "@/lib/frontend-logger";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { findTreeRoot } from "@/lib/project-file-helpers";
 import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { toggleSet } from "@/lib/set-utils";
@@ -509,12 +510,12 @@ export const useWorktreeStore = create<WorktreeState>()(
             await get().refreshProjectWorktrees(projectPath);
             // Removing a subtree can fail partway: release whatever is gone all the same.
             const listed = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
-            for (const path of removed) if (!listed.has(path)) releaseWorktree(path);
+            for (const path of removed) if (!listed.has(path)) releaseWorktree(path, true);
             throw err;
           }
           for (const path of removed) {
             removingPaths.delete(path);
-            releaseWorktree(path);
+            releaseWorktree(path, true);
           }
           await get().refreshProjectWorktrees(projectPath);
 
@@ -664,9 +665,9 @@ export function isListedWorktree(path: string): boolean {
 
 /**
  * Drop the client state of a removed worktree and stop listening to it, so a worktree later created
- * at the same path starts fresh.
+ * at the same path starts fresh. `discarded`: the user removed it in Loxel, giving up what it held.
  */
-function releaseWorktree(path: string): void {
+function releaseWorktree(path: string, discarded = false): void {
   purgeWorktreeStores(path);
   closeLayoutBrowserPages(path);
   purgeWorktreeCache(path);
@@ -678,6 +679,7 @@ function releaseWorktree(path: string): void {
       ),
   });
   wsClient.unsubscribeWorktree(path);
+  dispatchLoxelEvent("loxel-worktree-gone", { wtPath: path, discarded });
 }
 
 /**
