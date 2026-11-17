@@ -609,6 +609,60 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
   );
 
   test(
+    "a window that leaves a worktree, or closes, while its resources are created is not kept",
+    async () => {
+      const { path: wtPath } = await executeAdd({ name: "smoke-leave", repoPath: repo.root });
+      const subscribe = JSON.stringify({ type: "subscribe_worktree", worktreePath: wtPath });
+      const unsubscribe = JSON.stringify({ type: "unsubscribe_worktree", worktreePath: wtPath });
+      const openSocket = async () => {
+        const opened = bunWebSocket(socket.url, auth);
+        await new Promise((resolve, reject) => {
+          opened.addEventListener("open", resolve);
+          opened.addEventListener("error", reject);
+        });
+        return opened;
+      };
+      /**
+       * This window subscribes and leaves once the others' subscribes are sent, which proves the
+       * creation they started has ended; with nobody left, the resources go after the grace period.
+       */
+      const expectTornDown = async () => {
+        const since = log.mark();
+        socket.send(subscribe);
+        await waitFor("worktree_files_resynced", (message) => message.wtPath === wtPath, since);
+        socket.send(unsubscribe);
+        await retryUntil(
+          () => {},
+          async (timeoutMs) => {
+            const response = await fetch(`${baseUrl}/api/files/undo`, {
+              method: "POST",
+              headers: { ...auth, "Content-Type": "application/json" },
+              body: JSON.stringify({ wt: wtPath }),
+            });
+            if (response.status === 503) return true;
+            await Bun.sleep(timeoutMs);
+            return false;
+          },
+          "the worktree's resources to be torn down",
+        );
+      };
+
+      // Switching on at once: the unsubscribe comes before the creation the subscribe started ends.
+      const leaving = await openSocket();
+      leaving.send(subscribe);
+      leaving.send(unsubscribe);
+      await expectTornDown();
+      leaving.close();
+
+      const closing = await openSocket();
+      closing.send(subscribe);
+      closing.close();
+      await expectTornDown();
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "the changes panel and explorer follow an edit, a stage and a commit",
     async () => {
       const name = "smoke-file.txt";

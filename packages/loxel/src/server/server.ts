@@ -224,6 +224,11 @@ const wtResources = new Map<string, WorktreeResources>();
  * its subscriber out.
  */
 const wtResourcesCreating = new Map<string, Promise<WorktreeResources>>();
+/**
+ * The windows waiting on a creation in `wtResourcesCreating`, the first included. An unsubscribe or
+ * a close meanwhile takes its window out, so the creation does not subscribe it when it ends.
+ */
+const wtPendingSubscribers = new Map<string, Set<ServerWebSocket<WsData>>>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
 /** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
@@ -665,11 +670,13 @@ function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectP
 
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
   const creating = wtResourcesCreating.get(wtPath);
-  if (creating) {
-    // Subscribed to what it creates; one that failed is tried again here. A window that closed
-    // meanwhile subscribes to nothing.
+  const joining = wtPendingSubscribers.get(wtPath);
+  if (creating && joining) {
+    // Subscribed to what it creates; one that failed is tried again here. A window that left the
+    // worktree or closed meanwhile subscribes to nothing.
+    joining.add(ws);
     await creating.catch(() => {});
-    if (!clients.has(ws)) return;
+    if (!joining.has(ws)) return;
     return subscribeWorktree(ws, wtPath);
   }
   const existing = wtResources.get(wtPath);
@@ -696,15 +703,19 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   }
 
   const creation = createWorktreeResources(ws, wtPath, project);
+  const pending = new Set([ws]);
   wtResourcesCreating.set(wtPath, creation);
+  wtPendingSubscribers.set(wtPath, pending);
   let resources: WorktreeResources;
   try {
     resources = await creation;
   } finally {
     wtResourcesCreating.delete(wtPath);
+    wtPendingSubscribers.delete(wtPath);
   }
-  // The window closed while they were being created: they start their grace period at once.
-  if (!clients.has(ws)) {
+  // The window left the worktree or closed while they were being created: unless a window that
+  // joined meanwhile subscribes, they start their grace period at once.
+  if (!pending.has(ws)) {
     unsubscribeWorktree(ws, wtPath);
     return;
   }
@@ -811,6 +822,7 @@ async function createWorktreeResources(
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
+  wtPendingSubscribers.get(wtPath)?.delete(ws);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
 
@@ -964,6 +976,7 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
 
 /** Unsubscribe a client from all worktrees (on disconnect). */
 function unsubscribeAllWorktrees(ws: ServerWebSocket<WsData>): void {
+  for (const pending of wtPendingSubscribers.values()) pending.delete(ws);
   const clientState = clients.get(ws);
   if (!clientState) return;
   for (const wtPath of clientState.subscribedWorktrees) {
