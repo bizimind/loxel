@@ -4,7 +4,7 @@ import { useFileTabRename } from "@/hooks/useFileTabRename";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { useEditorStateStore } from "@/store/editor-state";
 
-import { DELETED_TAB_TITLE_CLASS, DivergedDot, FileContextMenuItems, Tab } from "./tab";
+import { DELETED_TAB_TITLE_CLASS, DivergedDot, FileContextMenuItems, QueuedDot, Tab } from "./tab";
 
 interface EditorTabProps {
   props: IDockviewPanelHeaderProps<{ filePath: string; worktreePath?: string }>;
@@ -13,7 +13,8 @@ interface EditorTabProps {
 
 /**
  * Shared dockview tab for file-backed editor panels (code, markdown, excalidraw).
- * Shows an icon, filename, diverged indicator, deleted-from-disk styling, and close button.
+ * Shows an icon, filename, diverged or save-queued indicator, deleted-from-disk styling, and close
+ * button.
  */
 export function EditorTab({ props, icon }: EditorTabProps) {
   const filePath = props.params.filePath;
@@ -21,8 +22,11 @@ export function EditorTab({ props, icon }: EditorTabProps) {
   const handleRename = useFileTabRename(filePath);
   const isDiverged = useEditorStateStore((s) => s.files.get(filePath)?.state === "diverged");
   const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
+  const isQueued = useEditorStateStore((s) => s.files.get(filePath)?.queued ?? false);
 
-  const leading = isDiverged ? <DivergedDot title="File changed on disk" /> : null;
+  let leading: React.ReactNode = null;
+  if (isDiverged) leading = <DivergedDot title="File changed on disk" />;
+  else if (isQueued) leading = <QueuedDot title="Not saved yet: waiting for the Loxel server" />;
 
   return (
     <Tab

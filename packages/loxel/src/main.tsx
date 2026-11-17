@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { frontendLog } from "./lib/frontend-logger";
 import { startPerfMonitor } from "./lib/perf-monitor";
+import { initSaveOutbox } from "./lib/save-outbox";
 import { queryClient } from "./query-client";
 
 const log = frontendLog.child("ui");
@@ -40,10 +41,20 @@ startPerfMonitor();
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 
-createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+// Rendered once the save outbox has loaded, so a tab restored with the layout can take over a
+// save of its file that an earlier run left unsent. Never holds the app back for long.
+const OUTBOX_INIT_WAIT_MS = 2_000;
+void Promise.race([
+  initSaveOutbox(),
+  new Promise((resolve) => {
+    setTimeout(resolve, OUTBOX_INIT_WAIT_MS);
+  }),
+]).finally(() => {
+  createRoot(root).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+});

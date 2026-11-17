@@ -23,7 +23,10 @@ mock.module("monaco-editor", () => ({ Uri: { from: (parts: unknown) => parts } }
 mock.module("@/lib/monaco-theme", () => ({ toMonacoLanguage: (lang: string) => lang }));
 mock.module("@/lib/monaco-save-action", () => ({ addSaveAction: () => {} }));
 const saveEditorContent = jest.fn(async () => {});
-mock.module("@/lib/save-editor-content", () => ({ saveEditorContent }));
+mock.module("@/lib/save-editor-content", () => ({
+  saveEditorContent,
+  writeEditorContent: saveEditorContent,
+}));
 
 /** The file at HEAD and on disk */
 let headContent = "";
