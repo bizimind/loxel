@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import type { ChildLogger } from "@/api/log-entry-model";
 import { TERMINAL_HOST_PROTOCOL } from "@/api/terminal-host-protocol-version";
+import { ensurePrivateDir } from "@/socket-paths";
 
 import type { HostConnection } from "./host-connection";
 import { HostConnectError, openHostConnection, sendAndClose } from "./host-connection";
@@ -25,7 +26,6 @@ import {
   HOST_LOG_PREFIX,
   type HostEntry,
   HostEntrySchema,
-  ensureRunDir,
   hostBinDir,
   hostEntryPath,
   hostLogsDir,
@@ -144,8 +144,8 @@ export class TerminalHostPool implements TerminalHost {
   private async discoverAll(
     adopt: (sessions: TerminalSessionInfo[]) => void,
   ): Promise<TerminalHostPoolStart> {
-    ensureRunDir(this.runDir);
-    ensureRunDir(this.socketDir);
+    ensurePrivateDir(this.runDir);
+    ensurePrivateDir(this.socketDir);
     const found = await Promise.all(
       this.knownHostIds().map((hostId) =>
         this.discover(hostId).catch((err: unknown) => {

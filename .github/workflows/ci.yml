@@ -205,9 +205,9 @@ jobs:
     needs: discover
     if: needs.discover.outputs.test != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    # Healthy loxel runs take up to ~4 min including ~1 min of setup, plus a minute or two when the
-    # terraform-ls build is not cached; leave room for slow runners.
-    timeout-minutes: 9
+    # Healthy loxel runs take up to ~4 min including ~1 min of setup; leave room for slow runners and
+    # for compiling gopls, docker-language-server and terraform-ls when their caches miss.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -225,9 +225,7 @@ jobs:
       # loxel's suites that run a real language server fail in CI without its build
       # (src/test/built-binary.ts), so a bump that breaks a build fails here, not in the next release.
       # The ESLint server's bundle runs under Node, and its build fetches the server's source, which
-      # the cache keeps. terraform-ls compiles with the pinned Go toolchain, a minute or two on a
-      # cache miss, so the cache keeps the binary, keyed on what its build stamp hashes. The others
-      # take a few seconds.
+      # the cache keeps; the others take a few seconds.
       - if: matrix.package.name == 'loxel'
         uses: actions/setup-node@v7
         with:
@@ -237,16 +235,50 @@ jobs:
         with:
           path: packages/loxel/build/eslint-language-server-source
           key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts') }}
+      # gopls, docker-language-server and terraform-ls compile from the pinned modules that Dependabot
+      # bumps. The binaries are cached on everything that goes into them, so they only compile when one
+      # of those changed, and their build skips a binary the cache restored (its `.source` record
+      # matches).
       - if: matrix.package.name == 'loxel'
-        uses: actions/cache@v6
+        id: go-servers
+        uses: actions/cache/restore@v6
         with:
-          path: |
+          path: &go-servers-path |
+            packages/loxel/build/gopls
+            packages/loxel/build/gopls.source
+            packages/loxel/build/docker-language-server
+            packages/loxel/build/docker-language-server.source
             packages/loxel/build/terraform-ls
             packages/loxel/build/terraform-ls.source
-          key: terraform-ls-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/build-terraform-ls.ts', 'packages/loxel/scripts/terraform-ls-module/go.*') }}
+          key: go-servers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts', 'packages/loxel/scripts/build-gopls.ts', 'packages/loxel/scripts/build-docker-lsp.ts', 'packages/loxel/scripts/build-terraform-ls.ts', 'packages/loxel/scripts/gopls-module/**', 'packages/loxel/scripts/docker-lsp-module/**', 'packages/loxel/scripts/terraform-ls-module/**') }}
+      # Only for a compile: the toolchain (go-<version>), the module downloads (go re-extracts them)
+      # and the build cache, from the last compile on main with the same toolchain, so a bump
+      # recompiles only what it changed.
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
+        id: go-build
+        uses: actions/cache/restore@v6
+        with:
+          path: &go-build-path |
+            packages/loxel/build/go-*.*
+            packages/loxel/build/go-path/pkg/mod/cache/download
+            packages/loxel/build/go-cache
+          key: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts') }}-${{ hashFiles('packages/loxel/scripts/*-module/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/loxel/scripts/go-toolchain.ts') }}-
       - if: matrix.package.name == 'loxel'
         name: Build the language servers the tests run
-        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff terraform-ls tombi
+        run: pnpm -C packages/loxel run build:language-servers eslint-language-server yaml-language-server lemminx ruff tombi gopls docker-language-server terraform-ls
+      # Saved once built, so a failing test does not throw the compile away. The Go caches, over a
+      # gigabyte, are saved from main only; a pull request starts from main's.
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-servers-path
+          key: ${{ steps.go-servers.outputs.cache-primary-key }}
+      - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true' && steps.go-build.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: *go-build-path
+          key: ${{ steps.go-build.outputs.cache-primary-key }}
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
 

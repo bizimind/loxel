@@ -10,9 +10,11 @@
  * terraform-ls and its dependencies are pinned by the go.mod and go.sum in `terraform-ls-module/`.
  * The server reports the version embedded from its own `version/VERSION`, so no `-X` flag is needed.
  *
- * To upgrade: in a module with a `tools.go` importing `github.com/hashicorp/terraform-ls`, run
- * `go get github.com/hashicorp/terraform-ls@<version>`, raise any dependency a scan of the built
- * binary flags with `go get <module>@<version>`, then `go mod tidy`.
+ * The module names terraform-ls in a `tool` directive, so `go mod tidy` keeps its requirements,
+ * and Dependabot raises its dependencies (.github/dependabot.yml). To upgrade terraform-ls itself,
+ * run `go get github.com/hashicorp/terraform-ls@<version>` in the module directory, raise any
+ * dependency a scan of the built binary flags with `go get <module>@<version>`, then
+ * `go mod tidy`.
  */
 
 import path from "node:path";

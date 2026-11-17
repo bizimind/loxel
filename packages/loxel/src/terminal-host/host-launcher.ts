@@ -23,10 +23,11 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { ensurePrivateDir } from "@/socket-paths";
+
 import { TERMINAL_HOST_ENTRY, embeddedHostBuildId } from "./host-build-id";
 import {
   TERMINAL_HOST_BINARY,
-  ensureRunDir,
   hostBinDir,
   hostLogPath,
   hostLogsDir,
@@ -60,8 +61,8 @@ export interface LaunchedHost {
 export async function launchHost(launch: HostLaunch): Promise<LaunchedHost> {
   const { stateDir, runDir, socketDir, hostId, hostBuildId } = launch;
   const command = launch.command ?? hostCommand(stateDir, hostBuildId);
-  ensureRunDir(runDir);
-  ensureRunDir(socketDir);
+  ensurePrivateDir(runDir);
+  ensurePrivateDir(socketDir);
   mkdirSync(hostLogsDir(stateDir), { recursive: true });
   const logFile = hostLogPath(stateDir, hostId);
   // What the host itself cannot log (a crash of the runtime) lands next to its log.

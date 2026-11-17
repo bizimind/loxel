@@ -42,10 +42,15 @@ interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */
   onWaiting?: () => void;
   windowWaitMs?: number;
+  /**
+   * The Unix socket to send the request over (the `loxel` CLI's); `serverUrl` then only fills the
+   * URL.
+   */
+  unix?: string;
 }
 
 /**
- * Ask the Loxel server at `serverUrl` to open a file, folder, URL or terminal. Files, folders and
+ * Ask the Loxel server at `serverUrl`, or on the `unix` socket, to open a file, folder, URL or terminal. Files, folders and
  * terminals are sent to a window, so a 503 means none has connected yet — Loxel is still
  * launching — and the request is retried for a while instead of failing. So is a request no server
  * answers, as between a server that is exiting (quit, update restart, crash) and its replacement.
@@ -53,7 +58,7 @@ interface RequestOpenOptions {
 export async function requestOpen(
   serverUrl: string,
   request: OpenRequest,
-  { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
+  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, unix }: RequestOpenOptions = {},
 ): Promise<OpenResult> {
   let unreachable: unknown = null;
   /** The response, or null when no server answered: one may be handing over to the next. */
@@ -63,6 +68,7 @@ export async function requestOpen(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
+        ...(unix ? { unix } : {}),
       });
     } catch (err) {
       unreachable = err;
@@ -81,7 +87,9 @@ export async function requestOpen(
       res = await post();
     }
   }
-  if (res === null) throw new Error(`Cannot reach Loxel at ${serverUrl}`, { cause: unreachable });
+  if (res === null) {
+    throw new Error(`Cannot reach Loxel at ${unix ?? serverUrl}`, { cause: unreachable });
+  }
   const data: unknown = await res.json().catch(() => null);
   if (res.ok) {
     const warning =
@@ -112,7 +120,7 @@ export interface OpenAllResult {
 export async function requestOpenAll(
   serverUrl: string,
   requests: OpenRequest[],
-  { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
+  { onWaiting, windowWaitMs = WINDOW_WAIT_MS, unix }: RequestOpenOptions = {},
 ): Promise<OpenAllResult> {
   const deadline = Date.now() + windowWaitMs;
   let announced = false;
@@ -121,6 +129,7 @@ export async function requestOpenAll(
   for (const [index, request] of requests.entries()) {
     try {
       const { warning } = await requestOpen(serverUrl, request, {
+        unix,
         windowWaitMs: Math.max(0, deadline - Date.now()),
         onWaiting: () => {
           if (!announced) onWaiting?.();
