@@ -1016,17 +1016,14 @@ describe("TerminalManager with several clients", () => {
     expect(host.resizes).toHaveLength(1);
     expect(first.sizes).toHaveLength(1);
 
-    // The active client leaving hands input to none until the other claims, at the size it
-    // already renders at.
+    // The active client leaving hands input to the other, at the size it already renders at.
     manager.detach(id, second.sink);
-    type(first.sink, "unclaimed");
-    manager.resize(id, first.sink, 100, 30);
     type(first.sink, "now-first");
-    expect(host.writes).toEqual(["from-first", "typed", "now-first"]);
+    expect(host.writes.at(-1)).toBe("now-first");
     expect(host.resizes).toHaveLength(1);
   });
 
-  test("the active client leaving makes none active, and the next claim takes over", async () => {
+  test("the active client leaving hands its input over silently, and coming back joins passive", async () => {
     const host = new FakeTerminalHost();
     const manager = createManager([], host);
     const id = crypto.randomUUID();
@@ -1038,10 +1035,11 @@ describe("TerminalManager with several clients", () => {
       manager.write(id, client, new TextEncoder().encode(text));
 
     // As the server does on a re-attach (a worktree switch and back): the old sink goes, and a
-    // new one attaches, joining the other client without resizing anything.
+    // new one attaches. Meanwhile the remaining client's xterm answers the program's queries (a
+    // reply carries no claim), and nobody is resized or told.
     manager.detach(id, first.sink);
     type(second.sink, "reply");
-    expect(host.writes).toEqual([]);
+    expect(host.writes).toEqual(["reply"]);
     const again = createRecordingSink();
     void manager.attach(id, again.sink, { ...attachOptions, cols: 90, rows: 20 });
     expect(host.resizes).toEqual([]);
@@ -1050,7 +1048,7 @@ describe("TerminalManager with several clients", () => {
 
     manager.resize(id, again.sink, 90, 20);
     type(again.sink, "typed");
-    expect(host.writes).toEqual(["typed"]);
+    expect(host.writes).toEqual(["reply", "typed"]);
     expect(host.resizes).toEqual([{ cols: 90, rows: 20 }]);
   });
 

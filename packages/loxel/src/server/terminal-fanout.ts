@@ -66,10 +66,11 @@ interface Client {
 }
 
 export class TerminalFanout {
+  /** In the order they attached. */
   private readonly clients = new Map<TerminalSink, Client>();
   /**
-   * The client whose size the PTY has and whose input is written: the one that claimed it last,
-   * or attached alone. None once it leaves, until another claims.
+   * The client whose input is written, and, when it claimed the terminal or attached alone, whose
+   * size the PTY has. Once it leaves, the most recently attached client takes its input over.
    */
   private active: TerminalSink | null = null;
   /** The PTY's size: the latest the active client asked for, clamped as the host clamps it. */
@@ -140,14 +141,16 @@ export class TerminalFanout {
   }
 
   /**
-   * Remove `sink`; returns whether it was attached. When it was the active client none is
-   * afterwards: the PTY keeps its size, which the others already render at, and the next claim
-   * takes over, so a window leaving (or switching worktree and back) reflows nothing. Once the
-   * last client is gone the stream starts over with the next attach.
+   * Remove `sink`; returns whether it was attached. When it was the active client, the most
+   * recently attached one takes its input over silently, which is not a claim: the PTY keeps its
+   * size, which that one already renders at, and nobody is told or resized, so a window leaving
+   * (or switching worktree and back) reflows nothing, while exactly one xterm still answers the
+   * program's terminal queries. Its user's input claims the terminal as usual. Once the last
+   * client is gone the stream starts over with the next attach.
    */
   detach(sink: TerminalSink): boolean {
     if (!this.clients.delete(sink)) return false;
-    if (this.active === sink) this.active = null;
+    if (this.active === sink) this.active = [...this.clients.keys()].at(-1) ?? null;
     if (this.clients.size === 0) this.offset = null;
     return true;
   }
