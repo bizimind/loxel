@@ -57,7 +57,7 @@ Server-to-client delivery uses helpers in server.ts, chosen by scope:
 - `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`).
 - `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`, and `open_url` when no window shows its worktree), see [Per-window identity](#per-window-identity).
 - `sendToWorktreeWindows(wtPath, windowId)`: every subscriber showing a worktree, with a different message for the window in use among them (`open_url` with its placement and focus); returns false when no window shows it, and `open_url` then goes through `sendToActiveWindow`.
-- `sendTo(owner)`: terminal events go only to the connection that owns the session.
+- `sendTo(ws)`: one socket; a terminal session's events reach every connection attached to it, each through its own sink (see [TERMINALS.md](TERMINALS.md#several-clients)).
 
 On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` that reconnects every 2 s, queues JSON messages sent before the first connection (messages queued during a later disconnect are discarded on reconnect, since `onReconnect` listeners re-create server-side state), and on reconnect compares the server version from `/api/version` with the first one it saw: a change reloads the page, otherwise `onReconnect` listeners run so features re-create server-side state (worktree subscription, log subscription, terminal reattach).
 
@@ -110,7 +110,7 @@ Services by scope:
 | Server-wide                        | module load in server.ts                                              | `TerminalHostPool` and its `TerminalManager`, `NotificationStore`, `SchemaService`, `FormatService`, one manager per language server, `ExternalFolderRegistry`, the client map |
 | Per project (`ProjectState`)       | `initializeProject` at startup or registration                        | Git `FileWatcher`, `ReviewDb`, `LocalDb`, `WorktreeStatusTracker`, worktrees dir                                                                                               |
 | Per worktree (`WorktreeResources`) | first `subscribe_worktree`; torn down when the last subscriber leaves | file, file-operations (with undo history), drafts, external files and Others-folder services, a linked worktree's own Git watcher                                              |
-| Per connection (`ClientState`)     | WebSocket `open`                                                      | owned terminals, subscribed worktrees, `windowId`                                                                                                                              |
+| Per connection (`ClientState`)     | WebSocket `open`                                                      | attached terminals, subscribed worktrees, `windowId`                                                                                                                           |
 | Per LSP socket                     | `/ws/<lsp>?wt=...` upgrade                                            | one language-server session per socket, at most one per worktree path for worktree-scoped servers; see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)                              |
 
 `resolveFilePath` maps an absolute path to its owning worktree resources (drafts first, then worktree files, then Others folders and external files, preferring the requester's worktree). Watcher wiring is in [WATCHERS.md](WATCHERS.md); projects and worktrees in [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
