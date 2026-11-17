@@ -2,19 +2,40 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { EnrichedProject, Project } from "@/api/project-model";
+import {
+  type ServerId,
+  type WorktreeRef,
+  formatWorktreeRef,
+  sameWorktreeRef,
+  worktreeRef,
+} from "@/api/worktree-ref";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { toggleSet } from "@/lib/set-utils";
 
 import { serverProjectsStorage } from "./server-storage";
 
+/** A project as the window lists it: with the server that listed it, which holds its worktrees. */
+export interface ListedProject extends EnrichedProject {
+  server: ServerId;
+}
+
+/** A project's ref: its root on its server. */
+export function projectRef(project: Pick<ListedProject, "server" | "path">): WorktreeRef {
+  return worktreeRef(project.server, project.path);
+}
+
 /**
- * Derive the active project from a worktree path. Explicit worktree membership
- * handles WT_DIR locations outside the repository; the boundary-aware prefix
- * remains a fallback for paths inside bare repositories.
+ * Derive the project holding a path. Explicit worktree membership handles WT_DIR locations
+ * outside the repository; the boundary-aware prefix remains a fallback for paths inside bare
+ * repositories.
  */
-export function deriveProject(wtPath: string | null, projects: EnrichedProject[]): Project | null {
+export function deriveProject<P extends EnrichedProject>(
+  wtPath: string | null,
+  projects: readonly P[],
+): P | null {
   if (!wtPath) return null;
   return (
     projects
@@ -28,6 +49,18 @@ export function deriveProject(wtPath: string | null, projects: EnrichedProject[]
   );
 }
 
+/** The project holding the worktree (or root checkout) `wt`: {@link deriveProject} on its server. */
+export function projectOf<P extends ListedProject>(
+  wt: WorktreeRef | null,
+  projects: readonly P[],
+): P | null {
+  if (!wt) return null;
+  return deriveProject(
+    wt.path,
+    projects.filter((project) => project.server === wt.server),
+  );
+}
+
 /** `discarded`: the project's files are deleted, not only removed from Loxel. */
 async function removeAndSwitchProject(
   id: string,
@@ -37,13 +70,18 @@ async function removeAndSwitchProject(
 ): Promise<void> {
   const { useWorktreeStore } = await import("./worktrees");
   const wtStore = useWorktreeStore.getState();
-  const activeProject = deriveProject(wtStore.activeWorktreePath, get().projects);
-  const isRemovingActive = activeProject?.id === id;
   const removed = get().projects.find((project) => project.id === id);
+  const activeProject = projectOf(wtStore.activeWorktree, get().projects);
+  const isRemovingActive =
+    removed !== undefined &&
+    activeProject !== null &&
+    sameWorktreeRef(projectRef(activeProject), projectRef(removed));
   const removedPaths = removed
     ? [
         ...(removed.isBare ? [] : [removed.path]),
-        ...(wtStore.byProject[removed.path]?.worktrees ?? removed.worktrees).map((wt) => wt.path),
+        ...(
+          wtStore.byProject[formatWorktreeRef(projectRef(removed))]?.worktrees ?? removed.worktrees
+        ).map((wt) => wt.path),
       ]
     : [];
 
@@ -58,7 +96,7 @@ async function removeAndSwitchProject(
     if (remaining.length > 0) {
       const target = remaining[0]!;
       const targetPath = target.isBare ? target.worktrees[0]?.path : target.path;
-      if (targetPath) await wtStore.switchWorktree(targetPath);
+      if (targetPath) await wtStore.switchWorktree(worktreeRef(target.server, targetPath));
       else wtStore.reset();
     } else {
       wtStore.reset();
@@ -90,7 +128,7 @@ export function clampSidebarWidth(width: number): number {
 }
 
 interface ProjectState {
-  projects: EnrichedProject[];
+  projects: ListedProject[];
   /** The server user's home directory (null until projects are first fetched). */
   homeDir: string | null;
   /** Where Home's drafts are kept (`ProjectsResponse.homeDraftsDir`). */
@@ -137,14 +175,16 @@ export const useProjectStore = create<ProjectState>()(
       fetchProjects: async () => {
         try {
           const data = await api.getProjects();
+          // Listed by the window's own server, the one connection it has today.
+          const server = localServerId();
           set({
-            projects: data.projects,
+            projects: data.projects.map((project) => ({ ...project, server })),
             homeDir: data.homeDir,
             homeDraftsDir: data.homeDraftsDir,
           });
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
-          useWorktreeStore.getState().applyEnrichedProjects(data.projects);
+          useWorktreeStore.getState().applyEnrichedProjects(get().projects);
         } finally {
           // Settle even on failure, so waiting opens report "no project" instead of hanging
           projectsLoaded.resolve();
@@ -159,8 +199,11 @@ export const useProjectStore = create<ProjectState>()(
         // Switch to the new project's worktree (or project root for non-bare).
         const { useWorktreeStore } = await import("./worktrees");
         const added = get().projects.find((candidate) => candidate.id === project.id);
-        const targetPath = added?.isBare ? added.worktrees[0]?.path : project.path;
-        if (targetPath) await useWorktreeStore.getState().switchWorktree(targetPath);
+        if (!added) return;
+        const targetPath = added.isBare ? added.worktrees[0]?.path : added.path;
+        if (targetPath) {
+          await useWorktreeStore.getState().switchWorktree(worktreeRef(added.server, targetPath));
+        }
       },
 
       removeProject: async (id) => {

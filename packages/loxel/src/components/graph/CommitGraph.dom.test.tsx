@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 
 import type { CommitInfo } from "@/api/git-models";
+import { localRef } from "@/api/local-server";
 import { purgeWorktreeStores } from "@/store/worktree-store";
 import { getWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 const commit: CommitInfo = {
   hash: "a".repeat(40),
@@ -45,7 +46,7 @@ describe("CommitGraph", () => {
   // worktree's store once, not loop on a store the component doesn't render from (#345).
   test("sets the graph column width without looping when the active worktree was restored on reload", async () => {
     const consoleError = spyOn(console, "error");
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
 
     render(
       <QueryClientProvider client={new QueryClient()}>

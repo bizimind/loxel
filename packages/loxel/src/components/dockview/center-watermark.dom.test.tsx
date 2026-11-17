@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { IWatermarkPanelProps } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
 import type { OpenRequest } from "@/open-request";
 import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
 import { useProjectStore } from "@/store/projects";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 const openRequests: OpenRequest[] = [];
 const actualClient = await import("@/api/client");
@@ -35,7 +36,7 @@ beforeEach(() => {
   browsers = [];
   openRequests.length = 0;
   stopListening = onLoxelEvent("loxel-create-browser", (detail) => browsers.push(detail?.url));
-  useWorktreeStore.setState({ activeWorktreePath: WT });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
   useBrowserBookmarksStore.setState({
     bookmarks: [
       { url: "https://github.com/acme/web/pulls", title: "Pull requests" },
@@ -47,7 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   stopListening();
-  useWorktreeStore.setState({ activeWorktreePath: null });
+  useWorktreeStore.setState(activeWorktreeFields(null));
   useBrowserBookmarksStore.setState({ bookmarks: [] });
 });
 
@@ -68,7 +69,7 @@ describe("quickstart page", () => {
   });
 
   test("lists only what needs no worktree in Home, and offers to add a project", () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     watermark();
 
     expect(rowLabels()).toEqual(["New Terminal", "New Browser", "New Plan", "Add Project"]);
@@ -78,7 +79,7 @@ describe("quickstart page", () => {
   });
 
   test("makes Add Project the main action before the first project, and only once known", () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     useProjectStore.setState({ projects: [], projectsFetched: false });
     const { rerender } = watermark();
     const addProject = () => screen.getByRole("button", { name: "Add Project" });
@@ -117,7 +118,7 @@ describe("quickstart page", () => {
   });
 
   test("runs a command from Home in a terminal in the home directory", () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     useProjectStore.setState({ homeDir: "/Users/me" });
     watermark();
     const field = screen.getByPlaceholderText("Run a command…");

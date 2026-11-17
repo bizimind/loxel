@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+import { localRef } from "@/api/local-server";
 import { getCurrentRepositoryStore } from "@/store/worktree-repository";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 const revertToHead = jest.fn(async (_args: { worktree: string; files: string[] }) => {});
 const openedFiles: string[] = [];
@@ -87,7 +88,7 @@ describe("FileTreePanel", () => {
     revertToHead.mockClear();
     openedFiles.length = 0;
     missingPaths.clear();
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
     getCurrentWorktreeUI().getState().setSelectedDiffFile("src/a.ts");
     getCurrentWorktreeUI().getState().setPendingReveal(null);
     getCurrentRepositoryStore()

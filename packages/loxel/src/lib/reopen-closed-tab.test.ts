@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { DockviewApi, DockviewComponent } from "dockview-react";
 import type { AddPanelOptions } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
+
 // The editors' module-level caches pull in Milkdown and Excalidraw, which these tests don't need.
 mock.module("@/components/editor/MarkdownEditor", () => ({
   renameEditorCacheKey: () => {},
@@ -19,7 +21,7 @@ const { closeCenterTab, forgetClosedTabGroup, registerClosedTabParams } =
 const { setCenterApi } = await import("@/store/tools-bar");
 const { getCurrentWorktreeToolsBar } = await import("@/store/worktree-tools-bar");
 const { purgeWorktreeStores } = await import("@/store/worktree-store");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 
 const WT = "/repo/wt";
 const OTHER_WT = "/repo/other";
@@ -36,7 +38,7 @@ function createCenter(worktreePath = WT): DockviewApi {
   dockview.layout(800, 600);
   const api = new DockviewApi(dockview);
   setCenterApi(api, worktreePath);
-  useWorktreeStore.setState({ activeWorktreePath: worktreePath });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(worktreePath)));
   return api;
 }
 
@@ -224,7 +226,7 @@ describe("reopenClosedTab", () => {
     expect(other.panels).toHaveLength(0);
 
     setCenterApi(api, WT);
-    useWorktreeStore.setState({ activeWorktreePath: WT });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
     reopenClosedTab();
     expect(api.getPanel(a.id)).toBeDefined();
   });
@@ -235,11 +237,11 @@ describe("reopenClosedTab", () => {
     addFile(api, "b.ts", { referencePanel: a.id, direction: "within" });
     closeCenterTab(a.api);
 
-    useWorktreeStore.setState({ activeWorktreePath: OTHER_WT });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(OTHER_WT)));
     reopenClosedTab();
     expect(api.getPanel(a.id)).toBeUndefined();
 
-    useWorktreeStore.setState({ activeWorktreePath: WT });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
     reopenClosedTab();
     expect(api.getPanel(a.id)).toBeDefined();
   });

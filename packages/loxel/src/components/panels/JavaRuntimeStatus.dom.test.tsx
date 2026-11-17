@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { JavaEnvResponse } from "@/api/java-env-model";
+import { localRef } from "@/api/local-server";
 
 const JDK: NonNullable<JavaEnvResponse["env"]> = {
   source: "java-home",
@@ -40,7 +41,7 @@ mock.module("@/store/tools-bar", () => ({
   subscribeCenterApi: () => () => {},
 }));
 
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { JavaRuntimeStatus } = await import("./JavaRuntimeStatus");
 
 function renderStatus() {
@@ -108,7 +109,7 @@ describe("JavaRuntimeStatus", () => {
   });
 
   test("shows and selects the JDK of the active panel's worktree, not the active one", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: "/wt-b" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt-b")));
     renderStatus();
 
     const button = await screen.findByRole("button", { name: "Java 21.0.5 (Temurin)" });

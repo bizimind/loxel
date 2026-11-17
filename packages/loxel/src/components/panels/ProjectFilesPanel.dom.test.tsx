@@ -128,7 +128,7 @@ const { TEMPLATES } = await import("@/store/keybindings/keybinding-schema");
 const { useKeybindingStore } = await import("@/store/keybindings/keybinding-store");
 const { useSettingsStore } = await import("@/store/settings-store");
 const { getCurrentWorktreeUI } = await import("@/store/worktree-ui");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { ProjectFilesPanel } = await import("./ProjectFilesPanel");
 
 function renderPanel(queryClient: QueryClient) {
@@ -231,7 +231,7 @@ describe("ProjectFilesPanel", () => {
       },
     );
 
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
     getCurrentWorktreeUI().setState({
       selectedProjectFile: null,
       expandedProjectFolders: new Set(),

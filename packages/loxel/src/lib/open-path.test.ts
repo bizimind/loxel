@@ -11,7 +11,8 @@ const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
 const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
 const { getWorktreeUI } = await import("@/store/worktree-ui");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
+const { localRef, localServerId } = await import("@/api/local-server");
 
 const MAIN = "/repo";
 const OTHER = "/repo/.worktrees/other";
@@ -33,15 +34,20 @@ describe("opens from outside the window", () => {
     ];
     useProjectStore.setState({
       projects: [
-        { path: MAIN, isBare: false, worktrees: [{ path: MAIN }, { path: OTHER }] },
+        {
+          server: localServerId(),
+          path: MAIN,
+          isBare: false,
+          worktrees: [{ path: MAIN }, { path: OTHER }],
+        },
       ] as never,
     });
     useWorktreeStore.setState({
       byProject: {},
-      activeWorktreePath: MAIN,
-      switchWorktree: async (path: string) => {
-        switched.push(path);
-        useWorktreeStore.setState({ activeWorktreePath: path });
+      ...activeWorktreeFields(localRef(MAIN)),
+      switchWorktree: async (wt) => {
+        switched.push(wt.path);
+        useWorktreeStore.setState(activeWorktreeFields(wt));
       },
     });
     setCenterApi({} as never, MAIN);
@@ -71,7 +77,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a link naming no worktree opens in Home when it is on screen", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
     await openUrl(null, { url: URL_TARGET });
@@ -81,7 +87,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a link waits for Home's editor area to mount, as at a launch with the link", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi(null);
 
     await openUrl(null, { url: URL_TARGET });
@@ -92,7 +98,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a file link in Home opens in the worktree holding it, switching there", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
     await openPath(`${OTHER}/a.md`, { line: 3, column: 1 });
@@ -104,7 +110,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a link between Home's plans opens in Home", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
@@ -116,7 +122,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a file link in Home to a file in no worktree opens nothing", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
     await openPath("/elsewhere/notes.md");
@@ -209,7 +215,7 @@ describe("opens from outside the window", () => {
     const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
     cleanups.push(() => send.mockRestore());
     // In Home, a file outside every worktree has nowhere to open.
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
 
     await openFromInbox("in-4", { type: "open_file", data: { filePath: "/elsewhere/notes.md" } });
     expect(openedFiles).toEqual([]);

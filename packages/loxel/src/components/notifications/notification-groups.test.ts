@@ -1,25 +1,33 @@
 import { describe, expect, test } from "bun:test";
 
-import type { NotificationSource, ServerNotification } from "@/api/notification-model";
+import type { NotificationSource } from "@/api/notification-model";
+import { type ServerId, toServerId } from "@/api/worktree-ref";
+import type { ClientNotification } from "@/store/panel-notifications";
 
 import { groupNotifications } from "./notification-groups";
 
+const SERVER = toServerId("server-a");
+
 let next = 0;
-function notification(source: NotificationSource): ServerNotification {
+function notification(source: NotificationSource, server: ServerId = SERVER): ClientNotification {
   next += 1;
-  return { id: `n${next}`, timestamp: next, source, urgency: "normal" };
+  return { id: `n${next}`, timestamp: next, source, urgency: "normal", server };
 }
 
-function browser(origin: string, worktreePath: string | null = "/wt/a"): ServerNotification {
-  return notification({ kind: "browser", panelId: "p", worktreePath, origin, ref: "r" });
+function browser(
+  origin: string,
+  worktreePath: string | null = "/wt/a",
+  server: ServerId = SERVER,
+): ClientNotification {
+  return notification({ kind: "browser", panelId: "p", worktreePath, origin, ref: "r" }, server);
 }
 
-function terminal(): ServerNotification {
+function terminal(): ClientNotification {
   return notification({ kind: "terminal", panelId: "t", worktreePath: "/wt/a" });
 }
 
 /** Each entry as the ids it holds. */
-function shape(list: ServerNotification[]): string[][] {
+function shape(list: ClientNotification[]): string[][] {
   return groupNotifications(list).map((entry) =>
     entry.kind === "single" ? [entry.notification.id] : entry.notifications.map((n) => n.id),
   );
@@ -45,6 +53,14 @@ describe("groupNotifications", () => {
     const a2 = browser("http://localhost:3000", "/wt/a");
 
     expect(shape([a2, home, b, a])).toEqual([[a2.id, a.id], [home.id], [b.id]]);
+  });
+
+  test("keeps a site in the same worktree path on two servers apart", () => {
+    const here = browser("http://localhost:3000", "/wt/a");
+    const there = browser("http://localhost:3000", "/wt/a", toServerId("server-b"));
+    const here2 = browser("http://localhost:3000", "/wt/a");
+
+    expect(shape([here2, there, here])).toEqual([[here2.id, here.id], [there.id]]);
   });
 
   test("never stacks terminals' or the server's notifications", () => {

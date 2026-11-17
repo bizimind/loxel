@@ -19,7 +19,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
-import { useProjectStore } from "@/store/projects";
+import { projectRef, useProjectStore } from "@/store/projects";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
@@ -380,7 +380,7 @@ export function useWsBridge(): void {
 
         case "worktrees_changed": {
           // Refresh worktrees for the specific project that changed
-          useWorktreeStore.getState().refreshProjectWorktrees(message.data.projectPath);
+          useWorktreeStore.getState().refreshProjectWorktrees(localRef(message.data.projectPath));
           break;
         }
 
@@ -437,10 +437,10 @@ export function useWsBridge(): void {
           break;
 
         case "notifications_sync":
-          usePanelNotificationStore.getState().syncAll(message.data);
+          usePanelNotificationStore.getState().syncAll(localServerId(), message.data);
           break;
         case "notification_added":
-          usePanelNotificationStore.getState().addFromServer(message.data);
+          usePanelNotificationStore.getState().addFromServer(localServerId(), message.data);
           break;
         case "notification_dismissed":
           usePanelNotificationStore.getState().removeFromServer(message.id);
@@ -512,7 +512,7 @@ async function resyncAfterReconnect(): Promise<void> {
     await useProjectStore.getState().fetchProjects();
     const { refreshProjectWorktrees } = useWorktreeStore.getState();
     await Promise.all(
-      useProjectStore.getState().projects.map((p) => refreshProjectWorktrees(p.path)),
+      useProjectStore.getState().projects.map((p) => refreshProjectWorktrees(projectRef(p))),
     );
   } catch (error: unknown) {
     serverLog.error("Failed to refresh projects after reconnecting", { error });

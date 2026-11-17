@@ -15,17 +15,23 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { Project } from "@/api/project-model";
+import { formatWorktreeRef, sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
-import { focusSidebarEntryForPath, handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
+import { focusSidebarEntryById, handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
 import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { cn } from "@/lib/utils";
 import { openAddProjectWizard } from "@/store/add-project-wizard";
-import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/store/projects";
+import {
+  clampSidebarWidth,
+  type ListedProject,
+  projectRef,
+  SIDEBAR_DEFAULT_WIDTH,
+  useProjectStore,
+} from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { ProjectIcon } from "../projects/ProjectIcon";
@@ -62,7 +68,7 @@ export function Sidebar() {
   const deleteProject = useProjectStore((s) => s.deleteProject);
   const updateProject = useProjectStore((s) => s.updateProject);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
   const showHome = useWorktreeStore((s) => s.showHome);
 
@@ -104,13 +110,13 @@ export function Sidebar() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const [removingProject, setRemovingProject] = useState<Project | null>(null);
-  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [removingProject, setRemovingProject] = useState<ListedProject | null>(null);
+  const [deletingProject, setDeletingProject] = useState<ListedProject | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
     open: boolean;
     position: { x: number; y: number };
-    project: Project;
+    project: ListedProject;
   } | null>(null);
 
   const expandedSet = useMemo(() => new Set(expandedProjectIds), [expandedProjectIds]);
@@ -122,8 +128,10 @@ export function Sidebar() {
         ...projects
           .filter((p) => expandedSet.has(p.id))
           .map((p) => {
-            const ps = s.byProject[p.path];
-            return ps ? railDepth(ps, s.openArchives.includes(p.path)) : 0;
+            const project = projectRef(p);
+            const key = formatWorktreeRef(project);
+            const ps = s.byProject[key];
+            return ps ? railDepth(project, ps, s.openArchives.includes(key)) : 0;
           }),
       ),
     ),
@@ -131,16 +139,17 @@ export function Sidebar() {
   // Explicitly false: unknown until the project's worktrees have loaded.
   const menuProjectNestingOff = useWorktreeStore(
     (s) =>
-      contextMenu !== null && s.byProject[contextMenu.project.path]?.worktreeMetadata === false,
+      contextMenu !== null &&
+      s.byProject[formatWorktreeRef(projectRef(contextMenu.project))]?.worktreeMetadata === false,
   );
-  const [nestingProjectPath, setNestingProjectPath] = useState<string | null>(null);
+  const [nestingProject, setNestingProject] = useState<WorktreeRef | null>(null);
 
-  const handleProjectContextMenu = useCallback((e: React.MouseEvent, project: Project) => {
+  const handleProjectContextMenu = useCallback((e: React.MouseEvent, project: ListedProject) => {
     e.preventDefault();
     setContextMenu({ open: true, position: { x: e.clientX, y: e.clientY }, project });
   }, []);
 
-  const handleRenameStart = useCallback((project: Project) => {
+  const handleRenameStart = useCallback((project: ListedProject) => {
     setRenamingId(project.id);
     setRenameValue(project.name);
     setContextMenu(null);
@@ -165,7 +174,7 @@ export function Sidebar() {
     setRenamingId(null);
   }, [renamingId, renameValue, updateProject]);
 
-  const handleRemoveRequest = useCallback((project: Project) => {
+  const handleRemoveRequest = useCallback((project: ListedProject) => {
     setContextMenu(null);
     setRemovingProject(project);
   }, []);
@@ -177,7 +186,7 @@ export function Sidebar() {
     }
   }, [removingProject, removeProject]);
 
-  const handleDeleteRequest = useCallback((project: Project) => {
+  const handleDeleteRequest = useCallback((project: ListedProject) => {
     setContextMenu(null);
     setDeletingProject(project);
   }, []);
@@ -195,7 +204,7 @@ export function Sidebar() {
 
   /** The tree's expand and collapse actions on a project row: fold or unfold its worktrees, or step into the first one. */
   const handleProjectKeyDown = useCallback(
-    (e: React.KeyboardEvent, project: Project, isExpanded: boolean) => {
+    (e: React.KeyboardEvent, project: ListedProject, isExpanded: boolean) => {
       const action = getTreeActionForEvent(e);
       if (action !== "tree.expandOrFocusChild" && action !== "tree.collapseOrFocusParent") return;
       e.preventDefault();
@@ -211,29 +220,29 @@ export function Sidebar() {
       // The first worktree entry after this project's own entry, inside the project's block.
       const block = e.currentTarget.closest("[data-sidebar-project]");
       const first = block?.querySelectorAll(`[${SIDEBAR_ENTRY_ATTR}]`)[1];
-      const path = first?.getAttribute(SIDEBAR_ENTRY_ATTR);
-      if (path) focusSidebarEntryForPath(path);
+      const id = first?.getAttribute(SIDEBAR_ENTRY_ATTR);
+      if (id) focusSidebarEntryById(id);
     },
     [toggleProjectExpanded],
   );
 
   /** Click a project row: regular repos switch to their root; bare repos toggle expansion. */
   const handleProjectClick = useCallback(
-    (project: Project) => {
+    (project: ListedProject) => {
       const projectIsBare = project.isBare ?? false;
 
       if (projectIsBare) {
         // For bare repos: just toggle expand/collapse — user picks a worktree explicitly
         toggleProjectExpanded(project.id);
-      } else if (activeWorktreePath !== project.path) {
+      } else if (!activeWorktree || !sameWorktreeRef(activeWorktree, projectRef(project))) {
         // Non-bare: switch to project path as the worktree
-        switchWorktree(project.path);
+        void switchWorktree(projectRef(project));
       }
     },
-    [activeWorktreePath, switchWorktree, toggleProjectExpanded],
+    [activeWorktree, switchWorktree, toggleProjectExpanded],
   );
 
-  const isHome = activeWorktreePath === null;
+  const isHome = activeWorktree === null;
   // Always at full strength: the row's highlight and the rail's ring show when Home is shown.
   const homeTileClass = "text-foreground size-6";
 
@@ -316,7 +325,9 @@ export function Sidebar() {
         </div>
 
         {projects.map((project, index) => {
-          const isRootActive = activeWorktreePath === project.path;
+          const projectKey = formatWorktreeRef(projectRef(project));
+          const isRootActive =
+            activeWorktree !== null && formatWorktreeRef(activeWorktree) === projectKey;
           const isExpanded = expandedSet.has(project.id);
           const isRenaming = project.id === renamingId;
           const onProjectKeyDown = (e: React.KeyboardEvent) =>
@@ -340,7 +351,7 @@ export function Sidebar() {
                   )}
                   style={{ paddingLeft: `${ROW_LEFT}px` }}
                   tabIndex={-1}
-                  {...sidebarEntryProps(project.path)}
+                  {...sidebarEntryProps(projectKey)}
                   onClick={() => !isRenaming && handleProjectClick(project)}
                   onContextMenu={(e) => handleProjectContextMenu(e, project)}
                   onKeyDown={onProjectKeyDown}
@@ -403,7 +414,7 @@ export function Sidebar() {
                     // Rounded like the keyboard ring on a worktree icon
                     className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
                     onClick={() => handleProjectClick(project)}
-                    {...sidebarEntryProps(project.path)}
+                    {...sidebarEntryProps(projectKey)}
                     onContextMenu={(e) => handleProjectContextMenu(e, project)}
                     onKeyDown={onProjectKeyDown}
                     title={`${project.name}\n${project.path}`}
@@ -464,7 +475,7 @@ export function Sidebar() {
             <ContextMenuItem
               onClick={() => {
                 setContextMenu(null);
-                setNestingProjectPath(contextMenu.project.path);
+                setNestingProject(projectRef(contextMenu.project));
               }}
             >
               <ListTreeIcon className="size-3.5" />
@@ -486,11 +497,8 @@ export function Sidebar() {
         </ContextMenu>
       )}
 
-      {nestingProjectPath && (
-        <EnableNestingDialog
-          projectPath={nestingProjectPath}
-          onClose={() => setNestingProjectPath(null)}
-        />
+      {nestingProject && (
+        <EnableNestingDialog project={nestingProject} onClose={() => setNestingProject(null)} />
       )}
 
       {/* Remove project confirmation dialog */}

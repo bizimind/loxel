@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { DiffInfo, FileDiff } from "@/api/diff-model";
+import { localRef } from "@/api/local-server";
 import type { DiffSource } from "@/store/worktree-repository";
 
 /** The files the side-by-side view was rendered for, with the refs it was given */
@@ -49,7 +50,7 @@ mock.module("@/hooks/useReviewContext", () => ({
 const { DiffViewerPanel } = await import("./DiffViewerPanel");
 const { useUIStore } = await import("@/store/ui");
 const { getCurrentRepositoryStore } = await import("@/store/worktree-repository");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 
 const PATCH = [
   "--- a/src/app.ts",
@@ -81,7 +82,7 @@ beforeEach(() => {
   serverDiff = undefined;
   reviewWorktreePath = undefined;
   useUIStore.getState().setDiffViewMode("unified");
-  useWorktreeStore.setState({ activeWorktreePath: WT });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
 });
 afterEach(cleanup);
 

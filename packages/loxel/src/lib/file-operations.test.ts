@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
+
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
@@ -14,12 +16,12 @@ mock.module("@/api/client", () => ({
 mock.module("@/queries/query-helpers", () => ({ invalidateDirQueries: () => {} }));
 
 const { getWorktreeUI } = await import("@/store/worktree-ui");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { deleteFile, moveFile, renameFile } = await import("./file-operations");
 
 // A language-server edit of worktree /repo finishing after the user switched to /other.
 beforeEach(() => {
-  useWorktreeStore.setState({ activeWorktreePath: "/other" });
+  useWorktreeStore.setState(activeWorktreeFields(localRef("/other")));
   getWorktreeUI("/other").getState().setSelectedProjectFile("/repo/a.py");
 });
 

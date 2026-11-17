@@ -2,14 +2,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { cleanup, render } from "@testing-library/react";
 
-import type { NotificationSource, ServerNotification } from "@/api/notification-model";
+import { localServerId } from "@/api/local-server";
+import type { NotificationSource } from "@/api/notification-model";
+import type { ClientNotification } from "@/store/panel-notifications";
 
 import { NotificationItem } from "./NotificationItem";
 
 afterEach(cleanup);
 
 function renderItem(source: NotificationSource) {
-  const notification: ServerNotification = {
+  const notification: ClientNotification = {
+    server: localServerId(),
     id: "n1",
     timestamp: Date.now(),
     source,

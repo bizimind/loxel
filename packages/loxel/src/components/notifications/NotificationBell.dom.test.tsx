@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { wsClient } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { ServerNotification } from "@/api/notification-model";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
@@ -36,7 +37,7 @@ let send: ReturnType<typeof spyOn<typeof wsClient, "send">>;
 
 beforeEach(() => {
   send = spyOn(wsClient, "send").mockImplementation(() => {});
-  usePanelNotificationStore.getState().syncAll([build(2), build(1), AGENT]);
+  usePanelNotificationStore.getState().syncAll(localServerId(), [build(2), build(1), AGENT]);
 });
 
 afterEach(() => {
@@ -67,7 +68,7 @@ describe("the notification bell", () => {
     await openBell();
     fireEvent.click(screen.getByRole("button", { name: /^\+1 more/ }));
 
-    act(() => usePanelNotificationStore.getState().addFromServer(build(3)));
+    act(() => usePanelNotificationStore.getState().addFromServer(localServerId(), build(3)));
 
     expect(titles()).toEqual(["Build 3", "Build 2", "Build 1", "Agent needs input"]);
   });

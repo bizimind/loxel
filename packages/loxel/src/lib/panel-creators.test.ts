@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { DockviewApi, DockviewComponent } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
+
 // The editors' module-level caches pull in Milkdown and Excalidraw; the move only needs to call them.
 mock.module("@/components/editor/MarkdownEditor", () => ({
   renameEditorCacheKey: () => {},
@@ -56,7 +58,7 @@ const {
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { useProjectStore } = await import("@/store/projects");
 
 /** A center dockview with two groups: `left` (a.ts, b.ts) and `right` (c.ts). */
@@ -91,10 +93,10 @@ function tabIds(api: DockviewApi, groupIndex: number) {
 }
 
 // Most panels belong to a worktree, so the tests run in one; Home's test leaves it.
-beforeEach(() => useWorktreeStore.setState({ activeWorktreePath: "/repo" }));
+beforeEach(() => useWorktreeStore.setState(activeWorktreeFields(localRef("/repo"))));
 
 afterEach(() => {
-  useWorktreeStore.setState({ activeWorktreePath: null });
+  useWorktreeStore.setState(activeWorktreeFields(null));
   setCenterApi(null);
   document.body.innerHTML = "";
   useEditorStateStore.setState({ files: new Map() });
@@ -340,7 +342,7 @@ describe("placement", () => {
   const ids = (panels: { id: string }[]) => panels.map((p) => p.id);
 
   test("only panels that need no worktree open in Home", () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     const { api } = setup();
 
     openCompareFiles("/repo/a.ts", "/repo/b.ts");
@@ -353,7 +355,7 @@ describe("placement", () => {
   });
 
   test("a Home plan is one of Home's drafts, belonging to no worktree", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     const { api } = setup();
 
     await createEditor();
@@ -365,7 +367,7 @@ describe("placement", () => {
   });
 
   test("a Home terminal starts in the home directory and belongs to no worktree", () => {
-    useWorktreeStore.setState({ activeWorktreePath: null });
+    useWorktreeStore.setState(activeWorktreeFields(null));
     useProjectStore.setState({ homeDir: "/Users/me" });
     const { api } = setup();
 

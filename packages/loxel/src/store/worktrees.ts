@@ -5,8 +5,17 @@ import type { AddWorktreePlan, CreateWorktreeOptions } from "@/api/client";
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
-import { localRef, localServerId } from "@/api/local-server";
+import { localServerId, whenLocalServerKnown } from "@/api/local-server";
 import type { EnrichedProject } from "@/api/project-model";
+import {
+  type ServerId,
+  type WorktreeRef,
+  type WorktreeRefKey,
+  formatWorktreeRef,
+  parseWorktreeRef,
+  sameWorktreeRef,
+  worktreeRef,
+} from "@/api/worktree-ref";
 import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-model";
 import { showToast } from "@/components/ui/toast";
 import { STORAGE_PREFIX } from "@/lib/env";
@@ -28,25 +37,43 @@ import { queryClient } from "@/query-client";
 
 import { closeLayoutBrowserPages } from "./browser-pages";
 import { useFileSearchStore } from "./file-search";
-import { deriveProject, useProjectStore } from "./projects";
+import { type ListedProject, projectOf, projectRef, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
 import { purgeWorktreeStores } from "./worktree-store";
 
 const log = frontendLog.child("worktrees");
 
-const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
-const refreshRequestIds = new Map<string, number>();
+/** The window's active worktree as a {@link WorktreeRefKey}, kept across reloads of the page. */
+const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktree`;
+/** The latest list refresh of each project, by its key. */
+const refreshRequestIds = new Map<WorktreeRefKey, number>();
 /** Worktrees with a removal request in flight; shown as pending across list refreshes. */
-const removingPaths = new Set<string>();
+const removingKeys = new Set<WorktreeRefKey>();
 /**
  * Worktrees with a create request in flight; shown as pending across list refreshes. Git registers
  * the worktree before its init hook runs, so the list can include it well before it is ready.
  */
-const creatingPaths = new Set<string>();
+const creatingKeys = new Set<WorktreeRefKey>();
 let nextRefreshRequestId = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * The key of a worktree (or the root checkout) listed under `project`. A project's worktree list
+ * comes from the project's server, so its paths are on that server.
+ */
+export function worktreeKey(project: WorktreeRef, path: string): WorktreeRefKey {
+  return formatWorktreeRef(worktreeRef(project.server, path));
+}
+
+/** The worktree paths `keys` name on `project`'s server, the form the hierarchy helpers take. */
+function pathsOn(project: WorktreeRef, keys: readonly WorktreeRefKey[]): string[] {
+  return keys.flatMap((key) => {
+    const ref = parseWorktreeRef(key);
+    return ref?.server === project.server ? [ref.path] : [];
+  });
+}
 
 /** Sort worktrees by creation time ascending (old→new), nulls last. */
 function sortByCreatedAt(a: WorktreeEntry, b: WorktreeEntry): number {
@@ -84,70 +111,133 @@ export function getOrderedWorktrees(
 export type ProjectConfig = Pick<EnrichedProject, "worktreesDir" | "worktreeMetadata">;
 
 export interface ProjectState extends Partial<ProjectConfig> {
+  /** The project's worktrees, as its server lists them: their paths are on the project's server. */
   worktrees: WorktreeEntry[];
   /** User-defined worktree display order, across all nesting levels. Persisted. */
-  customOrder?: string[];
+  customOrder?: WorktreeRefKey[];
   /** Worktrees moved to the project's Archive group, each with everything nested below it. Persisted. */
-  archivedPaths?: string[];
+  archivedRefs?: WorktreeRefKey[];
   /** Worktrees whose nested worktrees are folded away in the sidebar. Persisted. */
-  collapsedPaths?: string[];
+  collapsedRefs?: WorktreeRefKey[];
 }
 
 const EMPTY_PROJECT: ProjectState = { worktrees: [] };
 
 /** The per-project lists saved through server storage and synced across windows. */
-const PERSISTED_KEYS = ["customOrder", "archivedPaths", "collapsedPaths"] as const;
-export type PersistedProjectState = Pick<ProjectState, (typeof PERSISTED_KEYS)[number]>;
+const PERSISTED_KEYS = ["customOrder", "archivedRefs", "collapsedRefs"] as const;
+type PersistedKey = (typeof PERSISTED_KEYS)[number];
+export type PersistedProjectState = Pick<ProjectState, PersistedKey>;
 
-/** The persisted lists of every project that has any. */
+/**
+ * The names each list was saved under before, read when an entry has none by its current name.
+ * Archive replaced "hide", so worktrees saved as hidden come back archived.
+ */
+const EARLIER_NAMES: Record<PersistedKey, readonly string[]> = {
+  customOrder: [],
+  archivedRefs: ["archivedPaths", "hiddenPaths"],
+  collapsedRefs: ["collapsedPaths"],
+};
+
+/** The persisted lists of every project that has any, by project key. */
 export function persistedProjectStates(
-  byProject: Readonly<Record<string, ProjectState>>,
-): Record<string, PersistedProjectState> {
-  const persisted: Record<string, PersistedProjectState> = {};
-  for (const [path, ps] of Object.entries(byProject)) {
+  byProject: Readonly<Record<WorktreeRefKey, ProjectState>>,
+): Record<WorktreeRefKey, PersistedProjectState> {
+  const persisted: Record<WorktreeRefKey, PersistedProjectState> = {};
+  for (const [key, ps] of projectEntries(byProject)) {
     const saved: PersistedProjectState = {};
-    for (const key of PERSISTED_KEYS) if (ps[key]) saved[key] = ps[key];
-    if (Object.keys(saved).length > 0) persisted[path] = saved;
+    for (const list of PERSISTED_KEYS) if (ps[list]) saved[list] = ps[list];
+    if (Object.keys(saved).length > 0) persisted[key] = saved;
   }
   return persisted;
 }
 
+/** `byProject`'s entries with their keys typed. */
+function projectEntries(
+  byProject: Readonly<Record<WorktreeRefKey, ProjectState>>,
+): [WorktreeRefKey, ProjectState][] {
+  // Every key was written as a WorktreeRefKey: `byProject` takes no other.
+  return Object.entries(byProject) as [WorktreeRefKey, ProjectState][];
+}
+
+/**
+ * A ref as saved: its string form, or a bare path saved before lists held refs. A bare path is
+ * taken to be on `server`, the server whose window saved it, so a user's order and archive survive
+ * the change; it is saved back as a ref. Null for anything else.
+ */
+function savedRef(text: string, server: ServerId): WorktreeRef | null {
+  return text.startsWith("/") ? worktreeRef(server, text) : parseWorktreeRef(text);
+}
+
 /**
  * `byProject` with saved lists (untrusted: from storage or another window) applied over each
- * project's entry, keeping its runtime data (worktree list, etc.).
+ * project's entry, keeping its runtime data (worktree list, etc.). Projects and worktrees saved as
+ * bare paths are read as on `server`, the window's own.
  */
 export function mergePersistedProjectStates(
-  byProject: Readonly<Record<string, ProjectState>>,
+  byProject: Readonly<Record<WorktreeRefKey, ProjectState>>,
   saved: unknown,
-): Record<string, ProjectState> {
+  server: ServerId,
+): Record<WorktreeRefKey, ProjectState> {
   const merged = { ...byProject };
   if (!saved || typeof saved !== "object") return merged;
-  for (const [path, entry] of Object.entries(saved)) {
-    if (!entry || typeof entry !== "object") continue;
-    const next: ProjectState = { ...(merged[path] ?? { worktrees: [] }) };
+  for (const [savedKey, entry] of Object.entries(saved)) {
+    const project = savedRef(savedKey, server);
+    if (!project || !entry || typeof entry !== "object") continue;
+    const key = formatWorktreeRef(project);
+    const next: ProjectState = { ...(merged[key] ?? { worktrees: [] }) };
     const record = entry as Record<string, unknown>;
-    for (const key of PERSISTED_KEYS) {
-      // Archive replaced "hide": worktrees saved as hidden come back archived.
-      const value: unknown =
-        record[key] ?? (key === "archivedPaths" ? record.hiddenPaths : undefined);
-      if (Array.isArray(value)) next[key] = value.filter((x) => typeof x === "string");
+    for (const list of PERSISTED_KEYS) {
+      const value = [list, ...EARLIER_NAMES[list]]
+        .map((name) => record[name])
+        .find((v): v is unknown[] => Array.isArray(v));
+      if (!value) continue;
+      next[list] = value.flatMap((item) => {
+        // A project's worktrees are on its server.
+        const ref = typeof item === "string" ? savedRef(item, project.server) : null;
+        return ref ? [formatWorktreeRef(ref)] : [];
+      });
     }
-    merged[path] = next;
+    merged[key] = next;
   }
   return merged;
 }
 
-/** The persisted lists pruned to worktrees that still exist. */
-function prunePersisted(ps: ProjectState | undefined, valid: ReadonlySet<string>) {
+/** The persisted lists pruned to the project's worktrees that still exist. */
+function prunePersisted(
+  project: WorktreeRef,
+  ps: ProjectState | undefined,
+  validPaths: ReadonlySet<string>,
+): PersistedProjectState {
+  const valid = new Set([...validPaths].map((path) => worktreeKey(project, path)));
   return Object.fromEntries(
-    PERSISTED_KEYS.map((key) => [key, ps?.[key]?.filter((path) => valid.has(path))]),
+    PERSISTED_KEYS.map((list) => [list, ps?.[list]?.filter((key) => valid.has(key))]),
   ) as PersistedProjectState;
 }
 
+/** A project's persisted lists as worktree paths on its server, the form the hierarchy helpers take. */
+export interface ProjectListPaths {
+  /** The custom display order; undefined while the user has set none. */
+  order: string[] | undefined;
+  archived: string[];
+  collapsed: string[];
+}
+
+/** {@link ProjectListPaths} of `project`, whose state is `ps`. */
+export function projectListPaths(project: WorktreeRef, ps: ProjectState): ProjectListPaths {
+  return {
+    order: ps.customOrder && pathsOn(project, ps.customOrder),
+    archived: pathsOn(project, ps.archivedRefs ?? []),
+    collapsed: pathsOn(project, ps.collapsedRefs ?? []),
+  };
+}
+
 /** The project's worktrees split into the main list and its Archive group, each in display order. */
-function splitArchived(ps: ProjectState): { listed: WorktreeEntry[]; archived: WorktreeEntry[] } {
-  const ordered = getOrderedWorktrees(ps.worktrees, ps.customOrder);
-  const archived = archivedSet(ps.worktrees, ps.archivedPaths ?? []);
+function splitArchived(
+  ps: ProjectState,
+  lists: ProjectListPaths,
+): { listed: WorktreeEntry[]; archived: WorktreeEntry[] } {
+  const ordered = getOrderedWorktrees(ps.worktrees, lists.order);
+  const archived = archivedSet(ps.worktrees, lists.archived);
   return {
     listed: ordered.filter((wt) => !archived.has(wt.path)),
     archived: ordered.filter((wt) => archived.has(wt.path)),
@@ -155,16 +245,20 @@ function splitArchived(ps: ProjectState): { listed: WorktreeEntry[]; archived: W
 }
 
 /** The project's listed (not archived) worktrees as the sidebar shows them: nested, collapsed subtrees left out. */
-export function getWorktreeRows(ps: ProjectState): WorktreeRow<WorktreeEntry>[] {
-  return buildWorktreeRows(splitArchived(ps).listed, new Set(ps.collapsedPaths));
+export function getWorktreeRows(
+  project: WorktreeRef,
+  ps: ProjectState,
+): WorktreeRow<WorktreeEntry>[] {
+  const lists = projectListPaths(project, ps);
+  return buildWorktreeRows(splitArchived(ps, lists).listed, new Set(lists.collapsed));
 }
 
 /** The listed and archived worktrees as trees, for rendering the sidebar. */
-export function getWorktreeTrees(ps: ProjectState): {
-  listed: WorktreeNode<WorktreeEntry>[];
-  archived: WorktreeNode<WorktreeEntry>[];
-} {
-  const { listed, archived } = splitArchived(ps);
+export function getWorktreeTrees(
+  project: WorktreeRef,
+  ps: ProjectState,
+): { listed: WorktreeNode<WorktreeEntry>[]; archived: WorktreeNode<WorktreeEntry>[] } {
+  const { listed, archived } = splitArchived(ps, projectListPaths(project, ps));
   return { listed: buildWorktreeTree(listed), archived: buildWorktreeTree(archived) };
 }
 
@@ -172,8 +266,8 @@ export function getWorktreeTrees(ps: ProjectState): {
  * The worktrees `Ctrl+Alt+1`–`0` number: the sidebar's visible order without collapsed subtrees,
  * archived worktrees or pending entries, the same whether or not the sidebar is expanded.
  */
-export function getNumberedWorktrees(ps: ProjectState): WorktreeEntry[] {
-  return getWorktreeRows(ps)
+export function getNumberedWorktrees(project: WorktreeRef, ps: ProjectState): WorktreeEntry[] {
+  return getWorktreeRows(project, ps)
     .filter((row) => !row.wt.pending)
     .map((row) => row.wt);
 }
@@ -186,11 +280,12 @@ export function getNumberedWorktrees(ps: ProjectState): WorktreeEntry[] {
  */
 export function deriveOwningWorktree(
   path: string,
-  projects: readonly Pick<EnrichedProject, "path" | "isBare" | "worktrees">[],
-  byProject: Readonly<Record<string, Pick<ProjectState, "worktrees">>>,
+  projects: readonly Pick<ListedProject, "server" | "path" | "isBare" | "worktrees">[],
+  byProject: Readonly<Record<WorktreeRefKey, Pick<ProjectState, "worktrees">>>,
 ): string | null {
   const roots = projects.flatMap((project) => {
-    const worktrees = byProject[project.path]?.worktrees ?? project.worktrees;
+    const worktrees =
+      byProject[formatWorktreeRef(projectRef(project))]?.worktrees ?? project.worktrees;
     const worktreeRoots = worktrees.map((worktree) => worktree.path);
     return project.isBare ? worktreeRoots : [...worktreeRoots, project.path];
   });
@@ -209,37 +304,44 @@ export interface CreateStarted {
 }
 
 export interface WorktreeState {
-  /** All per-project state keyed by project path. */
-  byProject: Record<string, ProjectState>;
+  /** All per-project state keyed by project ref. */
+  byProject: Record<WorktreeRefKey, ProjectState>;
+  /** The worktree (or regular repo's root checkout) the window shows; null for Home. */
+  activeWorktree: WorktreeRef | null;
+  /**
+   * @deprecated The path of `activeWorktree`, kept for the readers not moved to refs yet; a
+   * cleanup after task 6 removes it. Changes only together with `activeWorktree`, through
+   * {@link activeWorktreeFields}.
+   */
   activeWorktreePath: string | null;
 
   /** Pending add plan that needs user resolution (branch conflict). */
   pendingAddPlan:
-    | (AddWorktreePlan & { projectPath: string } & Pick<
+    | (AddWorktreePlan & { project: WorktreeRef } & Pick<
           CreateWorktreeOptions,
           "parentPath" | "fromParent" | "title"
         >)
     | null;
   /** Pending remove plan that needs user confirmation (dirty state). */
-  pendingRemovePlan: (WorktreeRemovePlan & { wtPath: string; projectPath: string }) | null;
+  pendingRemovePlan: (WorktreeRemovePlan & { wtPath: string; project: WorktreeRef }) | null;
 
   /** Flag set by keybinding to trigger the inline create worktree UI. */
   createWorktreeRequested: boolean;
   /** Projects whose Archive group is open in the sidebar; every Archive starts closed. */
-  openArchives: string[];
+  openArchives: WorktreeRefKey[];
 
   /** Apply enriched project data (called by project store after fetchProjects). */
-  applyEnrichedProjects: (enriched: EnrichedProject[]) => void;
+  applyEnrichedProjects: (enriched: readonly ListedProject[]) => void;
 
   /** Refresh worktrees for a single project (called by ws-bridge on worktrees_changed). */
-  refreshProjectWorktrees: (projectPath: string) => Promise<void>;
+  refreshProjectWorktrees: (project: WorktreeRef) => Promise<void>;
 
   /**
-   * Switch to a worktree by absolute path. Server supports multiple concurrent projects,
-   * so no project switch is needed — only a single api.switchWorktree() call.
-   * All state updates are optimistic (before API calls) to prevent WS race conditions.
+   * Switch to a worktree, or a regular repo's root checkout. Server supports multiple concurrent
+   * projects, so no project switch is needed. All state updates are optimistic (before API calls)
+   * to prevent WS race conditions.
    */
-  switchWorktree: (path: string) => Promise<void>;
+  switchWorktree: (wt: WorktreeRef) => Promise<void>;
 
   /** Show Home, the layout with no worktree active (its own browsers, terminals and plans). */
   showHome: () => void;
@@ -252,11 +354,11 @@ export interface WorktreeState {
    * create cannot start. See {@link CreateStarted} for the rest.
    */
   createWorktree: (
-    projectPath: string,
+    project: WorktreeRef,
     name: string,
     options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "fromParent" | "title">,
   ) => Promise<CreateStarted | null>;
-  requestRemoveWorktree: (projectPath: string, wt: WorktreeEntry) => Promise<void>;
+  requestRemoveWorktree: (project: WorktreeRef, wt: WorktreeEntry) => Promise<void>;
   confirmRemoveWorktree: (options: {
     deleteBranch: boolean;
     force: boolean;
@@ -264,14 +366,14 @@ export interface WorktreeState {
   }) => Promise<void>;
   /** Nest a worktree under another, or move it to the top level (`parentPath: null`). */
   setWorktreeParent: (
-    projectPath: string,
+    project: WorktreeRef,
     path: string,
     parentPath: string | null,
   ) => Promise<void>;
   /** Show `title` instead of the worktree name; empty shows the worktree name again. */
-  setWorktreeTitle: (projectPath: string, path: string, title: string) => Promise<void>;
+  setWorktreeTitle: (project: WorktreeRef, path: string, title: string) => Promise<void>;
   /** Turn on worktree metadata for the project, so its worktrees can nest. */
-  enableWorktreeMetadata: (projectPath: string) => Promise<void>;
+  enableWorktreeMetadata: (project: WorktreeRef) => Promise<void>;
   dismissPendingPlan: () => void;
   /** Create the worktree of the parked `pendingAddPlan`, the way `createWorktree` does. */
   confirmCreateWorktree: (
@@ -281,36 +383,76 @@ export interface WorktreeState {
   requestCreateWorktree: () => void;
   clearCreateWorktreeRequest: () => void;
 
-  setCustomOrder: (projectPath: string, orderedPaths: string[]) => void;
+  /** Set the display order of the project's worktrees, given as paths on its server. */
+  setCustomOrder: (project: WorktreeRef, orderedPaths: readonly string[]) => void;
   /**
    * Move a worktree, with everything nested below it, to the project's Archive group, or back out.
    * A worktree archived as part of an ancestor brings that whole archived subtree back.
    */
-  toggleArchived: (projectPath: string, path: string) => void;
+  toggleArchived: (project: WorktreeRef, path: string) => void;
   /**
    * Archive `path` in its own right, so it stays archived when it moves out of an archived
    * worktree it was archived with. Does nothing when it already is.
    */
-  markArchived: (projectPath: string, path: string) => void;
+  markArchived: (project: WorktreeRef, path: string) => void;
   /** Open or close the project's Archive group. */
-  toggleArchiveOpen: (projectPath: string) => void;
+  toggleArchiveOpen: (project: WorktreeRef) => void;
   /** Fold or unfold the worktrees nested below `path`. */
-  toggleCollapsed: (projectPath: string, path: string) => void;
+  toggleCollapsed: (project: WorktreeRef, path: string) => void;
   reset: () => void;
 }
 
+/**
+ * The store fields that make `wt` active, or Home when null: the one way to change the active
+ * worktree, which keeps `activeWorktreePath` in step with it.
+ */
+export function activeWorktreeFields(
+  wt: WorktreeRef | null,
+): Pick<WorktreeState, "activeWorktree" | "activeWorktreePath"> {
+  return { activeWorktree: wt, activeWorktreePath: wt?.path ?? null };
+}
+
+/**
+ * {@link activeWorktreeFields}, or none when `wt` names the active worktree already, so the ref
+ * subscribers hold stays the same object.
+ */
+function activeWorktreeChange(
+  state: WorktreeState,
+  wt: WorktreeRef | null,
+): Partial<WorktreeState> {
+  const current = state.activeWorktree;
+  if (current === wt || (current && wt && sameWorktreeRef(current, wt))) return {};
+  return activeWorktreeFields(wt);
+}
+
+/** The active worktree saved in this tab's session, if it is a ref. */
+function sessionActiveWorktree(): WorktreeRef | null {
+  const saved = sessionStorage.getItem(ACTIVE_WT_SESSION_KEY);
+  return saved === null ? null : parseWorktreeRef(saved);
+}
+
 /** Get the project state entry, falling back to a stable empty default. */
-function getProject(state: WorktreeState, projectPath: string): ProjectState {
-  return state.byProject[projectPath] ?? EMPTY_PROJECT;
+function getProject(state: WorktreeState, project: WorktreeRef): ProjectState {
+  return state.byProject[formatWorktreeRef(project)] ?? EMPTY_PROJECT;
 }
 
 /** Return a new byProject with a patched entry for one project. */
 function patchProject(
   state: WorktreeState,
-  projectPath: string,
+  project: WorktreeRef,
   patch: Partial<ProjectState>,
-): Record<string, ProjectState> {
-  return { ...state.byProject, [projectPath]: { ...getProject(state, projectPath), ...patch } };
+): Record<WorktreeRefKey, ProjectState> {
+  return {
+    ...state.byProject,
+    [formatWorktreeRef(project)]: { ...getProject(state, project), ...patch },
+  };
+}
+
+/** Find a listed project by its ref. */
+function findProject(project: WorktreeRef): ListedProject | undefined {
+  return useProjectStore
+    .getState()
+    .projects.find((candidate) => sameWorktreeRef(projectRef(candidate), project));
 }
 
 export const useWorktreeStore = create<WorktreeState>()(
@@ -318,113 +460,115 @@ export const useWorktreeStore = create<WorktreeState>()(
     persist(
       (set, get) => ({
         byProject: {},
-        activeWorktreePath: sessionStorage.getItem(ACTIVE_WT_SESSION_KEY),
+        ...activeWorktreeFields(sessionActiveWorktree()),
         pendingAddPlan: null,
         pendingRemovePlan: null,
         createWorktreeRequested: false,
         openArchives: [],
 
         applyEnrichedProjects: (enriched) => {
-          // Derive the active project to initialize activeWorktreePath for non-bare repos
-          const currentWtPath = get().activeWorktreePath;
-          const allProjects = useProjectStore.getState().projects;
-          const project = deriveProject(currentWtPath, allProjects);
-          const isBare = project?.isBare ?? false;
-          const projectPath = project?.path ?? null;
-
-          // A regular repo's root checkout is a valid context on its own, so a
-          // fresh session starts there rather than in a `.worktrees/` entry.
-          const activeWorktreePath =
-            !isBare && !currentWtPath && projectPath ? projectPath : currentWtPath;
-
           set((s) => {
-            const byProject: Record<string, ProjectState> = { ...s.byProject };
+            const byProject = { ...s.byProject };
 
             for (const p of enriched) {
-              const existing = byProject[p.path];
+              const project = projectRef(p);
+              const key = formatWorktreeRef(project);
+              const existing = byProject[key];
               const effectiveWorktrees =
                 p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []);
               const validPaths = new Set(effectiveWorktrees.map((wt) => wt.path));
-              byProject[p.path] = {
-                worktrees: withRequestsInFlight(effectiveWorktrees, existing?.worktrees ?? []),
+              byProject[key] = {
+                worktrees: withRequestsInFlight(
+                  project,
+                  effectiveWorktrees,
+                  existing?.worktrees ?? [],
+                ),
                 worktreesDir: p.worktreesDir,
                 worktreeMetadata: p.worktreeMetadata,
-                ...prunePersisted(existing, validPaths),
+                ...prunePersisted(project, existing, validPaths),
               };
             }
 
-            return { byProject, activeWorktreePath };
+            return { byProject };
           });
 
-          // Validate: if the hydrated activeWorktreePath no longer exists, fall back
-          const finalPath = get().activeWorktreePath;
-          if (finalPath) {
-            const allPaths = new Set([
-              ...enriched.map((p) => p.path),
-              ...enriched.flatMap((p) => p.worktrees.map((wt) => wt.path)),
-            ]);
-            if (!allPaths.has(finalPath)) {
-              const first = enriched[0];
-              const fallback = first
-                ? first.isBare
-                  ? (first.worktrees[0]?.path ?? null)
-                  : first.path
-                : null;
-              set({ activeWorktreePath: fallback });
-            }
-          }
+          // Validate: if the hydrated active worktree no longer exists, fall back
+          const active = get().activeWorktree;
+          if (!active) return;
+          const listed = new Set(
+            enriched.flatMap((p) => {
+              const project = projectRef(p);
+              return [
+                formatWorktreeRef(project),
+                ...p.worktrees.map((wt) => worktreeKey(project, wt.path)),
+              ];
+            }),
+          );
+          if (listed.has(formatWorktreeRef(active))) return;
+          const first = enriched[0];
+          const fallbackPath = first?.isBare ? first.worktrees[0]?.path : first?.path;
+          set(
+            activeWorktreeFields(
+              first && fallbackPath ? worktreeRef(first.server, fallbackPath) : null,
+            ),
+          );
         },
 
-        refreshProjectWorktrees: async (projectPath) => {
+        refreshProjectWorktrees: async (project) => {
+          const key = formatWorktreeRef(project);
           const requestId = ++nextRefreshRequestId;
-          refreshRequestIds.set(projectPath, requestId);
-          const allProjects = useProjectStore.getState().projects;
-          const project = allProjects.find((p) => p.path === projectPath);
-          if (!project) return;
-          const prior = getProject(get(), projectPath).worktrees;
+          refreshRequestIds.set(key, requestId);
+          const listed = findProject(project);
+          if (!listed) return;
+          const prior = getProject(get(), project).worktrees;
           const priorPaths = new Set(prior.map((wt) => wt.path));
 
-          const data = await api.getProjectWorktrees(project.id);
-          if (refreshRequestIds.get(projectPath) !== requestId) return;
+          const data = await api.getProjectWorktrees(listed.id);
+          if (refreshRequestIds.get(key) !== requestId) return;
           const validPaths = new Set([
             ...data.worktrees.map((wt) => wt.path),
-            ...(project.isBare ? [] : [project.path]),
+            ...(listed.isBare ? [] : [project.path]),
           ]);
 
           set((s) => {
-            const existing = getProject(s, projectPath);
+            const existing = getProject(s, project);
             return {
-              byProject: patchProject(s, projectPath, {
-                worktrees: withRequestsInFlight(data.worktrees, existing.worktrees),
+              byProject: patchProject(s, project, {
+                worktrees: withRequestsInFlight(project, data.worktrees, existing.worktrees),
                 worktreeMetadata: data.worktreeMetadata,
-                ...prunePersisted(existing, validPaths),
+                ...prunePersisted(project, existing, validPaths),
               }),
             };
           });
 
           // Whether removed or moved, in this window or anywhere else, by the app or by `wt`.
           for (const wt of prior) {
-            if (wt.pending !== "creating" && !validPaths.has(wt.path)) releaseWorktree(wt.path);
+            if (wt.pending !== "creating" && !validPaths.has(wt.path)) {
+              releaseWorktree(worktreeRef(project.server, wt.path));
+            }
           }
 
-          const active = get().activeWorktreePath;
-          const activeProject = deriveProject(active, allProjects);
+          const active = get().activeWorktree;
+          if (!active || active.server !== project.server || validPaths.has(active.path)) return;
+          const activeProject = projectOf(active, useProjectStore.getState().projects);
           const belongedToProject =
-            active === project.path ||
-            priorPaths.has(active ?? "") ||
-            activeProject?.id === project.id;
-          if (!active || !belongedToProject || validPaths.has(active)) return;
+            active.path === project.path ||
+            priorPaths.has(active.path) ||
+            (activeProject !== null && sameWorktreeRef(projectRef(activeProject), project));
+          if (!belongedToProject) return;
 
           releaseWorktree(active);
 
-          const fallback = project.isBare ? (data.worktrees[0]?.path ?? null) : project.path;
-          set({ activeWorktreePath: fallback });
-          if (fallback) transitionWorktreeState();
+          const fallbackPath = listed.isBare ? data.worktrees[0]?.path : project.path;
+          set(
+            activeWorktreeFields(fallbackPath ? worktreeRef(project.server, fallbackPath) : null),
+          );
+          if (fallbackPath) transitionWorktreeState();
         },
 
-        switchWorktree: async (path) => {
-          // 1. Set activeWorktreePath OPTIMISTICALLY (before API calls)
-          set({ activeWorktreePath: path });
+        switchWorktree: async (wt) => {
+          // 1. Set the active worktree OPTIMISTICALLY (before API calls)
+          set((s) => activeWorktreeChange(s, wt));
 
           // 2. Transition worktree state (clears comments)
           transitionWorktreeState();
@@ -434,13 +578,13 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         showHome: () => {
-          if (get().activeWorktreePath === null) return;
-          set({ activeWorktreePath: null });
+          if (get().activeWorktree === null) return;
+          set(activeWorktreeFields(null));
           transitionWorktreeState();
         },
 
-        createWorktree: async (projectPath, name, options) => {
-          const plan = await api.planAddWorktree(projectPath, name);
+        createWorktree: async (project, name, options) => {
+          const plan = await api.planAddWorktree(project.path, name);
           const parentPath = options?.parentPath;
           const fromParent = options?.fromParent;
           const title = options?.title;
@@ -451,11 +595,11 @@ export const useWorktreeStore = create<WorktreeState>()(
                 `A worktree already exists for branch '${plan.branch}' at: ${plan.branchConflict.worktreePath}`,
               );
             }
-            set({ pendingAddPlan: { ...plan, projectPath, parentPath, fromParent, title } });
+            set({ pendingAddPlan: { ...plan, project, parentPath, fromParent, title } });
             return null;
           }
 
-          return startCreate(set, get, projectPath, plan.worktreePath, name, {
+          return startCreate(set, get, project, plan.worktreePath, name, {
             branch: options?.branch,
             parentPath,
             fromParent,
@@ -467,10 +611,10 @@ export const useWorktreeStore = create<WorktreeState>()(
           const { pendingAddPlan } = get();
           if (!pendingAddPlan) return null;
 
-          const { name, worktreePath, projectPath, parentPath, fromParent, title } = pendingAddPlan;
+          const { name, worktreePath, project, parentPath, fromParent, title } = pendingAddPlan;
           set({ pendingAddPlan: null });
 
-          return startCreate(set, get, projectPath, worktreePath, name, {
+          return startCreate(set, get, project, worktreePath, name, {
             branchResolution,
             parentPath,
             fromParent,
@@ -478,48 +622,50 @@ export const useWorktreeStore = create<WorktreeState>()(
           });
         },
 
-        requestRemoveWorktree: async (projectPath, wt) => {
-          const plan = await api.planRemoveWorktree(projectPath, wt.path);
-          set({ pendingRemovePlan: { ...plan, wtPath: wt.path, projectPath } });
+        requestRemoveWorktree: async (project, wt) => {
+          const plan = await api.planRemoveWorktree(project.path, wt.path);
+          set({ pendingRemovePlan: { ...plan, wtPath: wt.path, project } });
         },
 
         confirmRemoveWorktree: async ({ deleteBranch, force, nested = "move-up" }) => {
           const { pendingRemovePlan } = get();
           if (!pendingRemovePlan) return;
 
-          const { wtPath, worktreePath, projectPath } = pendingRemovePlan;
+          const { wtPath, worktreePath, project } = pendingRemovePlan;
           set({ pendingRemovePlan: null });
           const nestedPaths =
             nested === "remove" ? pendingRemovePlan.nested.map((wt) => wt.path) : [];
-          const removed = [worktreePath, ...nestedPaths];
+          const removed = [worktreePath, ...nestedPaths].map((path) =>
+            worktreeRef(project.server, path),
+          );
 
           // Not removed optimistically: the entries stay, marked pending, until the server has
           // unregistered the worktrees (their files are deleted afterwards, in the background).
-          for (const path of removed) {
-            removingPaths.add(path);
-            markRemoving(set, projectPath, path);
+          for (const wt of removed) {
+            removingKeys.add(formatWorktreeRef(wt));
+            markRemoving(set, project, wt.path);
           }
           let result: Awaited<ReturnType<typeof api.removeWorktreeByWtPath>>;
           try {
-            result = await api.removeWorktreeByWtPath(projectPath, wtPath, {
+            result = await api.removeWorktreeByWtPath(project.path, wtPath, {
               deleteBranch,
               force,
               nested,
               ...(nested === "remove" ? { nestedPaths } : {}),
             });
           } catch (err) {
-            for (const path of removed) removingPaths.delete(path);
-            await get().refreshProjectWorktrees(projectPath);
+            for (const wt of removed) removingKeys.delete(formatWorktreeRef(wt));
+            await get().refreshProjectWorktrees(project);
             // Removing a subtree can fail partway: release whatever is gone all the same.
-            const listed = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
-            for (const path of removed) if (!listed.has(path)) releaseWorktree(path, true);
+            const listed = new Set(getProject(get(), project).worktrees.map((wt) => wt.path));
+            for (const wt of removed) if (!listed.has(wt.path)) releaseWorktree(wt, true);
             throw err;
           }
-          for (const path of removed) {
-            removingPaths.delete(path);
-            releaseWorktree(path, true);
+          for (const wt of removed) {
+            removingKeys.delete(formatWorktreeRef(wt));
+            releaseWorktree(wt, true);
           }
-          await get().refreshProjectWorktrees(projectPath);
+          await get().refreshProjectWorktrees(project);
 
           if (result.warning) throw new Error(result.warning);
 
@@ -530,35 +676,35 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
         },
 
-        setWorktreeParent: async (projectPath, path, parentPath) => {
+        setWorktreeParent: async (project, path, parentPath) => {
           const parent = parentPath
-            ? getProject(get(), projectPath).worktrees.find((wt) => wt.path === parentPath)
+            ? getProject(get(), project).worktrees.find((wt) => wt.path === parentPath)
             : undefined;
           // Show the move at once when the parent already has an id; the refresh confirms it.
           if (parentPath === null || parent?.wtId) {
-            patchEntry(set, projectPath, path, { parentWtId: parent?.wtId });
+            patchEntry(set, project, path, { parentWtId: parent?.wtId });
           }
-          if (parentPath) expand(set, projectPath, parentPath);
+          if (parentPath) expand(set, project, parentPath);
           try {
-            await api.updateWorktreeMeta(projectPath, path, { parentPath });
+            await api.updateWorktreeMeta(project.path, path, { parentPath });
           } finally {
-            await get().refreshProjectWorktrees(projectPath);
+            await get().refreshProjectWorktrees(project);
           }
         },
 
-        setWorktreeTitle: async (projectPath, path, title) => {
+        setWorktreeTitle: async (project, path, title) => {
           const trimmed = title.trim();
-          patchEntry(set, projectPath, path, { title: trimmed || undefined });
+          patchEntry(set, project, path, { title: trimmed || undefined });
           try {
-            await api.updateWorktreeMeta(projectPath, path, { title: trimmed || null });
+            await api.updateWorktreeMeta(project.path, path, { title: trimmed || null });
           } finally {
-            await get().refreshProjectWorktrees(projectPath);
+            await get().refreshProjectWorktrees(project);
           }
         },
 
-        enableWorktreeMetadata: async (projectPath) => {
-          await api.enableWorktreeMetadata(projectPath);
-          await get().refreshProjectWorktrees(projectPath);
+        enableWorktreeMetadata: async (project) => {
+          await api.enableWorktreeMetadata(project.path);
+          await get().refreshProjectWorktrees(project);
         },
 
         dismissPendingPlan: () => {
@@ -573,41 +719,48 @@ export const useWorktreeStore = create<WorktreeState>()(
           set({ createWorktreeRequested: false });
         },
 
-        setCustomOrder: (projectPath, orderedPaths) => {
-          set((s) => ({ byProject: patchProject(s, projectPath, { customOrder: orderedPaths }) }));
+        setCustomOrder: (project, orderedPaths) => {
+          const customOrder = orderedPaths.map((path) => worktreeKey(project, path));
+          set((s) => ({ byProject: patchProject(s, project, { customOrder }) }));
         },
 
-        toggleArchived: (projectPath, wtPath) => {
+        toggleArchived: (project, wtPath) => {
           set((s) => {
-            const ps = getProject(s, projectPath);
+            const ps = getProject(s, project);
+            const archived = toggleArchivedPaths(
+              ps.worktrees,
+              pathsOn(project, ps.archivedRefs ?? []),
+              wtPath,
+            );
             return {
-              byProject: patchProject(s, projectPath, {
-                archivedPaths: toggleArchivedPaths(ps.worktrees, ps.archivedPaths ?? [], wtPath),
+              byProject: patchProject(s, project, {
+                archivedRefs: archived.map((path) => worktreeKey(project, path)),
               }),
             };
           });
         },
 
-        markArchived: (projectPath, wtPath) => {
+        markArchived: (project, wtPath) => {
+          const key = worktreeKey(project, wtPath);
           set((s) => {
-            const current = getProject(s, projectPath).archivedPaths ?? [];
-            if (current.includes(wtPath)) return {};
-            return {
-              byProject: patchProject(s, projectPath, { archivedPaths: [...current, wtPath] }),
-            };
+            const current = getProject(s, project).archivedRefs ?? [];
+            if (current.includes(key)) return {};
+            return { byProject: patchProject(s, project, { archivedRefs: [...current, key] }) };
           });
         },
 
-        toggleArchiveOpen: (projectPath) => {
-          set((s) => ({ openArchives: [...toggleSet(new Set(s.openArchives), projectPath)] }));
+        toggleArchiveOpen: (project) => {
+          const key = formatWorktreeRef(project);
+          set((s) => ({ openArchives: [...toggleSet(new Set(s.openArchives), key)] }));
         },
 
-        toggleCollapsed: (projectPath, wtPath) => {
+        toggleCollapsed: (project, wtPath) => {
+          const key = worktreeKey(project, wtPath);
           set((s) => {
-            const current = getProject(s, projectPath).collapsedPaths ?? [];
+            const current = getProject(s, project).collapsedRefs ?? [];
             return {
-              byProject: patchProject(s, projectPath, {
-                collapsedPaths: [...toggleSet(new Set(current), wtPath)],
+              byProject: patchProject(s, project, {
+                collapsedRefs: [...toggleSet(new Set(current), key)],
               }),
             };
           });
@@ -615,11 +768,11 @@ export const useWorktreeStore = create<WorktreeState>()(
 
         reset: () => {
           refreshRequestIds.clear();
-          removingPaths.clear();
-          creatingPaths.clear();
+          removingKeys.clear();
+          creatingKeys.clear();
           set({
             byProject: {},
-            activeWorktreePath: null,
+            ...activeWorktreeFields(null),
             pendingAddPlan: null,
             pendingRemovePlan: null,
             createWorktreeRequested: false,
@@ -629,7 +782,15 @@ export const useWorktreeStore = create<WorktreeState>()(
       }),
       {
         name: `${STORAGE_PREFIX}-worktrees`,
-        storage: createJSONStorage(() => serverWorktreesStorage),
+        // Lists saved before they held refs hold bare paths, which name the window's server, so
+        // they load once it is known.
+        storage: createJSONStorage(() => ({
+          ...serverWorktreesStorage,
+          getItem: async (name: string) => {
+            await whenLocalServerKnown();
+            return serverWorktreesStorage.getItem(name);
+          },
+        })),
         partialize: (state) => ({ byProject: persistedProjectStates(state.byProject) }),
         merge: (persisted, current) => {
           if (!persisted || typeof persisted !== "object" || !("byProject" in persisted)) {
@@ -637,7 +798,11 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
           return {
             ...current,
-            byProject: mergePersistedProjectStates(current.byProject, persisted.byProject),
+            byProject: mergePersistedProjectStates(
+              current.byProject,
+              persisted.byProject,
+              localServerId(),
+            ),
           };
         },
       },
@@ -646,21 +811,35 @@ export const useWorktreeStore = create<WorktreeState>()(
 );
 
 useWorktreeStore.subscribe(
-  (s) => s.activeWorktreePath,
-  (path) => {
-    if (path) {
-      sessionStorage.setItem(ACTIVE_WT_SESSION_KEY, path);
+  (s) => s.activeWorktree,
+  (wt) => {
+    if (wt) {
+      sessionStorage.setItem(ACTIVE_WT_SESSION_KEY, formatWorktreeRef(wt));
     } else {
       sessionStorage.removeItem(ACTIVE_WT_SESSION_KEY);
     }
   },
 );
 
+/** A worktree in this window's lists, as a ref, with its entry. */
+export interface ListedWorktree {
+  ref: WorktreeRef;
+  entry: WorktreeEntry;
+}
+
+/** Every worktree in this window's lists (not the regular repos' root checkouts). */
+export function listedWorktrees(): ListedWorktree[] {
+  return projectEntries(useWorktreeStore.getState().byProject).flatMap(([key, ps]) => {
+    const project = parseWorktreeRef(key);
+    if (!project) return [];
+    return ps.worktrees.map((entry) => ({ ref: worktreeRef(project.server, entry.path), entry }));
+  });
+}
+
 /** Whether `path` is a worktree or a regular project's root checkout in this window's lists. */
 export function isListedWorktree(path: string): boolean {
-  const { byProject } = useWorktreeStore.getState();
   return (
-    Object.values(byProject).some((ps) => ps.worktrees.some((wt) => wt.path === path)) ||
+    listedWorktrees().some(({ ref }) => ref.path === path) ||
     useProjectStore.getState().projects.some((p) => !p.isBare && p.path === path)
   );
 }
@@ -669,15 +848,15 @@ export function isListedWorktree(path: string): boolean {
  * Drop the client state of a removed worktree and stop listening to it, so a worktree later created
  * at the same path starts fresh. `discarded`: the user removed it in Loxel, giving up what it held.
  */
-function releaseWorktree(path: string, discarded = false): void {
+function releaseWorktree(wt: WorktreeRef, discarded = false): void {
+  const { path } = wt;
   purgeWorktreeStores(path);
   closeLayoutBrowserPages(path);
   purgeWorktreeCache(path);
   useFileSearchStore.getState().purgeWorktree(path);
-  const ref = localRef(path);
   const homeServer = localServerId();
   queryClient.removeQueries({
-    predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, ref, homeServer),
+    predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, wt, homeServer),
   });
   wsClient.unsubscribeWorktree(path);
   dispatchLoxelEvent("loxel-worktree-gone", { wtPath: path, discarded });
@@ -718,20 +897,22 @@ type SetFn = (
  * does not have yet (git had not registered them when it was read) are kept.
  */
 function withRequestsInFlight(
+  project: WorktreeRef,
   listed: readonly WorktreeEntry[],
   current: readonly WorktreeEntry[],
 ): WorktreeEntry[] {
   const listedPaths = new Set(listed.map((wt) => wt.path));
   const stillCreating = current.filter(
-    (wt) => creatingPaths.has(wt.path) && !listedPaths.has(wt.path),
+    (wt) => creatingKeys.has(worktreeKey(project, wt.path)) && !listedPaths.has(wt.path),
   );
-  return [...listed.map(withPendingMarker), ...stillCreating];
+  return [...listed.map((wt) => withPendingMarker(project, wt)), ...stillCreating];
 }
 
 /** A listed worktree with the marker of the request in flight for it, if any. */
-function withPendingMarker(wt: WorktreeEntry): WorktreeEntry {
-  if (removingPaths.has(wt.path)) return { ...wt, pending: "removing" };
-  if (creatingPaths.has(wt.path)) return { ...wt, pending: "creating" };
+function withPendingMarker(project: WorktreeRef, wt: WorktreeEntry): WorktreeEntry {
+  const key = worktreeKey(project, wt.path);
+  if (removingKeys.has(key)) return { ...wt, pending: "removing" };
+  if (creatingKeys.has(key)) return { ...wt, pending: "creating" };
   return wt;
 }
 
@@ -739,65 +920,67 @@ function withPendingMarker(wt: WorktreeEntry): WorktreeEntry {
 function startCreate(
   set: SetFn,
   get: () => WorktreeState,
-  projectPath: string,
+  project: WorktreeRef,
   worktreePath: string,
   name: string,
   options: CreateWorktreeOptions,
 ): CreateStarted {
+  const key = worktreeKey(project, worktreePath);
   // The dialog closes once a create starts, so the same name can be submitted again meanwhile.
-  if (creatingPaths.has(worktreePath)) {
+  if (creatingKeys.has(key)) {
     throw new Error(`Worktree '${name}' is already being created`);
   }
-  creatingPaths.add(worktreePath);
-  addOptimisticEntry(set, projectPath, worktreePath, name, options);
-  return { created: finishCreate(set, get, projectPath, worktreePath, name, options) };
+  creatingKeys.add(key);
+  addOptimisticEntry(set, project, worktreePath, name, options);
+  return { created: finishCreate(set, get, project, worktreePath, name, options) };
 }
 
 async function finishCreate(
   set: SetFn,
   get: () => WorktreeState,
-  projectPath: string,
+  project: WorktreeRef,
   worktreePath: string,
   name: string,
   options: CreateWorktreeOptions,
 ): Promise<boolean> {
   let created = true;
   try {
-    const result = await api.createWorktree(projectPath, name, options);
-    if (result.hookSkipped) void offerToRunInitHook(projectPath, result.path);
+    const result = await api.createWorktree(project.path, name, options);
+    if (result.hookSkipped) void offerToRunInitHook(project.path, result.path);
   } catch (err) {
     created = false;
     const reason = err instanceof Error ? err.message : String(err);
-    log.warn(`Failed to create worktree '${name}'`, { projectPath, error: err });
+    log.warn(`Failed to create worktree '${name}'`, { projectPath: project.path, error: err });
     showToast(`Could not create worktree '${name}': ${reason}`);
   } finally {
-    creatingPaths.delete(worktreePath);
+    creatingKeys.delete(worktreeKey(project, worktreePath));
   }
   // Gone at once on failure; the refresh brings it back if the create got as far as git.
-  if (!created) removeOptimisticEntry(set, projectPath, worktreePath);
+  if (!created) removeOptimisticEntry(set, project, worktreePath);
   try {
-    await get().refreshProjectWorktrees(projectPath);
+    await get().refreshProjectWorktrees(project);
   } catch (err) {
     log.warn("Could not refresh the worktree list after creating a worktree", {
-      projectPath,
+      projectPath: project.path,
       error: err,
     });
     // Ready all the same; the next refresh fills in what the optimistic entry lacks.
-    if (created) patchEntry(set, projectPath, worktreePath, { pending: undefined });
+    if (created) patchEntry(set, project, worktreePath, { pending: undefined });
   }
   return created;
 }
 
 function addOptimisticEntry(
   set: SetFn,
-  projectPath: string,
+  project: WorktreeRef,
   worktreePath: string,
   name: string,
   { parentPath, title }: { parentPath?: string; title?: string },
 ): void {
-  const project = useWorktreeStore.getState().byProject[projectPath];
   const parentWtId = parentPath
-    ? project?.worktrees.find((wt) => wt.path === parentPath)?.wtId
+    ? getProject(useWorktreeStore.getState(), project).worktrees.find(
+        (wt) => wt.path === parentPath,
+      )?.wtId
     : undefined;
   const optimistic: WorktreeEntry = {
     path: worktreePath,
@@ -810,54 +993,53 @@ function addOptimisticEntry(
     ...(title ? { title } : {}),
     pending: "creating",
   };
-  if (parentPath) expand(set, projectPath, parentPath);
+  if (parentPath) expand(set, project, parentPath);
   set((s) => ({
-    byProject: patchProject(s, projectPath, {
-      worktrees: [...getProject(s, projectPath).worktrees, optimistic],
+    byProject: patchProject(s, project, {
+      worktrees: [...getProject(s, project).worktrees, optimistic],
     }),
   }));
 }
 
 /** Unfold `path`, so a worktree just nested under it is in view. */
-function expand(set: SetFn, projectPath: string, path: string): void {
+function expand(set: SetFn, project: WorktreeRef, path: string): void {
+  const key = worktreeKey(project, path);
   set((s) => {
-    const collapsed = getProject(s, projectPath).collapsedPaths;
-    if (!collapsed?.includes(path)) return {};
+    const collapsed = getProject(s, project).collapsedRefs;
+    if (!collapsed?.includes(key)) return {};
     return {
-      byProject: patchProject(s, projectPath, {
-        collapsedPaths: collapsed.filter((p) => p !== path),
-      }),
+      byProject: patchProject(s, project, { collapsedRefs: collapsed.filter((k) => k !== key) }),
     };
   });
 }
 
 function patchEntry(
   set: SetFn,
-  projectPath: string,
+  project: WorktreeRef,
   worktreePath: string,
   patch: Partial<WorktreeEntry>,
 ): void {
   set((s) => ({
-    byProject: patchProject(s, projectPath, {
-      worktrees: getProject(s, projectPath).worktrees.map((wt) =>
+    byProject: patchProject(s, project, {
+      worktrees: getProject(s, project).worktrees.map((wt) =>
         wt.path === worktreePath ? { ...wt, ...patch } : wt,
       ),
     }),
   }));
 }
 
-function removeOptimisticEntry(set: SetFn, projectPath: string, worktreePath: string): void {
+function removeOptimisticEntry(set: SetFn, project: WorktreeRef, worktreePath: string): void {
   set((s) => ({
-    byProject: patchProject(s, projectPath, {
-      worktrees: getProject(s, projectPath).worktrees.filter((wt) => wt.path !== worktreePath),
+    byProject: patchProject(s, project, {
+      worktrees: getProject(s, project).worktrees.filter((wt) => wt.path !== worktreePath),
     }),
   }));
 }
 
-function markRemoving(set: SetFn, projectPath: string, worktreePath: string): void {
+function markRemoving(set: SetFn, project: WorktreeRef, worktreePath: string): void {
   set((s) => ({
-    byProject: patchProject(s, projectPath, {
-      worktrees: getProject(s, projectPath).worktrees.map((wt) =>
+    byProject: patchProject(s, project, {
+      worktrees: getProject(s, project).worktrees.map((wt) =>
         wt.path === worktreePath ? { ...wt, pending: "removing" } : wt,
       ),
     }),

@@ -5,6 +5,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 
+import { formatWorktreeRef } from "@/api/worktree-ref";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
@@ -14,7 +15,7 @@ import { restartsTerminalsOf, terminalRestartWarning } from "@/lib/update-termin
 import { cn } from "@/lib/utils";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
 import { useUpdateStatus } from "@/queries/use-update-status";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { projectOf, projectRef, useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -41,13 +42,13 @@ export function TopBar() {
   // macOS hides the traffic lights in native fullscreen (they only appear in the slide-down
   // title bar), so the inset would be an empty gap. Screenshot mode always draws them.
   const trafficLightsInset = isScreenshot || (isElectron && !fullScreen);
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
-  const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
+  const activeRef = useWorktreeStore((s) => s.activeWorktree);
+  const activeProject = useProjectStore((s) => projectOf(activeRef, s.projects));
   const activeWorktree = useWorktreeStore((s) => {
-    if (!s.activeWorktreePath || !activeProject) return null;
-    const wts = s.byProject[activeProject.path]?.worktrees;
+    if (!activeRef || !activeProject) return null;
+    const wts = s.byProject[formatWorktreeRef(projectRef(activeProject))]?.worktrees;
     if (!wts) return null;
-    return wts.find((w) => w.path === s.activeWorktreePath) ?? null;
+    return wts.find((w) => w.path === activeRef.path) ?? null;
   });
   const activeWorktreeName = activeWorktree
     ? (activeWorktree.branch ?? activeWorktree.path.split("/").pop() ?? "worktree")

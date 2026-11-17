@@ -6,7 +6,8 @@ export type ServerId = string & { readonly serverIdBrand: unique symbol };
 
 /** The one way a string becomes a {@link ServerId}: a `serverId` a server sent. */
 export function toServerId(id: string): ServerId {
-  if (id === "" || id.includes(":")) throw new Error(`Not a server id: ${JSON.stringify(id)}`);
+  if (id === "" || id.includes(":") || id.includes("/"))
+    throw new Error(`Not a server id: ${JSON.stringify(id)}`);
   return id as ServerId;
 }
 
@@ -41,16 +42,22 @@ export function isWorktreeRef(value: unknown): value is WorktreeRef {
 }
 
 /**
- * The string form of a ref, `<serverId>:<path>`, for a `Map` or a persisted key. A server id holds
- * no `:`, so the first one ends it.
+ * The string form of a ref, `<serverId>:<path>`, for a `Map`, a `Set` or a persisted key. Branded,
+ * so a bare path can't stand in for one.
  */
-export function formatWorktreeRef(ref: WorktreeRef): string {
-  return `${ref.server}:${ref.path}`;
+export type WorktreeRefKey = string & { readonly worktreeRefKeyBrand: unique symbol };
+
+/** The {@link WorktreeRefKey} of `ref`. A server id holds no `:`, so the first one ends it. */
+export function formatWorktreeRef(ref: WorktreeRef): WorktreeRefKey {
+  return `${ref.server}:${ref.path}` as WorktreeRefKey;
 }
 
 /** The ref {@link formatWorktreeRef} wrote; null for a string it could not have written. */
 export function parseWorktreeRef(text: string): WorktreeRef | null {
   const separator = text.indexOf(":");
   if (separator <= 0 || separator === text.length - 1) return null;
-  return worktreeRef(toServerId(text.slice(0, separator)), text.slice(separator + 1));
+  const server = text.slice(0, separator);
+  // A server id holds no `/`, so this is a bare path with a `:` in it.
+  if (server.includes("/")) return null;
+  return worktreeRef(toServerId(server), text.slice(separator + 1));
 }

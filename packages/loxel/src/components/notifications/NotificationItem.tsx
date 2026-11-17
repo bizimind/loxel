@@ -8,7 +8,7 @@ import { NotificationSiteMenu } from "@/components/menus/NotificationSiteMenu";
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { cn } from "@/lib/utils";
-import { usePanelNotificationStore } from "@/store/panel-notifications";
+import { type ClientNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 import { useSettingsStore } from "@/store/settings-store";
 
 const URGENCY_COLORS: Record<ServerNotification["urgency"], string> = {
@@ -64,7 +64,7 @@ export function NotificationItem({
   stack,
   inGroup = false,
 }: {
-  notification: ServerNotification;
+  notification: ClientNotification;
   onNavigate?: () => void;
   /** Show this notification as the face of its site's collapsed group. */
   stack?: NotificationStack;

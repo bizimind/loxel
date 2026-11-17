@@ -4,10 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 import type { FileDiff } from "@/api/diff-model";
+import { localRef } from "@/api/local-server";
 import type { DiffSide } from "@/components/diff/SideBySideDiffView";
 import { useEditorStateStore } from "@/store/editor-state";
 import { getWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 const WT = "/repo";
 
@@ -103,7 +104,7 @@ describe("GitSideBySideDiffView", () => {
     saveEditorContent.mockClear();
     headContent = "one\ntwo\nthree\n";
     diskContent = "one\n2\nthree\n";
-    useWorktreeStore.setState({ activeWorktreePath: WT });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
     getWorktreeUI(WT).getState().setSelectedDiffFile("src/a.ts");
   });
   afterEach(cleanup);
