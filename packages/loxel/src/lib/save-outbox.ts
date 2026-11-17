@@ -422,15 +422,17 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
   }
   // Send what the editor shows now, which can be ahead of the entry (typing since the last
   // autosave) or merged with the disk: writing the entry's older content would make its echo
-  // look like a change to merge back into the editor, undoing that typing. This also cancels the
-  // editor's pending autosave.
+  // look like a change to merge back into the editor, undoing that typing. Taking it also cancels
+  // the editor's pending autosave.
   const now = ownerEditor(entry);
   const pending = now?.takePendingEdit?.();
   await writeEditorContent(
     entry.filePath,
     pending?.content ?? now?.getEditorContent?.() ?? entry.content,
     entry.worktreePath,
-    pending ? pending.options : entry.options,
+    // The entry's options, not the pending edit's: those are always the explicit-save ones, and
+    // a queued autosave must not format unless format-on-autosave is on.
+    entry.options,
     entry.editorKey,
   );
   return hasQueuedSave(current) ? "unavailable" : "done";

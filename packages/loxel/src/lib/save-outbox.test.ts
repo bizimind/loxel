@@ -14,7 +14,7 @@ mock.module("@/lib/open-path", () => ({
 
 // The files on disk, the writes that reached them, and how the server answers writes.
 let disk: Record<string, string> = {};
-let writes: Array<{ path: string; content: string }> = [];
+let writes: Array<{ path: string; content: string; format?: boolean }> = [];
 let serverDown = false;
 let refuseWrites = false;
 /** Paths the server answers with a plain 404, as for a worktree it has no resources for. */
@@ -29,10 +29,10 @@ mock.module("@/api/client", () => ({
     if (content === undefined) throw new actualClient.ApiError("File not found", 404, "ENOENT");
     return { content };
   },
-  writeFileContent: async (options: { path: string; content: string }) => {
+  writeFileContent: async (options: { path: string; content: string; format?: boolean }) => {
     if (serverDown) throw new TypeError("Failed to fetch");
     if (refuseWrites) throw new actualClient.ApiError("Permission denied", 500);
-    writes.push({ path: options.path, content: options.content });
+    writes.push({ path: options.path, content: options.content, format: options.format });
     disk[options.path] = options.content;
     return { success: true, content: options.content };
   },
@@ -171,6 +171,21 @@ describe("open editor", () => {
     serverDown = false;
     await retryQueuedSaves();
     expect(disk[FILE]).toBe("a\nb\nc\nd\nTYPED\n");
+  });
+
+  test("a retried autosave keeps its own format options", async () => {
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+    // The pending edit carries the explicit-save options, as `takePendingEdit` does.
+    useEditorStateStore
+      .getState()
+      .registerPendingEdit(FILE, () => ({ content: text.current, options: { format: true } }));
+    serverDown = true;
+    await saveEditorContent(FILE, text.current, "/repo"); // an autosave: no format options
+
+    serverDown = false;
+    await retryQueuedSaves();
+    expect(writes.at(-1)?.format).toBeUndefined();
   });
 
   test("a second external change does not undo edits kept through the first", async () => {
