@@ -75,9 +75,10 @@ export function externalFolderConflict(
 }
 
 /**
- * Heavy per-worktree resources, created when a client subscribes and destroyed
- * when the last subscriber disconnects. Multiple worktrees can have active
- * resources simultaneously.
+ * Heavy per-worktree resources, created when a client subscribes and destroyed a grace period
+ * (`config.worktreeGraceMs`) after the last subscriber left, unless one subscribes again first.
+ * Removing the worktree or shutting down destroys them at once. Multiple worktrees can have
+ * active resources simultaneously.
  */
 export interface WorktreeResources {
   /** Key into the projects map (resolved git root). */
@@ -148,7 +149,7 @@ export interface ClientState {
 /** A language-server manager rooted at a worktree, as `server.ts` drives it. */
 export interface WorktreeLspServer {
   readonly name: LspName;
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void;
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string, freshServer?: boolean): void;
   destroySession(ws: ServerWebSocket<unknown>): void;
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
@@ -158,6 +159,8 @@ export interface WorktreeLspServer {
    * may run more than once for a path, and for one the server never served.
    */
   forgetWorktree?(wtPath: string): void;
+  /** Stop the servers of `wtPath` kept for a new socket after theirs went: the worktree is gone. */
+  stopWaitingSessions?(wtPath: string): void;
   /** May settle once its processes have exited; server shutdown waits for that. */
   destroy(): void | Promise<void>;
 }
@@ -166,6 +169,8 @@ export interface WorktreeLspData {
   type: LspName;
   wtPath: string;
   manager: WorktreeLspServer;
+  /** The client asked for a server started afresh, not one an earlier socket left running. */
+  freshServer: boolean;
 }
 
 /** WS data tag for routing app vs language-server connections. */

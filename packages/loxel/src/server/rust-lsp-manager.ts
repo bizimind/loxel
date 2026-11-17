@@ -30,6 +30,7 @@ import {
 } from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
 import {
+  sendWarning,
   type SpawnOptions,
   type SuppressibleFeature,
   WorktreeLspManager,
@@ -70,9 +71,6 @@ interface SessionState {
 /** JSON-RPC's `MethodNotFound`. */
 const METHOD_NOT_FOUND = -32601;
 
-/** LSP `MessageType.Warning`. */
-const MESSAGE_TYPE_WARNING = 2;
-
 /**
  * How many projects a session adds for opened files. Each stays loaded until the server restarts,
  * and a project the size of ripgrep already takes 500 MB or more.
@@ -101,8 +99,8 @@ export class RustLspManager extends WorktreeLspManager {
     "textDocument/formatting",
     "textDocument/rangeFormatting",
   ];
-  /** What each session has told the user already. */
-  private readonly reported = new WeakMap<WtLspSession, Set<string>>();
+  /** What each session has told the user already, by kind. */
+  private readonly reported = new WeakMap<WtLspSession, Map<string, string>>();
   /** What each start decided, from `resolveBinary` on. */
   private readonly plans = new WeakMap<WtLspContext, RustAnalyzerPlan>();
   private readonly states = new WeakMap<WtLspSession, SessionState>();
@@ -289,7 +287,7 @@ export class RustLspManager extends WorktreeLspManager {
     // A request still gets its answer; a notification has none.
     if (blocked.id === undefined) return;
     const error = { code: METHOD_NOT_FOUND, message: `${blocked.method} is not available` };
-    session.ws.send(JSON.stringify({ jsonrpc: "2.0", id: blocked.id, error }));
+    this.sendToClient(session, JSON.stringify({ jsonrpc: "2.0", id: blocked.id, error }));
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {
@@ -314,12 +312,17 @@ export class RustLspManager extends WorktreeLspManager {
 
   /** Tell the user, through the client's `showMessages`, once per session and kind. */
   private report(session: WtLspSession, kind: string, message: string): void {
-    const reported = this.reported.get(session) ?? new Set();
+    const reported = this.reported.get(session) ?? new Map<string, string>();
     this.reported.set(session, reported);
     if (reported.has(kind)) return;
-    reported.add(kind);
-    const params = { type: MESSAGE_TYPE_WARNING, message };
-    session.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "window/showMessage", params }));
+    reported.set(kind, message);
+    sendWarning(session.ws, message);
+  }
+
+  /** A window that took the server over has not seen what the last one was told. */
+  protected override onClientAdopted(session: WtLspSession): void {
+    for (const message of this.reported.get(session)?.values() ?? [])
+      sendWarning(session.ws, message);
   }
 
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
@@ -525,7 +528,7 @@ export class RustLspManager extends WorktreeLspManager {
   /** Once a manifest changed, what failed may load now, and a new failure is worth telling. */
   private forgetProjectReports(session: WtLspSession): void {
     const reported = this.reported.get(session);
-    for (const kind of reported ?? []) {
+    for (const kind of [...(reported?.keys() ?? [])]) {
       if (kind === "project" || kind.startsWith("project:")) reported?.delete(kind);
     }
   }

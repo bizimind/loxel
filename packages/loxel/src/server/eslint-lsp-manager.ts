@@ -13,9 +13,13 @@ import {
   type LinterLaunch,
   type LinterNoLaunch,
   ProjectLinterLspManager,
-  sendWarning,
 } from "./project-linter-lsp-manager";
-import type { SuppressibleFeature, WtLspContext, WtLspSession } from "./stdio-lsp-manager";
+import {
+  sendWarning,
+  type SuppressibleFeature,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 import { documentPath } from "./ts-lsp-manager";
 
 const SERVER_FILE = path.join("eslint-language-server", "eslintServer.cjs");

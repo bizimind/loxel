@@ -43,15 +43,17 @@ The renderer's WebSocket client reconnects on its own, with backoff, so windows 
 
 The server keeps state at these scopes (`src/server/server-state.ts`):
 
-| Scope                    | Lifetime                              | Shared across windows?                                                                                                                             |
-| ------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ProjectState`           | per registered repo, server lifetime  | Yes — one watcher, review database and worktree status list per repo                                                                               |
-| `WorktreeResources`      | first subscriber to last              | Yes — file services and undo/redo history are shared by every window on the worktree                                                               |
-| `ClientState`            | per app WebSocket connection          | No — its terminals, subscriptions and window ID belong to that connection                                                                          |
-| Terminal sessions        | create to destroy, in a terminal host | No — output goes to the owning connection; sessions detach on disconnect and can be reattached, also by the next server process                    |
-| Language-server sessions | per language-server WebSocket         | Partly — worktree-scoped managers keep one process per worktree path (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
+| Scope                    | Lifetime                                                            | Shared across windows?                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProjectState`           | per registered repo, server lifetime                                | Yes — one watcher, review database and worktree status list per repo                                                                               |
+| `WorktreeResources`      | first subscriber to 5 minutes after the last                        | Yes — file services and undo/redo history are shared by every window on the worktree                                                               |
+| `ClientState`            | per app WebSocket connection                                        | No — its terminals, subscriptions and window ID belong to that connection                                                                          |
+| Terminal sessions        | create to destroy, in a terminal host                               | No — output goes to the owning connection; sessions detach on disconnect and can be reattached, also by the next server process                    |
+| Language-server sessions | per language-server WebSocket, then 60 s for a new one to take over | Partly — worktree-scoped managers keep one process per worktree path (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
 
 Undo/redo is per worktree, so two windows on the same worktree share one history; that matches the single filesystem they both edit.
+
+Disconnects are expected to be short (a reload, a network blip, a look at another worktree), so neither kind of state ends with its last connection. When the last subscriber of a worktree leaves, by `unsubscribe_worktree` or by its socket closing, its `WorktreeResources` stay for `config.worktreeGraceMs` (5 minutes, `LOXEL_WORKTREE_GRACE_MS`), the wait an orphaned terminal gets too. The watchers keep running meanwhile, so the caches stay current, and a save or undo that arrives in the meantime finds the worktree. A subscribe within the period adopts the resources unchanged, undo history included; otherwise they are torn down when it ends. Removing the worktree, closing its project and shutting down tear them down at once. Every subscribe, adopting or not, answers that socket alone with `worktree_files_resynced`, since whatever the client cached was not kept up to date while it was not subscribed; a directory reaches it with changes again once it lists that directory again. Language-server sessions get a grace period of their own, described in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md#lifecycle).
 
 ## Persistent state
 

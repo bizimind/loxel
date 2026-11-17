@@ -65,7 +65,7 @@ Only a file's own tab is moved or closed by `handleFileMoved` and `handleFileDel
 
 The HTTP response is not the completion signal: the `saving → clean` transition is driven by the echo. It does make the written content the merge base (`markWritten`, for the newest save in flight only), so a save whose echo is lost to a disconnect is not later mistaken for an external change. The response's (possibly formatted) content is stashed by nonce for 2 s so the echo handler can use it instead of refetching (`consumeSavedContent`). If no echo arrives within 10 s the nonce is dropped and the file returns to dirty. Pending saves are counted per worktree, and [useWsSubscription.ts](../src/hooks/useWsSubscription.ts) defers unsubscribing a worktree until `onWorktreeSavesDrained` fires so echoes are not lost on a worktree switch. Because all windows share one server and one nonce store, the saving window sees its own echo while other windows see an external change; see [SHARED_SERVER.md](SHARED_SERVER.md) and, for the watchers that produce events, [WATCHERS.md](WATCHERS.md).
 
-A `worktree_files_resynced` message (after a watcher pause/resume) invalidates clean editors' queries and pushes fresh content for every non-clean editor through `handleDiskChange` with no nonces.
+A `worktree_files_resynced` message (after a watcher pause/resume, and to a socket each time it subscribes to the worktree) invalidates clean editors' queries and pushes fresh content for every non-clean editor through `handleDiskChange` with no nonces.
 
 ### Save outbox
 

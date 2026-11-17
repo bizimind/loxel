@@ -10,11 +10,12 @@ import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import { HOME_KEY } from "@/api/home-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { BIN_HEADER_SIZE, BIN_MSG_INPUT, parseBinaryHeader } from "@/api/terminal-stream";
-import type {
-  FileMoveSource,
-  TerminalSpawnTarget,
-  WsClientMessage,
-  WsMessage,
+import {
+  type FileMoveSource,
+  LSP_FRESH_SERVER_PARAM,
+  type TerminalSpawnTarget,
+  type WsClientMessage,
+  type WsMessage,
 } from "@/api/ws-protocol";
 import { STOPPING_SERVER_WAIT_MS, type ShutdownTerminals } from "@/parent-channel-protocol";
 import { TerminalHostPool, currentHostBuildId } from "@/terminal-host";
@@ -35,6 +36,7 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { gitExecClient } from "./git-exec-client";
+import { GracePeriods } from "./grace-periods";
 import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -196,6 +198,8 @@ const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
 /** Worktrees whose callbacks must stay quiescent while removal is attempted. */
 const suspendedWorktrees = new Set<string>();
+/** Worktrees nobody subscribes to, whose resources are kept for a subscriber to come back. */
+const worktreeGrace = new GracePeriods<string>(config.worktreeGraceMs);
 
 /** Find the project that owns the given path: under its cwd or its worktrees dir. */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
@@ -573,13 +577,25 @@ function createFilesService(
 
 // --- Subscription management ---
 
+/**
+ * Tell a new subscriber to refetch the worktree's file queries: whatever it cached was not kept up
+ * to date while it was not subscribed (a reload, a reconnect, a look at another worktree). A
+ * directory's changes reach it again once it lists that directory again.
+ */
+function sendFilesResynced(ws: ServerWebSocket<WsData>, wtPath: string, projectPath: string): void {
+  sendTo(ws, { type: "worktree_files_resynced", wtPath, projectPath });
+}
+
 async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): Promise<void> {
   const existing = wtResources.get(wtPath);
   if (existing) {
+    // Within its grace period the worktree is adopted as it is, undo history included.
+    if (worktreeGrace.cancel(wtPath)) log.info(`Worktree resources adopted: ${wtPath}`);
     existing.subscribers.add(ws);
     const clientState = clients.get(ws);
     if (clientState) clientState.subscribedWorktrees.add(wtPath);
     log.debug(`Client subscribed to ${wtPath} (${existing.subscribers.size} subscribers)`);
+    sendFilesResynced(ws, wtPath, existing.projectPath);
     return;
   }
 
@@ -684,24 +700,30 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   });
   // Same for the Others section, which starts with the folders restored from the last session.
   broadcastOthers(wtPath);
+  sendFilesResynced(ws, wtPath, project.cwd);
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources) return;
 
-  resources.subscribers.delete(ws);
+  // A repeated unsubscribe must not start the grace period again.
+  if (!resources.subscribers.delete(ws)) return;
   const clientState = clients.get(ws);
   if (clientState) clientState.subscribedWorktrees.delete(wtPath);
 
   if (resources.subscribers.size === 0) {
-    teardownWorktreeResources(wtPath, resources);
+    log.info(`Worktree resources kept for ${config.worktreeGraceMs} ms: ${wtPath}`);
+    worktreeGrace.start(wtPath, () => {
+      if (wtResources.get(wtPath) === resources) teardownWorktreeResources(wtPath, resources);
+    });
   } else {
     log.debug(`Client unsubscribed from ${wtPath} (${resources.subscribers.size} remaining)`);
   }
 }
 
 function teardownWorktreeResources(wtPath: string, resources: WorktreeResources): void {
+  worktreeGrace.cancel(wtPath);
   suspendedWorktrees.delete(wtPath);
   resources.worktreeWatcher?.stop();
   resources.filesService.stop();
@@ -746,6 +768,7 @@ function forgetWorktreeInLanguageServers(wtPath: string): void {
 
 /** Stop serving a worktree path that no longer exists. */
 function releaseWorktreeResources(wtPath: string): void {
+  for (const manager of worktreeLspManagers) manager.stopWaitingSessions?.(wtPath);
   forgetWorktreeInLanguageServers(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
@@ -1474,6 +1497,7 @@ async function serveRequest(
       type: worktreeLspManager.name,
       wtPath,
       manager: worktreeLspManager,
+      freshServer: url.searchParams.has(LSP_FRESH_SERVER_PARAM),
     });
     if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
     return undefined;
@@ -1522,7 +1546,7 @@ const server = Bun.serve<WsData>({
       }
       const worktreeLsp = worktreeLspData(ws);
       if (worktreeLsp) {
-        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath);
+        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath, worktreeLsp.freshServer);
         return;
       }
       if (shuttingDown) {

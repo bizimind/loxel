@@ -229,7 +229,7 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
       super.handleClientData(session, data);
       return;
     }
-    session.ws.send(JSON.stringify({ jsonrpc: "2.0", id, result: [] }));
+    this.sendToClient(session, JSON.stringify({ jsonrpc: "2.0", id, result: [] }));
   }
 }
 

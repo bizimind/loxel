@@ -167,7 +167,7 @@ export class TsLspManager extends WorktreeLspManager {
     // Server→client requests we fulfill locally (TypeScript blocks on
     // workspace/configuration until we answer).
     if (this.handleServerRequest(session, body)) return;
-    session.ws.send(toClientUris(body));
+    this.sendToClient(session, toClientUris(body));
   }
 
   // ---------------------------------------------------------------------------
