@@ -16,12 +16,12 @@ mock.module("@/api/client", () => ({
 mock.module("@/queries/query-helpers", () => ({ invalidateDirQueries: () => {} }));
 
 const { getWorktreeUI } = await import("@/store/worktree-ui");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { deleteFile, moveFile, renameFile } = await import("./file-operations");
 
 // A language-server edit of worktree /repo finishing after the user switched to /other.
 beforeEach(() => {
-  useWorktreeStore.setState({ activeWorktreePath: "/other" });
+  useWorktreeStore.setState(activeWorktreeFields(localRef("/other")));
   getWorktreeUI(localRef("/other")).getState().setSelectedProjectFile("/repo/a.py");
 });
 

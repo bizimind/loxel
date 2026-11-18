@@ -11,12 +11,11 @@ import { wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import { localRef, localServerId } from "@/api/local-server";
 import type { DirEntry } from "@/api/project-files-model";
-import type { EnrichedProject } from "@/api/project-model";
 import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { queryClient } from "@/query-client";
-import { useProjectStore } from "@/store/projects";
+import { type ListedProject, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { queryKeys } from "./query-keys";
@@ -52,7 +51,7 @@ beforeAll(() => {
     return () => {};
   });
   useProjectStore.setState({
-    projects: [{ path: PROJECT_PATH } as EnrichedProject],
+    projects: [{ server: localServerId(), path: PROJECT_PATH } as ListedProject],
     fetchProjects,
   });
   useWorktreeStore.setState({ refreshProjectWorktrees });
@@ -144,7 +143,7 @@ describe("useWsBridge git messages", () => {
   test("worktrees_changed refreshes that project's worktree list", () => {
     deliver({ type: "worktrees_changed", data: { projectPath: PROJECT_PATH } });
 
-    expect(refreshProjectWorktrees.mock.calls).toEqual([[PROJECT_PATH] as never]);
+    expect(refreshProjectWorktrees.mock.calls).toEqual([[localRef(PROJECT_PATH)] as never]);
     expect(setQueryData).not.toHaveBeenCalled();
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
@@ -165,7 +164,9 @@ describe("useWsBridge after a reconnect", () => {
     expect(matchedByPredicates(keys)).toEqual(keys.slice(0, -1));
     expect(fetchProjects).toHaveBeenCalledTimes(1);
     // Worktrees removed meanwhile are released by the per-project refresh.
-    await waitFor(() => expect(refreshProjectWorktrees).toHaveBeenCalledWith(PROJECT_PATH));
+    await waitFor(() =>
+      expect(refreshProjectWorktrees).toHaveBeenCalledWith(localRef(PROJECT_PATH)),
+    );
   });
 });
 

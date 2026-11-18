@@ -3,9 +3,10 @@
  * knobs and lines sit on the collapsed rail and in the expanded list, and how wide the rail is.
  */
 import type { WorktreeEntry } from "@/api/git-models";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { TREE_INDENT_STEP } from "@/components/tree";
 import type { WorktreeNode } from "@/lib/worktree-hierarchy";
-import { getWorktreeTrees, type ProjectState } from "@/store/worktrees";
+import { getWorktreeTrees, projectListPaths, type ProjectState } from "@/store/worktrees";
 
 /** Worktree icons are this size at every nesting level. */
 export const ICON_PX = 24;
@@ -35,8 +36,8 @@ export function railWidth(depth: number): number {
  * The deepest nesting level the collapsed rail shows for a project: open groups only, at most
  * `RAIL_LEVELS`, and the Archive's worktrees one level in when it is open.
  */
-export function railDepth(ps: ProjectState, archiveOpen: boolean): number {
-  const collapsed = new Set(ps.collapsedPaths);
+export function railDepth(project: WorktreeRef, ps: ProjectState, archiveOpen: boolean): number {
+  const collapsed = new Set(projectListPaths(project, ps).collapsed);
   const deepest = (nodes: readonly WorktreeNode<WorktreeEntry>[], level: number): number =>
     Math.max(
       -1,
@@ -46,6 +47,6 @@ export function railDepth(ps: ProjectState, archiveOpen: boolean): number {
           : level,
       ),
     );
-  const { listed, archived } = getWorktreeTrees(ps);
+  const { listed, archived } = getWorktreeTrees(project, ps);
   return Math.max(0, deepest(listed, 0), archiveOpen ? deepest(archived, 1) : 0);
 }

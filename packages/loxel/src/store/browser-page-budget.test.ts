@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 
 import type { DockviewPanelApi } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
 import type { BrowserPageUsage } from "@/electron/browser-page-protocol";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
@@ -19,7 +20,7 @@ import {
   useBrowserPages,
 } from "./browser-pages";
 import { useSettingsStore } from "./settings-store";
-import { useWorktreeStore } from "./worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "./worktrees";
 
 const MINUTE = 60_000;
 const GB = 1024 * 1024;
@@ -119,7 +120,7 @@ describe("reviewing background pages", () => {
       getBrowserPageUsage: async () => ({ totalMemoryKB: TOTAL_KB, pages: [used] }),
       setBrowserPageFrozen,
     });
-    useWorktreeStore.setState({ activeWorktreePath: "/wt/shown" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt/shown")));
     useSettingsStore.setState((s) => ({ browser: { ...s.browser, backgroundTabs: "balanced" } }));
     attachBrowserPage("busy", { layoutKey: "/wt/a", url: "https://busy.test/", slot });
     setBrowserPageWebContents("busy", GUEST);

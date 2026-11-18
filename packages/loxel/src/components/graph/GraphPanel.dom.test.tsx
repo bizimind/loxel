@@ -11,7 +11,7 @@ import {
 } from "@/store/worktree-cache";
 import { purgeWorktreeStores } from "@/store/worktree-store";
 import { getWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 mock.module("@/components/panels/BranchPanel", () => ({ BranchPanel: () => null }));
 mock.module("./CommitGraph", () => ({ CommitGraph: () => null }));
@@ -81,7 +81,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
-  useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+  useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
 });
 
 afterEach(() => {

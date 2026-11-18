@@ -3,6 +3,7 @@ import { afterEach, describe, expect, jest, mock, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { localRef } from "@/api/local-server";
 import type { RustToolchainResponse } from "@/api/rust-toolchain-model";
 
 const ACTIVE: RustToolchainResponse = {
@@ -47,7 +48,7 @@ mock.module("@/store/tools-bar", () => ({
   subscribeCenterApi: () => () => {},
 }));
 
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { RustToolchainStatus } = await import("./RustToolchainStatus");
 
 function renderStatus() {
@@ -67,7 +68,7 @@ afterEach(() => {
 
 describe("RustToolchainStatus", () => {
   test("shows and selects the toolchain of the active panel's worktree, not the active one", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: "/wt-b" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt-b")));
     renderStatus();
 
     const button = await screen.findByRole("button", { name: "Rust 1.99.1 (stable)" });

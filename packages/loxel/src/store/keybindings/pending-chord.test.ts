@@ -2,13 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { DockviewApi } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
 import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { registerFindTarget } from "@/lib/find-targets";
 import { registerTabRename } from "@/lib/tab-rename";
 
 import { applyStoreUpdate } from "../store-sync";
 import { setCenterApi } from "../tools-bar";
-import { useWorktreeStore } from "../worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "../worktrees";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
 import { findOverlappingActions, useKeybindingStore } from "./keybinding-store";
 import {
@@ -23,7 +24,7 @@ const key = normalizeKeyCombo;
 afterEach(() => {
   cancelPendingChord();
   useKeybindingStore.getState().resetAllOverrides();
-  useWorktreeStore.setState({ activeWorktreePath: null });
+  useWorktreeStore.setState(activeWorktreeFields(null));
 });
 
 describe("resolveKeystroke", () => {
@@ -48,7 +49,7 @@ describe("resolveKeystroke", () => {
   });
 
   test("resolves a three-step typed split chord", () => {
-    useWorktreeStore.setState({ activeWorktreePath: "/wt" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt")));
     resolveKeystroke(key("Cmd+Backslash"));
     expect(resolveKeystroke(key("T"))).toEqual({ kind: "pending" });
     expect(resolveKeystroke(key("ArrowDown"))).toEqual({

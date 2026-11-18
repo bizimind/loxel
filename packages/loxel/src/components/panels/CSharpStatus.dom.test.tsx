@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { CSharpStatusResponse } from "@/api/csharp-env-model";
+import { localRef } from "@/api/local-server";
 
 const RUNNING: CSharpStatusResponse = {
   server: {
@@ -37,7 +38,7 @@ mock.module("@/store/tools-bar", () => ({
   subscribeCenterApi: () => () => {},
 }));
 
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { CSharpStatus } = await import("./CSharpStatus");
 
 function renderStatus(client = new QueryClient()) {
@@ -56,7 +57,7 @@ afterEach(() => {
 
 describe("CSharpStatus", () => {
   test("shows and selects for the active panel's worktree, not the active one", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: "/wt-b" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt-b")));
     renderStatus();
     const button = await screen.findByRole("button", { name: "C#: All.slnx" });
     expect(getCSharpStatus.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:
 
 import type { DockviewPanelApi } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import {
@@ -19,7 +20,7 @@ import {
 } from "./browser-pages";
 import { usePanelNotificationStore } from "./panel-notifications";
 import { useSettingsStore } from "./settings-store";
-import { useWorktreeStore } from "./worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "./worktrees";
 
 const api = {} as DockviewPanelApi;
 const slots = new Map<string, HTMLElement>();
@@ -57,7 +58,7 @@ beforeEach(() => {
   useSettingsStore.setState((s) => ({ browser: { ...s.browser, notificationSites: {} } }));
   usePanelNotificationStore.setState({ panelIndex: new Set() });
   // Pages hidden here are in layouts that are not being shown.
-  useWorktreeStore.setState({ activeWorktreePath: "/wt/elsewhere" });
+  useWorktreeStore.setState(activeWorktreeFields(localRef("/wt/elsewhere")));
 });
 
 afterEach(() => {
@@ -95,7 +96,7 @@ describe("browser pages", () => {
     for (const id of ["b1", "b2"]) hide(id);
     show("a1", "/wt/a");
     // Switching to B: A's panel unmounts before B's mount.
-    useWorktreeStore.setState({ activeWorktreePath: "/wt/b" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt/b")));
     hide("a1");
     expect(backgroundBrowserPages().map((page) => page.id)).toEqual(["a1"]);
   });

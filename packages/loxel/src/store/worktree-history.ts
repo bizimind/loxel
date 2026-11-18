@@ -11,41 +11,47 @@
  * as an ordinary navigation (clearing the forward stack) and the popped entry is gone.
  */
 
-import { useProjectStore } from "./projects";
-import { useWorktreeStore } from "./worktrees";
+import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
+
+import { projectRef, useProjectStore } from "./projects";
+import { listedWorktrees, useWorktreeStore } from "./worktrees";
 
 /** Back/forward stacks are capped; the oldest entries are dropped. */
 const MAX_ENTRIES = 50;
 
 export class WorktreeHistory {
-  private back: string[] = [];
-  private forward: string[] = [];
+  private back: WorktreeRef[] = [];
+  private forward: WorktreeRef[] = [];
 
   /** Record a navigation away from `previous` that wasn't made by back/forward. */
-  record(previous: string): void {
-    if (this.back.at(-1) !== previous) this.back.push(previous);
+  record(previous: WorktreeRef): void {
+    const last = this.back.at(-1);
+    if (!last || !sameWorktreeRef(last, previous)) this.back.push(previous);
     if (this.back.length > MAX_ENTRIES) this.back.shift();
     this.forward = [];
   }
 
   /** Pop the most recent valid back entry, pushing `current` onto the forward stack. */
-  goBack(current: string | null, isValid: (path: string) => boolean): string | null {
+  goBack(current: WorktreeRef | null, isValid: (wt: WorktreeRef) => boolean): WorktreeRef | null {
     return this.step(this.back, this.forward, current, isValid);
   }
 
   /** Pop the most recent valid forward entry, pushing `current` onto the back stack. */
-  goForward(current: string | null, isValid: (path: string) => boolean): string | null {
+  goForward(
+    current: WorktreeRef | null,
+    isValid: (wt: WorktreeRef) => boolean,
+  ): WorktreeRef | null {
     return this.step(this.forward, this.back, current, isValid);
   }
 
   private step(
-    from: string[],
-    to: string[],
-    current: string | null,
-    isValid: (path: string) => boolean,
-  ): string | null {
+    from: WorktreeRef[],
+    to: WorktreeRef[],
+    current: WorktreeRef | null,
+    isValid: (wt: WorktreeRef) => boolean,
+  ): WorktreeRef | null {
     for (let target = from.pop(); target !== undefined; target = from.pop()) {
-      if (target === current || !isValid(target)) continue;
+      if ((current && sameWorktreeRef(target, current)) || !isValid(target)) continue;
       if (current) to.push(current);
       if (to.length > MAX_ENTRIES) to.shift();
       return target;
@@ -59,26 +65,25 @@ const history = new WorktreeHistory();
 let navigatingHistory = false;
 
 useWorktreeStore.subscribe(
-  (s) => s.activeWorktreePath,
-  (path, previous) => {
-    if (navigatingHistory || !previous || previous === path) return;
+  (s) => s.activeWorktree,
+  (wt, previous) => {
+    if (navigatingHistory || !previous || (wt && sameWorktreeRef(previous, wt))) return;
     history.record(previous);
   },
 );
 
-/** Whether `path` is still a worktree (or project root) that can be switched to. */
-function isSwitchable(path: string): boolean {
-  if (useProjectStore.getState().projects.some((p) => p.path === path)) return true;
-  return Object.values(useWorktreeStore.getState().byProject).some((ps) =>
-    ps.worktrees.some((wt) => wt.path === path && !wt.pending),
-  );
+/** Whether `wt` is still a worktree (or project root) that can be switched to. */
+function isSwitchable(wt: WorktreeRef): boolean {
+  const { projects } = useProjectStore.getState();
+  if (projects.some((p) => sameWorktreeRef(projectRef(p), wt))) return true;
+  return listedWorktrees().some(({ ref, entry }) => sameWorktreeRef(ref, wt) && !entry.pending);
 }
 
-function navigateTo(target: string | null): void {
+function navigateTo(target: WorktreeRef | null): void {
   if (!target) return;
   navigatingHistory = true;
   try {
-    // switchWorktree sets the active path synchronously, before its first await.
+    // switchWorktree sets the active worktree synchronously, before its first await.
     void useWorktreeStore.getState().switchWorktree(target);
   } finally {
     navigatingHistory = false;
@@ -86,11 +91,11 @@ function navigateTo(target: string | null): void {
 }
 
 export function goBackWorktree(): void {
-  const current = useWorktreeStore.getState().activeWorktreePath;
+  const current = useWorktreeStore.getState().activeWorktree;
   navigateTo(history.goBack(current, isSwitchable));
 }
 
 export function goForwardWorktree(): void {
-  const current = useWorktreeStore.getState().activeWorktreePath;
+  const current = useWorktreeStore.getState().activeWorktree;
   navigateTo(history.goForward(current, isSwitchable));
 }

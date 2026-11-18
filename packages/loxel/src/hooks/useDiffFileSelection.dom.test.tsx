@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { renderHook } from "@testing-library/react";
 
 import type { FileDiff } from "@/api/diff-model";
+import { localRef } from "@/api/local-server";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 import { useDiffFileSelection } from "./useDiffFileSelection";
 
@@ -24,7 +25,7 @@ const ui = () => getCurrentWorktreeUI().getState();
 
 describe("useDiffFileSelection", () => {
   beforeEach(() => {
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
     ui().setSelectedDiffFile(null);
   });
 

@@ -7,6 +7,7 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { formatWorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
@@ -42,7 +43,7 @@ import {
   getCreateEventForAction,
 } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { projectOf, projectRef, useProjectStore } from "@/store/projects";
 import { useSearchStore } from "@/store/search";
 import { useSettingsStore } from "@/store/settings-store";
 import { useSymbolSearchStore } from "@/store/symbol-search";
@@ -116,10 +117,11 @@ function splitOrPromote(active: IDockviewPanel, position: "left" | "right" | "to
 function getActiveProjectWorktrees() {
   const wtState = useWorktreeStore.getState();
   const projects = useProjectStore.getState().projects;
-  const project = deriveProject(wtState.activeWorktreePath, projects);
+  const project = projectOf(wtState.activeWorktree, projects);
   if (!project) return null;
-  const ps = wtState.byProject[project.path];
-  return { wtState, project, ps };
+  const ref = projectRef(project);
+  const ps = wtState.byProject[formatWorktreeRef(ref)];
+  return { wtState, project, ref, ps };
 }
 
 /**
@@ -375,7 +377,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         if (!ctx?.ps) break;
         // Numbering follows the sidebar's visible order whether or not it is expanded, so a digit
         // always means the same worktree.
-        const ordered = getNumberedWorktrees(ctx.ps);
+        const ordered = getNumberedWorktrees(ctx.ref, ctx.ps);
         if (ordered.length === 0) break;
 
         const digit = Number(actionId.split(".")[2]);
@@ -383,7 +385,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
         // 0 = position 10. Note: position 9 (index 8) is unreachable by design —
         // this matches the standard tab-switching convention.
         const idx = digit === 9 ? ordered.length - 1 : digit === 0 ? 9 : digit - 1;
-        if (ordered[idx]) ctx.wtState.switchWorktree(ordered[idx].path);
+        const target = ordered[idx];
+        if (target) void ctx.wtState.switchWorktree(worktreeRef(ctx.ref.server, target.path));
         break;
       }
 
@@ -408,7 +411,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
 
-        const wt = ctx.ps.worktrees.find((w) => w.path === ctx.wtState.activeWorktreePath);
+        const wt = ctx.ps.worktrees.find((w) => w.path === ctx.wtState.activeWorktree?.path);
         if (!wt || wt.pending || wt.isMain) break;
 
         // Expand sidebar + project so confirmation dialogs are visible
@@ -418,7 +421,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
           projState.toggleProjectExpanded(ctx.project.id);
         }
 
-        ctx.wtState.requestRemoveWorktree(ctx.project.path, wt).catch(console.error);
+        ctx.wtState.requestRemoveWorktree(ctx.ref, wt).catch(console.error);
         break;
       }
 

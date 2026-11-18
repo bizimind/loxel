@@ -29,12 +29,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { WorktreeEntry } from "@/api/git-models";
-import type { Project } from "@/api/project-model";
+import { formatWorktreeRef, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import { InlineRenameInput } from "@/components/tree";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { showToast } from "@/components/ui/toast";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
-import { focusSidebarEntryForPath } from "@/lib/focus-navigation";
+import { focusSidebarEntryById } from "@/lib/focus-navigation";
 import { sidebarEntryProps } from "@/lib/focus-targets";
 import { idToColor } from "@/lib/hash-color";
 import { cn } from "@/lib/utils";
@@ -49,11 +49,13 @@ import {
   type WorktreeRow,
 } from "@/lib/worktree-hierarchy";
 import { hasWorktreeNotification, usePanelNotificationStore } from "@/store/panel-notifications";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { type ListedProject, projectOf, projectRef, useProjectStore } from "@/store/projects";
 import {
   getOrderedWorktrees,
   getWorktreeTrees,
+  projectListPaths,
   useWorktreeStore,
+  worktreeKey,
   type ProjectState,
 } from "@/store/worktrees";
 
@@ -70,13 +72,13 @@ import { worktreeLabel, worktreeName, worktreeSubtitle } from "./worktree-labels
 import { WorktreeContextMenu, useWorktreeContextMenu } from "./WorktreeMenu";
 
 /** The Archive group's drop target and sidebar entry. */
-function archiveId(projectPath: string): string {
-  return `archive:${projectPath}`;
+function archiveId(projectKey: string): string {
+  return `archive:${projectKey}`;
 }
 
 /** The drop target after the last top-level worktree (the "Add worktree" row). */
-function endId(projectPath: string): string {
-  return `end:${projectPath}`;
+function endId(projectKey: string): string {
+  return `end:${projectKey}`;
 }
 
 const EMPTY_PROJECT_STATE: ProjectState = { worktrees: [] };
@@ -97,35 +99,49 @@ type TreeDrop =
   | { kind: "archive" }
   | { kind: "place"; drop: RowDrop; from: "listed" | "archived" | "archive-out" };
 
-export function WorktreeTree({ project, expanded }: { project: Project; expanded: boolean }) {
-  const ps = useWorktreeStore((s) => s.byProject[project.path]) ?? EMPTY_PROJECT_STATE;
+/**
+ * A project's worktrees in the sidebar. Its worktrees are on the project's server, so within the
+ * tree (rows, drag and drop) a path names one; refs name them to the stores and the sidebar's
+ * keyboard entries.
+ */
+export function WorktreeTree({ project, expanded }: { project: ListedProject; expanded: boolean }) {
+  // The same object across project fetches, which rebuild every project.
+  const ref = useMemo(
+    () => projectRef({ server: project.server, path: project.path }),
+    [project.server, project.path],
+  );
+  const projectKey = formatWorktreeRef(ref);
+  const ps = useWorktreeStore((s) => s.byProject[projectKey]) ?? EMPTY_PROJECT_STATE;
   const nesting = ps.worktreeMetadata ?? false;
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  /** The active worktree's path, when it is on this project's server. */
+  const activePath = activeWorktree?.server === ref.server ? activeWorktree.path : null;
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
   const setWorktreeTitle = useWorktreeStore((s) => s.setWorktreeTitle);
   const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
   const toggleArchived = useWorktreeStore((s) => s.toggleArchived);
   const markArchived = useWorktreeStore((s) => s.markArchived);
   const toggleCollapsed = useWorktreeStore((s) => s.toggleCollapsed);
-  const archiveOpen = useWorktreeStore((s) => s.openArchives.includes(project.path));
+  const archiveOpen = useWorktreeStore((s) => s.openArchives.includes(projectKey));
   const toggleArchiveOpen = useWorktreeStore((s) => s.toggleArchiveOpen);
   const createWorktreeRequested = useWorktreeStore((s) => s.createWorktreeRequested);
   const clearCreateWorktreeRequest = useWorktreeStore((s) => s.clearCreateWorktreeRequest);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const homeDir = useProjectStore((s) => s.homeDir);
 
-  const menu = useWorktreeContextMenu(project.path);
+  const menu = useWorktreeContextMenu(ref);
   const { handleSetParent } = menu;
 
-  const trees = useMemo(() => getWorktreeTrees(ps), [ps]);
-  const collapsedSet = useMemo(() => new Set(ps.collapsedPaths), [ps.collapsedPaths]);
+  const lists = useMemo(() => projectListPaths(ref, ps), [ref, ps]);
+  const trees = useMemo(() => getWorktreeTrees(ref, ps), [ref, ps]);
+  const collapsedSet = useMemo(() => new Set(lists.collapsed), [lists.collapsed]);
   const archived = useMemo(
-    () => archivedSet(ps.worktrees, ps.archivedPaths ?? []),
-    [ps.worktrees, ps.archivedPaths],
+    () => archivedSet(ps.worktrees, lists.archived),
+    [ps.worktrees, lists.archived],
   );
   const parents = useMemo(() => resolveParents(ps.worktrees), [ps.worktrees]);
-  const archiveEntry = archiveId(project.path);
-  const endEntry = endId(project.path);
+  const archiveEntry = archiveId(projectKey);
+  const endEntry = endId(projectKey);
 
   /** Whether `node`'s nested worktrees are shown at `level`. */
   const isOpen = useCallback(
@@ -153,17 +169,17 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   // Respond to keybinding-triggered create request
   useEffect(() => {
     if (!createWorktreeRequested) return;
-    const activeProject = deriveProject(activeWorktreePath, useProjectStore.getState().projects);
-    if (activeProject?.path !== project.path) return;
+    const activeProject = projectOf(activeWorktree, useProjectStore.getState().projects);
+    if (activeProject?.id !== project.id || activeProject.server !== project.server) return;
     clearCreateWorktreeRequest();
     setNewWorktree({});
-  }, [createWorktreeRequested, clearCreateWorktreeRequest, activeWorktreePath, project.path]);
+  }, [createWorktreeRequested, clearCreateWorktreeRequest, activeWorktree, project]);
 
   const expandGroup = useCallback(
     (path: string) => {
-      if (collapsedSet.has(path)) toggleCollapsed(project.path, path);
+      if (collapsedSet.has(path)) toggleCollapsed(ref, path);
     },
-    [collapsedSet, toggleCollapsed, project.path],
+    [collapsedSet, toggleCollapsed, ref],
   );
 
   /** Unfold a group the rail folds because of its depth: only the expanded sidebar has room. */
@@ -196,12 +212,12 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
       setEditingTitlePath(null);
       try {
         // Setting it back to the worktree's own name clears the title.
-        await setWorktreeTitle(project.path, wt.path, value === worktreeName(wt) ? "" : value);
+        await setWorktreeTitle(ref, wt.path, value === worktreeName(wt) ? "" : value);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to change the title");
       }
     },
-    [setWorktreeTitle, project.path],
+    [setWorktreeTitle, ref],
   );
 
   // --- @dnd-kit: drop onto a row to nest, between rows to place it there ---
@@ -307,18 +323,18 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
       if (!target) return;
       const moved = String(event.active.id);
       if (target.kind === "archive") {
-        toggleArchived(project.path, moved);
+        toggleArchived(ref, moved);
         return;
       }
       const { drop, from } = target;
       // Out of the Archive, only the dragged worktree leaves: when it was archived with an
       // ancestor, moving it out of that ancestor's subtree is what takes it out.
-      if (from === "archive-out" && (ps.archivedPaths ?? []).includes(moved)) {
-        toggleArchived(project.path, moved);
+      if (from === "archive-out" && lists.archived.includes(moved)) {
+        toggleArchived(ref, moved);
       }
       if (drop.zone !== "inside") {
-        const orderedPaths = getOrderedWorktrees(ps.worktrees, ps.customOrder).map((wt) => wt.path);
-        setCustomOrder(project.path, moveInOrder(orderedPaths, moved, drop.path, drop.zone));
+        const orderedPaths = getOrderedWorktrees(ps.worktrees, lists.order).map((wt) => wt.path);
+        setCustomOrder(ref, moveInOrder(orderedPaths, moved, drop.path, drop.zone));
       }
       // Within a section, compare with the parent it is shown under: an archived worktree
       // nested under a listed one is drawn at the Archive's top level and keeps its parent.
@@ -329,17 +345,17 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
               ?.parent ?? null);
       if (drop.parent === shownParent) return;
       // Leaving an archived parent for the Archive's top level must not take it out of the Archive.
-      if (from === "archived" && drop.parent === null) markArchived(project.path, moved);
+      if (from === "archived" && drop.parent === null) markArchived(ref, moved);
       void handleSetParent(moved, drop.parent);
     },
     [
       resolveDrop,
       toggleArchived,
       markArchived,
-      project.path,
+      ref,
       ps.worktrees,
-      ps.customOrder,
-      ps.archivedPaths,
+      lists.order,
+      lists.archived,
       setCustomOrder,
       parents,
       listedRows,
@@ -374,12 +390,12 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
       e.preventDefault();
       e.stopPropagation();
       if (!item.open) item.expand();
-      else if (item.firstChildEntry) focusSidebarEntryForPath(item.firstChildEntry);
+      else if (item.firstChildEntry) focusSidebarEntryById(item.firstChildEntry);
     } else if (action === "tree.collapseOrFocusParent") {
       e.preventDefault();
       e.stopPropagation();
       if (item.expandable && item.open) item.collapse();
-      else focusSidebarEntryForPath(item.parentEntry);
+      else focusSidebarEntryById(item.parentEntry);
     }
   };
 
@@ -395,19 +411,19 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     const open = isOpen(node, level);
     // The rail folds groups below its last level; only the expanded sidebar can unfold them.
     const railFolded = hasChildren && !expanded && !railShowsBelow(level);
-    const toggleOpen = () =>
-      railFolded ? expandFromRail(wt.path) : toggleCollapsed(project.path, wt.path);
+    const toggleOpen = () => (railFolded ? expandFromRail(wt.path) : toggleCollapsed(ref, wt.path));
 
     const row = (
       <TreeRow
         key={hasChildren ? undefined : wt.path}
         wt={wt}
+        project={ref}
         pad={iconLeft(level)}
         padExpanded={iconLeftExpanded(level)}
         expanded={expanded}
-        isActive={wt.path === activeWorktreePath}
+        isActive={wt.path === activePath}
         foldedPaths={open ? [] : descendantPaths(node)}
-        activeWorktreePath={activeWorktreePath}
+        activePath={activePath}
         archived={archived.has(wt.path)}
         isDragging={wt.path === activeDragId}
         dropZone={dropTarget?.path === wt.path ? dropTarget.zone : null}
@@ -425,18 +441,18 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
         }
         onEditTitleFinish={(value) => handleEditTitleFinish(wt, value)}
         onEditTitleCancel={() => setEditingTitlePath(null)}
-        onSelect={() => !wt.pending && switchWorktree(wt.path)}
+        onSelect={() => !wt.pending && switchWorktree(worktreeRef(ref.server, wt.path))}
         onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
-        onToggleArchived={() => toggleArchived(project.path, wt.path)}
+        onToggleArchived={() => toggleArchived(ref, wt.path)}
         onToggleOpen={hasChildren ? toggleOpen : undefined}
         onKeyDown={(e) =>
           handleTreeKey(e, {
             open,
             expandable: hasChildren,
             expand: () => (railFolded ? expandFromRail(wt.path) : expandGroup(wt.path)),
-            collapse: () => toggleCollapsed(project.path, wt.path),
+            collapse: () => toggleCollapsed(ref, wt.path),
             parentEntry,
-            firstChildEntry: node.children[0]?.wt.path,
+            firstChildEntry: firstChildEntry(ref, node.children),
           })
         }
       />
@@ -450,7 +466,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
         style={groupStyle(idToColor(worktreeName(wt)).bg, level)}
       >
         {row}
-        {open && renderNodes(node.children, level + 1, wt.path)}
+        {open && renderNodes(node.children, level + 1, worktreeKey(ref, wt.path))}
       </div>
     );
   };
@@ -485,38 +501,37 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
             <div
               className="text-muted-foreground cursor-pointer py-1.5 text-[11px] italic hover:underline"
               style={{ paddingLeft: `${iconLeftExpanded(0)}px` }}
-              onClick={() => switchWorktree(project.path)}
+              onClick={() => switchWorktree(ref)}
             >
               Click to load worktrees
             </div>
           )}
 
-          {renderNodes(trees.listed, 0, project.path)}
+          {renderNodes(trees.listed, 0, projectKey)}
 
           {/* While dragging, an empty Archive shows too, so the first worktree can be dropped in. */}
           {(archivedCount > 0 || activeDragId !== null) && (
             <div className="wt-group" style={groupStyle("var(--muted-foreground)", 0, true)}>
               <ArchiveRow
                 id={archiveEntry}
+                project={ref}
                 count={archivedCount}
                 open={archiveOpen}
                 expanded={expanded}
                 pad={iconLeft(0)}
                 padExpanded={iconLeftExpanded(0)}
                 foldedPaths={archiveOpen ? [] : [...archived]}
-                activeInside={
-                  !archiveOpen && activeWorktreePath !== null && archived.has(activeWorktreePath)
-                }
+                activeInside={!archiveOpen && activePath !== null && archived.has(activePath)}
                 isDropTarget={dropTarget?.path === archiveEntry}
-                onToggle={() => toggleArchiveOpen(project.path)}
+                onToggle={() => toggleArchiveOpen(ref)}
                 onKeyDown={(e) =>
                   handleTreeKey(e, {
                     open: archiveOpen,
                     expandable: true,
-                    expand: () => toggleArchiveOpen(project.path),
-                    collapse: () => toggleArchiveOpen(project.path),
-                    parentEntry: project.path,
-                    firstChildEntry: trees.archived[0]?.wt.path,
+                    expand: () => toggleArchiveOpen(ref),
+                    collapse: () => toggleArchiveOpen(ref),
+                    parentEntry: projectKey,
+                    firstChildEntry: firstChildEntry(ref, trees.archived),
                   })
                 }
               />
@@ -561,7 +576,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
 
       {newWorktree && (
         <NewWorktreeDialog
-          projectPath={project.path}
+          project={ref}
           parent={newWorktree.parent}
           titles={nesting}
           onClose={() => setNewWorktree(null)}
@@ -582,6 +597,15 @@ function groupStyle(color: string, level: number, archive = false): React.CSSPro
     "--wt-line-x-expanded": `${iconLeftExpanded(level) + KNOB_INSET}px`,
     ...(archive ? { "--wt-knob-text": "var(--background)" } : {}),
   } as React.CSSProperties;
+}
+
+/** The sidebar entry of the first of `nodes`: the first child of the row that shows them. */
+function firstChildEntry(
+  project: WorktreeRef,
+  nodes: readonly WorktreeNode<WorktreeEntry>[],
+): string | undefined {
+  const first = nodes[0];
+  return first && worktreeKey(project, first.wt.path);
 }
 
 /** Every worktree below `node`. */
@@ -622,6 +646,8 @@ function Knob({ open, count, title, onToggle }: KnobProps) {
 
 interface TreeRowProps {
   wt: WorktreeEntry;
+  /** The project the worktree is listed under, on whose server its path (and `foldedPaths`) are */
+  project: WorktreeRef;
   /** The icon's left edge on the rail and in the expanded list */
   pad: number;
   padExpanded: number;
@@ -629,7 +655,8 @@ interface TreeRowProps {
   isActive: boolean;
   /** Worktrees folded away below this one, whose notifications and selection it shows */
   foldedPaths: readonly string[];
-  activeWorktreePath: string | null;
+  /** The active worktree's path, when it is on the project's server */
+  activePath: string | null;
   archived: boolean;
   isDragging: boolean;
   dropZone: RowDrop["zone"] | null;
@@ -650,12 +677,13 @@ interface TreeRowProps {
 /** A worktree row that can be dragged, and dropped onto or next to. */
 function TreeRow({
   wt,
+  project,
   pad,
   padExpanded,
   expanded,
   isActive,
   foldedPaths,
-  activeWorktreePath,
+  activePath,
   archived,
   isDragging,
   dropZone,
@@ -682,9 +710,11 @@ function TreeRow({
   );
   // A folded worktree also shows its hidden nested worktrees' notifications.
   const hasNotification = usePanelNotificationStore((s) =>
-    [wt.path, ...foldedPaths].some((path) => hasWorktreeNotification(s, path)),
+    [wt.path, ...foldedPaths].some((path) =>
+      hasWorktreeNotification(s, worktreeRef(project.server, path)),
+    ),
   );
-  const activeInside = activeWorktreePath !== null && foldedPaths.includes(activeWorktreePath);
+  const activeInside = activePath !== null && foldedPaths.includes(activePath);
   const label = worktreeLabel(wt);
   const nestedCount = foldedPaths.length;
   const tooltip = useRailTooltip(expanded);
@@ -712,7 +742,7 @@ function TreeRow({
         onMouseLeave={tooltip.hide}
         {...drag.attributes}
         {...drag.listeners}
-        {...(pending ? undefined : sidebarEntryProps(wt.path))}
+        {...(pending ? undefined : sidebarEntryProps(worktreeKey(project, wt.path)))}
       >
         {(dropZone === "before" || dropZone === "after") && (
           <div className="wt-drop-line" data-zone={dropZone} />
@@ -781,6 +811,8 @@ function TreeRow({
 
 interface ArchiveRowProps {
   id: string;
+  /** The project whose Archive it heads, on whose server `foldedPaths` are */
+  project: WorktreeRef;
   count: number;
   open: boolean;
   expanded: boolean;
@@ -797,6 +829,7 @@ interface ArchiveRowProps {
 /** The head of a project's Archive group: opens and closes it, and takes worktrees dropped on it. */
 function ArchiveRow({
   id,
+  project,
   count,
   open,
   expanded,
@@ -810,7 +843,7 @@ function ArchiveRow({
 }: ArchiveRowProps) {
   const drop = useDroppable({ id });
   const hasNotification = usePanelNotificationStore((s) =>
-    foldedPaths.some((path) => hasWorktreeNotification(s, path)),
+    foldedPaths.some((path) => hasWorktreeNotification(s, worktreeRef(project.server, path))),
   );
   const tooltip = useRailTooltip(expanded);
   const countLabel =

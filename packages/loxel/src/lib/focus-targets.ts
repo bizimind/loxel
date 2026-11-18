@@ -37,9 +37,12 @@ export function panelAutofocusProps() {
   return { [PANEL_AUTOFOCUS_ATTR]: "" };
 }
 
-/** Props for a keyboard-navigable worktree sidebar entry (a worktree or project root). */
-export function sidebarEntryProps(path: string) {
-  return { [SIDEBAR_ENTRY_ATTR]: path };
+/**
+ * Props for a keyboard-navigable worktree sidebar entry: a worktree or project root, by its
+ * `WorktreeRefKey`, or another row by an id of its own.
+ */
+export function sidebarEntryProps(id: string) {
+  return { [SIDEBAR_ENTRY_ATTR]: id };
 }
 
 /**

@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { localRef } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type {
   InboxOpenMessage,
@@ -11,7 +12,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
-import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { deriveProject, projectRef, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
@@ -125,7 +126,7 @@ async function revealFolder(rawPath: string): Promise<void> {
     if (owner === activeWorktree?.path) {
       showPanel("projectFiles");
     } else {
-      await switchWorktree(owner);
+      await switchWorktree(localRef(owner));
       showPanelAfterLayoutRestore("projectFiles");
     }
     // The switch sets the active worktree synchronously, so this targets the owner's store.
@@ -229,7 +230,7 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
   if (deriveOwningWorktree(worktreePath, projects, byProject) === worktreePath) return;
   const project = deriveProject(worktreePath, projects);
   if (!project) return;
-  await refreshProjectWorktrees(project.path).catch((err: unknown) => {
+  await refreshProjectWorktrees(projectRef(project)).catch((err: unknown) => {
     log.warn("Could not refresh a project's worktrees", {
       error: err instanceof Error ? err : undefined,
       project: project.path,
@@ -255,7 +256,8 @@ async function openInWorktree(target: string | null, open: PendingOpen): Promise
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
-  if (focus && target !== null && target !== activeWorktreePath) await switchWorktree(target);
+  if (focus && target !== null && target !== activeWorktreePath)
+    await switchWorktree(localRef(target));
   return true;
 }
 

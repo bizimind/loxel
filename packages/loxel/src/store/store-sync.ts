@@ -7,6 +7,7 @@
  * unnecessary re-renders.
  */
 
+import { localServerId } from "@/api/local-server";
 import type { LogLevel } from "@/api/log-entry-model";
 import { reconcile } from "@/lib/reconcile";
 
@@ -106,6 +107,7 @@ const syncTargets: Record<string, SyncTarget> = {
         byProject: mergePersistedProjectStates(
           useWorktreeStore.getState().byProject,
           partial.byProject,
+          localServerId(),
         ),
       });
     },

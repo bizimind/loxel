@@ -6,9 +6,19 @@ import { type ServerId, type WorktreeRef, toServerId, worktreeRef } from "./work
  * another, so it never changes while the page lives.
  */
 let localServer: ServerId | null = null;
+const localServerKnown = Promise.withResolvers<ServerId>();
 
 export function setLocalServerId(id: string): void {
   localServer = toServerId(id);
+  localServerKnown.resolve(localServer);
+}
+
+/**
+ * Resolves once the window's server is known, for work that can start before the first render,
+ * such as a store loading its persisted state.
+ */
+export function whenLocalServerKnown(): Promise<ServerId> {
+  return localServerKnown.promise;
 }
 
 export function localServerId(): ServerId {

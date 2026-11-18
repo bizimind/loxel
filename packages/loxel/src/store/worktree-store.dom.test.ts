@@ -12,7 +12,7 @@ import {
   setWorktreeInnerLayout,
 } from "./worktree-cache";
 import { createWorktreeStore, purgeWorktreeStores } from "./worktree-store";
-import { useWorktreeStore } from "./worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "./worktrees";
 
 const PATH = "/repo";
 const HERE = localRef(PATH);
@@ -28,7 +28,7 @@ afterEach(() => {
     purgeWorktreeStores(wt);
     purgeWorktreeCache(wt);
   }
-  useWorktreeStore.setState({ activeWorktreePath: null });
+  useWorktreeStore.setState(activeWorktreeFields(null));
 });
 
 describe("per-worktree store instances", () => {
@@ -47,7 +47,7 @@ describe("per-worktree store instances", () => {
     const { result } = renderHook(() => counter.useStore((s) => s.count));
     expect(result.current).toBe(0); // the no-op store, with nothing active
 
-    act(() => useWorktreeStore.setState({ activeWorktreePath: PATH }));
+    act(() => useWorktreeStore.setState(activeWorktreeFields(localRef(PATH))));
     expect(result.current).toBe(5);
     expect(counter.getCurrent()).toBe(counter.getStore(HERE));
   });
@@ -71,7 +71,7 @@ describe("per-worktree store instances", () => {
 
 describe("per-worktree cache", () => {
   test("is purged by ref, leaving the same path on another server", () => {
-    act(() => useWorktreeStore.setState({ activeWorktreePath: PATH }));
+    act(() => useWorktreeStore.setState(activeWorktreeFields(localRef(PATH))));
     setWorktreeInnerLayout("graph", { grid: {} } as never);
     expect(getWorktreeInnerLayout("graph")).toBeDefined();
 
