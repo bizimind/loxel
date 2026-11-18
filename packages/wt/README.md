@@ -68,7 +68,7 @@ codesign -s - ~/.local/bin/wt
 wt version
 ```
 
-`wt update` upgrades the binary in place; set `WT_AUTO_UPDATE=1` to have it check before every command.
+`wt update` upgrades the binary in place, installing only a release signed by Bizimind; set `WT_AUTO_UPDATE=1` to have it check before every command. A binary built from source cannot update itself; download a release to get updates.
 
 ---
 
@@ -374,7 +374,7 @@ Run the same checks as `wt init` and report them, changing nothing. Exits 1 when
 
 ### `wt version`, `wt update`
 
-Print the installed version, or update the binary in place.
+Print the installed version, or update the binary in place. An update is installed only if its release signature checks out (and, on macOS, the new binary is signed with Bizimind's Developer ID); otherwise the installed binary stays as it is.
 
 ---
 

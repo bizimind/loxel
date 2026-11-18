@@ -35,7 +35,6 @@ export {
   // Core types and functions
   checkForUpdates,
   checkForUpdatesWithCache,
-  cleanupFailedUpdate,
   compareVersions,
   createUpdateSystem,
   downloadAndVerify,

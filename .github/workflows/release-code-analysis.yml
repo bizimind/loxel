@@ -41,6 +41,14 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      # Before anything is tagged or uploaded: a release whose manifest cannot be signed, or whose
+      # binaries would embed a key that does not verify it, fails here instead of half published.
+      - name: Check the manifest signing key pair
+        run: bun packages/cli-common/scripts/sign-manifest.ts --check
+        env:
+          CLI_MANIFEST_SIGNING_KEY: ${{ secrets.CLI_MANIFEST_SIGNING_KEY }}
+          CLI_MANIFEST_PUBLIC_KEY: ${{ vars.CLI_MANIFEST_PUBLIC_KEY }}
+
       - name: Bump patch version
         id: bump
         run: |
@@ -114,10 +122,20 @@ jobs:
         run: pnpm -C packages/code-analysis run build
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
+          # Embedded in the binary, which checks update manifests against it.
+          CLI_MANIFEST_PUBLIC_KEY: ${{ vars.CLI_MANIFEST_PUBLIC_KEY }}
 
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/import-signing-certificate
+        with:
+          certificate: ${{ secrets.LOXEL_CERTIFICATE }}
+          password: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
+
+      # Self-updating CLIs refuse a macOS update without this Developer ID signature.
       - name: Sign binary (macOS)
         if: runner.os == 'macOS'
-        run: codesign -s - -f packages/code-analysis/dist/code-analysis
+        run: bun packages/cli-common/scripts/codesign-release.ts packages/code-analysis/dist/code-analysis code-analysis
 
       - name: Calculate checksum
         id: sha
@@ -148,6 +166,10 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
       - name: Generate manifest
         run: |
           VERSION="${{ needs.check-and-bump.outputs.version }}"
@@ -162,6 +184,7 @@ jobs:
             --arg sha_linux_x64 "${{ needs.build.outputs.sha256_linux-x64 }}" \
             --arg base "$BASE" \
             '{
+              package: "code-analysis",
               version: $v,
               released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
               binaries: {
@@ -172,12 +195,20 @@ jobs:
             }' > manifest.json
           cat manifest.json
 
+      # Self-updating CLIs trust a manifest (and the checksums in it) only with this signature.
+      - name: Sign manifest
+        run: bun packages/cli-common/scripts/sign-manifest.ts manifest.json
+        env:
+          CLI_MANIFEST_SIGNING_KEY: ${{ secrets.CLI_MANIFEST_SIGNING_KEY }}
+          CLI_MANIFEST_PUBLIC_KEY: ${{ vars.CLI_MANIFEST_PUBLIC_KEY }}
+
       - name: Upload manifest to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
+          aws s3 cp manifest.json.sig s3://loxel/code-analysis/manifest.json.sig --content-type text/plain
           aws s3 cp manifest.json s3://loxel/code-analysis/manifest.json --content-type application/json
 
       - name: Create GitHub Release

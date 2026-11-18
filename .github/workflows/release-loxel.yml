@@ -175,16 +175,10 @@ jobs:
         run: bun packages/loxel/scripts/sbom-vuln-gate.ts "$RUNNER_TEMP/sbom-vulns.json"
 
       - name: Import signing certificate
-        run: |
-          echo "$LOXEL_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "temp" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "temp" build.keychain
-          security import certificate.p12 -k build.keychain -P "$LOXEL_CERTIFICATE_PWD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "temp" build.keychain
-        env:
-          LOXEL_CERTIFICATE: ${{ secrets.LOXEL_CERTIFICATE }}
-          LOXEL_CERTIFICATE_PWD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
+        uses: ./.github/actions/import-signing-certificate
+        with:
+          certificate: ${{ secrets.LOXEL_CERTIFICATE }}
+          password: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
 
       - name: Decode Apple API key
         run: |
