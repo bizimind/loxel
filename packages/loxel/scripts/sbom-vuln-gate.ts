@@ -16,9 +16,11 @@ const FAILING_LABELS = new Set(["MEDIUM", "HIGH", "CRITICAL"]);
 /** Whether a finding with neither a score nor a label fails, or only warns. */
 const UNRATED_FAILS = false;
 
+const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
+
 export interface Vulnerability {
   VulnerabilityID: string;
-  Severity: string;
+  Severity: (typeof SEVERITIES)[number];
   /** Where Trivy took the label from, usually the vendor. */
   SeveritySource?: string;
   CVSS?: Record<string, { V3Score?: number; V40Score?: number }>;
@@ -26,6 +28,52 @@ export interface Vulnerability {
 
 export interface TrivyReport {
   Results?: Array<{ Vulnerabilities?: Vulnerability[] }>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function parseVulnerability(value: unknown): Vulnerability {
+  const severity = SEVERITIES.find((s) => isObject(value) && value.Severity === s);
+  if (!isObject(value) || typeof value.VulnerabilityID !== "string" || !severity) {
+    // The finding itself stays out of the message: logs are public.
+    throw new Error("Trivy report holds a vulnerability without an ID or a known severity");
+  }
+  const cvss: NonNullable<Vulnerability["CVSS"]> = {};
+  for (const [source, scores] of Object.entries(isObject(value.CVSS) ? value.CVSS : {})) {
+    if (!isObject(scores)) continue;
+    cvss[source] = {
+      V3Score: optionalNumber(scores.V3Score),
+      V40Score: optionalNumber(scores.V40Score),
+    };
+  }
+  const source = value.SeveritySource;
+  return {
+    VulnerabilityID: value.VulnerabilityID,
+    Severity: severity,
+    ...(typeof source === "string" && { SeveritySource: source }),
+    CVSS: cvss,
+  };
+}
+
+/** Trivy's JSON narrowed to what the gate reads; any other shape throws, so the gate fails closed. */
+export function parseReport(json: unknown): TrivyReport {
+  const results = isObject(json) ? json.Results : undefined;
+  if (results !== undefined && !Array.isArray(results))
+    throw new Error("Trivy report's Results is not a list");
+  return {
+    Results: (results ?? []).map((result: unknown) => {
+      const vulnerabilities = isObject(result) ? (result.Vulnerabilities ?? []) : [];
+      if (!Array.isArray(vulnerabilities))
+        throw new Error("A Trivy result's Vulnerabilities is not a list");
+      return { Vulnerabilities: vulnerabilities.map(parseVulnerability) };
+    }),
+  };
 }
 
 /**
@@ -88,9 +136,7 @@ export function gate(report: TrivyReport): {
 if (import.meta.main) {
   const path = process.argv[2];
   if (!path) throw new Error("Usage: bun scripts/sbom-vuln-gate.ts <trivy-report.json>");
-  // Trivy's own JSON output, which this script does not validate further.
-  const report = (await Bun.file(path).json()) as TrivyReport;
-  const { counts, failing, unrated } = gate(report);
+  const { counts, failing, unrated } = gate(parseReport(await Bun.file(path).json()));
   console.log(`Findings by severity: ${JSON.stringify(Object.fromEntries(counts))}`);
   // Only a count: logs are public, and the IDs of findings that do not fail stay out of them.
   if (unrated > 0) console.log(`::warning::${unrated} finding(s) have no CVSS score or severity`);

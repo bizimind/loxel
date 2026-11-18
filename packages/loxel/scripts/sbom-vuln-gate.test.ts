@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { gate, judge, score, type Vulnerability } from "./sbom-vuln-gate";
+import { gate, judge, parseReport, score, type Vulnerability } from "./sbom-vuln-gate";
 
 function vulnerability(fields: Partial<Vulnerability>): Vulnerability {
   return { VulnerabilityID: "CVE-1", Severity: "UNKNOWN", ...fields };
@@ -66,5 +66,53 @@ describe("gate", () => {
   test("passes a clean scan and rejects one that read no components", () => {
     expect(gate({ Results: [{}] }).failing).toEqual([]);
     expect(() => gate({})).toThrow("no components");
+  });
+});
+
+describe("parseReport", () => {
+  test("keeps the fields the gate reads", () => {
+    const json = {
+      Results: [
+        {
+          Target: "Node.js",
+          Vulnerabilities: [
+            {
+              VulnerabilityID: "CVE-1",
+              Severity: "HIGH",
+              SeveritySource: "ghsa",
+              CVSS: { ghsa: { V3Score: 7.5, V3Vector: "x" } },
+            },
+          ],
+        },
+        { Target: "Go" },
+      ],
+    };
+    expect(parseReport(json)).toEqual({
+      Results: [
+        {
+          Vulnerabilities: [
+            {
+              VulnerabilityID: "CVE-1",
+              Severity: "HIGH",
+              SeveritySource: "ghsa",
+              CVSS: { ghsa: { V3Score: 7.5, V40Score: undefined } },
+            },
+          ],
+        },
+        { Vulnerabilities: [] },
+      ],
+    });
+  });
+
+  test("rejects a shape it does not know, so the gate fails closed", () => {
+    expect(() =>
+      parseReport({ Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-1" }] }] }),
+    ).toThrow("known severity");
+    expect(() =>
+      parseReport({
+        Results: [{ Vulnerabilities: [{ VulnerabilityID: "CVE-1", Severity: "SEVERE" }] }],
+      }),
+    ).toThrow();
+    expect(() => parseReport({ Results: {} })).toThrow("not a list");
   });
 });
