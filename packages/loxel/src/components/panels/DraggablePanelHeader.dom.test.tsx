@@ -31,10 +31,11 @@ function dragHeader(header: HTMLElement) {
 describe("DraggablePanelHeader", () => {
   test("a drag from the header itself drags the panel", () => {
     const header = renderHeader();
+    expect(header.getAttribute("draggable")).toBe("true");
 
     fireEvent.pointerDown(screen.getByText("Logs"));
 
-    expect(header.draggable).toBe(true);
+    expect(header.getAttribute("draggable")).toBe("true");
     const { proceeded, setData } = dragHeader(header);
     expect(proceeded).toBe(true);
     expect(setData).toHaveBeenCalledWith("text/plain", "logs");
@@ -51,7 +52,7 @@ describe("DraggablePanelHeader", () => {
 
     fireEvent.pointerDown(control());
 
-    expect(header.draggable).toBe(false);
+    expect(header.getAttribute("draggable")).toBe("false");
   });
 
   test("a drag of a descendant's own content, like selected text in a field, is left alone", () => {
@@ -74,7 +75,7 @@ describe("DraggablePanelHeader", () => {
 
     fireEvent.pointerDown(screen.getByText("Logs"));
 
-    expect(header.draggable).toBe(true);
+    expect(header.getAttribute("draggable")).toBe("true");
     expect(dragHeader(header).setData).toHaveBeenCalledWith("text/plain", "logs");
   });
 });

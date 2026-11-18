@@ -28,7 +28,8 @@ export function DraggablePanelHeader({
   // drag tracking (BrowserPagePool's) would be left thinking a drag is still in progress.
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const pressed = e.target;
-    e.currentTarget.draggable = !(pressed instanceof Element && pressed.closest(HEADER_CONTROLS));
+    const onControl = pressed instanceof Element && pressed.closest(HEADER_CONTROLS) !== null;
+    e.currentTarget.setAttribute("draggable", String(!onControl));
   }, []);
 
   const handleDragStart = useCallback(
