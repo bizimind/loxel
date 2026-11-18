@@ -7,6 +7,7 @@ import { localServerId } from "@/api/local-server";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { registerLayoutCache } from "@/store/worktree-cache";
 import { isListedWorktree } from "@/store/worktrees";
 
@@ -160,6 +161,39 @@ async function fetchLayout(
  */
 let outerSwapping = false;
 
+/**
+ * The layouts this window has shown, per storage prefix, shared by every layout of that prefix:
+ * the editor area remounts on every worktree switch, and with its own cache it would fetch its
+ * layout from the server each time before it could render. A cached layout is the one in the
+ * window's session row, or a default not yet written: only this window writes its session rows,
+ * and a worktree's rows deleted with it are dropped from the cache too (`purgeWorktreeCache`, and
+ * `forgetIfRemoved` for a layout left after its worktree was removed).
+ */
+const sharedLayoutCaches = new Map<string, Map<string, SerializedDockview>>();
+
+function sharedLayoutCache(prefix: string): Map<string, SerializedDockview> {
+  let cache = sharedLayoutCaches.get(prefix);
+  if (!cache) {
+    cache = new Map();
+    sharedLayoutCaches.set(prefix, cache);
+    // Layouts are stored on the window's server, under their worktree's bare path. Registered for
+    // the window's lifetime, like the cache itself, so its entries are purged with their worktrees.
+    registerLayoutCache(localServerId(), cache);
+  }
+  return cache;
+}
+
+/** Where a restored layout came from: the server, the window's cache, or the default. */
+type LayoutSource = "server" | "cache" | "default";
+
+/**
+ * Drop a removed worktree's layout, which may have changed since its purge, so a worktree recreated
+ * at its path starts fresh.
+ */
+function forgetIfRemoved(cache: Map<string, SerializedDockview>, key: string): void {
+  if (key !== HOME_LAYOUT_KEY && !isListedWorktree(key)) cache.delete(key);
+}
+
 export function isOuterSwapping(): boolean {
   return outerSwapping;
 }
@@ -185,8 +219,12 @@ export function PersistedLayoutComponent({
   ...dockviewProps
 }: PersistedLayoutProps) {
   const internalApiRef = useRef<DockviewApi | null>(null);
-  const cacheRef = useRef(new Map<string, SerializedDockview>());
-  const initialLayoutRef = useRef<SerializedDockview | null>(null);
+  const cacheRef = useRef(sharedLayoutCache(storagePrefix));
+  // A layout already shown in this window renders at once, without waiting for the server.
+  const initialLayoutRef = useRef<SerializedDockview | null>(
+    cacheRef.current.get(layoutKey) ?? null,
+  );
+  const initialSourceRef = useRef<LayoutSource>(initialLayoutRef.current ? "cache" : "default");
   // Last serialized form we wrote (or settled on) for the active key — skips
   // no-op saves from synthetic onDidLayoutChange events fired during restore.
   const lastSavedRef = useRef<string>("");
@@ -196,10 +234,7 @@ export function PersistedLayoutComponent({
   // Pending writes waiting for the debounce to fire — keyed by full storage key
   // (a single map is fine because each PersistedLayoutComponent owns its own).
   const pendingPayloadRef = useRef<Map<string, string>>(new Map());
-  const [hydrated, setHydrated] = useState(false);
-
-  // Layouts are stored on the window's server, under their worktree's bare path.
-  useEffect(() => registerLayoutCache(localServerId(), cacheRef.current), []);
+  const [hydrated, setHydrated] = useState(() => initialLayoutRef.current !== null);
 
   // Stable refs for callbacks to avoid stale closures
   const onLayoutRestoredRef = useRef(onLayoutRestored);
@@ -278,17 +313,26 @@ export function PersistedLayoutComponent({
   }, [flushPendingSaveOnUnload]);
 
   // Unmounted with the page still up (going to or leaving Home): write the last change now, so the
-  // layout mounted next for this key reads it rather than the one before.
-  useEffect(() => () => flushPendingSave(), [flushPendingSave]);
+  // layout mounted next for this key reads it rather than the one before. Leaving for Home because
+  // the worktree was removed runs no swap, so its layout is forgotten here.
+  useEffect(
+    () => () => {
+      flushPendingSave();
+      forgetIfRemoved(cacheRef.current, prevKeyRef.current);
+    },
+    [flushPendingSave],
+  );
 
   // Hydrate the initial layout before mounting DockviewReact so onReady can restore synchronously.
   useEffect(() => {
+    if (initialLayoutRef.current) return;
     let cancelled = false;
     (async () => {
       const layout = await fetchLayout(storagePrefix, layoutKey, layoutVersion);
       if (cancelled) return;
       initialLayoutRef.current =
         layout && dropUnregisteredPanels(layout, { components, tabComponents });
+      if (layout) initialSourceRef.current = "server";
       setHydrated(true);
     })();
     return () => {
@@ -301,18 +345,20 @@ export function PersistedLayoutComponent({
   /**
    * After restoring or creating a layout, record the snapshot and (when appropriate)
    * persist it to this window's session. We persist whenever the layout came from
-   * the server OR when this is the first-and-only window — both cases mean the
+   * the server OR is the default of the first-and-only window — both cases mean the
    * window's "starting state" is meaningful and should survive promote-on-close.
    * Additional (non-first) windows that get a default layout don't persist until
-   * the user actually modifies something, so they can't clobber canonical.
+   * the user actually modifies something, so they can't clobber canonical. A layout
+   * from the window's cache is never written: it is already in the session row, or
+   * is such a default.
    */
   const settleAfterRestore = useCallback(
-    (dvApi: DockviewApi, key: string, sourceWasServer: boolean) => {
+    (dvApi: DockviewApi, key: string, source: LayoutSource) => {
       const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       lastSavedRef.current = snapshot;
       cacheRef.current.set(key, data);
-      if (sourceWasServer || IS_FIRST_WINDOW) {
+      if (source === "server" || (source === "default" && IS_FIRST_WINDOW)) {
         flushPendingSave();
         api.putStore(sessionKey(storagePrefix, key), snapshot).catch(() => {});
       }
@@ -350,7 +396,7 @@ export function PersistedLayoutComponent({
     }
 
     // Leaving a worktree that was removed: a worktree later created there starts fresh.
-    if (!isListedWorktree(oldKey)) cacheRef.current.delete(oldKey);
+    forgetIfRemoved(cacheRef.current, oldKey);
 
     // Begin swap
     swappingRef.current = true;
@@ -366,22 +412,23 @@ export function PersistedLayoutComponent({
     let restored = false;
     (async () => {
       const cached = cacheRef.current.get(newKey);
-      let sourceWasServer = false;
+      let source: LayoutSource = "default";
       if (cached) {
         dvApi.fromJSON(cached);
+        source = "cache";
       } else {
         const fetched = await fetchLayout(storagePrefix, newKey, layoutVersion);
         if (cancelled) return;
         if (fetched) {
           dvApi.fromJSON(dropUnregisteredPanels(fetched, { components, tabComponents }));
-          sourceWasServer = true;
+          source = "server";
         } else {
           createDefaultRef.current(dvApi);
         }
       }
 
       onLayoutRestoredRef.current?.(dvApi);
-      settleAfterRestore(dvApi, newKey, sourceWasServer || cached !== undefined);
+      settleAfterRestore(dvApi, newKey, source);
 
       swappingRef.current = false;
       if (externalSwappingRef) externalSwappingRef.current = false;
@@ -413,17 +460,15 @@ export function PersistedLayoutComponent({
       internalApiRef.current = dvApi;
       if (externalApiRef) externalApiRef.current = dvApi;
 
-      let sourceWasServer = false;
       if (initialLayoutRef.current) {
         dvApi.fromJSON(initialLayoutRef.current);
-        sourceWasServer = true;
       } else {
         createDefaultRef.current(dvApi);
       }
 
       onApiReady?.(dvApi);
       onLayoutRestoredRef.current?.(dvApi);
-      settleAfterRestore(dvApi, layoutKey, sourceWasServer);
+      settleAfterRestore(dvApi, layoutKey, initialSourceRef.current);
 
       dvApi.onDidLayoutChange(() => {
         if (swappingRef.current || outerSwapping) return;
