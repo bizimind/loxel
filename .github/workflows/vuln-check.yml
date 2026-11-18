@@ -66,6 +66,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -88,5 +89,6 @@ jobs:
           output: ${{ runner.temp }}/sbom-vulns.json
           # The action's default Trivy (v0.70.0) cannot decode sbom.ts's CycloneDX 1.7.
           version: v0.76.1
+
       - name: Gate on SBOM vulnerabilities
         run: bun packages/loxel/scripts/sbom-vuln-gate.ts "$RUNNER_TEMP/sbom-vulns.json"
