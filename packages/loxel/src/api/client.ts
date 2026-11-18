@@ -251,7 +251,10 @@ export async function getFileContentByPath(
 ): Promise<{ content: string }> {
   const params = new URLSearchParams();
   params.set("path", absolutePath);
-  if (worktreePath) params.set("wt", worktreePath);
+  if (worktreePath) {
+    params.set("wt", worktreePath);
+    await wsClient.whenSubscribed(worktreePath);
+  }
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`, { signal });
 }
 
@@ -265,7 +268,10 @@ export async function getFilePreviewContent(
 ): Promise<{ content: string }> {
   const params = new URLSearchParams();
   params.set("path", absolutePath);
-  if (worktreePath) params.set("wt", worktreePath);
+  if (worktreePath) {
+    params.set("wt", worktreePath);
+    await wsClient.whenSubscribed(worktreePath);
+  }
   params.set("preview", "1");
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`);
 }
@@ -886,6 +892,7 @@ export async function getDirContents(wt: string, dir: string) {
   const params = new URLSearchParams();
   params.set("wt", wt);
   if (dir) params.set("dir", dir);
+  await wsClient.whenSubscribed(wt);
   return fetchJson<DirEntry[]>(`/files?${params.toString()}`);
 }
 
@@ -992,6 +999,10 @@ export class WsClient {
   private pendingMessages: WsClientMessage[] = [];
   /** The worktrees this window is subscribed to, in order: the server takes the last as shown. */
   private worktrees = new Set<string>();
+  /** Of those, the ones whose resources the server has confirmed (`worktree_files_resynced`). */
+  private confirmedWorktrees = new Set<string>();
+  /** Callers of {@link whenSubscribed} waiting on a worktree's confirmation. */
+  private confirmationWaiters = new Map<string, (() => void)[]>();
 
   connect(): void {
     this.closed = false;
@@ -1028,6 +1039,16 @@ export class WsClient {
             greeted = true;
             this.handleHello(message);
             return;
+          }
+          if (message.type === "worktree_files_resynced") {
+            this.confirmedWorktrees.add(message.wtPath);
+            this.releaseWaiters(message.wtPath);
+          }
+          // A subscription the server refused names no worktree, and none of them will be
+          // confirmed now: their reads go out (and fail) as they would without the wait.
+          if (message.type === "error") {
+            for (const worktreePath of this.worktrees) this.confirmedWorktrees.add(worktreePath);
+            this.releaseWaiters();
           }
           for (const listener of this.listeners) {
             listener(message);
@@ -1101,6 +1122,7 @@ export class WsClient {
     const ws = this.ws;
     this.ws = null;
     ws?.close();
+    this.releaseWaiters();
     this.setState("expired");
   }
 
@@ -1145,6 +1167,8 @@ export class WsClient {
       return;
     }
     this.server = hello;
+    // A restarted server has no worktree resources: each subscription below waits for its answer.
+    this.confirmedWorktrees.clear();
     this.attempt = 0;
     for (const worktreePath of this.worktrees) {
       this.sendNow({ type: "subscribe_worktree", worktreePath });
@@ -1272,7 +1296,37 @@ export class WsClient {
    */
   unsubscribeWorktree(worktreePath: string): void {
     if (!this.worktrees.delete(worktreePath)) return;
+    this.confirmedWorktrees.delete(worktreePath);
+    this.releaseWaiters(worktreePath);
     if (this.isOpen()) this.sendNow({ type: "unsubscribe_worktree", worktreePath });
+  }
+
+  /**
+   * Settles once the server has the resources of `worktreePath`, which this window subscribed to:
+   * until then it answers requests for the worktree's files with 404s, on a first visit and after
+   * a reconnect (to a server that may have restarted) alike. Settles at once for a worktree the
+   * window is not subscribed to, and when the subscription ends or the server refuses one.
+   */
+  whenSubscribed(worktreePath: string): Promise<void> {
+    if (!this.worktrees.has(worktreePath) || this.confirmedWorktrees.has(worktreePath)) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const waiters = this.confirmationWaiters.get(worktreePath) ?? [];
+      waiters.push(resolve);
+      this.confirmationWaiters.set(worktreePath, waiters);
+    });
+  }
+
+  /** Settle the {@link whenSubscribed} waits on `worktreePath`, or on every worktree. */
+  private releaseWaiters(worktreePath?: string): void {
+    const paths =
+      worktreePath === undefined ? [...this.confirmationWaiters.keys()] : [worktreePath];
+    for (const path of paths) {
+      const waiters = this.confirmationWaiters.get(path);
+      this.confirmationWaiters.delete(path);
+      for (const resolve of waiters ?? []) resolve();
+    }
   }
 
   disconnect(): void {
@@ -1282,6 +1336,7 @@ export class WsClient {
     this.ws?.close();
     this.ws = null;
     this.pendingMessages = [];
+    this.releaseWaiters();
     // A later connect waits for its hello again, and treats it as a reconnect if one came before.
     this.setState(this.server ? "reconnecting" : "connecting");
   }
