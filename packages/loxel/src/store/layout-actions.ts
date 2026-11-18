@@ -12,7 +12,7 @@
  */
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 
-import { isCenterPanel } from "./panel-config";
+import { isCenterPanel, ZONE_MIN_SIZES } from "./panel-config";
 import type { SidebarZone } from "./settings-store";
 import { getCurrentWorktreeToolsBar } from "./worktree-tools-bar";
 
@@ -160,7 +160,7 @@ export function collapseZone(api: DockviewApi, zone: SidebarZone, { skipSave = f
 }
 
 /**
- * Expand a sidebar zone: remove constraints and restore saved size.
+ * Expand a sidebar zone: lift the collapsed constraints to the zone's minimum and restore saved size.
  * When `forceSize` is provided, uses that size directly instead of reading
  * from per-scope sidebar sizes (used during layout restoration).
  */
@@ -175,29 +175,34 @@ export function expandZone(
   const scoped = getCurrentWorktreeToolsBar();
   const sizes = scoped.getState().sidebarSizes;
 
+  // Read the size before lifting the constraints: the new minimum grows a collapsed zone at once,
+  // and a collapsed zone (size 0) must restore its saved size, not keep the minimum. An open zone
+  // saves its size as it is after the constraints, which may have grown it to the minimum.
   if (zone === "bottom") {
-    group.api.setConstraints({ minimumHeight: 0, maximumHeight: Number.MAX_SAFE_INTEGER });
+    const wasOpen = group.api.height > 0;
+    group.api.setConstraints({
+      minimumHeight: ZONE_MIN_SIZES.bottom,
+      maximumHeight: Number.MAX_SAFE_INTEGER,
+    });
     if (forceSize !== undefined) {
       group.api.setSize({ height: forceSize });
+    } else if (wasOpen) {
+      scoped.setState({ sidebarSizes: { ...sizes, bottom: group.api.height } });
     } else {
-      const h = group.api.height;
-      if (h > 0) {
-        scoped.setState({ sidebarSizes: { ...sizes, bottom: h } });
-      } else {
-        requestAnimationFrame(() => group.api.setSize({ height: sizes.bottom }));
-      }
+      requestAnimationFrame(() => group.api.setSize({ height: sizes.bottom }));
     }
   } else {
-    group.api.setConstraints({ minimumWidth: 0, maximumWidth: Number.MAX_SAFE_INTEGER });
+    const wasOpen = group.api.width > 0;
+    group.api.setConstraints({
+      minimumWidth: ZONE_MIN_SIZES[zone],
+      maximumWidth: Number.MAX_SAFE_INTEGER,
+    });
     if (forceSize !== undefined) {
       group.api.setSize({ width: forceSize });
+    } else if (wasOpen) {
+      scoped.setState({ sidebarSizes: { ...sizes, [zone]: group.api.width } });
     } else {
-      const w = group.api.width;
-      if (w > 0) {
-        scoped.setState({ sidebarSizes: { ...sizes, [zone]: w } });
-      } else {
-        requestAnimationFrame(() => group.api.setSize({ width: sizes[zone] }));
-      }
+      requestAnimationFrame(() => group.api.setSize({ width: sizes[zone] }));
     }
   }
 }
