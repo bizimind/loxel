@@ -12,7 +12,7 @@ import { localRef } from "@/api/local-server";
 import { movePanelToZone, setDockviewApi } from "@/store/tools-bar";
 import { purgeWorktreeStores } from "@/store/worktree-store";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 import { onOuterLayoutRestored, setupOuterDockview } from "./outer-dockview-setup";
 
@@ -48,7 +48,7 @@ let dockview: DockviewComponent | undefined;
 
 beforeEach(() => {
   purgeWorktreeStores(localRef(WT));
-  useWorktreeStore.setState({ activeWorktreePath: WT });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
 });
 
 afterEach(() => {
