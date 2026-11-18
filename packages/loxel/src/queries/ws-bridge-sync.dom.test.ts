@@ -105,16 +105,17 @@ const WORKING_TREE_DIFFS = [STAGED_DIFF, UNSTAGED_DIFF, UNCOMMITTED_DIFF];
 
 describe("useWsBridge git messages", () => {
   test.each([
-    { type: "refs_changed", projectPath: PROJECT_PATH, data: [] },
-    { type: "log_changed", projectPath: PROJECT_PATH },
-  ] satisfies WsMessage[])(
-    "$type refetches the commit lists and working-tree diffs, and nothing else",
-    (message) => {
+    { message: { type: "refs_changed", projectPath: PROJECT_PATH, data: [] }, branches: true },
+    { message: { type: "log_changed", projectPath: PROJECT_PATH }, branches: false },
+  ] satisfies { message: WsMessage; branches: boolean }[])(
+    "$message.type refetches the commit lists and working-tree diffs (and branches on a ref change), and nothing else",
+    ({ message, branches }) => {
       deliver(message);
 
       expect(invalidatedKeys()).toEqual([
         queryKeys.projectCommits(PROJECT),
         queryKeys.projectBranchCommits(PROJECT),
+        ...(branches ? [queryKeys.branches(PROJECT)] : []),
       ]);
       expect(matchedByPredicates(DIFF_KEYS)).toEqual(WORKING_TREE_DIFFS);
       expect(setQueryData).not.toHaveBeenCalled();
