@@ -194,9 +194,9 @@ export function keyServer(queryKey: readonly unknown[]): ServerId | null {
 
 /**
  * Whether a query key reaches into `wt`: a key of `wt`'s server that names `wt`, a worktree or
- * project inside it, or a path inside it (a listed directory, a file). A key naming no server
- * (Home's, or one built before its project was known) is the window's own: it counts as
- * `homeServer`'s.
+ * project inside it, or a path inside it (a listed directory, a file, a diff source's worktree).
+ * A key naming no server (Home's, or one built before its project was known) is the window's own:
+ * it counts as `homeServer`'s.
  */
 export function isKeyWithinWorktree(
   queryKey: readonly unknown[],
@@ -204,11 +204,20 @@ export function isKeyWithinWorktree(
   homeServer: ServerId,
 ): boolean {
   if ((keyServer(queryKey) ?? homeServer) !== wt.server) return false;
-  return queryKey.some((part) =>
-    isWorktreeRef(part)
-      ? isWithin(part.path, wt.path)
-      : typeof part === "string" && isWithin(part, wt.path),
-  );
+  return queryKey.some((part) => {
+    const path = keyPartPath(part);
+    return path !== null && isWithin(path, wt.path);
+  });
+}
+
+/** The path a key part names: a ref's, a path's own, or a diff source's worktree. */
+function keyPartPath(part: unknown): string | null {
+  if (typeof part === "string") return part;
+  if (isWorktreeRef(part)) return part.path;
+  if (typeof part === "object" && part !== null && "worktree" in part) {
+    return typeof part.worktree === "string" ? part.worktree : null;
+  }
+  return null;
 }
 
 /**
