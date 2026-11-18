@@ -156,6 +156,21 @@ jobs:
       - name: Generate SBOM
         run: bun packages/loxel/scripts/sbom.ts "packages/loxel/build/Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json"
 
+      # Before anything is uploaded: fail on a vulnerability scoring above the gate's CVSS threshold,
+      # with `.trivyignore` applied (Trivy reads it from the working directory). The same scan as
+      # vuln-check.yml's scheduled `loxel-sbom` job; see packages/loxel/docs/ELECTRON.md.
+      - name: Scan SBOM for vulnerabilities
+        # Pinned to a commit: this job later imports the signing certificate and notarization key.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: sbom
+          scan-ref: packages/loxel/build/Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json
+          scanners: vuln
+          format: json
+          output: ${{ runner.temp }}/sbom-vulns.json
+      - name: Gate on SBOM vulnerabilities
+        run: bun packages/loxel/scripts/sbom-vuln-gate.ts "$RUNNER_TEMP/sbom-vulns.json"
+
       - name: Import signing certificate
         run: |
           echo "$LOXEL_CERTIFICATE" | base64 --decode > certificate.p12
