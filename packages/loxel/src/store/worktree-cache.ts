@@ -50,8 +50,8 @@ export function setWorktreeInnerLayout(containerId: string, layout: SerializedDo
 }
 
 /**
- * Each mounted layout's own cache of the layouts it has shown, keyed by layout key: a worktree's
- * bare path, as the layout is stored under on `server`, the server that holds it.
+ * The window's caches of the layouts it has shown, one per layout storage prefix, keyed by layout
+ * key: a worktree's bare path, as the layout is stored under on `server`, the server that holds it.
  */
 const layoutCaches = new Map<Map<string, unknown>, ServerId>();
 
