@@ -4,6 +4,9 @@ import { useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { PanelId } from "@/store/panel-config";
 
+/** Controls a header holds whose own press-and-drag must not start a panel drag. */
+const HEADER_CONTROLS = "input, textarea, button, select";
+
 /**
  * Panel header that doubles as a drag handle for dockview panel rearrangement.
  * Sets the same drag data format as ToolsBarIcon so dockview's onDidDrop recognizes it.
@@ -19,8 +22,21 @@ export function DraggablePanelHeader({
 }) {
   const dragImageRef = useRef<HTMLDivElement>(null);
 
+  // A press on a control the header holds (a button, a text field) is that control's: suspend the
+  // header's dragging for that press, so the gesture never becomes a panel drag. Suspending rather
+  // than cancelling the dragstart matters: a cancelled dragstart gets no dragend, and window-level
+  // drag tracking (BrowserPagePool's) would be left thinking a drag is still in progress.
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const pressed = e.target;
+    const onControl = pressed instanceof Element && pressed.closest(HEADER_CONTROLS) !== null;
+    e.currentTarget.setAttribute("draggable", String(!onControl));
+  }, []);
+
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
+      // A drag of something inside the header (selected text in a field, or content portalled out
+      // of its React tree) is that element's own drag; leave it alone.
+      if (e.target !== e.currentTarget) return;
       e.dataTransfer.setData("text/plain", panelId);
       e.dataTransfer.effectAllowed = "move";
       if (dragImageRef.current) {
@@ -38,6 +54,7 @@ export function DraggablePanelHeader({
         className,
       )}
       draggable
+      onPointerDown={handlePointerDown}
       onDragStart={handleDragStart}
     >
       {children}
