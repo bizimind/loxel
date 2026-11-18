@@ -4,7 +4,9 @@
  * Shared by the "Go to Recent Notification" keybinding and
  * click-to-navigate in the notification center overlay.
  */
-import { isPanelSource } from "@/api/notification-model";
+import type { IDockviewPanel } from "dockview-react";
+
+import { type PanelNotificationSource, isPanelSource } from "@/api/notification-model";
 import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
 import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
 import {
@@ -15,17 +17,32 @@ import {
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
-/** Try to activate a panel, retrying once after a short delay if not found. */
-function activatePanelById(panelId: string, retries = 1): void {
-  const api = getCenterApi();
-  const panel = api?.panels.find((p) => p.id === panelId);
-  if (api && panel) {
+/**
+ * Whether a dock panel is the notification source's: a browser source names the panel's id, a
+ * terminal source the terminal's id, which its panel holds in `params.terminalId` (the id its
+ * tab's notification dot goes by).
+ */
+function isSourcePanel(panel: IDockviewPanel, source: PanelNotificationSource): boolean {
+  if (source.kind === "browser") return panel.id === source.panelId;
+  const params: unknown = panel.params;
+  return (
+    typeof params === "object" &&
+    params !== null &&
+    "terminalId" in params &&
+    params.terminalId === source.panelId
+  );
+}
+
+/** Try to activate the source's panel, retrying once after a short delay if not found. */
+function activateSourcePanel(source: PanelNotificationSource, retries = 1): void {
+  const panel = getCenterApi()?.panels.find((p) => isSourcePanel(p, source));
+  if (panel) {
     panel.api.setActive();
     return;
   }
   // Panel may not be mounted yet after worktree switch — retry after layout settles
   if (retries > 0) {
-    setTimeout(() => activatePanelById(panelId, retries - 1), 150);
+    setTimeout(() => activateSourcePanel(source, retries - 1), 150);
   }
 }
 
@@ -51,10 +68,10 @@ export function navigateToNotification(notification: ClientNotification): void {
   // the page opens lands next to it. Main ignores refs with nothing left to click (the page was
   // closed, unloaded or reloaded, and no service worker showed it).
   const activate = (afterSwitch: boolean) => {
-    if (source.kind !== "browser") return activatePanelById(panelId);
+    if (source.kind !== "browser") return activateSourcePanel(source);
     const click = (slot: PageSlot | null) => {
       if (slot) slot.api.setActive();
-      else activatePanelById(panelId);
+      else activateSourcePanel(source);
       window.electronAPI?.clickBrowserNotification({ ref: source.ref });
     };
     if (afterSwitch) whenBrowserPageAttached(panelId, click);

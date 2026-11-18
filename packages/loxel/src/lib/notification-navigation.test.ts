@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
+import type { DockviewApi } from "dockview-react";
+
 import { localRef, localServerId } from "@/api/local-server";
 import type { NotificationSource } from "@/api/notification-model";
 import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { ClientNotification } from "@/store/panel-notifications";
+import { setCenterApi } from "@/store/tools-bar";
 import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 import { navigateToNotification } from "./notification-navigation";
@@ -33,6 +36,7 @@ beforeEach(() => {
 afterEach(() => {
   switchWorktree.mockClear();
   showHome.mockClear();
+  setCenterApi(null);
   useWorktreeStore.setState({
     ...activeWorktreeFields(null),
     switchWorktree: originals.switchWorktree,
@@ -70,5 +74,18 @@ describe("navigateToNotification", () => {
     navigateToNotification(notification({ kind: "inbox", worktreePath: "/repo/.worktrees/b" }));
 
     expect(switchWorktree.mock.calls).toEqual([[localRef("/repo/.worktrees/b")]]);
+  });
+
+  test("activates the terminal's tab, whose panel id is not the terminal's", () => {
+    const panel = (id: string, params: object) => ({ id, params, api: { setActive: mock() } });
+    // A panel whose id happens to be the terminal id must not be taken for its tab.
+    const decoy = panel("terminal-1", {});
+    const tab = panel("terminal-terminal-1", { terminalId: "terminal-1" });
+    setCenterApi({ panels: [decoy, tab] } as unknown as DockviewApi);
+
+    navigateToNotification(notification(terminalIn("/repo")));
+
+    expect(tab.api.setActive).toHaveBeenCalledTimes(1);
+    expect(decoy.api.setActive).not.toHaveBeenCalled();
   });
 });
