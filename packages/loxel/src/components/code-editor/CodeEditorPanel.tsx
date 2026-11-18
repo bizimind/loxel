@@ -798,7 +798,7 @@ export function CodeEditorPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
-      {saveRefused !== null && editorFileState !== "diverged" && (
+      {saveRefused !== null && !isDeleted && editorFileState !== "diverged" && (
         <SaveRefusedBanner
           reason={saveRefused}
           onRetry={() => void saveNow()}

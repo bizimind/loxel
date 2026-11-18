@@ -423,7 +423,8 @@ export function useDiskSyncedContent<T>(
   const handleAcceptDisk = useCallback((): T | null => {
     const store = useEditorStateStore.getState();
     const entry = store.files.get(editorKey);
-    if (!entry?.diskContent) return null;
+    // An empty file is a disk version too.
+    if (!entry || entry.diskContent === null) return null;
     let parsed: T | null = null;
     try {
       parsed = deserializeRef.current(entry.diskContent);

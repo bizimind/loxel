@@ -17,7 +17,7 @@ export function EditableSideBanners({ side }: { side: EditableSide }) {
       {side.isDeleted && !side.loadFailed && (
         <DeletedFileBanner fileName={fileName} onRecreate={() => void side.recreateFile()} />
       )}
-      {side.saveRefused !== null && !side.isDiverged && (
+      {side.saveRefused !== null && !side.isDeleted && !side.isDiverged && (
         <SaveRefusedBanner
           fileName={fileName}
           reason={side.saveRefused}

@@ -962,7 +962,7 @@ export function MarkdownEditor({
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
       {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
-      {saveRefused !== null && editorFileState !== "diverged" && (
+      {saveRefused !== null && !isDeleted && editorFileState !== "diverged" && (
         <SaveRefusedBanner
           reason={saveRefused}
           onRetry={() => void saveNow()}

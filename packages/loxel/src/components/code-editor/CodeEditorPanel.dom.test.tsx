@@ -325,7 +325,11 @@ describe("CodeEditorPanel refused save", () => {
     await waitFor(() => expect(screen.queryByText(/could not be saved/)).toBeNull());
   });
 
-  test("Discard changes loads the disk version and gives the edit up", async () => {
+  test.each([
+    ["REAL", "a file"],
+    ["", "an empty file"],
+  ])("Discard changes loads the disk version %p of %s and gives the edit up", async (onDisk) => {
+    fileResponse = () => Response.json({ content: onDisk });
     writeResponse = () => Response.json({ error: "EACCES: permission denied" }, { status: 500 });
     renderPanel();
     await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
@@ -337,11 +341,30 @@ describe("CodeEditorPanel refused save", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
 
-    await waitFor(() => expect(mountedEditor().model.getValue()).toBe("REAL"));
+    await waitFor(() => expect(mountedEditor().model.getValue()).toBe(onDisk));
     await waitFor(() => expect(screen.queryByText(/could not be saved/)).toBeNull());
     const key = fileEditorKey(localServerId(), FILE);
     expect(useEditorStateStore.getState().files.get(key)?.state).toBe("clean");
     expect(outboxEntriesForTests()).toEqual([]);
     expect(writes.length).toBe(writesBefore);
+  });
+
+  test("a refused save's file deleted on disk shows only the deleted-file banner", async () => {
+    writeResponse = () => Response.json({ error: "EACCES: permission denied" }, { status: 500 });
+    renderPanel();
+    await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
+    act(() => mountedEditor().userEdit("REAL edited"));
+    await act(async () => {
+      await saveAction?.();
+    });
+    await screen.findByText(/could not be saved/);
+
+    act(() =>
+      useEditorStateStore.getState().setDeleted(fileEditorKey(localServerId(), FILE), true),
+    );
+
+    await screen.findByRole("button", { name: "Re-create file" });
+    expect(screen.queryByText(/could not be saved/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Discard changes" })).toHaveLength(1);
   });
 });
