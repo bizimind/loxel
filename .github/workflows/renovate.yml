@@ -56,4 +56,7 @@ jobs:
           RENOVATE_CUSTOM_ENV_VARIABLES: '{"GITHUB_TOKEN": "${{ steps.app-token.outputs.token }}"}'
           LOG_LEVEL: info
         # The same 7-day cooldown on Renovate's own dependencies as pnpm-workspace.yaml sets here.
+        # pnpm skips their install scripts, so Renovate logs "RE2 not usable" and uses JavaScript's
+        # regex engine. That is deliberate: re2's script downloads an unpinned prebuilt binary into
+        # this token-holding job, and RE2 only guards against slow regexes in untrusted configs.
         run: pnpm --config.minimum-release-age=10080 dlx "renovate@$RENOVATE_VERSION"
