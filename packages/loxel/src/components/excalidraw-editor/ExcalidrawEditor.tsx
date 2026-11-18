@@ -11,6 +11,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import { SaveRefusedBanner } from "@/components/editor/SaveRefusedBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -244,6 +245,8 @@ export function ExcalidrawEditor({
     diskContent,
     editorFileState,
     isDeleted,
+    saveRefused,
+    discardEdits,
     recreateFile,
     cacheKey,
     isError,
@@ -409,6 +412,13 @@ export function ExcalidrawEditor({
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
       {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
+      {saveRefused !== null && !isDeleted && editorFileState !== "diverged" && (
+        <SaveRefusedBanner
+          reason={saveRefused}
+          onRetry={() => void saveNow()}
+          onDiscard={() => void discardEdits(handleAcceptDisk)}
+        />
+      )}
       <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />

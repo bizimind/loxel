@@ -60,6 +60,11 @@ export interface OutboxEntry {
   status: OutboxStatus;
   /** For `review`: the disk content the save conflicts with, null when there is none to show. */
   disk: string | null;
+  /**
+   * Why the server refused the save (its error message), shown on its editor. Set in `review`,
+   * and kept while a newer save of the editor is being sent; absent in entries of older versions.
+   */
+  refusal?: string;
 }
 
 /** Where entries persist between runs. A write resolves once stored, and rejects if it was not. */
@@ -239,16 +244,19 @@ function settleGoneSaves(): void {
 
 /** Bring what follows from the entries in step with them: editors' flags, worktrees held. */
 function entriesChanged(): void {
-  syncQueuedFlags();
+  syncEditorFlags();
   syncHeldWorktrees();
 }
 
-/** Keep each editor's `queued` flag in step with its entry. */
-function syncQueuedFlags(): void {
+/** Keep each editor's `queued` and `saveRefused` flags in step with its entry. */
+function syncEditorFlags(): void {
   const store = useEditorStateStore.getState();
   for (const [key, editor] of store.files) {
-    const queued = isWaiting(entryOfInstance(editor.instanceId));
+    const entry = entryOfInstance(editor.instanceId);
+    const queued = isWaiting(entry);
     if (editor.queued !== queued) store.setQueued(key, queued);
+    const refused = entry?.refusal ?? null;
+    if (editor.saveRefused !== refused) store.setSaveRefused(key, refused);
   }
 }
 
@@ -293,6 +301,10 @@ export function addOutboxEntry(
     seq: nextSeq++,
     status,
     disk: null,
+    // Its editor goes on showing why the last save was refused until this one is answered.
+    ...(status === "sending" && previous?.refusal !== undefined
+      ? { refusal: previous.refusal }
+      : {}),
   };
   entries.set(entry.id, entry);
   const stored = persist(entry);
@@ -328,18 +340,19 @@ export function outboxSaveWritten(entry: OutboxEntry, written: string): void {
 }
 
 /**
- * Sending `entry` failed with `err`: queue it for a retry, or drop it if the server refused. A
- * retry the server refused because the file changed since it was read is queued, to merge again.
+ * Sending `entry` failed with `err`: queue it for a retry, or keep it for review if the server
+ * refused, even while its editor is open: the editor may unmount (a worktree switch, its tab
+ * closing) before it saves again. A retry the server refused because the file changed since it
+ * was read is queued, to merge again.
  */
 export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
   if (entries.get(entry.id) !== entry) return;
   if (!isRetriableSaveError(err) && !api.isDiskChangedError(err)) {
-    // An open editor still holds the edits (dirty, as before the outbox); a closed one does not.
-    if (ownerEditor(entry)) removeEntry(entry);
-    else toReview(entry, null);
+    toReview(entry, null, refusalReason(err));
     return;
   }
   entry.status = "queued";
+  delete entry.refusal;
   void persist(entry);
   entriesChanged();
   if (isGone(entry)) {
@@ -363,7 +376,23 @@ export function outboxEditorClosing(
   worktreePath: string | null,
 ): void {
   const entry = entryOfInstance(editor.instanceId);
-  if (!editor.deleted && !editor.movedTo) return;
+  if (!editor.deleted && !editor.movedTo) {
+    // A refused save of another view (a compare or diff side), which does not take it over when it
+    // mounts again: shown once the view is gone, as a closed editor's refused save is. A pending
+    // autosave flushed meanwhile replaces it, and is shown when it fails.
+    if (
+      entry?.status === "review" &&
+      entry.refusal !== undefined &&
+      !isFileTabKey(editorKey, editor)
+    ) {
+      queueMicrotask(() => {
+        if (entries.get(entry.id) === entry && !ownerEditor(entry)) {
+          toReview(entry, entry.disk, entry.refusal);
+        }
+      });
+    }
+    return;
+  }
   // Kept only for the file's own tab, which a reload brings back: another view of the file (a
   // compare or diff side) gives its edits up with it.
   if (editor.movedTo || !isFileTabKey(editorKey, editor)) {
@@ -430,6 +459,19 @@ export function adoptOutboxEntry(editorKey: EditorKey, entry: OutboxEntry): void
   void persist(entry);
   entriesChanged();
   if (entry.status === "queued") scheduleRetry(0);
+  if (entry.status === "review" && entry.refusal !== undefined) void mergeDiskIntoAdopted(entry);
+}
+
+/**
+ * A refused save its file's tab took over: the file may have changed while no editor of it was
+ * open. Its disk version goes through the editor like any external change, which merges it or
+ * shows the conflict, so the next save does not overwrite it.
+ */
+async function mergeDiskIntoAdopted(entry: OutboxEntry): Promise<void> {
+  const disk = await readDisk(entry);
+  if (disk.kind !== "content" || disk.content === entry.base) return;
+  if (entries.get(entry.id) !== entry || ownerEditor(entry)?.state !== "dirty") return;
+  useEditorStateStore.getState().handleDiskChange(entry.editorKey, [], disk.content);
 }
 
 // -- Retrying --
@@ -665,7 +707,7 @@ async function retryClosed(entry: OutboxEntry): Promise<RetryOutcome> {
       return reason;
     }
     log.error("The server refused a queued save", { path: entry.filePath, error });
-    toReview(entry, null);
+    toReview(entry, null, refusalReason(error));
     return "done";
   }
   savedClosed(entry);
@@ -678,14 +720,24 @@ function savedClosed(entry: OutboxEntry): void {
   removeEntry(entry);
 }
 
-/** The save needs the user: keep it, and show it in the file's tab. */
-function toReview(entry: OutboxEntry, disk: string | null): void {
+/** What the editor says a refused save failed with. */
+function refusalReason(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : "the server refused it";
+}
+
+/**
+ * The save needs the user: keep it, and show it in the file's tab. `refusal`: the server refused
+ * it, for this reason.
+ */
+function toReview(entry: OutboxEntry, disk: string | null, refusal?: string): void {
   entry.status = "review";
   entry.disk = disk;
+  if (refusal === undefined) delete entry.refusal;
+  else entry.refusal = refusal;
   recovered.delete(entry.id);
   void persist(entry);
   entriesChanged();
-  // An open editor already shows the edits (with its conflict or deleted banner).
+  // An open editor already shows the edits (with its conflict, deleted or refused-save banner).
   if (ownerEditor(entry)) return;
   const name = getDisplayFilename(entry.filePath);
   // An entry names no server yet (#1456), so its file's tab is found by path. Recovered entries
@@ -777,6 +829,7 @@ function isOutboxEntry(value: unknown): value is OutboxEntry {
     typeof v.content === "string" &&
     typeof v.seq === "number" &&
     (typeof v.disk === "string" || v.disk === null) &&
+    (v.refusal === undefined || typeof v.refusal === "string") &&
     (v.status === "sending" ||
       v.status === "queued" ||
       v.status === "retrying" ||
@@ -864,7 +917,10 @@ export async function initSaveOutbox(
         const orphans = stored.filter((e) => e.ownerId !== ownerId && !live?.has(e.ownerId));
         for (const entry of orphans) {
           entry.ownerId = ownerId;
-          if (entry.status !== "review") entry.status = "queued";
+          if (entry.status !== "review") {
+            entry.status = "queued";
+            delete entry.refusal; // carried by a save in flight when the window went
+          }
           entry.seq = nextSeq++;
         }
         // Taken over only once stored as this window's, so no other window takes them too.
@@ -886,7 +942,9 @@ export async function initSaveOutbox(
   void settleRecoveredOfGoneWorktrees(taken);
   scheduleRetry(0);
   // Saves that need the user are shown in their tabs once the app is up.
-  for (const entry of taken) if (entry.status === "review") toReview(entry, entry.disk);
+  for (const entry of taken) {
+    if (entry.status === "review") toReview(entry, entry.disk, entry.refusal);
+  }
 }
 
 /** Test hook: forget every entry and stop retrying, as a new window (page load) starts. */

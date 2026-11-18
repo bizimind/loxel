@@ -20,6 +20,34 @@ class FakeModel {
   getOptions = () => ({ tabSize: 2, indentSize: 2 });
   dispose = () => {};
   onDidChangeContent = () => ({ dispose() {} });
+  getLineCount = () => this.value.split("\n").length;
+  getLineMaxColumn = (line: number) => (this.value.split("\n")[line - 1] ?? "").length + 1;
+  /** Applies range edits as Monaco does, last first so earlier ranges stay valid. */
+  pushEditOperations = (_selections: unknown, edits: { range: FakeRange; text: string }[]) => {
+    const offset = (line: number, column: number) =>
+      this.value
+        .split("\n")
+        .slice(0, line - 1)
+        .reduce((sum, text) => sum + text.length + 1, column - 1);
+    const sorted = edits.toSorted(
+      (a, b) =>
+        offset(b.range.startLineNumber, b.range.startColumn) -
+        offset(a.range.startLineNumber, a.range.startColumn),
+    );
+    for (const { range, text } of sorted) {
+      const start = offset(range.startLineNumber, range.startColumn);
+      const end = offset(range.endLineNumber, range.endColumn);
+      this.value = this.value.slice(0, start) + text + this.value.slice(end);
+    }
+    return null;
+  };
+}
+
+interface FakeRange {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
 }
 
 class FakeEditor {
@@ -105,6 +133,8 @@ mock.module("@/components/code-editor/caret-row", () => ({
 
 const { CodeEditorPanel } = await import("./CodeEditorPanel");
 const { PanelContext } = await import("@/components/dockview/panel-context");
+const { outboxEntriesForTests, resetSaveOutboxForTests } = await import("@/lib/save-outbox");
+const { fileEditorKey, useEditorStateStore } = await import("@/store/editor-state");
 
 const FILE = "/repo/real.ts";
 
@@ -119,6 +149,7 @@ const panelApi = {
 
 let fileResponse: () => Response | Promise<Response>;
 let writes: { path: string; content: string }[] = [];
+let writeResponse: () => Response;
 const realFetch = globalThis.fetch;
 
 function renderPanel(worktree: WorktreeRef | null = null) {
@@ -146,12 +177,13 @@ beforeEach(() => {
   saveAction = null;
   writes = [];
   fileResponse = () => Response.json({ content: "REAL" });
+  writeResponse = () => Response.json({ success: true });
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/file-content")) return fileResponse();
     if (url.includes("/file-write")) {
       writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ success: true });
+      return writeResponse();
     }
     if (url.includes("/editorconfig")) return Response.json({ properties: {} });
     return Response.json({});
@@ -160,6 +192,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetSaveOutboxForTests();
   globalThis.fetch = realFetch;
   onlineManager.setOnline(true);
 });
@@ -261,5 +294,77 @@ describe("CodeEditorPanel content load", () => {
     renderPanel();
     await waitFor(() => expect(mountedEditor().model.getValue()).toBe("REAL"));
     await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
+  });
+});
+
+describe("CodeEditorPanel refused save", () => {
+  test("keeps the edit across the editor unmounting and mounting again, unsaved", async () => {
+    writeResponse = () =>
+      Response.json({ error: "EACCES: permission denied, open '/repo/real.ts'" }, { status: 500 });
+    const { unmount } = renderPanel();
+    await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
+    act(() => mountedEditor().userEdit("REAL edited"));
+    await act(async () => {
+      await saveAction?.();
+    });
+    await screen.findByText(/could not be saved: EACCES: permission denied/);
+
+    // A worktree switch unmounts the editor, and switching back mounts it again.
+    unmount();
+    renderPanel();
+
+    await waitFor(() => expect(mountedEditor().model.getValue()).toBe("REAL edited"));
+    await screen.findByText(/could not be saved: EACCES: permission denied/);
+    const key = fileEditorKey(localServerId(), FILE);
+    expect(useEditorStateStore.getState().files.get(key)?.state).toBe("dirty");
+
+    // Once the file can be written, Try again saves the edit and the banner goes.
+    writeResponse = () => Response.json({ success: true });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(writes.at(-1)).toMatchObject({ content: "REAL edited" }));
+    await waitFor(() => expect(screen.queryByText(/could not be saved/)).toBeNull());
+  });
+
+  test.each([
+    ["REAL", "a file"],
+    ["", "an empty file"],
+  ])("Discard changes loads the disk version %p of %s and gives the edit up", async (onDisk) => {
+    fileResponse = () => Response.json({ content: onDisk });
+    writeResponse = () => Response.json({ error: "EACCES: permission denied" }, { status: 500 });
+    renderPanel();
+    await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
+    act(() => mountedEditor().userEdit("REAL edited"));
+    await act(async () => {
+      await saveAction?.();
+    });
+    const writesBefore = writes.length;
+
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+    await waitFor(() => expect(mountedEditor().model.getValue()).toBe(onDisk));
+    await waitFor(() => expect(screen.queryByText(/could not be saved/)).toBeNull());
+    const key = fileEditorKey(localServerId(), FILE);
+    expect(useEditorStateStore.getState().files.get(key)?.state).toBe("clean");
+    expect(outboxEntriesForTests()).toEqual([]);
+    expect(writes.length).toBe(writesBefore);
+  });
+
+  test("a refused save's file deleted on disk shows only the deleted-file banner", async () => {
+    writeResponse = () => Response.json({ error: "EACCES: permission denied" }, { status: 500 });
+    renderPanel();
+    await waitFor(() => expect(mountedEditor().options.readOnly).toBe(false));
+    act(() => mountedEditor().userEdit("REAL edited"));
+    await act(async () => {
+      await saveAction?.();
+    });
+    await screen.findByText(/could not be saved/);
+
+    act(() =>
+      useEditorStateStore.getState().setDeleted(fileEditorKey(localServerId(), FILE), true),
+    );
+
+    await screen.findByRole("button", { name: "Re-create file" });
+    expect(screen.queryByText(/could not be saved/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Discard changes" })).toHaveLength(1);
   });
 });

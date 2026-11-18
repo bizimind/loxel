@@ -14,6 +14,7 @@ import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { EditorBanner } from "@/components/editor/EditorBanner";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import { SaveRefusedBanner } from "@/components/editor/SaveRefusedBanner";
 import {
   type MergeCallbacks,
   useDiskSyncedContent,
@@ -230,6 +231,8 @@ export function CodeEditorPanel({
     diskContent,
     editorFileState,
     isDeleted,
+    saveRefused,
+    discardEdits,
     isError,
     retryLoad,
     saveNow,
@@ -795,6 +798,13 @@ export function CodeEditorPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
+      {saveRefused !== null && !isDeleted && editorFileState !== "diverged" && (
+        <SaveRefusedBanner
+          reason={saveRefused}
+          onRetry={() => void saveNow()}
+          onDiscard={() => void discardEdits(handleAcceptDisk)}
+        />
+      )}
       {contentUnknown && isError && (
         <EditorBanner
           tone="danger"

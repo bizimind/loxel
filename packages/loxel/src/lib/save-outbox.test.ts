@@ -189,14 +189,117 @@ describe("open editor", () => {
     expect(outboxEntriesForTests()).toEqual([]);
   });
 
-  test("a refused save is not queued", async () => {
+  test("a refused save is kept for review, not queued, and its editor says why", async () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     refuseWrites = true;
 
     expect(await saveEditorContent(FILE, text.current, "/repo", undefined, KEY)).toBe(false);
     expect(editor()?.queued).toBe(false);
+    expect(editor()?.saveRefused).toBe("Permission denied");
+    expect(outboxEntriesForTests()).toEqual([
+      expect.objectContaining({
+        status: "review",
+        content: text.current,
+        refusal: "Permission denied",
+      }),
+    ]);
+    // Shown by the open editor's banner: nothing is reopened or toasted.
+    expect(opened).toEqual([]);
+    expect(toasts).toEqual([]);
+  });
+
+  test("a refused save survives its editor unmounting and is shown when it mounts again", async () => {
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+    refuseWrites = true;
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
+
+    // A worktree switch unmounts the editor.
+    const closing = editor();
+    if (!closing) throw new Error("no editor");
+    outboxEditorClosing(KEY, closing, "/repo");
+    useEditorStateStore.getState().closeFile(KEY);
+
+    // Switching back mounts it again: it shows the refused edits, unsaved, with the reason.
+    const entry = findAdoptableEntry(FILE);
+    expect(entry?.content).toBe("a\nb\nc\nd\n");
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, entry!);
+    expect(editor()?.state).toBe("dirty");
+    expect(editor()?.saveRefused).toBe("Permission denied");
+
+    // The banner stays while a new save is in flight, and goes once one is written.
+    refuseWrites = false;
+    const saved = saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
+    expect(editor()?.saveRefused).toBe("Permission denied");
+    expect(await saved).toBe(true);
+    expect(editor()?.saveRefused).toBeNull();
     expect(outboxEntriesForTests()).toEqual([]);
+  });
+
+  test("a refused save is kept across a reload", async () => {
+    const { storage } = memoryStorage();
+    await initSaveOutbox({ storage });
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    refuseWrites = true;
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
+
+    await reload(storage);
+    expect(outboxEntriesForTests()).toEqual([
+      expect.objectContaining({ status: "review", refusal: "Permission denied" }),
+    ]);
+    expect(opened).toEqual([FILE]);
+
+    // The tab it opens takes it over with its reason.
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    adoptOutboxEntry(KEY, findAdoptableEntry(FILE)!);
+    expect(editor()?.state).toBe("dirty");
+    expect(editor()?.saveRefused).toBe("Permission denied");
+  });
+
+  test("a save in flight after a refusal is recovered queued, without the refusal", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e1", leftBehind({ status: "sending", refusal: "Permission denied" }));
+    serverDown = true; // the retry the recovery starts waits
+    await reload(storage);
+    expect(outboxEntriesForTests()).toEqual([expect.objectContaining({ status: "queued" })]);
+    expect(outboxEntriesForTests()[0]?.refusal).toBeUndefined();
+  });
+
+  test("a refused save taken over by a reopened tab merges what changed on disk meanwhile", async () => {
+    const text = { current: "a\nb\nc\nd\n" };
+    openEditor("a\nb\nc\n", text);
+    refuseWrites = true;
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
+    const closing = editor();
+    if (!closing) throw new Error("no editor");
+    outboxEditorClosing(KEY, closing, "/repo");
+    useEditorStateStore.getState().closeFile(KEY);
+
+    disk[FILE] = "A\nb\nc\n"; // another program edits the file while no tab is open
+    const reopened = { current: "a\nb\nc\nd\n" };
+    openEditor("A\nb\nc\n", reopened);
+    adoptOutboxEntry(KEY, findAdoptableEntry(FILE)!);
+    await until(() => reopened.current === "A\nb\nc\nd\n");
+    expect(editor()?.state).toBe("dirty");
+  });
+
+  test("a compare side's refused save is shown in the file's tab once the side closes", async () => {
+    const side = viewEditorKey("compare-1:new");
+    const store = useEditorStateStore.getState();
+    store.openFile(side, TEST_SERVER, FILE);
+    store.setBaseContent(side, "a\nb\nc\n");
+    refuseWrites = true;
+    await saveEditorContent(FILE, "a\nX\nc\n", "/repo", undefined, side);
+    const closing = useEditorStateStore.getState().files.get(side);
+    if (!closing) throw new Error("no side");
+    outboxEditorClosing(side, closing, "/repo");
+    useEditorStateStore.getState().closeFile(side);
+
+    await until(() => opened.length > 0);
+    expect(opened).toEqual([FILE]);
+    expect(findAdoptableEntry(FILE)?.content).toBe("a\nX\nc\n");
   });
 
   test("later saves wait behind a queued one, and the retry sends the newest", async () => {
