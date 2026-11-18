@@ -8,11 +8,13 @@
  */
 
 import * as api from "@/api/client";
+import type { ServerId } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { openFile } from "@/lib/open-path";
+import { isWithin } from "@/lib/project-file-helpers";
 import {
   type SaveOptions,
   holdWorktree,
@@ -415,6 +417,32 @@ export function outboxEditorClosing(
     },
     "review",
   );
+}
+
+/**
+ * The files of `worktreePath` whose edits Loxel holds unsaved, which removing the worktree in Loxel
+ * discards: this window's editors of `server`'s files in it that have unsaved changes, and the
+ * outbox's saves of the worktree not in flight, this window's and every other window's (read from
+ * storage).
+ */
+export async function unsavedFilesOf(server: ServerId, worktreePath: string): Promise<string[]> {
+  const files = new Set<string>();
+  for (const editor of useEditorStateStore.getState().files.values()) {
+    if (editor.server !== server || editor.state === "clean") continue;
+    if (isWithin(editor.filePath, worktreePath)) files.add(editor.filePath);
+  }
+  const stored = await (storage?.load() ?? Promise.resolve([])).catch((error: unknown) => {
+    log.warn("Failed to read other windows' unsaved edits", { error });
+    return [];
+  });
+  // This window's are current in memory; the stored copies may lag behind.
+  const others = stored.filter((entry) => entry.ownerId !== ownerId);
+  for (const entry of [...entries.values(), ...others]) {
+    if (entry.worktreePath === worktreePath && entry.status !== "sending") {
+      files.add(entry.filePath);
+    }
+  }
+  return [...files];
 }
 
 /** Forget the saves of a file, or of everything under a folder, that the user deleted. */

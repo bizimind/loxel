@@ -7,6 +7,7 @@ import type { WorktreeEntry } from "@/api/git-models";
 import { localServerId } from "@/api/local-server";
 import { formatWorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import { ToastContainer } from "@/components/ui/toast";
+import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 import {
   type ListedProject,
   projectRef,
@@ -74,6 +75,7 @@ afterEach(() => {
     autoExpandedProjectIds: [],
   });
   useWorktreeStore.getState().reset();
+  useEditorStateStore.setState({ files: new Map() });
 });
 
 describe("Sidebar remove worktree dialog", () => {
@@ -96,6 +98,23 @@ describe("Sidebar remove worktree dialog", () => {
 
     expect(screen.getByText(/hooks run in trusted repositories/)).toBeDefined();
     expect(screen.getByRole("button", { name: "Trust repository and run it" })).toBeDefined();
+  });
+
+  test("counts the edits Loxel holds unsaved in the worktree, and asks to discard them", async () => {
+    const editors = useEditorStateStore.getState();
+    const file = "/repo/.worktrees/topic/README.md";
+    editors.openFile(fileEditorKey(localServerId(), file), localServerId(), file);
+    editors.markDirty(fileEditorKey(localServerId(), file));
+    useWorktreeStore.setState({ pendingRemovePlan: { ...removePlan, cleanHookHeld: false } });
+    render(<Sidebar />);
+
+    expect(
+      await screen.findByText("1 unsaved edit in Loxel: README.md. It will be lost."),
+    ).toBeDefined();
+    const remove = screen.getByRole("button", { name: "Remove worktree" });
+    expect(remove.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByLabelText("Discard local changes (force remove)"));
+    expect(remove.hasAttribute("disabled")).toBe(false);
   });
 
   test("says nothing about hooks once the repository is trusted", () => {
