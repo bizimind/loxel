@@ -2,6 +2,7 @@
   "name": "@bizimind/cli-common",
   "version": "0.1.0",
   "description": "Common CLI utilities for bizimind packages",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

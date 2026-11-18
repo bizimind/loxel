@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 
+import { electronVersion } from "./electron-dist";
 import { readManifests, shippedComponent } from "./language-server-manifest";
 import {
   type Bom,
+  bunAdditions,
   bunComponent,
   checkNpmDependencies,
+  electronAdditions,
   generateSbom,
   goAdditions,
+  jarAdditions,
+  readThirdParty,
+  sorted,
   withComponents,
 } from "./sbom";
 
@@ -18,8 +24,8 @@ const npmManifest = {
 };
 
 describe("generateSbom", () => {
-  test("lists the lockfile's packages, Electron, Bun and every language server", async () => {
-    const bom = await generateSbom();
+  test("lists the lockfile's packages, Electron, Bun and every language server, licensed", async () => {
+    const bom = await generateSbom(process.versions);
     const names = new Set(
       bom.components.map((component) =>
         typeof component.group === "string"
@@ -29,7 +35,12 @@ describe("generateSbom", () => {
     );
     expect(names).toContain("react");
     expect(names).toContain("electron");
+    expect(names).toContain("chromium");
     expect(names).toContain("bun");
+    expect(names).toContain("webkit");
+    expect(names).toContain("Inter");
+    // Shipped as generated CSS, so a dependency rather than a devDependency.
+    expect(names).toContain("tailwindcss");
     // The tsc Loxel ships, from this machine's platform package (generateSbom itself refuses a
     // manifest's npm package that is not a dependency).
     expect(names).toContain(`@typescript/typescript-${process.platform}-${process.arch}`);
@@ -37,6 +48,9 @@ describe("generateSbom", () => {
       const shipped = shippedComponent(manifest);
       if (shipped) expect(names).toContain(shipped.name);
     }
+    // Every override in third-party.json matched (generateSbom throws otherwise), and fuzzy's
+    // legacy `licenses` was read.
+    expect(bom.components.filter((component) => !component.licenses)).toEqual([]);
     // It runs pnpm, so give a slow machine room.
   }, 30_000);
 });
@@ -161,5 +175,107 @@ describe("checkNpmDependencies", () => {
         devDependencies: { "x-server": "1.0.0" },
       }),
     ).toThrow("x-server (x.json)");
+  });
+});
+
+describe("electronAdditions", () => {
+  const bundled = {
+    version: "45.3.0",
+    note: "",
+    components: [{ name: "chromium", version: "156.0.1", license: "BSD-3-Clause", url: "u" }],
+  };
+
+  test("lists what Electron bundles under it, and its license covers theirs", () => {
+    const [electron, chromium] = electronAdditions("45.3.0", [], "1.0.0", bundled);
+    expect(electron?.component.licenses).toEqual([{ expression: "MIT AND BSD-3-Clause" }]);
+    expect(chromium?.component).toMatchObject({ name: "chromium", version: "156.0.1" });
+    expect(chromium?.parents).toEqual(["pkg:npm/electron@45.3.0"]);
+  });
+
+  test("refuses a third-party.json that lists another Electron", () => {
+    expect(() => electronAdditions("46.0.0", [], "1.0.0", bundled)).toThrow("pins 46.0.0");
+  });
+
+  test("third-party.json lists the pinned Electron", async () => {
+    const packageJson: unknown = await Bun.file(`${import.meta.dir}/../package.json`).json();
+    const { electron } = await readThirdParty();
+    expect(electron.version).toBe(electronVersion(packageJson));
+  });
+});
+
+describe("bunAdditions", () => {
+  const bundled = {
+    note: "",
+    components: [
+      {
+        name: "webkit",
+        versionKey: "webkit",
+        purl: "pkg:github/oven-sh/webkit@{version}",
+        license: "LGPL-2.0-or-later AND BSD-2-Clause",
+        url: "u",
+      },
+      { name: "brotli", license: "MIT", url: "u" },
+    ],
+  };
+
+  test("takes the versions the shipped Bun reports", () => {
+    const additions = bunAdditions({ bun: "1.4.4", webkit: "abc" }, bundled);
+    expect(additions.map(({ component }) => component["bom-ref"])).toEqual([
+      "pkg:github/oven-sh/bun@bun-v1.4.4",
+      "pkg:github/oven-sh/webkit@abc",
+      "brotli",
+    ]);
+    expect(additions[0]?.component.licenses).toEqual([
+      { expression: "MIT AND (LGPL-2.0-or-later AND BSD-2-Clause)" },
+    ]);
+  });
+
+  test("refuses a version key the shipped Bun no longer reports", () => {
+    expect(() => bunAdditions({ bun: "1.4.4" }, bundled)).toThrow("process.versions.webkit");
+  });
+});
+
+describe("jarAdditions", () => {
+  test("lists each artifact once under its server, without the server's own snapshots", () => {
+    const guava = { groupId: "com.google.guava", artifactId: "guava", version: "33.7.1-jre" };
+    const additions = jarAdditions(
+      [
+        { file: "jdtls/plugins/a.jar", coordinates: [guava] },
+        {
+          file: "jdtls/plugins/b.jar",
+          coordinates: [guava, { groupId: "x", artifactId: "y", version: "1.0.0-SNAPSHOT" }],
+        },
+      ],
+      (file) => `parent:${file.split("/")[0]}`,
+      new Set(),
+    );
+    expect(additions).toEqual([
+      {
+        component: {
+          type: "library",
+          "bom-ref": "pkg:maven/com.google.guava/guava@33.7.1-jre",
+          group: "com.google.guava",
+          name: "guava",
+          version: "33.7.1-jre",
+          purl: "pkg:maven/com.google.guava/guava@33.7.1-jre",
+        },
+        parents: ["parent:jdtls"],
+      },
+    ]);
+  });
+});
+
+describe("sorted", () => {
+  test("orders components and dependencies by ref", () => {
+    const bom: Bom = {
+      metadata: { component: { "bom-ref": "root", version: "1.0.0" } },
+      components: [{ "bom-ref": "b" }, { "bom-ref": "a" }],
+      dependencies: [{ ref: "root", dependsOn: ["b", "a"] }, { ref: "a" }],
+    };
+    expect(sorted(bom)).toEqual({
+      ...bom,
+      components: [{ "bom-ref": "a" }, { "bom-ref": "b" }],
+      dependencies: [{ ref: "a" }, { ref: "root", dependsOn: ["a", "b"] }],
+    });
   });
 });

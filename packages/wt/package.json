@@ -2,6 +2,7 @@
   "name": "@bizimind/wt",
   "version": "0.1.82",
   "description": "Configless CLI for managing git worktrees with shell hooks",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "exports": {
     ".": "./src/cli.ts",

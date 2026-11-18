@@ -1,0 +1,274 @@
+{
+  "note": "Read by scripts/sbom.ts. `licenses` fixes components whose metadata has no license, keyed by bom-ref so a version bump forces a recheck; `concluded` beside `license` records a license chosen from an OR expression. `components` are what ships but is no package; `electron` and `bun` list what those binaries bundle.",
+  "licenses": {
+    "pkg:maven/io.takari.m2e.workspace/org.eclipse.m2e.workspace.cli@0.4.0": {
+      "license": "EPL-1.0",
+      "note": "In jdtls; its jar's Bundle-License is EPL-1.0, which deps.dev cannot name"
+    },
+    "pkg:maven/jakarta.annotation/jakarta.annotation-api@1.3.5": {
+      "license": "EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0",
+      "note": "In jdtls; its pom lists EPL 2.0 and GPL2 with the Classpath Exception"
+    },
+    "pkg:maven/jakarta.servlet/jakarta.servlet-api@6.2.0-M2": {
+      "license": "EPL-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0",
+      "note": "In jdtls; its jar's Bundle-License lists EPL 2.0 and GPL with the Classpath Exception"
+    },
+    "pkg:maven/junit/junit@4.13.2": {
+      "license": "EPL-1.0",
+      "note": "In jdtls; its jar's LICENSE-junit.txt is EPL 1.0"
+    },
+    "pkg:maven/org.eclipse.sisu/org.eclipse.sisu.inject@1.0.0": {
+      "license": "EPL-2.0",
+      "note": "In jdtls's embedded Maven; its jar's Bundle-License is EPL 2.0"
+    },
+    "pkg:maven/org.eclipse.sisu/org.eclipse.sisu.plexus@1.0.0": {
+      "license": "EPL-2.0",
+      "note": "In jdtls's embedded Maven; its jar's Bundle-License is EPL 2.0"
+    },
+    "pkg:maven/org.eclipse.xtext/org.eclipse.xtext.xbase.lib@2.44.0": {
+      "license": "EPL-2.0",
+      "note": "In jdtls; its jar's Bundle-License is EPL 2.0"
+    },
+    "pkg:maven/org.jsoup/jsoup@1.23.2": {
+      "license": "MIT",
+      "note": "In jdtls; its pom lists the MIT License"
+    },
+    "pkg:maven/org.sonatype.plexus/plexus-build-api@0.0.7": {
+      "license": "Apache-2.0",
+      "note": "In jdtls's embedded Maven; its parent pom (spice-parent 15) lists Apache 2.0"
+    },
+    "pkg:npm/khroma@2.1.0": {
+      "license": "MIT",
+      "note": "package.json has no license field; the package's license file is MIT"
+    }
+  },
+  "components": [
+    {
+      "name": "Inter",
+      "version": "4.001",
+      "license": "OFL-1.1",
+      "url": "https://github.com/rsms/inter",
+      "note": "Renderer font, public/fonts/InterVariable*.woff2"
+    },
+    {
+      "name": "JetBrains Mono",
+      "version": "2.304",
+      "license": "OFL-1.1",
+      "url": "https://github.com/JetBrains/JetBrainsMono",
+      "note": "Renderer font, public/fonts/JetBrainsMono*"
+    },
+    {
+      "name": "Literata",
+      "version": "3.103",
+      "license": "OFL-1.1",
+      "url": "https://github.com/googlefonts/literata",
+      "note": "Renderer font, public/fonts/Literata-*.woff2"
+    },
+    {
+      "name": "File and folder icons",
+      "license": "MIT AND Apache-2.0",
+      "url": "https://github.com/peakoss/vscode-jetbrains-icon-theme",
+      "note": "public/icons, mostly from vscode-jetbrains-icon-theme (MIT) and JetBrains' IntelliJ Platform icons (Apache-2.0); public/icons/LICENSE has the provenance"
+    },
+    {
+      "name": "monaco-lsp-client",
+      "version": "0.1.0",
+      "license": "MIT",
+      "url": "https://github.com/microsoft/monaco-editor/tree/main/monaco-lsp-client",
+      "note": "Upstream of the @bizimind/monaco-lsp-client fork, which was never published as a package"
+    }
+  ],
+  "electron": {
+    "version": "45.3.0",
+    "note": "What the pinned Electron bundles, from https://releases.electronjs.org/releases.json; update with the Electron version",
+    "components": [
+      {
+        "name": "chromium",
+        "version": "156.0.8078.96",
+        "purl": "pkg:github/chromium/chromium@{version}",
+        "license": "BSD-3-Clause",
+        "url": "https://chromium.googlesource.com/chromium/src",
+        "note": "Chromium's own code; Electron's LICENSES.chromium.html lists the third-party code Chromium bundles"
+      },
+      {
+        "name": "node",
+        "version": "24.22.2",
+        "purl": "pkg:github/nodejs/node@v{version}",
+        "license": "MIT",
+        "url": "https://github.com/nodejs/node"
+      },
+      {
+        "name": "v8",
+        "version": "15.6.75.50",
+        "purl": "pkg:github/v8/v8@{version}",
+        "license": "BSD-3-Clause",
+        "url": "https://github.com/v8/v8"
+      }
+    ]
+  },
+  "bun": {
+    "note": "What Bun statically links, from https://github.com/oven-sh/bun/blob/main/LICENSE.md (Windows-only libraries and the npm polyfills left out). `versionKey` names the `process.versions` entry the shipped binary reports the version (mostly a commit) in.",
+    "components": [
+      {
+        "name": "webkit",
+        "versionKey": "webkit",
+        "purl": "pkg:github/oven-sh/webkit@{version}",
+        "license": "LGPL-2.0-or-later AND BSD-2-Clause",
+        "url": "https://github.com/oven-sh/WebKit",
+        "note": "Bun's fork of WebKit, for JavaScriptCore"
+      },
+      {
+        "name": "boringssl",
+        "versionKey": "boringssl",
+        "purl": "pkg:github/google/boringssl@{version}",
+        "license": "Apache-2.0",
+        "url": "https://boringssl.googlesource.com/boringssl/"
+      },
+      {
+        "name": "libarchive",
+        "versionKey": "libarchive",
+        "purl": "pkg:github/libarchive/libarchive@{version}",
+        "license": "BSD-2-Clause AND BSD-3-Clause AND (CC0-1.0 OR OpenSSL OR Apache-2.0)",
+        "url": "https://github.com/libarchive/libarchive"
+      },
+      {
+        "name": "mimalloc",
+        "versionKey": "mimalloc",
+        "purl": "pkg:github/microsoft/mimalloc@{version}",
+        "license": "MIT",
+        "url": "https://github.com/microsoft/mimalloc"
+      },
+      {
+        "name": "picohttpparser",
+        "versionKey": "picohttpparser",
+        "purl": "pkg:github/h2o/picohttpparser@{version}",
+        "license": "MIT OR Artistic-1.0-Perl OR GPL-1.0-or-later",
+        "url": "https://github.com/h2o/picohttpparser"
+      },
+      {
+        "name": "zig",
+        "versionKey": "zig",
+        "purl": "pkg:github/oven-sh/zig@{version}",
+        "license": "MIT",
+        "url": "https://github.com/oven-sh/zig",
+        "note": "Bun's fork of Zig, whose standard library is compiled in"
+      },
+      {
+        "name": "zlib-ng",
+        "versionKey": "zlib",
+        "purl": "pkg:github/zlib-ng/zlib-ng@{version}",
+        "license": "Zlib",
+        "url": "https://github.com/zlib-ng/zlib-ng"
+      },
+      {
+        "name": "tinycc",
+        "versionKey": "tinycc",
+        "purl": "pkg:github/oven-sh/tinycc@{version}",
+        "license": "LGPL-2.1-or-later",
+        "url": "https://github.com/oven-sh/tinycc"
+      },
+      {
+        "name": "lol-html",
+        "versionKey": "lolhtml",
+        "purl": "pkg:github/cloudflare/lol-html@{version}",
+        "license": "BSD-3-Clause",
+        "url": "https://github.com/cloudflare/lol-html"
+      },
+      {
+        "name": "c-ares",
+        "versionKey": "ares",
+        "purl": "pkg:github/c-ares/c-ares@{version}",
+        "license": "MIT",
+        "url": "https://github.com/c-ares/c-ares"
+      },
+      {
+        "name": "libdeflate",
+        "versionKey": "libdeflate",
+        "purl": "pkg:github/ebiggers/libdeflate@{version}",
+        "license": "MIT",
+        "url": "https://github.com/ebiggers/libdeflate"
+      },
+      {
+        "name": "ls-hpack",
+        "versionKey": "lshpack",
+        "purl": "pkg:github/litespeedtech/ls-hpack@{version}",
+        "license": "MIT",
+        "url": "https://github.com/litespeedtech/ls-hpack"
+      },
+      {
+        "name": "zstd",
+        "versionKey": "zstd",
+        "purl": "pkg:github/facebook/zstd@{version}",
+        "license": "BSD-3-Clause OR GPL-2.0-only",
+        "url": "https://github.com/facebook/zstd"
+      },
+      {
+        "name": "icu",
+        "versionKey": "icu",
+        "license": "Unicode-3.0",
+        "url": "https://github.com/unicode-org/icu"
+      },
+      {
+        "name": "typescript-go",
+        "versionKey": "typescript",
+        "license": "Apache-2.0",
+        "url": "https://github.com/microsoft/typescript-go",
+        "note": "Ported as the type checker behind `bun check`"
+      },
+      {
+        "name": "uWebSockets",
+        "license": "Apache-2.0",
+        "url": "https://github.com/uNetworking/uWebSockets",
+        "note": "With uSockets, vendored in Bun's repository"
+      },
+      {
+        "name": "uSockets",
+        "license": "Apache-2.0",
+        "url": "https://github.com/uNetworking/uSockets"
+      },
+      { "name": "brotli", "license": "MIT", "url": "https://github.com/google/brotli" },
+      { "name": "ls-qpack", "license": "MIT", "url": "https://github.com/litespeedtech/ls-qpack" },
+      {
+        "name": "lsquic",
+        "license": "MIT AND BSD-3-Clause",
+        "url": "https://github.com/litespeedtech/lsquic"
+      },
+      {
+        "name": "simdutf",
+        "license": "Apache-2.0 OR MIT",
+        "url": "https://github.com/simdutf/simdutf"
+      },
+      { "name": "libbase64", "license": "BSD-2-Clause", "url": "https://github.com/aklomp/base64" },
+      {
+        "name": "libjpeg-turbo",
+        "license": "IJG AND BSD-3-Clause AND Zlib",
+        "url": "https://github.com/libjpeg-turbo/libjpeg-turbo"
+      },
+      {
+        "name": "libspng",
+        "license": "BSD-2-Clause",
+        "url": "https://github.com/randy408/libspng"
+      },
+      {
+        "name": "libwebp",
+        "license": "BSD-3-Clause",
+        "url": "https://github.com/webmproject/libwebp"
+      },
+      { "name": "highway", "license": "Apache-2.0", "url": "https://github.com/google/highway" },
+      { "name": "uucode", "license": "MIT", "url": "https://github.com/jacobsandlund/uucode" },
+      {
+        "name": "libc++abi",
+        "version": "19.1.0",
+        "license": "Apache-2.0 WITH LLVM-exception",
+        "url": "https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/libcxxabi/src/cxa_thread_atexit.cpp",
+        "note": "Only the `__cxa_thread_atexit` fallback"
+      },
+      {
+        "name": "esbuild",
+        "license": "MIT",
+        "url": "https://github.com/evanw/esbuild",
+        "note": "Bun's transpiler, CSS lexer and module resolver are ports of it"
+      }
+    ]
+  }
+}
