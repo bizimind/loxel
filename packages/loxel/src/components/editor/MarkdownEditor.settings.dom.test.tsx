@@ -9,8 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
+import { localServerId } from "@/api/local-server";
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
-import { useEditorStateStore } from "@/store/editor-state";
+import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 
 const FILE_PATH = "/tmp/loxel-test/notes.md";
@@ -69,7 +70,12 @@ function fakePanelApi(): DockviewPanelApi {
 }
 
 function editorContent(): string | null {
-  return useEditorStateStore.getState().files.get(FILE_PATH)?.getEditorContent?.() ?? null;
+  return (
+    useEditorStateStore
+      .getState()
+      .files.get(fileEditorKey(localServerId(), FILE_PATH))
+      ?.getEditorContent?.() ?? null
+  );
 }
 
 function renderEditor() {
@@ -102,7 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useEditorStateStore.getState().closeFile(FILE_PATH);
+  useEditorStateStore.getState().closeFile(fileEditorKey(localServerId(), FILE_PATH));
 });
 
 describe("MarkdownEditor markdown output settings", () => {

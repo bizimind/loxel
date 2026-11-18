@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type * as monaco from "monaco-editor";
 
+import { localRef } from "@/api/local-server";
+
 const WT = "/repo";
 
 /** Real paths of the existing paths; a symlink maps to where it points. */
@@ -140,14 +142,17 @@ describe("createLspWorkspaceFiles", () => {
   test("renames within a folder, and moves then renames across folders", async () => {
     await files().rename(uri("file:///repo/pkg/a.py"), uri("file:///repo/pkg/b.py"));
     expect(calls).toEqual([
-      ["rename", { wt: WT, path: "/repo/pkg/a.py", newName: "b.py", isDetached: false }],
+      ["rename", { wt: localRef(WT), path: "/repo/pkg/a.py", newName: "b.py", isDetached: false }],
     ]);
 
     calls.length = 0;
     await files().rename(uri("file:///repo/pkg/a.py"), uri("file:///repo/lib/c.py"));
     expect(calls).toEqual([
       ["createDir", WT, { dir: "/repo", name: "lib" }],
-      ["move", { wt: WT, srcPath: "/repo/pkg/a.py", destDir: "/repo/lib", newName: "c.py" }],
+      [
+        "move",
+        { wt: localRef(WT), srcPath: "/repo/pkg/a.py", destDir: "/repo/lib", newName: "c.py" },
+      ],
     ]);
   });
 
@@ -163,7 +168,7 @@ describe("createLspWorkspaceFiles", () => {
     );
     expect(calls.at(-1)).toEqual([
       "delete",
-      { wt: WT, path: "/repo/pkg/a 2.py", isDetached: false },
+      { wt: localRef(WT), path: "/repo/pkg/a 2.py", isDetached: false },
     ]);
   });
 });

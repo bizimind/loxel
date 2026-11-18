@@ -3,6 +3,7 @@ import type * as monaco from "monaco-editor";
 
 import * as api from "@/api/client";
 import { ApiError } from "@/api/client";
+import { localRef } from "@/api/local-server";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 
 import { deleteFile, moveFile, renameFile } from "./file-operations";
@@ -46,6 +47,8 @@ const PROTECTED_SEGMENTS = new Set([
  * reach this file system.
  */
 export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
+  // Language-server clients still name their worktree by path (step 6c gives them a ref).
+  const wt = localRef(wtPath);
   let realRoot: Promise<string> | undefined;
   const getRealRoot = () =>
     (realRoot ??= api.getPathInfo(wtPath).then(
@@ -68,7 +71,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
 
   /** Removes what a create route made under a free name (the path appeared meanwhile), then throws. */
   async function refuseStray(stray: string, reason: string): Promise<never> {
-    await deleteFile({ wt: wtPath, path: stray, isDetached: false });
+    await deleteFile({ wt, path: stray, isDetached: false });
     throw new Error(reason);
   }
 
@@ -127,16 +130,16 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
       const newName = pathName(targetPath);
       let path: string;
       if (parentOf(sourcePath) === targetDir) {
-        path = await renameFile({ wt: wtPath, path: sourcePath, newName, isDetached: false });
+        path = await renameFile({ wt, path: sourcePath, newName, isDetached: false });
       } else {
         await ensureDir(targetDir);
-        path = await moveFile({ wt: wtPath, srcPath: sourcePath, destDir: targetDir, newName });
+        path = await moveFile({ wt, srcPath: sourcePath, destDir: targetDir, newName });
       }
       if (path !== targetPath) throw new Error(`${sourcePath} was moved to ${path} instead`);
     },
 
     async delete(uri) {
-      await deleteFile({ wt: wtPath, path: editablePath(uri, wtPath), isDetached: false });
+      await deleteFile({ wt, path: editablePath(uri, wtPath), isDetached: false });
     },
   };
 }

@@ -7,6 +7,7 @@ import { showToast } from "@/components/ui/toast";
 import { moveFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";
+import { getQueryScope } from "@/queries/use-scope";
 import { useWorktreeStore } from "@/store/worktrees";
 
 export const DETACHED_FILE_DRAG_TYPE = "application/x-detached-file";
@@ -56,7 +57,7 @@ async function moveDetachedFile(filePath: string, destDir: string) {
 
 async function moveProjectFile(srcPath: string, destDir: string) {
   try {
-    const wt = useWorktreeStore.getState().activeWorktreePath;
+    const wt = getQueryScope().activeWorktree;
     if (!wt) return;
     await moveFile({ wt, srcPath, destDir });
   } catch (err) {

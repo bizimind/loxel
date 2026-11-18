@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 
 import type { CommitInfo } from "@/api/git-models";
+import { localRef } from "@/api/local-server";
 import { purgeWorktreeStores } from "@/store/worktree-store";
 import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -35,7 +36,7 @@ const { CommitGraph } = await import("./CommitGraph");
 
 afterEach(() => {
   cleanup();
-  purgeWorktreeStores("/repo");
+  purgeWorktreeStores(localRef("/repo"));
   mock.restore();
 });
 
@@ -54,7 +55,7 @@ describe("CommitGraph", () => {
     );
 
     await screen.findByText("Initial commit");
-    expect(getWorktreeUI("/repo").getState().graphColumnSizing.graph).toBeGreaterThan(0);
+    expect(getWorktreeUI(localRef("/repo")).getState().graphColumnSizing.graph).toBeGreaterThan(0);
     const loopErrors = consoleError.mock.calls.filter((args) =>
       args.some((arg) => String(arg).includes("Maximum update depth exceeded")),
     );

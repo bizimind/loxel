@@ -15,7 +15,7 @@ import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
 import { useAgentTerminalsStore } from "@/store/agent-terminals";
-import { useEditorStateStore } from "@/store/editor-state";
+import { type EditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -57,7 +57,7 @@ function invalidateEditorConfigBelow(dir: string): void {
 export function refreshOpenFile(
   project: WorktreeRef | null,
   wt: WorktreeRef | undefined,
-  editorKey: string,
+  editorKey: EditorKey,
   nonces: string[],
 ): void {
   const editorStore = useEditorStateStore.getState();
@@ -112,7 +112,7 @@ export function refreshOpenFile(
 async function fetchIntoOpenFile(
   project: WorktreeRef | null,
   wt: WorktreeRef | undefined,
-  editorKey: string,
+  editorKey: EditorKey,
   path: string,
   nonces: string[],
 ): Promise<void> {
@@ -144,7 +144,7 @@ async function fetchIntoOpenFile(
 export async function checkOpenFileExists(
   project: WorktreeRef | null,
   wt: WorktreeRef | undefined,
-  editorKey: string,
+  editorKey: EditorKey,
 ): Promise<void> {
   const initial = useEditorStateStore.getState().files.get(editorKey);
   if (!initial || initial.movedTo) return;
@@ -259,6 +259,7 @@ export function useWsBridge(): void {
           // Home's drafts belong to no worktree, like the editors that show them.
           const editorWt = message.wtPath === HOME_KEY ? undefined : wt;
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
+            if (entry.server !== wt.server) continue;
             if (entry.filePath === changedPath) {
               refreshOpenFile(project, editorWt, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
@@ -308,7 +309,7 @@ export function useWsBridge(): void {
           // need the same conflict-aware state-machine path as a normal file event. Those with a
           // save queued are the save outbox's: its retry reads the file and merges it.
           for (const [editorKey, entry] of editorStore.files) {
-            if (entry.state === "clean" || entry.queued) continue;
+            if (entry.server !== wt.server || entry.state === "clean" || entry.queued) continue;
             const path = entry.filePath;
             const queryKey = queryKeys.fileContent(project, path, undefined, wt);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;

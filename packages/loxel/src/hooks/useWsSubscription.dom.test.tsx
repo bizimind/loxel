@@ -3,9 +3,10 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { cleanup, renderHook } from "@testing-library/react";
 
 import { wsClient } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { WsClientMessage } from "@/api/ws-protocol";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { useEditorStateStore } from "@/store/editor-state";
+import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { useWsSubscription } from "./useWsSubscription";
@@ -21,8 +22,10 @@ beforeAll(() => {
     sent.push(message);
   });
   useWorktreeStore.setState({ activeWorktreePath: WT });
-  useEditorStateStore.getState().openFile(EXTERNAL);
-  useEditorStateStore.getState().openFile(`${WT}/src/a.ts`);
+  const server = localServerId();
+  for (const path of [EXTERNAL, `${WT}/src/a.ts`]) {
+    useEditorStateStore.getState().openFile(fileEditorKey(server, path), server, path);
+  }
   renderHook(() => useWsSubscription(WT));
 });
 

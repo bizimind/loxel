@@ -240,6 +240,7 @@ export function ExcalidrawEditor({
   onCreateNewRef.current = onCreateNew;
 
   const {
+    editorKey,
     diskContent,
     editorFileState,
     isDeleted,
@@ -360,7 +361,7 @@ export function ExcalidrawEditor({
   // render-time ref still reports "clean" — that would wipe the user's just-typed char.
   useEffect(() => {
     if (!diskContent || !excalidrawApiRef.current) return;
-    if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
+    if (useEditorStateStore.getState().files.get(editorKey)?.state !== "clean") return;
 
     const diskVersion = sceneVersion(diskContent.elements);
     if (diskVersion === lastVersionRef.current) return;
@@ -372,7 +373,7 @@ export function ExcalidrawEditor({
     } finally {
       isProgrammaticRef.current = false;
     }
-  }, [diskContent, isProgrammaticRef, filePath]);
+  }, [diskContent, editorKey, isProgrammaticRef, filePath]);
 
   // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
   // be re-created; only a file that never loaded has nothing to show.

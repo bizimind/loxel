@@ -3,7 +3,7 @@
  */
 import type { IDockviewPanelProps } from "dockview-react";
 
-import { PanelContext } from "@/components/dockview/panel-context";
+import { PanelWorktreeProvider } from "@/components/dockview/panel-context";
 
 import { MarkdownEditor } from "./MarkdownEditor";
 
@@ -17,7 +17,7 @@ export function MarkdownEditorPanelComponent(
   }>,
 ) {
   return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+    <PanelWorktreeProvider worktreePath={props.params.worktreePath}>
       <MarkdownEditor
         filePath={props.params.filePath}
         line={props.params.line}
@@ -29,6 +29,6 @@ export function MarkdownEditorPanelComponent(
         }}
         panelApi={props.api}
       />
-    </PanelContext.Provider>
+    </PanelWorktreeProvider>
   );
 }

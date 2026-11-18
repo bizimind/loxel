@@ -319,6 +319,7 @@ export function MarkdownEditor({
   );
 
   const {
+    editorKey,
     diskContent,
     editorFileState,
     isDeleted,
@@ -741,7 +742,7 @@ export function MarkdownEditor({
     const prevDiskBody = lastSyncedDiskBodyRef.current;
     lastSyncedDiskBodyRef.current = canonicalDiskBody;
 
-    if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
+    if (useEditorStateStore.getState().files.get(editorKey)?.state !== "clean") return;
 
     try {
       // The debounced change listener may not have reported a just-made edit yet, so the store

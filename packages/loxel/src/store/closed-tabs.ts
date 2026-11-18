@@ -14,6 +14,9 @@ import type {
   PanelOptions,
 } from "dockview-react";
 
+import type { WorktreeRef } from "@/api/worktree-ref";
+
+import { layoutWorktree } from "./active-worktree";
 import { getCenterPanelDef } from "./panel-config";
 import { getCenterApi, getCenterApiLayoutKey } from "./tools-bar";
 import { createWorktreeStore } from "./worktree-store";
@@ -70,8 +73,8 @@ export function closeCenterTab(api: DockviewPanelApi): void {
   const panel = getCenterApi()?.getPanel(api.id);
   const closed = panel && toClosedTab(panel);
   if (layoutKey && closed) {
-    const { tabs } = getStore(layoutKey).getState();
-    getStore(layoutKey).setState({ tabs: [...tabs, closed].slice(-MAX_CLOSED_TABS) });
+    const store = getStore(layoutWorktree(layoutKey));
+    store.setState({ tabs: [...store.getState().tabs, closed].slice(-MAX_CLOSED_TABS) });
   }
   api.close();
 }
@@ -81,10 +84,10 @@ export function closeCenterTab(api: DockviewPanelApi): void {
  * again (its file was reopened another way, a singleton was recreated) has nothing to bring back.
  */
 export function takeLastClosedTab(
-  worktreePath: string,
+  worktree: WorktreeRef | null,
   isOpen: (panelId: string) => boolean,
 ): ClosedTab | undefined {
-  const store = getStore(worktreePath);
+  const store = getStore(worktree);
   const tabs = [...store.getState().tabs];
   let tab = tabs.pop();
   while (tab && isOpen(tab.id)) tab = tabs.pop();
@@ -97,12 +100,12 @@ export function takeLastClosedTab(
  * the first of them landed so they keep their order around it.
  */
 export function retargetClosedTabs(
-  worktreePath: string,
+  worktree: WorktreeRef | null,
   fromId: string,
   toId: string,
   indexOffset: number,
 ): void {
-  const store = getStore(worktreePath);
+  const store = getStore(worktree);
   store.setState({
     tabs: store
       .getState()
@@ -118,6 +121,6 @@ export function retargetClosedTabs(
  * A group was removed. Its closed tabs stop naming its id, which dockview reuses for later groups,
  * and share a name no group has, so they still reopen together.
  */
-export function forgetClosedTabGroup(worktreePath: string, groupId: string): void {
-  retargetClosedTabs(worktreePath, groupId, `removed-${crypto.randomUUID()}`, 0);
+export function forgetClosedTabGroup(worktree: WorktreeRef | null, groupId: string): void {
+  retargetClosedTabs(worktree, groupId, `removed-${crypto.randomUUID()}`, 0);
 }

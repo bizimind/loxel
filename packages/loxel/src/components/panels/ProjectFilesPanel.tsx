@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
@@ -127,9 +128,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         new Set([...ui.expandedProjectFolders].filter((p) => !isWithin(p, path))),
       );
       // Editors still open on its files keep receiving disk changes as individual Others files.
-      const openPaths = openEditorPaths(useEditorStateStore.getState().files).filter((p) =>
-        isWithin(p, path),
-      );
+      const openPaths = openEditorPaths(
+        useEditorStateStore.getState().files,
+        localServerId(), // the server `wsClient` reaches
+      ).filter((p) => isWithin(p, path));
       if (openPaths.length > 0) {
         wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
       }

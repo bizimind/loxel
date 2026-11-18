@@ -9,7 +9,7 @@ import {
   outboxSaveFailed,
   outboxSaveWritten,
 } from "@/lib/save-outbox";
-import { diskBase, useEditorStateStore } from "@/store/editor-state";
+import { diskBase, type EditorKey, useEditorStateStore } from "@/store/editor-state";
 
 /**
  * Shared save orchestration for file-backed editors.
@@ -74,7 +74,7 @@ export interface SaveOptions {
  * Entries auto-expire after 2 seconds to handle duplicate FS events
  * (the same nonce may appear in multiple file_content_changed messages).
  */
-const savedContentByNonce = new Map<string, { content: string; editorKey: string }>();
+const savedContentByNonce = new Map<string, { content: string; editorKey: EditorKey }>();
 
 const STASH_EXPIRY_MS = 2_000;
 
@@ -83,7 +83,7 @@ const STASH_EXPIRY_MS = 2_000;
  * Other editors of the same file get nothing: the content may already be outdated by a later save
  * of the saving editor, which only that editor can tell, so they read the file instead.
  */
-export function consumeSavedContent(nonce: string, editorKey: string): string | undefined {
+export function consumeSavedContent(nonce: string, editorKey: EditorKey): string | undefined {
   const saved = savedContentByNonce.get(nonce);
   return saved?.editorKey === editorKey ? saved.content : undefined;
 }
@@ -100,7 +100,7 @@ function showFormatNotice(notice: string): void {
   showToast(notice, "info");
 }
 
-function stashContent(nonce: string, content: string, editorKey: string): void {
+function stashContent(nonce: string, content: string, editorKey: EditorKey): void {
   savedContentByNonce.set(nonce, { content, editorKey });
   setTimeout(() => savedContentByNonce.delete(nonce), STASH_EXPIRY_MS);
 }
@@ -110,8 +110,8 @@ function stashContent(nonce: string, content: string, editorKey: string): void {
  * completion of the save is still the nonce echo. Callers that keep the content elsewhere on
  * failure (e.g. a move carrying edits) use the result; others can ignore it.
  *
- * `editorKey` names the editor-state entry that tracks the save; it is the file path except for
- * editors that are not the file's own tab (see `useEditorStateStore`). A save of an open editor
+ * `editorKey` names the editor-state entry that tracks the save: the file's tab key
+ * (`fileEditorKey`), or another view's (see `useEditorStateStore`). A save of an open editor
  * goes through the save outbox ([save-outbox.ts](save-outbox.ts)), which keeps it until the
  * server confirms it and retries it if the server cannot be reached. While an editor has a save
  * waiting there, its later saves wait too: the outbox reads the disk before writing, so edits
@@ -120,9 +120,9 @@ function stashContent(nonce: string, content: string, editorKey: string): void {
 export async function saveEditorContent(
   filePath: string,
   content: string,
-  worktreePath?: string | null,
-  options?: SaveOptions,
-  editorKey: string = filePath,
+  worktreePath: string | null | undefined,
+  options: SaveOptions | undefined,
+  editorKey: EditorKey,
 ): Promise<boolean> {
   const editor = useEditorStateStore.getState().files.get(editorKey);
   if (editor && hasQueuedSave(editor)) {
@@ -148,9 +148,9 @@ export async function saveEditorContent(
 export async function writeEditorContent(
   filePath: string,
   content: string,
-  worktreePath?: string | null,
-  options?: SaveOptions,
-  editorKey: string = filePath,
+  worktreePath: string | null | undefined,
+  options: SaveOptions | undefined,
+  editorKey: EditorKey,
 ): Promise<boolean> {
   const result = await postEditorContent(filePath, content, worktreePath, options, editorKey);
   return result.ok;
@@ -165,7 +165,7 @@ export async function postEditorContent(
   content: string,
   worktreePath: string | null | undefined,
   options: SaveOptions | undefined,
-  editorKey: string,
+  editorKey: EditorKey,
   expectedContent?: string,
 ): Promise<{ ok: true } | { ok: false; error: unknown }> {
   const nonce = crypto.randomUUID();

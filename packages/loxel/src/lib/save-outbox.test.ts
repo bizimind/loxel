@@ -74,29 +74,33 @@ const {
 const { dispatchLoxelEvent } = await import("./loxel-events");
 type OutboxEntry = import("./save-outbox").OutboxEntry;
 type OutboxStorage = import("./save-outbox").OutboxStorage;
-const { useEditorStateStore } = await import("@/store/editor-state");
+const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
+const localServerModule = await import("@/api/local-server");
+const { localServerId } = localServerModule;
 const { useProjectStore } = await import("@/store/projects");
 
+const TEST_SERVER = localServerId();
 const FILE = "/repo/a.ts";
+const KEY = fileEditorKey(TEST_SERVER, FILE);
 
 /** Open an editor of FILE that loaded `content` and now shows `editorText`. */
 function openEditor(content: string, editorText: { current: string }): void {
   const store = useEditorStateStore.getState();
-  store.openFile(FILE);
-  store.setBaseContent(FILE, content);
+  store.openFile(KEY, TEST_SERVER, FILE);
+  store.setBaseContent(KEY, content);
   store.registerEditorCallbacks(
-    FILE,
+    KEY,
     () => editorText.current,
     (merged) => {
       editorText.current = merged;
       return merged;
     },
   );
-  store.registerPendingEdit(FILE, () => ({ content: editorText.current }));
+  store.registerPendingEdit(KEY, () => ({ content: editorText.current }));
 }
 
 function editor() {
-  return useEditorStateStore.getState().files.get(FILE);
+  return useEditorStateStore.getState().files.get(KEY);
 }
 
 /** Storage that keeps copies of the entries, as IndexedDB does, across "reloads" of the outbox. */
@@ -125,7 +129,7 @@ function leftBehind(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
     id: "e1",
     instanceId: "gone-editor",
     ownerId: "gone-window",
-    editorKey: FILE,
+    editorKey: KEY,
     filePath: FILE,
     worktreePath: "/repo",
     base: "a\nb\nc\n",
@@ -174,7 +178,7 @@ describe("open editor", () => {
     openEditor("a\nb\nc\n", text);
     serverDown = true;
 
-    expect(await saveEditorContent(FILE, text.current, "/repo")).toBe(false);
+    expect(await saveEditorContent(FILE, text.current, "/repo", undefined, KEY)).toBe(false);
     expect(editor()?.state).toBe("dirty");
     expect(editor()?.queued).toBe(true);
 
@@ -190,7 +194,7 @@ describe("open editor", () => {
     openEditor("a\nb\nc\n", text);
     refuseWrites = true;
 
-    expect(await saveEditorContent(FILE, text.current, "/repo")).toBe(false);
+    expect(await saveEditorContent(FILE, text.current, "/repo", undefined, KEY)).toBe(false);
     expect(editor()?.queued).toBe(false);
     expect(outboxEntriesForTests()).toEqual([]);
   });
@@ -199,13 +203,13 @@ describe("open editor", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
 
     serverDown = false;
     disk[FILE] = "A\nb\nc\n"; // another program edits the file meanwhile
     text.current = "a\nb\nc\nd\ne\n";
     // Not written blindly over the other program's edit: it waits for the retry's merge.
-    void saveEditorContent(FILE, text.current, "/repo");
+    void saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     expect(writes).toEqual([]);
 
     await retryQueuedSaves();
@@ -217,7 +221,7 @@ describe("open editor", () => {
     const text = { current: "a\nX\nc\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
 
     serverDown = false;
     disk[FILE] = "a\nY\nc\n";
@@ -227,7 +231,7 @@ describe("open editor", () => {
     expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
 
     // Accepting the disk version gives up the edits.
-    useEditorStateStore.getState().acceptDiskVersion(FILE);
+    useEditorStateStore.getState().acceptDiskVersion(KEY);
     expect(outboxEntriesForTests()).toEqual([]);
   });
 
@@ -235,7 +239,7 @@ describe("open editor", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     text.current = "a\nb\nc\nd\nTYPED\n"; // typed since, its autosave not due yet
 
     serverDown = false;
@@ -249,9 +253,9 @@ describe("open editor", () => {
     // The pending edit carries the explicit-save options, as `takePendingEdit` does.
     useEditorStateStore
       .getState()
-      .registerPendingEdit(FILE, () => ({ content: text.current, options: { format: true } }));
+      .registerPendingEdit(KEY, () => ({ content: text.current, options: { format: true } }));
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo"); // an autosave: no format options
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY); // an autosave: no format options
 
     serverDown = false;
     await retryQueuedSaves();
@@ -262,22 +266,22 @@ describe("open editor", () => {
     const text = { current: "USER\nb\nc\nd\ne\n" };
     openEditor("a\nb\nc\nd\ne\n", text);
     const store = useEditorStateStore.getState();
-    store.markDirty(FILE);
-    store.handleDiskChange(FILE, [], "a\nb\nc\nd\nB\n");
+    store.markDirty(KEY);
+    store.handleDiskChange(KEY, [], "a\nb\nc\nd\nB\n");
     expect(text.current).toBe("USER\nb\nc\nd\nB\n");
-    store.handleDiskChange(FILE, [], "a\nb\nC\nd\nB\n");
+    store.handleDiskChange(KEY, [], "a\nb\nC\nd\nB\n");
     expect(text.current).toBe("USER\nb\nC\nd\nB\n");
   });
 
   test("a save confirmed without its echo is the base of the next one", async () => {
     const text = { current: "a\nb1\nc\n" };
     openEditor("a\nb\nc\n", text);
-    await saveEditorContent(FILE, text.current, "/repo"); // written; its echo never comes
-    useEditorStateStore.getState().handleSaveError(FILE, [...editor()!.pendingNonces][0]!);
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY); // written; its echo never comes
+    useEditorStateStore.getState().handleSaveError(KEY, [...editor()!.pendingNonces][0]!);
 
     text.current = "a\nb12\nc\n";
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     serverDown = false;
     await retryQueuedSaves();
 
@@ -292,8 +296,8 @@ describe("closed editor", () => {
     const text = { current: content };
     openEditor(base, text);
     serverDown = true;
-    await saveEditorContent(FILE, content, "/repo");
-    useEditorStateStore.getState().closeFile(FILE);
+    await saveEditorContent(FILE, content, "/repo", undefined, KEY);
+    useEditorStateStore.getState().closeFile(KEY);
     serverDown = false;
   }
 
@@ -320,9 +324,9 @@ describe("closed editor", () => {
   });
 
   test("a conflict is shown at once in the file's tab when it is open and clean", async () => {
-    const side = "compare-1:new";
+    const side = viewEditorKey("compare-1:new");
     const store = useEditorStateStore.getState();
-    store.openFile(side, FILE);
+    store.openFile(side, TEST_SERVER, FILE);
     store.setBaseContent(side, "a\nb\nc\n");
     serverDown = true;
     await saveEditorContent(FILE, "a\nX\nc\n", "/repo", undefined, side);
@@ -349,8 +353,8 @@ describe("closed editor", () => {
 
     const entry = findAdoptableEntry(FILE);
     expect(entry?.content).toBe("a\nX\nc\n");
-    useEditorStateStore.getState().openFile(FILE);
-    adoptOutboxEntry(FILE, entry!);
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, entry!);
     expect(editor()?.state).toBe("diverged");
     expect(editor()?.diskContent).toBe("a\nY\nc\n");
     expect(findAdoptableEntry(FILE)).toBeNull();
@@ -359,8 +363,8 @@ describe("closed editor", () => {
   test("a reopened tab takes over a save still waiting, as unsaved edits", async () => {
     await queueAndClose("a\nb\nc\n", "a\nb\nc\nd\n");
     const entry = findAdoptableEntry(FILE);
-    useEditorStateStore.getState().openFile(FILE);
-    adoptOutboxEntry(FILE, entry!);
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, entry!);
     expect(editor()?.state).toBe("dirty");
     expect(editor()?.baseContent).toBe("a\nb\nc\n");
     expect(editor()?.queued).toBe(true);
@@ -392,10 +396,33 @@ describe("recovery", () => {
     ]);
   });
 
+  test("a save in review is shown at start, before the window's server is known", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e1", leftBehind({ status: "review", disk: "A\nb\nc\n" }));
+    // main.tsx starts the outbox while it still waits for `/api/version`.
+    const unknown = spyOn(localServerModule, "localServerId").mockImplementation(() => {
+      throw new Error("The window's server is not known yet");
+    });
+    try {
+      await initSaveOutbox({ storage });
+    } finally {
+      unknown.mockRestore();
+    }
+    expect(opened).toEqual([FILE]);
+    expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
+  });
+
   test("the entries of a window still open are left to it", async () => {
     const { storage, stored } = memoryStorage();
     stored.set("e1", leftBehind({ ownerId: "open-window" }));
-    stored.set("e2", leftBehind({ id: "e2", filePath: "/repo/b.ts", editorKey: "/repo/b.ts" }));
+    stored.set(
+      "e2",
+      leftBehind({
+        id: "e2",
+        filePath: "/repo/b.ts",
+        editorKey: fileEditorKey(TEST_SERVER, "/repo/b.ts"),
+      }),
+    );
     disk["/repo/b.ts"] = "a\nb\nc\n";
     // Each window holds a lock named after itself while it is open.
     const locks = {
@@ -422,7 +449,7 @@ describe("recovery", () => {
     const text = { current: "a\nX\nc\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     serverDown = false;
     disk[FILE] = "a\nY\nc\n";
     await retryQueuedSaves();
@@ -432,8 +459,8 @@ describe("recovery", () => {
     expect(opened).toEqual([FILE]);
     const entry = findAdoptableEntry(FILE);
     expect(entry?.content).toBe("a\nX\nc\n");
-    useEditorStateStore.getState().openFile(FILE);
-    adoptOutboxEntry(FILE, entry!);
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, entry!);
     expect(editor()?.state).toBe("diverged");
     expect(editor()?.diskContent).toBe("a\nY\nc\n");
     expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
@@ -445,15 +472,15 @@ describe("recovery", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     delete disk[FILE]; // deleted by another program while the server was away
     serverDown = false;
     await retryQueuedSaves();
     expect(editor()?.deleted).toBe(true);
     text.current = "a\nb\nc\nd\ne\n"; // typed on, with autosave stopped by the deletion
 
-    outboxEditorClosing(FILE, editor()!, "/repo");
-    useEditorStateStore.getState().closeFile(FILE);
+    outboxEditorClosing(KEY, editor()!, "/repo");
+    useEditorStateStore.getState().closeFile(KEY);
     expect(opened).toEqual([]); // not reopened behind the user's back
 
     await reload(storage);
@@ -470,12 +497,12 @@ describe("deleted files", () => {
     const text = { current: "a\nb\nc\n" };
     openEditor("a\nb\nc\n", text);
     const store = useEditorStateStore.getState();
-    store.setDeleted(FILE, true);
+    store.setDeleted(KEY, true);
     text.current = "a\nb\nc\nnew\n";
-    store.markDirty(FILE);
+    store.markDirty(KEY);
 
-    outboxEditorClosing(FILE, editor()!, "/repo");
-    store.closeFile(FILE);
+    outboxEditorClosing(KEY, editor()!, "/repo");
+    store.closeFile(KEY);
     expect(outboxEntriesForTests().map((e) => [e.status, e.content])).toEqual([
       ["review", "a\nb\nc\nnew\n"],
     ]);
@@ -483,9 +510,9 @@ describe("deleted files", () => {
   });
 
   test("a compare side of a deleted file gives its edits up when it closes", async () => {
-    const side = "compare-1:new";
+    const side = viewEditorKey("compare-1:new");
     const store = useEditorStateStore.getState();
-    store.openFile(side, FILE);
+    store.openFile(side, TEST_SERVER, FILE);
     store.setBaseContent(side, "a\nb\nc\n");
     serverDown = true;
     await saveEditorContent(FILE, "a\nX\nc\n", "/repo", undefined, side);
@@ -497,8 +524,8 @@ describe("deleted files", () => {
 
   test("a clean editor of a deleted file leaves nothing behind", () => {
     openEditor("a\nb\nc\n", { current: "a\nb\nc\n" });
-    useEditorStateStore.getState().setDeleted(FILE, true);
-    outboxEditorClosing(FILE, editor()!, "/repo");
+    useEditorStateStore.getState().setDeleted(KEY, true);
+    outboxEditorClosing(KEY, editor()!, "/repo");
     expect(outboxEntriesForTests()).toEqual([]);
   });
 });
@@ -511,7 +538,7 @@ describe("recovered saves", () => {
     const entry = findAdoptableEntry(FILE)!;
     const text = { current: entry.content };
     openEditor("a\nb\nc\n", text);
-    adoptOutboxEntry(FILE, entry);
+    adoptOutboxEntry(KEY, entry);
     afterNextRead = () => (disk[FILE] = "A\nb\nc\n");
 
     await retryQueuedSaves();
@@ -527,7 +554,7 @@ describe("a file another program keeps rewriting", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     serverDown = false;
     let rewrites = 0;
     onWrite = () => (disk[FILE] = `rewrite ${++rewrites}\n`);
@@ -547,7 +574,7 @@ describe("storage", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
 
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     expect(storedWhenSent).toEqual([1]);
     expect(stored.size).toBe(0);
   });
@@ -561,8 +588,8 @@ describe("storage", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
 
-    await saveEditorContent(FILE, text.current, "/repo");
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     expect(disk[FILE]).toBe("a\nb\nc\nd\n");
     expect(toasts).toEqual([
       "Unsaved edits could not be stored: they are lost if Loxel closes before they are saved",
@@ -575,7 +602,7 @@ describe("retrying", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     serverDown = false;
     afterNextRead = () => (disk[FILE] = "A\nb\nc\n");
 
@@ -589,8 +616,8 @@ describe("retrying", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
-    useEditorStateStore.getState().closeFile(FILE);
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
+    useEditorStateStore.getState().closeFile(KEY);
     serverDown = false;
     afterNextRead = () => (disk[FILE] = "A\nb\nc\n");
 
@@ -603,7 +630,7 @@ describe("retrying", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     let drained = false;
     onWorktreeSavesDrained("/repo", () => (drained = true));
     expect(drained).toBe(false);
@@ -617,7 +644,7 @@ describe("retrying", () => {
     const text = { current: "a\nb\nc\nd\n" };
     openEditor("a\nb\nc\n", text);
     serverDown = true;
-    await saveEditorContent(FILE, text.current, "/repo");
+    await saveEditorContent(FILE, text.current, "/repo", undefined, KEY);
     serverDown = false;
 
     dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: "/repo" });
@@ -648,12 +675,13 @@ describe("queue", () => {
     const other = "/gone/b.ts";
     const store = useEditorStateStore.getState();
     for (const path of [other, FILE]) {
-      store.openFile(path);
-      store.setBaseContent(path, "a\n");
+      store.openFile(fileEditorKey(TEST_SERVER, path), TEST_SERVER, path);
+      store.setBaseContent(fileEditorKey(TEST_SERVER, path), "a\n");
     }
     serverDown = true;
-    await saveEditorContent(other, "a\nb\n", "/gone"); // older, retried first
-    await saveEditorContent(FILE, "a\nb\n", "/repo");
+    // older, retried first
+    await saveEditorContent(other, "a\nb\n", "/gone", undefined, fileEditorKey(TEST_SERVER, other));
+    await saveEditorContent(FILE, "a\nb\n", "/repo", undefined, KEY);
     serverDown = false;
     unserved.add(other);
     disk[other] = "a\n";
@@ -669,7 +697,7 @@ describe("a worktree that is gone", () => {
   async function queueSave(): Promise<void> {
     openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
     serverDown = true;
-    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
     serverDown = false;
   }
 
@@ -677,7 +705,7 @@ describe("a worktree that is gone", () => {
 
   test("drops its saves when the user removed it in Loxel, and says so", async () => {
     await queueSave();
-    useEditorStateStore.getState().closeFile(FILE);
+    useEditorStateStore.getState().closeFile(KEY);
 
     dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: true });
     expect(outboxEntriesForTests()).toEqual([]);
@@ -702,7 +730,7 @@ describe("a worktree that is gone", () => {
     openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
     dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: false });
     serverDown = true;
-    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
     expect(statuses()).toEqual(["review"]);
   });
 
@@ -712,7 +740,7 @@ describe("a worktree that is gone", () => {
     dispatchLoxelEvent("loxel-worktree-gone", { wtPath: "/repo", discarded: false });
     // The editor's unmount flush, sent after the server removed the worktree.
     serverDown = true;
-    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo");
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
     expect(outboxEntriesForTests()).toEqual([]);
   });
 
@@ -737,7 +765,14 @@ describe("a worktree that is gone", () => {
       await useProjectStore.getState().fetchProjects();
       unserved.add(file);
       const { storage, stored } = memoryStorage();
-      stored.set("e1", leftBehind({ worktreePath: wt, filePath: file, editorKey: file }));
+      stored.set(
+        "e1",
+        leftBehind({
+          worktreePath: wt,
+          filePath: file,
+          editorKey: fileEditorKey(TEST_SERVER, file),
+        }),
+      );
 
       await initSaveOutbox({ storage });
       await retryQueuedSaves();
