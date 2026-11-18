@@ -3,6 +3,7 @@ import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { onWebviewFocus } from "@/lib/webview-focus";
 
 /**
  * Shared by the root menu and submenus so they look identical. Light menus take the popover
@@ -22,28 +23,11 @@ function ContextMenu({ children, open, onOpenChange, position }: ContextMenuProp
   const triggerId = React.useId();
 
   // A click inside a <webview> (a browser panel's page) is handled by the page's own document, so
-  // Base UI never sees the outside press. Close when the page takes focus instead: the main process
-  // reports it, and as a fallback this window blurs with the webview left as the
-  // active element a tick later. The IPC also covers clicking into a page from another app, when
-  // this window has no focus left to lose.
+  // Base UI never sees the outside press. Close when the page takes focus instead.
   const close = React.useEffectEvent(() => onOpenChange(false));
-  const closeIfWebviewFocused = React.useEffectEvent(() => {
-    if (document.activeElement?.tagName === "WEBVIEW") onOpenChange(false);
-  });
   React.useEffect(() => {
     if (!open) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const onWindowBlur = () => {
-      clearTimeout(timer);
-      timer = setTimeout(closeIfWebviewFocused, 0);
-    };
-    const offWebviewFocused = window.electronAPI?.onWebviewFocused(close);
-    window.addEventListener("blur", onWindowBlur);
-    return () => {
-      offWebviewFocused?.();
-      window.removeEventListener("blur", onWindowBlur);
-      clearTimeout(timer);
-    };
+    return onWebviewFocus(close);
     // Reopening at a new point (another right-click) drops a check pending from the last one.
   }, [open, position.x, position.y]);
 

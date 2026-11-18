@@ -8,6 +8,7 @@
 import { useEffect } from "react";
 
 import { onFocusTargetsChange } from "@/lib/focus-target-registry";
+import { onWebviewFocus } from "@/lib/webview-focus";
 import type { KeyCombo } from "@/store/keybindings/key-combo";
 import { eventToKeyCombo, getBindingSteps, isModifierKey } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
@@ -111,10 +112,9 @@ export function useKeybindings(): void {
     const offChord = usePendingChordStore.subscribe((state, prev) => {
       if (state.steps.length > 0 !== prev.steps.length > 0) syncWebviewInterception();
     });
-    // Focus moving into a <webview> fires no focusin here. The main process reports it (the
-    // guest's webContents focus event); as a fallback, re-sync one tick after a focusout or window
-    // blur, by when activeElement is the webview.
-    const offWebviewFocused = window.electronAPI?.onWebviewFocused(syncWebviewInterception);
+    // Focus moving into a <webview> fires no focusin here. Focus leaving re-syncs one tick after
+    // its focusout, once activeElement has moved on.
+    const offWebviewFocus = onWebviewFocus(syncWebviewInterception);
     const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
     const offFocusTargets = onFocusTargetsChange(syncWebviewInterception);
     syncWebviewInterception();
@@ -125,15 +125,13 @@ export function useKeybindings(): void {
     document.addEventListener("focusin", syncWebviewInterception);
     document.addEventListener("focusout", syncAfterFocusLeaves);
     window.addEventListener("blur", cancelPendingChord);
-    window.addEventListener("blur", syncAfterFocusLeaves);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("focusin", syncWebviewInterception);
       document.removeEventListener("focusout", syncAfterFocusLeaves);
       window.removeEventListener("blur", cancelPendingChord);
-      window.removeEventListener("blur", syncAfterFocusLeaves);
       offWebviewKeystroke?.();
-      offWebviewFocused?.();
+      offWebviewFocus();
       offFocusTargets();
       offLookup();
       offChord();

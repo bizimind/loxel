@@ -6,11 +6,13 @@
  */
 import type { DockviewPanelApi } from "dockview-react";
 import { GlobeIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { PanelErrorBoundary } from "@/components/dockview/panel-error-boundary";
+import { isActivatedPanel } from "@/hooks/usePanelActivationFocus";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
+import { onWebviewFocus } from "@/lib/webview-focus";
 import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { REVIEW_INTERVAL_MS, reviewBackgroundPages } from "@/store/browser-page-budget";
 import {
@@ -19,6 +21,7 @@ import {
   detachBrowserPage,
   useBrowserPages,
 } from "@/store/browser-pages";
+import { activateEditorArea } from "@/store/tools-bar";
 
 import { BrowserPanel } from "./BrowserPanel";
 
@@ -73,16 +76,30 @@ const BrowserPageHost = memo(function BrowserPageHost({ page }: { page: BrowserP
     setVisible(host, false);
   }, [slot]);
 
-  // Focus in the page activates its panel's group, as focus in dockview's own panel content does.
-  const activateGroup = useCallback(() => {
-    if (slot && !slot.api.isGroupActive) slot.api.setActive();
+  // Focus in the page activates its panel, its group and the editor area, as a click in dockview's
+  // own panel content does: the page is laid over the layout, so dockview never sees the click.
+  // Focus in its toolbar arrives as a focus event; focus moving into its <webview> doesn't.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !slot) return;
+    const activate = () => {
+      if (!isActivatedPanel(slot.api)) slot.api.setActive();
+      activateEditorArea();
+    };
+    const offWebviewFocus = onWebviewFocus(() => {
+      if (host.contains(document.activeElement)) activate();
+    });
+    host.addEventListener("focus", activate, { capture: true });
+    return () => {
+      offWebviewFocus();
+      host.removeEventListener("focus", activate, { capture: true });
+    };
   }, [slot]);
 
   return (
     <div
       ref={hostRef}
       className="fixed overflow-hidden [[data-browser-page-drag]_&]:pointer-events-none"
-      onFocus={activateGroup}
       {...focusAreaProps("center")}
     >
       <PanelErrorBoundary panelName="browser" Icon={GlobeIcon} center>
