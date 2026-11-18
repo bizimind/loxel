@@ -250,7 +250,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 1. Bumps patch version in package.json
 2. Creates a release commit (`chore(<pkg>): release vX.Y.Z`) and tag
 3. Builds binaries
-4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`); for `wt` and `code-analysis` the manifest is signed and the macOS binaries carry the Developer ID, both checked by the CLI self-update (see `packages/cli-common/README.md`)
+4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`); for `wt` and `code-analysis` the manifest is signed and the macOS binaries carry the Developer ID, which `wt`'s self-update checks (see `packages/cli-common/README.md`)
 5. Creates a GitHub release with R2 download links (no binary attachments; `loxel` also attaches its CycloneDX SBOM)
 
 **Deployments**: The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch except Dependabot's, which only build, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
