@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, setSystemTime, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
+import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
@@ -49,7 +51,7 @@ interface FakeLink {
 /** A server whose socket opens and closes when the test says so. */
 class FakeServer {
   readonly opens: Array<{
-    wtPath: string | null;
+    wt: WorktreeRef | null;
     signal: AbortSignal;
     freshServer: boolean;
     accept: () => FakeLink;
@@ -60,10 +62,10 @@ class FakeServer {
 
   constructor() {
     this.connection = createLspConnection({
-      open: (wtPath, signal, freshServer) =>
+      open: (wt, signal, freshServer) =>
         new Promise((resolve, reject) => {
           this.opens.push({
-            wtPath,
+            wt,
             signal,
             freshServer,
             accept: () => {
@@ -101,10 +103,10 @@ class FakeServer {
 }
 
 async function connected(
-  wtPath: string | null = "/wt",
+  wt: WorktreeRef | null = localRef("/wt"),
 ): Promise<{ server: FakeServer; link: FakeLink }> {
   const server = new FakeServer();
-  server.connection.connect(wtPath);
+  server.connection.connect(wt);
   const link = await server.accept();
   return { server, link };
 }
@@ -127,7 +129,7 @@ describe("createLspConnection", () => {
     expect(server.opens).toHaveLength(1);
     advance(1);
     expect(server.opens).toHaveLength(2);
-    expect(server.opens[1]!.wtPath).toBe("/wt");
+    expect(server.opens[1]!.wt).toEqual(localRef("/wt"));
     await server.accept();
     expect(server.state).toEqual({ state: "connected" });
   });
@@ -176,7 +178,7 @@ describe("createLspConnection", () => {
 
   test("sockets that will not open stop it as unreachable", async () => {
     const server = new FakeServer();
-    server.connection.connect("/wt");
+    server.connection.connect(localRef("/wt"));
     for (let failure = 1; failure < LSP_MAX_FAILURES; failure++) {
       await server.refuse();
       advance(LSP_RECONNECT_BASE_DELAY_MS * 2 ** (failure - 1));
@@ -220,7 +222,7 @@ describe("createLspConnection", () => {
     expect(server.state).toMatchObject({ state: "stopped", reason: "replaced" });
     advance(10 * 60_000);
     server.connection.resume();
-    server.connection.connect("/wt");
+    server.connection.connect(localRef("/wt"));
     expect(server.opens).toHaveLength(1);
 
     server.connection.restart();
@@ -265,7 +267,7 @@ describe("createLspConnection", () => {
     expect(server.opens).toHaveLength(1);
     expect(server.state).toEqual({ state: "idle" });
 
-    server.connection.connect("/wt");
+    server.connection.connect(localRef("/wt"));
     server.connection.disconnect();
     const late = await server.accept();
     expect(late.disposed).toBe(true);
@@ -273,22 +275,30 @@ describe("createLspConnection", () => {
   });
 
   test("connect is a no-op for the same worktree and replaces the link for another", async () => {
-    const { server, link } = await connected("/a");
-    server.connection.connect("/a");
+    const { server, link } = await connected(localRef("/a"));
+    server.connection.connect(localRef("/a"));
     expect(server.opens).toHaveLength(1);
 
-    server.connection.connect("/b");
+    server.connection.connect(localRef("/b"));
     expect(link.disposed).toBe(true);
-    expect(server.opens[1]!.wtPath).toBe("/b");
+    expect(server.opens[1]!.wt).toEqual(localRef("/b"));
     // The old socket closing (the client closed it) does not reconnect anything.
     link.close(1000);
     await settle();
     expect(server.opens).toHaveLength(2);
   });
 
+  test("the same path on another server is another worktree", async () => {
+    const { server, link } = await connected(localRef("/a"));
+    const other = worktreeRef(toServerId("other-server"), "/a");
+    server.connection.connect(other);
+    expect(link.disposed).toBe(true);
+    expect(server.opens[1]!.wt).toEqual(other);
+  });
+
   test("a superseded attempt is aborted, so it never starts a client", () => {
     const server = new FakeServer();
-    server.connection.connect("/wt");
+    server.connection.connect(localRef("/wt"));
     server.connection.restart();
 
     expect(server.opens[0]!.signal.aborted).toBe(true);

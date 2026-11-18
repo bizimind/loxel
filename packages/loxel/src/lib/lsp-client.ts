@@ -1,12 +1,14 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 import type { IDisposable } from "monaco-editor";
 
+import { localServerId } from "@/api/local-server";
+import { sameWorktreeRef, type ServerId, type WorktreeRef } from "@/api/worktree-ref";
 import { LSP_FRESH_SERVER_PARAM } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
 
 import { frontendLog } from "./frontend-logger";
-import { isLiveEditorModel, isPreviewModel } from "./live-editor-model";
+import { editorFile, isLiveEditorModel, isPreviewModel } from "./live-editor-model";
 import {
   createLspConnection,
   createStopToastFilter,
@@ -15,6 +17,7 @@ import {
   type LspConnectionState,
   type LspLink,
 } from "./lsp-connection";
+import { type LspTransport, translateLspUris } from "./lsp-uri-translation";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
 import {
@@ -26,17 +29,19 @@ import {
 const log = frontendLog.child("ui");
 
 /** Every connected client, with the worktree it serves (null: YAML, shared by every worktree). */
-const connectedClients = new Map<MonacoLspClient, string | null>();
+const connectedClients = new Map<MonacoLspClient, WorktreeRef | null>();
 
 /** Every client's connection, for restarting them. */
 const connections = new Set<LspConnection>();
 
 /**
- * The language-server clients connected for `wtPath` now: TypeScript for the active worktree,
- * plus each lazily started server while a file of its language is open.
+ * The language-server clients connected for `wt` now: TypeScript for the active worktree, plus
+ * each lazily started server while a file of its language is open.
  */
-export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
-  return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
+export function getConnectedLspClients(wt: WorktreeRef): MonacoLspClient[] {
+  return [...connectedClients]
+    .filter(([, served]) => served !== null && sameWorktreeRef(served, wt))
+    .map(([client]) => client);
 }
 
 /** Every connected client, whatever its worktree, including YAML's. */
@@ -67,8 +72,11 @@ export interface LspClientOptions {
   /** The server's name for notices, such as `basedpyright`. */
   name: string;
   languageId: string | readonly string[];
-  /** Runs for each connection's transport; what it returns is disposed with the connection. */
-  onConnected?: (transport: WebSocketTransport) => IDisposable;
+  /**
+   * Runs for each connection's transport, which translates the URIs of what it sends and receives
+   * (see `lspUriTranslation`); what it returns is disposed with the connection.
+   */
+  onConnected?: (transport: LspTransport) => IDisposable;
   /**
    * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
    * distinct message once while Loxel runs, for a server whose messages are meant for the user
@@ -78,7 +86,7 @@ export interface LspClientOptions {
   /** The server's read-only documents: tabs and peek widgets show them, read through this client. */
   virtualDocuments?: VirtualDocumentOptions;
   /**
-   * Leave these languages' editor models on `loxel://HEAD/` URIs instead of `file://` (see
+   * Leave these languages' editor models on `loxel:` URIs instead of `file:` ones (see
    * `fileSchemeLanguages`), for a server sharing languages with one that needs them. Its manager
    * translates the URIs.
    */
@@ -89,13 +97,14 @@ export interface LspClientOptions {
  * Factory for a language-server client connection. Each call creates an independent
  * connect/disconnect pair backed by one WebSocket and one `MonacoLspClient` at a time.
  *
- * `connect(wtPath)` is idempotent per worktree path (null: a server not scoped to a worktree,
- * YAML). Connecting to a different path disposes the old client and socket (the server keeps the
- * old worktree's server a while for a socket to take it over, see `stdio-lsp-manager.ts`) and opens
- * a new connection. Both the worktree switch and `disconnect()`
- * dispose the client (unregistering providers and closing synced documents) before the socket.
- * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`), plus the tabs of
- * its own read-only documents. Workspace edits
+ * `connect(wt)` is idempotent per worktree (null: a server not scoped to a worktree, YAML, on the
+ * window's server). Connecting to another worktree disposes the old client and socket (the server
+ * keeps the old worktree's server a while for a socket to take it over, see `stdio-lsp-manager.ts`)
+ * and opens a new connection. Both the worktree switch and `disconnect()` dispose the client
+ * (unregistering providers and closing synced documents) before the socket. Only the live models of
+ * editor tabs showing the connection's server's files are synced to the server (see
+ * `isLiveEditorModel`), plus the tabs of its own read-only documents, and the URIs of every message
+ * are translated between editor model URIs and the server's (see `lspUriTranslation`). Workspace edits
  * (rename, code actions) also change the worktree's files that are not open (see
  * `createLspWorkspaceFiles`), and a toast says why when one fails.
  *
@@ -123,37 +132,41 @@ export function createLspClient({
     model.uri.scheme === virtualDocuments?.scheme && !isPreviewModel(model);
 
   async function open(
-    wtPath: string | null,
+    wt: WorktreeRef | null,
     signal: AbortSignal,
     freshServer: boolean,
   ): Promise<LspLink> {
+    const server = connectionServer(wt);
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const fresh = freshServer ? `&${LSP_FRESH_SERVER_PARAM}=1` : "";
-    const query = wtPath === null ? "" : `?wt=${encodeURIComponent(wtPath)}${fresh}`;
+    const query = wt === null ? "" : `?wt=${encodeURIComponent(wt.path)}${fresh}`;
     const address = `${proto}//${location.host}/${route}${query}`;
     const { socket, closed } = await openSocket(address, signal);
     // Superseded while the open settled (the abort closed the socket): start no client on it.
     signal.throwIfAborted();
-    const transport = WebSocketTransport.fromWebSocket(socket);
+    const socketTransport = WebSocketTransport.fromWebSocket(socket);
+    const transport = translateLspUris(socketTransport, server);
+    const isServersLiveModel = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
+      isLiveEditorModel(model) && editorFile(model.uri)?.server === server;
     let client: MonacoLspClient;
     try {
       client = new MonacoLspClient(transport, {
         languageId,
-        modelFilter: (model) => isLiveEditorModel(model) || ownsVirtualDocument(model),
+        modelFilter: (model) => isServersLiveModel(model) || ownsVirtualDocument(model),
         // Any server's. Their tabs are read-only, which stops typing but not a server's edit.
         isReadOnlyModel: (model) => isVirtualDocumentUri(model.uri.toString()),
         // One client per route at a time: each takes over the markers' owner of the one before.
         markerOwner,
-        workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
+        workspaceFileSystem: wt === null ? undefined : createLspWorkspaceFiles(wt),
         onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
         onShowMessage: showMessage,
         semanticTokenStyling: SEMANTIC_TOKEN_STYLING,
       });
     } catch (err) {
-      transport.dispose();
+      socketTransport.dispose();
       throw err;
     }
-    connectedClients.set(client, wtPath);
+    connectedClients.set(client, wt);
     const endVirtualDocuments = virtualDocumentScheme?.connected(client);
     const extension = onConnected?.(transport);
     return {
@@ -169,7 +182,7 @@ export function createLspClient({
         } catch (err) {
           log.error("Language-server client dispose failed", { route, error: err });
         }
-        transport.dispose();
+        socketTransport.dispose();
       },
     };
   }
@@ -205,6 +218,19 @@ export function createLspClient({
 }
 
 export type LspClient = ReturnType<typeof createLspClient>;
+
+/**
+ * The server a connection to `wt` reaches (YAML's, scoped to no worktree, is the window's). Sockets
+ * go to the window's server, the only one language servers are reached on, so a worktree on
+ * another server is refused rather than served by the wrong one.
+ */
+function connectionServer(wt: WorktreeRef | null): ServerId {
+  const server = localServerId();
+  if (wt !== null && wt.server !== server) {
+    throw new Error(`Language servers of ${wt.path} on server ${wt.server} cannot be reached`);
+  }
+  return server;
+}
 
 /** LSP `MessageType.Warning`: errors and warnings are shown, info and log messages are not. */
 const WARNING_MESSAGE_TYPE = 2;

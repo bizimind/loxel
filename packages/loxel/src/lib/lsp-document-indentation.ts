@@ -1,4 +1,3 @@
-import type { WebSocketTransport } from "@bizimind/monaco-lsp-client";
 import type * as monaco from "monaco-editor";
 
 import {
@@ -7,6 +6,7 @@ import {
 } from "@/api/lsp-indentation-model";
 
 import { isLiveEditorModel } from "./live-editor-model";
+import type { LspTransport } from "./lsp-uri-translation";
 
 type ModelRegistry = Pick<typeof monaco.editor, "getModels" | "onDidCreateModel">;
 
@@ -17,7 +17,7 @@ type ModelRegistry = Pick<typeof monaco.editor, "getModels" | "onDidCreateModel"
  * language server indent its edits for that file the same way.
  */
 export function reportDocumentIndentation(
-  transport: Pick<WebSocketTransport, "send">,
+  transport: Pick<LspTransport, "send">,
   languageIds: readonly string[],
   models: ModelRegistry,
 ): monaco.IDisposable {

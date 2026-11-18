@@ -143,7 +143,7 @@ export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPan
 
 /**
  * Model URI of a compare side. Unique per panel and side, since each side's model is disposed
- * with its editor, and outside `loxel://HEAD` so it is not taken for an editor tab's live model.
+ * with its editor; its fragment keeps it from being taken for an editor tab's live model.
  */
 function compareModelUri(filePath: string, panelId: string, side: "old" | "new") {
   return monaco.Uri.from({

@@ -82,28 +82,31 @@ beforeEach(() => {
 });
 
 describe("createLspWorkspaceFiles", () => {
-  const files = () => createLspWorkspaceFiles(WT);
+  const files = () => createLspWorkspaceFiles(localRef(WT));
 
   test("stat reports files, folders and missing paths of the worktree", async () => {
-    expect(await files().stat(uri("file:///repo/pkg/a.py"))).toBe("file");
-    expect(await files().stat(uri("loxel://HEAD/repo/pkg"))).toBe("directory");
-    expect(await files().stat(uri("file:///repo/pkg/new.py"))).toBeUndefined();
+    expect(await files().stat(uri("file://test-server/repo/pkg/a.py"))).toBe("file");
+    expect(await files().stat(uri("loxel://test-server/repo/pkg"))).toBe("directory");
+    expect(await files().stat(uri("file://test-server/repo/pkg/new.py"))).toBeUndefined();
   });
 
-  test("refuses paths outside the worktree, in dependencies or git, and other schemes", async () => {
+  test("refuses paths outside the worktree, in dependencies or git, other schemes and servers", async () => {
     for (const refused of [
-      "file:///usr/lib/python3.12/os.py",
-      "file:///repo-other/a.py",
-      "file:///repo",
-      "file:///repo/../etc/hosts",
-      "file:///repo/.venv/lib/python3.12/site-packages/requests/api.py",
-      "file:///repo/node_modules/left-pad/index.js",
-      "file:///repo/.git/config",
-      "file:///repo/.venv/lib/python3.12/os.py",
-      "file:///repo/.pixi/envs/default/lib/python3.12/os.py",
-      "file:///repo/.worktrees/feature/src/a.ts",
+      "file://test-server/usr/lib/python3.12/os.py",
+      "file://test-server/repo-other/a.py",
+      "file://test-server/repo",
+      "file://test-server/repo/../etc/hosts",
+      "file://test-server/repo/.venv/lib/python3.12/site-packages/requests/api.py",
+      "file://test-server/repo/node_modules/left-pad/index.js",
+      "file://test-server/repo/.git/config",
+      "file://test-server/repo/.venv/lib/python3.12/os.py",
+      "file://test-server/repo/.pixi/envs/default/lib/python3.12/os.py",
+      "file://test-server/repo/.worktrees/feature/src/a.ts",
       "loxel://compare/repo/pkg/a.py#panel-old",
-      "loxel://HEAD/repo/pkg/a.py#new",
+      "loxel://test-server/repo/pkg/a.py#new",
+      // The same path on another server, or on none.
+      "file://other-server/repo/pkg/a.py",
+      "file:///repo/pkg/a.py",
     ]) {
       await expect(files().stat(uri(refused))).rejects.toThrow();
     }
@@ -113,16 +116,16 @@ describe("createLspWorkspaceFiles", () => {
     exists(`${WT}/vendored`, true, "/opt/vendored");
     exists(`${WT}/vendored/lib.py`, false, "/opt/vendored/lib.py");
 
-    await expect(files().stat(uri("file:///repo/vendored/lib.py"))).rejects.toThrow(
+    await expect(files().stat(uri("file://test-server/repo/vendored/lib.py"))).rejects.toThrow(
       "outside the worktree",
     );
-    await expect(files().stat(uri("file:///repo/vendored/new/x.py"))).rejects.toThrow(
+    await expect(files().stat(uri("file://test-server/repo/vendored/new/x.py"))).rejects.toThrow(
       "outside the worktree",
     );
   });
 
   test("writes without formatting, with a fresh nonce", async () => {
-    await files().writeFile(uri("file:///repo/pkg/a.py"), "x = 1\n");
+    await files().writeFile(uri("file://test-server/repo/pkg/a.py"), "x = 1\n");
     const [[kind, options]] = calls as [[string, Record<string, unknown>]];
     expect(kind).toBe("write");
     expect(options).toMatchObject({ path: "/repo/pkg/a.py", content: "x = 1\n", worktreePath: WT });
@@ -131,7 +134,7 @@ describe("createLspWorkspaceFiles", () => {
   });
 
   test("creates missing parent folders before the file", async () => {
-    await files().createFile(uri("file:///repo/pkg/sub/deeper/new.py"));
+    await files().createFile(uri("file://test-server/repo/pkg/sub/deeper/new.py"));
     expect(calls).toEqual([
       ["createDir", WT, { dir: "/repo/pkg", name: "sub" }],
       ["createDir", WT, { dir: "/repo/pkg/sub", name: "deeper" }],
@@ -140,13 +143,19 @@ describe("createLspWorkspaceFiles", () => {
   });
 
   test("renames within a folder, and moves then renames across folders", async () => {
-    await files().rename(uri("file:///repo/pkg/a.py"), uri("file:///repo/pkg/b.py"));
+    await files().rename(
+      uri("file://test-server/repo/pkg/a.py"),
+      uri("file://test-server/repo/pkg/b.py"),
+    );
     expect(calls).toEqual([
       ["rename", { wt: localRef(WT), path: "/repo/pkg/a.py", newName: "b.py", isDetached: false }],
     ]);
 
     calls.length = 0;
-    await files().rename(uri("file:///repo/pkg/a.py"), uri("file:///repo/lib/c.py"));
+    await files().rename(
+      uri("file://test-server/repo/pkg/a.py"),
+      uri("file://test-server/repo/lib/c.py"),
+    );
     expect(calls).toEqual([
       ["createDir", WT, { dir: "/repo", name: "lib" }],
       [
@@ -157,13 +166,13 @@ describe("createLspWorkspaceFiles", () => {
   });
 
   test("refuses to read a file that is not UTF-8, which writing back would corrupt", async () => {
-    await expect(files().readFile(uri("file:///repo/pkg/notes.latin1"))).rejects.toThrow(
+    await expect(files().readFile(uri("file://test-server/repo/pkg/notes.latin1"))).rejects.toThrow(
       "not UTF-8",
     );
   });
 
   test("removes the file the create route made under a free name when the path appeared", async () => {
-    await expect(files().createFile(uri("file:///repo/pkg/a.py"))).rejects.toThrow(
+    await expect(files().createFile(uri("file://test-server/repo/pkg/a.py"))).rejects.toThrow(
       "/repo/pkg/a.py already exists",
     );
     expect(calls.at(-1)).toEqual([

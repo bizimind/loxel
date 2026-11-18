@@ -1,3 +1,5 @@
+import { localServerId } from "@/api/local-server";
+import { sameWorktreeRef, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import type { StoppedLanguageServer } from "@/store/lsp-status";
 
@@ -8,7 +10,7 @@ interface ToolchainServerRecovery {
   changedMessage: string;
   client: Pick<LspClient, "connect" | "disconnect">;
   stoppedServer: () => StoppedLanguageServer | undefined;
-  activeWorktree: () => string | null;
+  activeWorktree: () => WorktreeRef | null;
 }
 
 /**
@@ -25,9 +27,11 @@ export function createToolchainServerRecovery({
   return (message) => {
     if (message.type !== changedMessage || !("wtPath" in message)) return;
     if (stoppedServer()?.reason !== "start-failed") return;
-    const wtPath = activeWorktree();
-    if (wtPath === null || wtPath !== message.wtPath) return;
+    const wt = activeWorktree();
+    if (wt === null || message.wtPath === null) return;
+    // `wsClient`'s messages name worktrees of the window's server.
+    if (!sameWorktreeRef(wt, worktreeRef(localServerId(), message.wtPath))) return;
     client.disconnect();
-    client.connect(wtPath);
+    client.connect(wt);
   };
 }
