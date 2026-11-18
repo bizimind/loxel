@@ -89,7 +89,7 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
   // --- Context menu ---
   // Entry paths are relative to the repository root. They are on disk in the worktree whose local
   // changes are shown, and otherwise (commits) in the active worktree's checkout.
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const filesRoot = diffSource?.worktree ?? activeWorktreePath;
   const showsLocalChanges = diffSource?.type === "uncommitted" && !diffSource.base;
   const [contextMenu, setContextMenu] = useState<{

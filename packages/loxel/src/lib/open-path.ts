@@ -172,10 +172,10 @@ export function openFile(
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
     const { projects } = useProjectStore.getState();
-    const { activeWorktreePath, byProject } = useWorktreeStore.getState();
+    const { activeWorktree, byProject } = useWorktreeStore.getState();
 
     const target =
-      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
+      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktree?.path;
     if (!target) {
       showToast("Open a project before opening other files");
       return undefined;
@@ -214,7 +214,7 @@ export function openUrl(
   return inOrder(async () => {
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
-    const target = worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+    const target = worktreePath ?? useWorktreeStore.getState().activeWorktree?.path ?? null;
     return openInWorktree(target, { kind: "url", url, ...options, inboxId });
   });
 }
@@ -246,7 +246,8 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * the panel was queued.
  */
 async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
-  const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
+  const { activeWorktree, switchWorktree } = useWorktreeStore.getState();
+  const activeWorktreePath = activeWorktree?.path ?? null;
   const layoutKey = target ?? HOME_LAYOUT_KEY;
   const ui = getWorktreeUI(layoutWorktree(layoutKey)).getState();
   const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
@@ -306,7 +307,7 @@ export async function openPath(path: string, location?: FileLocation): Promise<v
     return;
   }
   const filePath = info?.path ?? path;
-  if (useWorktreeStore.getState().activeWorktreePath === null) {
+  if (useWorktreeStore.getState().activeWorktree === null) {
     await openFileFromHome(filePath, location);
     return;
   }

@@ -314,12 +314,6 @@ export interface WorktreeState {
   byProject: Record<WorktreeRefKey, ProjectState>;
   /** The worktree (or regular repo's root checkout) the window shows; null for Home. */
   activeWorktree: WorktreeRef | null;
-  /**
-   * @deprecated The path of `activeWorktree`, kept for the readers not moved to refs yet; a
-   * cleanup after task 6 removes it. Changes only together with `activeWorktree`, through
-   * {@link activeWorktreeFields}.
-   */
-  activeWorktreePath: string | null;
 
   /** Pending add plan that needs user resolution (branch conflict). */
   pendingAddPlan:
@@ -410,12 +404,12 @@ export interface WorktreeState {
 
 /**
  * The store fields that make `wt` active, or Home when null: the one way to change the active
- * worktree, which keeps `activeWorktreePath` in step with it.
+ * worktree.
  */
 export function activeWorktreeFields(
   wt: WorktreeRef | null,
-): Pick<WorktreeState, "activeWorktree" | "activeWorktreePath"> {
-  return { activeWorktree: wt, activeWorktreePath: wt?.path ?? null };
+): Pick<WorktreeState, "activeWorktree"> {
+  return { activeWorktree: wt };
 }
 
 /**

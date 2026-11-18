@@ -56,7 +56,7 @@ export default function App() {
   useThemeSync();
   useFontSettingsSync();
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   const activeLeftPanel = useWorktreeToolsBar((s) => s.activeLeftPanel);
   const activeBottomPanel = useWorktreeToolsBar((s) => s.activeBottomPanel);
   const activeRightPanel = useWorktreeToolsBar((s) => s.activeRightPanel);
@@ -77,13 +77,13 @@ export default function App() {
   }, []);
 
   // WS subscription lifecycle
-  useWsSubscription(activeWorktreePath);
+  useWsSubscription(activeWorktree?.path ?? null);
   useWindowPresence();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <TopBar />
-      {activeWorktreePath !== null ? (
+      {activeWorktree !== null ? (
         <>
           <div className="flex flex-1 overflow-hidden">
             <Sidebar />
@@ -92,7 +92,7 @@ export default function App() {
               <PersistedLayoutComponent
                 className="dockview-theme-abyss h-full"
                 storagePrefix="outer"
-                layoutKey={activeWorktreePath}
+                layoutKey={activeWorktree.path}
                 layoutVersion={LAYOUT_VERSION}
                 createDefaultLayout={createDefaultLayout}
                 onApiReady={setupOuterDockview}

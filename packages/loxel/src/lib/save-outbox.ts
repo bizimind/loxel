@@ -815,7 +815,7 @@ function subscribeRecoveredWorktrees(taken: readonly OutboxEntry[]): void {
   for (const wt of worktrees) {
     api.wsClient.subscribeWorktree(wt);
     onWorktreeSavesDrained(wt, () => {
-      if (useWorktreeStore.getState().activeWorktreePath !== wt)
+      if (useWorktreeStore.getState().activeWorktree?.path !== wt)
         api.wsClient.unsubscribeWorktree(wt);
     });
   }

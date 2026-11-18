@@ -32,7 +32,7 @@ const MAX_SUGGESTIONS = 6;
 
 /** Center watermark — visible when no center panels are open. */
 export function CenterWatermark(_props: IWatermarkPanelProps) {
-  const worktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const worktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const panels = worktreePath
     ? QUICKSTART_PANELS
     : QUICKSTART_PANELS.filter((def) => !def.needsWorktree);

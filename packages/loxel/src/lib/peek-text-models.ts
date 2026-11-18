@@ -125,7 +125,7 @@ const previewSource: PreviewSource = {
     if (file.server !== localServerId()) {
       throw new Error(`${file.path} is on server ${file.server}, which this window cannot read`);
     }
-    const worktree = useWorktreeStore.getState().activeWorktreePath;
+    const worktree = useWorktreeStore.getState().activeWorktree?.path;
     return (await api.getFilePreviewContent(file.path, worktree)).content;
   },
   languageOf(path, content) {

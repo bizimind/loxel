@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("CommitGraph", () => {
-  // On reload, `activeWorktreePath` comes back from session storage before anything switches
+  // On reload, `activeWorktree` comes back from session storage before anything switches
   // worktrees. Setting only it is that state: the first-visit graph width must land in the
   // worktree's store once, not loop on a store the component doesn't render from (#345).
   test("sets the graph column width without looping when the active worktree was restored on reload", async () => {
