@@ -62,6 +62,15 @@ export function setDockviewApi(api: DockviewApi | null): void {
   outerApi = api;
 }
 
+/**
+ * Make the editor area the outer layout's active group, as a click in it would. Content laid over
+ * the layout from outside it (browser pages) takes focus without dockview seeing the click.
+ */
+export function activateEditorArea(): void {
+  const centerHost = outerApi?.getPanel("centerHost");
+  if (centerHost && !centerHost.api.isGroupActive) centerHost.api.setActive();
+}
+
 /** The content element of a sidebar panel, or null if the outer layout doesn't hold it. */
 export function getSidebarPanelElement(panelId: PanelId): HTMLElement | null {
   return outerApi?.getPanel(panelId)?.view.content.element ?? null;
