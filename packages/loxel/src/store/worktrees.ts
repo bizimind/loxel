@@ -160,12 +160,19 @@ function projectEntries(
 }
 
 /**
+ * The start of an absolute path, POSIX or Windows (`C:\` or `C:/`). A ref's string form never
+ * starts like one: it starts with its server's id, a UUID.
+ */
+const ABSOLUTE_PATH_START = /^(?:\/|[A-Za-z]:[\\/])/;
+
+/**
  * A ref as saved: its string form, or a bare path saved before lists held refs. A bare path is
  * taken to be on `server`, the server whose window saved it, so a user's order and archive survive
- * the change; it is saved back as a ref. Null for anything else.
+ * the change; it is saved back as a ref.
  */
-function savedRef(text: string, server: ServerId): WorktreeRef | null {
-  return text.startsWith("/") ? worktreeRef(server, text) : parseWorktreeRef(text);
+function savedRef(text: string, server: ServerId): WorktreeRef {
+  if (ABSOLUTE_PATH_START.test(text)) return worktreeRef(server, text);
+  return parseWorktreeRef(text) ?? worktreeRef(server, text);
 }
 
 /**
@@ -181,8 +188,8 @@ export function mergePersistedProjectStates(
   const merged = { ...byProject };
   if (!saved || typeof saved !== "object") return merged;
   for (const [savedKey, entry] of Object.entries(saved)) {
+    if (!entry || typeof entry !== "object") continue;
     const project = savedRef(savedKey, server);
-    if (!project || !entry || typeof entry !== "object") continue;
     const key = formatWorktreeRef(project);
     const next: ProjectState = { ...(merged[key] ?? { worktrees: [] }) };
     const record = entry as Record<string, unknown>;
@@ -191,11 +198,10 @@ export function mergePersistedProjectStates(
         .map((name) => record[name])
         .find((v): v is unknown[] => Array.isArray(v));
       if (!value) continue;
-      next[list] = value.flatMap((item) => {
+      next[list] = value.flatMap((item) =>
         // A project's worktrees are on its server.
-        const ref = typeof item === "string" ? savedRef(item, project.server) : null;
-        return ref ? [formatWorktreeRef(ref)] : [];
-      });
+        typeof item === "string" ? [formatWorktreeRef(savedRef(item, project.server))] : [],
+      );
     }
     merged[key] = next;
   }
@@ -787,8 +793,11 @@ export const useWorktreeStore = create<WorktreeState>()(
         storage: createJSONStorage(() => ({
           ...serverWorktreesStorage,
           getItem: async (name: string) => {
+            // Started at once, only the result waits for the server: the later the saved lists
+            // arrive, the likelier a store update lands first and saves empty lists over them.
+            const saved = serverWorktreesStorage.getItem(name);
             await whenLocalServerKnown();
-            return serverWorktreesStorage.getItem(name);
+            return saved;
           },
         })),
         partialize: (state) => ({ byProject: persistedProjectStates(state.byProject) }),

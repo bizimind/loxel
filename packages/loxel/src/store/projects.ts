@@ -199,10 +199,11 @@ export const useProjectStore = create<ProjectState>()(
         // Switch to the new project's worktree (or project root for non-bare).
         const { useWorktreeStore } = await import("./worktrees");
         const added = get().projects.find((candidate) => candidate.id === project.id);
-        if (!added) return;
-        const targetPath = added.isBare ? added.worktrees[0]?.path : added.path;
+        // The window's own server added it; switch there even if the list does not show it yet.
+        const server = added?.server ?? localServerId();
+        const targetPath = added?.isBare ? added.worktrees[0]?.path : project.path;
         if (targetPath) {
-          await useWorktreeStore.getState().switchWorktree(worktreeRef(added.server, targetPath));
+          await useWorktreeStore.getState().switchWorktree(worktreeRef(server, targetPath));
         }
       },
 

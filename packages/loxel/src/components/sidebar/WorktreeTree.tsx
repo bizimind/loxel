@@ -105,7 +105,11 @@ type TreeDrop =
  * keyboard entries.
  */
 export function WorktreeTree({ project, expanded }: { project: ListedProject; expanded: boolean }) {
-  const ref = useMemo(() => projectRef(project), [project]);
+  // The same object across project fetches, which rebuild every project.
+  const ref = useMemo(
+    () => projectRef({ server: project.server, path: project.path }),
+    [project.server, project.path],
+  );
   const projectKey = formatWorktreeRef(ref);
   const ps = useWorktreeStore((s) => s.byProject[projectKey]) ?? EMPTY_PROJECT_STATE;
   const nesting = ps.worktreeMetadata ?? false;

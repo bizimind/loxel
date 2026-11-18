@@ -960,6 +960,24 @@ describe("worktree nesting", () => {
     expect(again).toEqual(merged);
   });
 
+  test("loads Windows paths saved bare as paths, not as refs on a drive-letter server", () => {
+    const server = toServerId("window-server");
+    const project = worktreeRef(server, "C:\\repo");
+
+    const merged = mergePersistedProjectStates(
+      {},
+      { "C:\\repo": { archivedPaths: ["C:/repo/.worktrees/a"] } },
+      server,
+    );
+
+    expect(merged).toEqual({
+      [formatWorktreeRef(project)]: {
+        worktrees: [],
+        archivedRefs: [worktreeKey(project, "C:/repo/.worktrees/a")],
+      },
+    });
+  });
+
   test("keeps the same project path on two servers apart", () => {
     const elsewhere = worktreeRef(toServerId("elsewhere"), PROJECT);
     const merged = mergePersistedProjectStates(
