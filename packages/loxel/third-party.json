@@ -1,5 +1,5 @@
 {
-  "note": "Read by scripts/sbom.ts. `licenses` fixes components whose metadata has no license, keyed by bom-ref so a version bump forces a recheck; `concluded` beside `license` records a license chosen from an OR expression. `components` are what ships but is no package; `electron` and `bun` list what those binaries bundle.",
+  "note": "Read by scripts/sbom.ts. `licenses` fixes components whose metadata has no license, keyed by bom-ref so a version bump forces a recheck; `concluded` beside `license` records a license chosen from an OR expression. `bundles` names the Maven artifact a language server's jar without Maven coordinates repackages, by its OSGi name. `components` are what ships but is no package; `electron` and `bun` list what those binaries bundle.",
   "licenses": {
     "pkg:maven/io.takari.m2e.workspace/org.eclipse.m2e.workspace.cli@0.4.0": {
       "license": "EPL-1.0",
@@ -40,6 +40,43 @@
     "pkg:npm/khroma@2.1.0": {
       "license": "MIT",
       "note": "package.json has no license field; the package's license file is MIT"
+    }
+  },
+  "bundles": {
+    "com.sun.jna": {
+      "maven": "net.java.dev.jna:jna",
+      "license": "Apache-2.0 OR LGPL-2.1-or-later",
+      "note": "In jdtls; the SPDX id in its META-INF/LICENSE"
+    },
+    "com.sun.jna.platform": {
+      "maven": "net.java.dev.jna:jna-platform",
+      "license": "Apache-2.0 OR LGPL-2.1-or-later",
+      "note": "In jdtls; licensed as JNA"
+    },
+    "org.gradle.toolingapi": {
+      "maven": "org.gradle:gradle-tooling-api",
+      "license": "Apache-2.0",
+      "note": "In jdtls (Buildship); Gradle is Apache-2.0"
+    },
+    "org.hamcrest": {
+      "maven": "org.hamcrest:hamcrest",
+      "license": "BSD-3-Clause",
+      "note": "In jdtls; its Bundle-License"
+    },
+    "org.objectweb.asm": {
+      "maven": "org.ow2.asm:asm",
+      "license": "BSD-3-Clause",
+      "note": "In jdtls; its Bundle-License"
+    },
+    "wrapped.com.jetbrains.intellij.java.java-decompiler-engine": {
+      "maven": "com.jetbrains.intellij.java:java-decompiler-engine",
+      "license": "Apache-2.0",
+      "note": "In jdtls; JetBrains' Fernflower decompiler, Apache-2.0"
+    },
+    "wrapped.org.jetbrains.annotations": {
+      "maven": "org.jetbrains:annotations",
+      "license": "Apache-2.0",
+      "note": "In jdtls; JetBrains' annotations, Apache-2.0"
     }
   },
   "components": [
@@ -254,7 +291,11 @@
         "license": "BSD-3-Clause",
         "url": "https://github.com/webmproject/libwebp"
       },
-      { "name": "highway", "license": "Apache-2.0", "url": "https://github.com/google/highway" },
+      {
+        "name": "highway",
+        "license": "Apache-2.0 OR BSD-3-Clause",
+        "url": "https://github.com/google/highway"
+      },
       { "name": "uucode", "license": "MIT", "url": "https://github.com/jacobsandlund/uucode" },
       {
         "name": "libc++abi",
@@ -268,6 +309,12 @@
         "license": "MIT",
         "url": "https://github.com/evanw/esbuild",
         "note": "Bun's transpiler, CSS lexer and module resolver are ports of it"
+      },
+      {
+        "name": "bun lint and bun fmt ports",
+        "license": "MIT AND ISC AND BSD-2-Clause AND BSD-3-Clause AND Apache-2.0",
+        "url": "https://github.com/oven-sh/bun/blob/bun-v1.4.4/LICENSE.md",
+        "note": "ESLint, typescript-eslint, oxlint, Prettier, Biome and the other projects Bun's license page lists for them, too many to list one by one"
       }
     ]
   }

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { $ } from "bun";
 
-import { findJars, parsePomProperties, parseWrappedBundle } from "./jar-coordinates";
+import { findJars, parseBundle, parsePomProperties, parseWrappedBundle } from "./jar-coordinates";
 
 describe("parsePomProperties", () => {
   test("reads the coordinates", () => {
@@ -36,6 +36,17 @@ describe("parseWrappedBundle", () => {
 
   test("is undefined without the header", () => {
     expect(parseWrappedBundle("Bundle-SymbolicName: org.eclipse.core.runtime\n")).toBeUndefined();
+  });
+});
+
+describe("parseBundle", () => {
+  test("reads the name without its attributes, and the version", () => {
+    const manifest =
+      "Bundle-SymbolicName: org.eclipse.core.runtime; singleton:=true\nBundle-Version: 3.35.100.v2026\n";
+    expect(parseBundle(manifest)).toEqual({
+      symbolicName: "org.eclipse.core.runtime",
+      version: "3.35.100.v2026",
+    });
   });
 });
 
@@ -73,20 +84,29 @@ describe("findJars", () => {
       "META-INF/MANIFEST.MF": "Bundle-SymbolicName: org.eclipse.m2e.maven.runtime\n",
       "jars/httpcore.jar": await Bun.file(nested).bytes(),
     });
-    const jars = await findJars(staged);
-    expect(jars.map(({ file, coordinates }) => [file, coordinates])).toEqual([
-      [
-        path.join("jdtls", "plugins", "guava.jar"),
-        [{ groupId: "com.google.guava", artifactId: "guava", version: "33.7.1-jre" }],
-      ],
-      [
-        path.join("jdtls", "plugins", "junit.jar"),
-        [{ groupId: "junit", artifactId: "junit", version: "4.13.2" }],
-      ],
-      [
-        path.join("jdtls", "plugins", "runtime.jar"),
-        [{ groupId: "org.apache.httpcomponents", artifactId: "httpcore", version: "4.4.16" }],
-      ],
+    await makeJar(path.join(plugins, "org.eclipse.text.jar"), {
+      "META-INF/MANIFEST.MF": "Bundle-SymbolicName: org.eclipse.text\nBundle-Version: 3.14.900\n",
+    });
+    expect(await findJars(staged)).toEqual([
+      {
+        file: path.join("jdtls", "plugins", "guava.jar"),
+        coordinates: [{ groupId: "com.google.guava", artifactId: "guava", version: "33.7.1-jre" }],
+      },
+      {
+        file: path.join("jdtls", "plugins", "junit.jar"),
+        coordinates: [{ groupId: "junit", artifactId: "junit", version: "4.13.2" }],
+      },
+      {
+        file: path.join("jdtls", "plugins", "org.eclipse.text.jar"),
+        coordinates: [],
+        bundle: { symbolicName: "org.eclipse.text", version: "3.14.900" },
+      },
+      {
+        file: path.join("jdtls", "plugins", "runtime.jar"),
+        coordinates: [
+          { groupId: "org.apache.httpcomponents", artifactId: "httpcore", version: "4.4.16" },
+        ],
+      },
     ]);
   });
 });

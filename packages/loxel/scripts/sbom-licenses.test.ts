@@ -1,6 +1,14 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-import { legacyNpmLicense, withDepsDevLicenses, withLicenseOverrides } from "./sbom-licenses";
+import {
+  legacyNpmLicense,
+  withDepsDevLicenses,
+  withLicenseOverrides,
+  withNpmLegacyLicenses,
+} from "./sbom-licenses";
 
 describe("legacyNpmLicense", () => {
   test("reads a licenses array as a choice", () => {
@@ -16,6 +24,25 @@ describe("legacyNpmLicense", () => {
   test("is undefined without either", () => {
     expect(legacyNpmLicense({ license: "MIT" })).toBeUndefined();
     expect(legacyNpmLicense({ licenses: [] })).toBeUndefined();
+  });
+});
+
+describe("withNpmLegacyLicenses", () => {
+  test("finds a scoped package stored with its peers' suffix", async () => {
+    const store = mkdtempSync(path.join(os.tmpdir(), "pnpm-store-test-"));
+    const dir = path.join(store, "@scope+pkg@1.0.0_react@19.0.0", "node_modules", "@scope", "pkg");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify({ licenses: [{ type: "MIT" }] }));
+    const component = {
+      "bom-ref": "pkg:npm/%40scope/pkg@1.0.0",
+      group: "@scope",
+      name: "pkg",
+      version: "1.0.0",
+      purl: "pkg:npm/%40scope/pkg@1.0.0",
+    };
+    const [result] = await withNpmLegacyLicenses([component], store);
+    rmSync(store, { recursive: true, force: true });
+    expect(result?.licenses).toEqual([{ expression: "MIT" }]);
   });
 });
 

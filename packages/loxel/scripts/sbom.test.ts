@@ -236,6 +236,8 @@ describe("bunAdditions", () => {
 });
 
 describe("jarAdditions", () => {
+  const parentOf = (file: string): string => `parent:${file.split("/")[0]}`;
+
   test("lists each artifact once under its server, without the server's own snapshots", () => {
     const guava = { groupId: "com.google.guava", artifactId: "guava", version: "33.7.1-jre" };
     const additions = jarAdditions(
@@ -246,8 +248,9 @@ describe("jarAdditions", () => {
           coordinates: [guava, { groupId: "x", artifactId: "y", version: "1.0.0-SNAPSHOT" }],
         },
       ],
-      (file) => `parent:${file.split("/")[0]}`,
+      parentOf,
       new Set(),
+      {},
     );
     expect(additions).toEqual([
       {
@@ -261,6 +264,32 @@ describe("jarAdditions", () => {
         },
         parents: ["parent:jdtls"],
       },
+    ]);
+  });
+
+  test("names a bundle without coordinates by its OSGi name, and leaves Eclipse's out", () => {
+    const bundles = {
+      "com.sun.jna": { maven: "net.java.dev.jna:jna", license: "Apache-2.0", note: "" },
+    };
+    const additions = jarAdditions(
+      [
+        {
+          file: "jdtls/plugins/jna.jar",
+          coordinates: [],
+          bundle: { symbolicName: "com.sun.jna", version: "5.19.1.v20260612-1000" },
+        },
+        {
+          file: "jdtls/plugins/runtime.jar",
+          coordinates: [],
+          bundle: { symbolicName: "org.eclipse.core.runtime", version: "3.35.100.v2026" },
+        },
+      ],
+      parentOf,
+      new Set(),
+      bundles,
+    );
+    expect(additions.map(({ component }) => [component["bom-ref"], component.licenses])).toEqual([
+      ["pkg:maven/net.java.dev.jna/jna@5.19.1", [{ expression: "Apache-2.0" }]],
     ]);
   });
 });

@@ -37,6 +37,12 @@ on:
       - "packages/loxel/scripts/go-toolchain.ts"
       - "packages/loxel/scripts/resolve-package.ts"
       - "packages/loxel/scripts/*-module/**"
+      # The SBOM step below: a language server bump that leaves a third-party.json override
+      # matching nothing fails here rather than in the release.
+      - "packages/loxel/scripts/sbom*.ts"
+      - "packages/loxel/scripts/go-build-info.ts"
+      - "packages/loxel/scripts/jar-coordinates.ts"
+      - "packages/loxel/third-party.json"
 
 permissions:
   contents: read
@@ -82,6 +88,11 @@ jobs:
 
       - name: Build server standalone
         run: pnpm -C packages/loxel run build:server:standalone
+
+      # The release writes the app's SBOM on macOS (release-loxel.yml); here it checks that the
+      # same language servers' Go modules and jars still match third-party.json's overrides.
+      - name: Check the SBOM
+        run: bun packages/loxel/scripts/sbom.ts "$RUNNER_TEMP/loxel.cdx.json"
 
       - name: Build renderer
         run: pnpm -C packages/loxel exec vite build

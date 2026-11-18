@@ -24,7 +24,7 @@ import { z } from "zod";
 
 import { electronVersion, type Patch, readPatches } from "./electron-dist";
 import { findGoBinaries, type GoBuildInfo, type GoModule } from "./go-build-info";
-import { findJars, type MavenCoordinates } from "./jar-coordinates";
+import { findJars, type Jar, type MavenCoordinates } from "./jar-coordinates";
 import {
   type Manifest,
   readAllManifests,
@@ -76,9 +76,16 @@ const ThirdPartyEntrySchema = z.strictObject({
   url: z.string(),
   note: z.string().optional(),
 });
+/** A jar without Maven coordinates, by its OSGi name: the artifact it repackages. */
+const BundleSchema = z.strictObject({
+  maven: z.string().regex(/^[^:]+:[^:]+$/),
+  license: z.string(),
+  note: z.string(),
+});
 const ThirdPartySchema = z.strictObject({
   note: z.string(),
   licenses: z.record(z.string(), LicenseOverrideSchema),
+  bundles: z.record(z.string(), BundleSchema),
   components: z.array(ThirdPartyEntrySchema),
   electron: z.strictObject({
     version: z.string(),
@@ -275,17 +282,36 @@ export function mavenComponent({ groupId, artifactId, version }: MavenCoordinate
 /**
  * The Maven artifacts among the jars, each a dependency of `parentOf(file)`, as goAdditions. A
  * `-SNAPSHOT` is the server's own build, like a Go `(devel)` module: no artifact anyone can look up.
+ * A jar without coordinates is the artifact `bundles` names for its OSGi name, at its OSGi version
+ * without the qualifier; Eclipse's own bundles are part of their server, and any other unnamed one
+ * is warned about.
  */
 export function jarAdditions(
-  jars: Array<{ file: string; coordinates: MavenCoordinates[] }>,
+  jars: Jar[],
   parentOf: (file: string) => string,
   skip: ReadonlySet<string>,
+  bundles: ThirdParty["bundles"],
 ): Addition[] {
-  const found = jars.flatMap(({ file, coordinates }) =>
-    coordinates
+  const found = jars.flatMap(({ file, coordinates, bundle }) => {
+    const parent = parentOf(file);
+    const artifacts = coordinates
       .filter(({ version }) => !version.endsWith("-SNAPSHOT"))
-      .map((coordinate) => ({ component: mavenComponent(coordinate), parent: parentOf(file) })),
-  );
+      .map((coordinate) => ({ component: mavenComponent(coordinate), parent }));
+    const named = bundle && bundles[bundle.symbolicName];
+    if (!bundle || !named) {
+      if (bundle && !bundle.symbolicName.startsWith("org.eclipse.")) {
+        console.warn(`${file} has no Maven coordinates and no "bundles" entry in third-party.json`);
+      }
+      return artifacts;
+    }
+    const [groupId = "", artifactId = ""] = named.maven.split(":");
+    const version = bundle.version.split(".").slice(0, 3).join(".");
+    const component = mavenComponent({ groupId, artifactId, version });
+    return [
+      ...artifacts,
+      { component: { ...component, licenses: [{ expression: named.license }] }, parent },
+    ];
+  });
   return uniqueAdditions(found, skip);
 }
 
@@ -402,7 +428,7 @@ export async function generateSbom(
     const existing = new Set(full.components.map((component) => component["bom-ref"]));
     full = withComponents(full, [
       ...goAdditions(await findGoBinaries(languageServersDir), parentOf, existing),
-      ...jarAdditions(await findJars(languageServersDir), parentOf, existing),
+      ...jarAdditions(await findJars(languageServersDir), parentOf, existing, thirdParty.bundles),
     ]);
   }
 
