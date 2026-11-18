@@ -21,13 +21,14 @@ export function DraggablePanelHeader({
   className?: string;
 }) {
   const dragImageRef = useRef<HTMLDivElement>(null);
-  // Where the pointer went down. A dragstart's target is the draggable header itself, so this is
-  // the only way to tell that a drag began in a control the header holds (a button, a text field):
-  // that drag is the control's, not the panel's.
-  const pressedRef = useRef<EventTarget | null>(null);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    pressedRef.current = e.target;
+  // A press on a control the header holds (a button, a text field) is that control's: suspend the
+  // header's dragging for that press, so the gesture never becomes a panel drag. Suspending rather
+  // than cancelling the dragstart matters: a cancelled dragstart gets no dragend, and window-level
+  // drag tracking (BrowserPagePool's) would be left thinking a drag is still in progress.
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const pressed = e.target;
+    e.currentTarget.draggable = !(pressed instanceof Element && pressed.closest(HEADER_CONTROLS));
   }, []);
 
   const handleDragStart = useCallback(
@@ -35,11 +36,6 @@ export function DraggablePanelHeader({
       // A drag of something inside the header (selected text in a field, or content portalled out
       // of its React tree) is that element's own drag; leave it alone.
       if (e.target !== e.currentTarget) return;
-      const pressed = pressedRef.current;
-      if (pressed instanceof Element && pressed.closest(HEADER_CONTROLS)) {
-        e.preventDefault();
-        return;
-      }
       e.dataTransfer.setData("text/plain", panelId);
       e.dataTransfer.effectAllowed = "move";
       if (dragImageRef.current) {

@@ -19,13 +19,9 @@ function renderHeader() {
   return header;
 }
 
-/**
- * Press on `pressed`, then start a drag the way the browser does: on the draggable header, whatever
- * descendant the press was on. Returns whether the drag went ahead and what it carried.
- */
-function pressAndDrag(header: HTMLElement, pressed: Element) {
+/** Start a drag the way the browser does once a press on the header moves: on the header itself. */
+function dragHeader(header: HTMLElement) {
   const setData = jest.fn();
-  fireEvent.pointerDown(pressed);
   const proceeded = fireEvent.dragStart(header, {
     dataTransfer: { setData, setDragImage: jest.fn(), effectAllowed: "none" },
   });
@@ -36,23 +32,26 @@ describe("DraggablePanelHeader", () => {
   test("a drag from the header itself drags the panel", () => {
     const header = renderHeader();
 
-    const { proceeded, setData } = pressAndDrag(header, screen.getByText("Logs"));
+    fireEvent.pointerDown(screen.getByText("Logs"));
 
+    expect(header.draggable).toBe(true);
+    const { proceeded, setData } = dragHeader(header);
     expect(proceeded).toBe(true);
     expect(setData).toHaveBeenCalledWith("text/plain", "logs");
   });
 
+  // The header's dragging is suspended rather than its dragstart cancelled: a cancelled dragstart
+  // gets no dragend, which would leave window-level drag tracking stuck.
   test.each([
     ["a button", () => screen.getByTitle("Clear logs")],
     ["an icon inside a button", () => screen.getByTestId("clear-icon")],
     ["a text field", () => screen.getByLabelText("Filter")],
-  ])("a drag that starts on %s does not drag the panel", (_name, control) => {
+  ])("a press on %s suspends the header's dragging", (_name, control) => {
     const header = renderHeader();
 
-    const { proceeded, setData } = pressAndDrag(header, control());
+    fireEvent.pointerDown(control());
 
-    expect(proceeded).toBe(false);
-    expect(setData).not.toHaveBeenCalled();
+    expect(header.draggable).toBe(false);
   });
 
   test("a drag of a descendant's own content, like selected text in a field, is left alone", () => {
@@ -71,11 +70,11 @@ describe("DraggablePanelHeader", () => {
 
   test("a press on the header after one on a control drags the panel again", () => {
     const header = renderHeader();
-    pressAndDrag(header, screen.getByTitle("Clear logs"));
+    fireEvent.pointerDown(screen.getByTitle("Clear logs"));
 
-    const { proceeded, setData } = pressAndDrag(header, screen.getByText("Logs"));
+    fireEvent.pointerDown(screen.getByText("Logs"));
 
-    expect(proceeded).toBe(true);
-    expect(setData).toHaveBeenCalledWith("text/plain", "logs");
+    expect(header.draggable).toBe(true);
+    expect(dragHeader(header).setData).toHaveBeenCalledWith("text/plain", "logs");
   });
 });
