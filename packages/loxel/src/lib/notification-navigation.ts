@@ -4,9 +4,14 @@
  * Shared by the "Go to Recent Notification" keybinding and
  * click-to-navigate in the notification center overlay.
  */
-import { type ServerNotification, isPanelSource } from "@/api/notification-model";
+import { isPanelSource } from "@/api/notification-model";
+import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
 import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
-import { usePanelNotificationStore } from "@/store/panel-notifications";
+import {
+  type ClientNotification,
+  notificationWorktree,
+  usePanelNotificationStore,
+} from "@/store/panel-notifications";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -24,20 +29,21 @@ function activatePanelById(panelId: string, retries = 1): void {
   }
 }
 
-export function navigateToNotification(notification: ServerNotification): void {
+export function navigateToNotification(notification: ClientNotification): void {
   const { source } = notification;
+  const worktree = notificationWorktree(notification);
 
   // Panels the inbox opened: go to the worktree (or Home) they opened in, unless they opened in
   // whatever the window showed. The notification has done its job.
   if (source.kind === "inbox") {
     usePanelNotificationStore.getState().dismiss(notification.id);
-    if (source.worktreePath !== undefined) showPlace(source.worktreePath, () => {});
+    if (worktree !== undefined) showPlace(worktree, () => {});
     return;
   }
 
   // Only sources with a panel can be navigated to
-  if (!isPanelSource(source)) return;
-  const { panelId, worktreePath } = source;
+  if (!isPanelSource(source) || worktree === undefined) return;
+  const { panelId } = source;
 
   // Like clicking a browser's notification: the page's `click` handler, or its service worker's
   // `notificationclick`, runs (to open the chat or build it was about). A page in another worktree
@@ -55,21 +61,22 @@ export function navigateToNotification(notification: ServerNotification): void {
     else click(getBrowserPageSlot(panelId));
   };
 
-  showPlace(worktreePath, activate);
+  showPlace(worktree, activate);
 }
 
 /**
  * Show a worktree, or Home (null), then call `then` with whether it had to switch there, once the
  * swapped-in layout has had a frame to mount.
  */
-function showPlace(worktreePath: string | null, then: (afterSwitch: boolean) => void): void {
+function showPlace(worktree: WorktreeRef | null, then: (afterSwitch: boolean) => void): void {
   const wtStore = useWorktreeStore.getState();
-  if (worktreePath === null && wtStore.activeWorktreePath !== null) {
+  const active = wtStore.activeWorktree;
+  if (worktree === null && active !== null) {
     wtStore.showHome();
     requestAnimationFrame(() => then(true));
-  } else if (worktreePath && wtStore.activeWorktreePath !== worktreePath) {
+  } else if (worktree && !(active && sameWorktreeRef(active, worktree))) {
     void wtStore
-      .switchWorktree(worktreePath)
+      .switchWorktree(worktree)
       .then(() => requestAnimationFrame(() => then(true)))
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);

@@ -4,15 +4,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { DockviewPanelApi } from "dockview-react";
 
 import { wsClient } from "@/api/client";
-import type { ServerNotification } from "@/api/notification-model";
+import { localServerId } from "@/api/local-server";
 import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { attachBrowserPage, closeBrowserPage } from "@/store/browser-pages";
+import type { ClientNotification } from "@/store/panel-notifications";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 import { NotificationSiteGroup } from "./NotificationSiteGroup";
 
-function build(n: number, faviconUrl?: string): ServerNotification {
+function build(n: number, faviconUrl?: string): ClientNotification {
   return {
+    server: localServerId(),
     id: `build-${n}`,
     timestamp: Date.now() - (10 - n) * 60_000,
     source: {

@@ -4,8 +4,11 @@ import * as monaco from "monaco-editor";
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { ServerId } from "@/api/worktree-ref";
+import { usePanelServer } from "@/components/dockview/panel-context";
 import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
+import { editorFileUri } from "@/lib/live-editor-model";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 import { useUIStore } from "@/store/ui";
 
@@ -30,8 +33,9 @@ function computeAutoHeight(lineCount: number): number {
   return Math.max(MIN_HEIGHT, Math.min(DEFAULT_MAX_HEIGHT, content));
 }
 
-function getModelUri(filePath: string): monaco.Uri {
-  return monaco.Uri.from({ scheme: "file", path: `/__frontmatter__/${filePath}.yaml` });
+/** A YAML editor model of the file's frontmatter, on the file's server, for the YAML server. */
+function getModelUri(server: ServerId, filePath: string): monaco.Uri {
+  return editorFileUri({ server, path: `/__frontmatter__/${filePath}.yaml` }, "file");
 }
 
 interface FrontmatterEditorProps {
@@ -48,6 +52,7 @@ export function FrontmatterEditor({
   isProgrammaticRef,
 }: FrontmatterEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
+  const server = usePanelServer();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   useInlayHintsOption(editorRef);
@@ -78,7 +83,7 @@ export function FrontmatterEditor({
   useEffect(() => {
     if (value === null) return;
 
-    const uri = getModelUri(filePath);
+    const uri = getModelUri(server, filePath);
     if (!monaco.editor.getModel(uri)) {
       monaco.editor.createModel(value, "yaml", uri);
     }
@@ -89,7 +94,7 @@ export function FrontmatterEditor({
     };
     // Only react to frontmatter existence and filePath changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value !== null, filePath]);
+  }, [value !== null, filePath, server]);
 
   // Editor instance lifecycle — re-created on collapse/expand toggle.
   // The model persists across these cycles, so undo history is preserved.
@@ -98,7 +103,7 @@ export function FrontmatterEditor({
     const container = containerRef.current;
     if (!container) return;
 
-    const uri = getModelUri(filePath);
+    const uri = getModelUri(server, filePath);
     const model = monaco.editor.getModel(uri);
     if (!model) return;
 
@@ -153,7 +158,7 @@ export function FrontmatterEditor({
       editor.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value !== null, collapsed, filePath]);
+  }, [value !== null, collapsed, filePath, server]);
 
   // Sync external value changes into Monaco (e.g., disk sync)
   useEffect(() => {

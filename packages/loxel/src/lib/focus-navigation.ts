@@ -19,6 +19,7 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview-react";
 
+import { formatWorktreeRef } from "@/api/worktree-ref";
 import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import type { MoveDirection } from "@/store/layout-actions";
 import type { PanelId } from "@/store/panel-config";
@@ -270,22 +271,22 @@ function focusSidebarEntry(entry: HTMLElement): void {
   entry.scrollIntoView({ block: "nearest" });
 }
 
-/** Move the worktree sidebar cursor to the entry for `path`, if it is shown. */
-export function focusSidebarEntryForPath(path: string): void {
-  const entry = sidebarEntries().find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === path);
+/** Move the worktree sidebar cursor to the entry with `id` (see `sidebarEntryProps`), if it is shown. */
+export function focusSidebarEntryById(id: string): void {
+  const entry = sidebarEntries().find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === id);
   if (entry) focusSidebarEntry(entry);
 }
 
 /**
- * Focus the worktree sidebar entry for `path` if it is shown, else the active worktree's entry,
+ * Focus the worktree sidebar entry with `id` if it is shown, else the active worktree's entry,
  * else the first entry.
  */
-function focusWorktreeEntry(path: string | null): boolean {
+function focusWorktreeEntry(id: string | null): boolean {
   const entries = sidebarEntries();
-  const activePath = useWorktreeStore.getState().activeWorktreePath;
-  const byPath = (p: string | null) =>
-    entries.find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === p);
-  const entry = byPath(path) ?? byPath(activePath) ?? entries[0];
+  const active = useWorktreeStore.getState().activeWorktree;
+  const byId = (candidate: string | null) =>
+    entries.find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === candidate);
+  const entry = byId(id) ?? (active && byId(formatWorktreeRef(active))) ?? entries[0];
   if (!entry) return false;
   focusSidebarEntry(entry);
   return true;
@@ -296,12 +297,12 @@ function focusWorktreeEntry(path: string | null): boolean {
  * entry — or the active worktree's, if the collapsed rail hides it.
  */
 export function toggleWorktreeSidebar(): void {
-  const entryPath = document.activeElement
+  const entryId = document.activeElement
     ?.closest(`[${SIDEBAR_ENTRY_ATTR}]`)
     ?.getAttribute(SIDEBAR_ENTRY_ATTR);
   const hadFocus = currentArea().kind === "worktrees";
   useProjectStore.getState().toggleSidebar();
-  if (hadFocus) afterLayout(() => focusWorktreeEntry(entryPath ?? null));
+  if (hadFocus) afterLayout(() => focusWorktreeEntry(entryId ?? null));
 }
 
 /** Enter the worktree sidebar on the active worktree's entry. */

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import type { WorktreeBasePlan } from "@/api/project-model";
+import { sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -25,12 +26,12 @@ function normalizeName(value: string): string {
  * on comes as a toast.
  */
 export function NewWorktreeDialog({
-  projectPath,
+  project,
   parent,
   titles,
   onClose,
 }: {
-  projectPath: string;
+  project: WorktreeRef;
   parent?: WorktreeEntry;
   /** Whether titles can be stored: they are worktree metadata, like nesting */
   titles: boolean;
@@ -40,7 +41,8 @@ export function NewWorktreeDialog({
   const confirmCreateWorktree = useWorktreeStore((s) => s.confirmCreateWorktree);
   const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
   const conflict = useWorktreeStore((s) =>
-    s.pendingAddPlan?.projectPath === projectPath &&
+    s.pendingAddPlan &&
+    sameWorktreeRef(s.pendingAddPlan.project, project) &&
     s.pendingAddPlan.branchConflict?.kind === "exists"
       ? s.pendingAddPlan
       : null,
@@ -61,14 +63,14 @@ export function NewWorktreeDialog({
     let cancelled = false;
     setBasePlan(null);
     api
-      .planWorktreeBase(projectPath, parentPath)
+      .planWorktreeBase(project.path, parentPath)
       .then((plan) => !cancelled && setBasePlan(plan))
       // Only a hint: the create itself reports anything that is really wrong.
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [projectPath, parentPath]);
+  }, [project.path, parentPath]);
 
   /** Set when the dialog is closed while a create is still being planned. */
   const abandoned = useRef(false);
@@ -87,7 +89,9 @@ export function NewWorktreeDialog({
       // A branch conflict keeps the dialog open to ask how to resolve it.
       const pending = useWorktreeStore.getState().pendingAddPlan;
       const conflicted =
-        pending?.projectPath === projectPath && pending.branchConflict?.kind === "exists";
+        pending !== null &&
+        sameWorktreeRef(pending.project, project) &&
+        pending.branchConflict?.kind === "exists";
       // Closed meanwhile: nobody is left to answer the conflict, and its plan would take over
       // the next New worktree dialog.
       if (abandoned.current) {
@@ -110,7 +114,7 @@ export function NewWorktreeDialog({
     const savedTitle =
       titles && trimmedTitle && trimmedTitle !== trimmedName ? trimmedTitle : undefined;
     void run(() =>
-      createWorktree(projectPath, trimmedName, {
+      createWorktree(project, trimmedName, {
         parentPath,
         fromParent: parent !== undefined && fromParent,
         title: savedTitle,

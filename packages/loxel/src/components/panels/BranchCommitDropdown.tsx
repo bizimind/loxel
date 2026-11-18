@@ -33,7 +33,7 @@ type SelectionMode = "default" | "branch" | "external";
 export function BranchCommitDropdown() {
   const { data: branchData } = useBranchCommitsQuery();
   const { data: worktreeStatuses } = useWorktreeStatusesQuery();
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const selectedCommits = useRepositoryStore((s) => s.selectedCommits);
   const selectCommit = useRepositoryStore((s) => s.selectCommit);
   const selectCommitRange = useRepositoryStore((s) => s.selectCommitRange);

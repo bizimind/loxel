@@ -7,7 +7,7 @@ import type { CommitInfo } from "@/api/git-models";
 import { localRef } from "@/api/local-server";
 import { purgeWorktreeStores } from "@/store/worktree-store";
 import { getWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 const commit: CommitInfo = {
   hash: "a".repeat(40),
@@ -41,12 +41,12 @@ afterEach(() => {
 });
 
 describe("CommitGraph", () => {
-  // On reload, `activeWorktreePath` comes back from session storage before anything switches
+  // On reload, `activeWorktree` comes back from session storage before anything switches
   // worktrees. Setting only it is that state: the first-visit graph width must land in the
   // worktree's store once, not loop on a store the component doesn't render from (#345).
   test("sets the graph column width without looping when the active worktree was restored on reload", async () => {
     const consoleError = spyOn(console, "error");
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
 
     render(
       <QueryClientProvider client={new QueryClient()}>

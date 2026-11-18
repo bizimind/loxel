@@ -4,19 +4,28 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import * as api from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
-import type { EnrichedProject } from "@/api/project-model";
+import { localServerId } from "@/api/local-server";
+import { formatWorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import { ToastContainer } from "@/components/ui/toast";
 import {
+  type ListedProject,
+  projectRef,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useProjectStore,
 } from "@/store/projects";
-import { type CreateStarted, useWorktreeStore } from "@/store/worktrees";
+import {
+  activeWorktreeFields,
+  type CreateStarted,
+  useWorktreeStore,
+  worktreeKey,
+} from "@/store/worktrees";
 
 const { Sidebar } = await import("./Sidebar");
 
-const project: EnrichedProject = {
+const project: ListedProject = {
+  server: localServerId(),
   id: "regular",
   path: "/repo",
   name: "regular-repo",
@@ -36,6 +45,11 @@ const project: EnrichedProject = {
   ],
 };
 
+const PROJECT = projectRef(project);
+const PROJECT_KEY = formatWorktreeRef(PROJECT);
+/** A worktree's sidebar entry and list key. */
+const key = (path: string) => worktreeKey(PROJECT, path);
+
 beforeEach(() => {
   useProjectStore.setState({
     projects: [project],
@@ -45,9 +59,9 @@ beforeEach(() => {
     autoExpandedProjectIds: [project.id],
   });
   useWorktreeStore.setState({
-    activeWorktreePath: project.path,
+    ...activeWorktreeFields(PROJECT),
     byProject: {
-      [project.path]: { worktrees: project.worktrees, worktreesDir: project.worktreesDir },
+      [PROJECT_KEY]: { worktrees: project.worktrees, worktreesDir: project.worktreesDir },
     },
   });
 });
@@ -67,7 +81,7 @@ describe("Sidebar remove worktree dialog", () => {
     name: "topic",
     worktreePath: "/repo/.worktrees/topic",
     wtPath: "/repo/.worktrees/topic",
-    projectPath: project.path,
+    project: PROJECT,
     branch: "topic",
     dirty: false,
     isMain: false,
@@ -105,7 +119,7 @@ describe("Sidebar regular-repository worktrees", () => {
   test("does not offer 'Click to load worktrees' for a regular repo with none", () => {
     useProjectStore.setState({ projects: [{ ...project, worktrees: [] }] });
     useWorktreeStore.setState({
-      byProject: { [project.path]: { worktrees: [], worktreesDir: project.worktreesDir } },
+      byProject: { [PROJECT_KEY]: { worktrees: [], worktreesDir: project.worktreesDir } },
     });
     render(<Sidebar />);
 
@@ -136,13 +150,15 @@ describe("Sidebar regular-repository worktrees", () => {
   });
 
   test("switches from a linked worktree back to the regular repository root", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: project.worktrees[0]!.path });
+    useWorktreeStore.setState(
+      activeWorktreeFields(worktreeRef(project.server, project.worktrees[0]!.path)),
+    );
     render(<Sidebar />);
 
     fireEvent.click(screen.getByText("regular-repo"));
 
     await waitFor(() => {
-      expect(useWorktreeStore.getState().activeWorktreePath).toBe(project.path);
+      expect(useWorktreeStore.getState().activeWorktree).toEqual(PROJECT);
     });
   });
 });
@@ -166,7 +182,7 @@ describe("Sidebar worktree context menu", () => {
 
   function setWorktrees(worktrees: WorktreeEntry[]) {
     useWorktreeStore.setState({
-      byProject: { [project.path]: { worktrees, worktreesDir: project.worktreesDir } },
+      byProject: { [PROJECT_KEY]: { worktrees, worktreesDir: project.worktreesDir } },
     });
   }
 
@@ -199,8 +215,8 @@ describe("Sidebar worktree context menu", () => {
   test("archive moves the worktree into the Archive group, and unarchive brings it back", async () => {
     openMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Archive worktree" }));
-    expect(useWorktreeStore.getState().byProject[project.path]?.archivedPaths).toEqual([
-      worktree.path,
+    expect(useWorktreeStore.getState().byProject[PROJECT_KEY]?.archivedRefs).toEqual([
+      key(worktree.path),
     ]);
     // The Archive starts closed, so the worktree is out of sight until it is opened.
     await waitFor(() => expect(screen.queryByText("topic")).toBeNull());
@@ -208,20 +224,20 @@ describe("Sidebar worktree context menu", () => {
 
     fireEvent.contextMenu(await screen.findByText("topic"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Unarchive worktree" }));
-    expect(useWorktreeStore.getState().byProject[project.path]?.archivedPaths).toEqual([]);
+    expect(useWorktreeStore.getState().byProject[PROJECT_KEY]?.archivedRefs).toEqual([]);
   });
 
   test("archiving from the collapsed rail moves the worktree icon into the Archive", async () => {
     useProjectStore.setState({ sidebarExpanded: false });
     const { container } = render(<Sidebar />);
-    const entry = (path: string) => container.querySelector(`[data-sidebar-entry="${path}"]`);
+    const entry = (path: string) => container.querySelector(`[data-sidebar-entry="${key(path)}"]`);
     expect(entry(worktree.path)).not.toBeNull();
 
     fireEvent.contextMenu(entry(worktree.path)!);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Archive worktree" }));
 
     await waitFor(() => expect(entry(worktree.path)).toBeNull());
-    expect(entry(`archive:${project.path}`)).not.toBeNull();
+    expect(container.querySelector(`[data-sidebar-entry="archive:${PROJECT_KEY}"]`)).not.toBeNull();
   });
 });
 
@@ -252,7 +268,7 @@ describe("Sidebar worktree nesting", () => {
   function setNesting(worktreeMetadata: boolean, worktrees = [parent, child]) {
     useWorktreeStore.setState({
       byProject: {
-        [project.path]: { worktrees, worktreesDir: project.worktreesDir, worktreeMetadata },
+        [PROJECT_KEY]: { worktrees, worktreesDir: project.worktreesDir, worktreeMetadata },
       },
     });
   }
@@ -272,8 +288,8 @@ describe("Sidebar worktree nesting", () => {
     fireEvent.click(screen.getByTitle("Collapse nested worktrees"));
 
     expect(screen.queryByText("Child task")).toBeNull();
-    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([
-      parent.path,
+    expect(useWorktreeStore.getState().byProject[PROJECT_KEY]?.collapsedRefs).toEqual([
+      key(parent.path),
     ]);
   });
 
@@ -294,9 +310,9 @@ describe("Sidebar worktree nesting", () => {
         e.getAttribute("data-sidebar-entry"),
       );
 
-    expect(entries()).toEqual([project.path, parent.path, child.path]);
+    expect(entries()).toEqual([PROJECT_KEY, key(parent.path), key(child.path)]);
     fireEvent.click(screen.getByTitle("Collapse nested worktrees"));
-    expect(entries()).toEqual([project.path, parent.path]);
+    expect(entries()).toEqual([PROJECT_KEY, key(parent.path)]);
     expect(screen.getByTitle("Expand nested worktrees").textContent).toBe("1");
   });
 
@@ -317,18 +333,24 @@ describe("Sidebar worktree nesting", () => {
     useProjectStore.setState({ sidebarExpanded: false });
     const { container } = render(<Sidebar />);
 
-    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/three"]')).not.toBeNull();
-    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/four"]')).toBeNull();
+    expect(
+      container.querySelector(`[data-sidebar-entry="${key("/repo/.worktrees/three")}"]`),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(`[data-sidebar-entry="${key("/repo/.worktrees/four")}"]`),
+    ).toBeNull();
 
     act(() => useProjectStore.setState({ sidebarExpanded: true }));
-    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/four"]')).not.toBeNull();
+    expect(
+      container.querySelector(`[data-sidebar-entry="${key("/repo/.worktrees/four")}"]`),
+    ).not.toBeNull();
   });
 
   test("arrow keys fold and unfold a group and step between parent and child", () => {
     setNesting(true);
     const { container } = render(<Sidebar />);
     const entry = (path: string) =>
-      container.querySelector<HTMLElement>(`[data-sidebar-entry="${path}"]`);
+      container.querySelector<HTMLElement>(`[data-sidebar-entry="${key(path)}"]`);
 
     fireEvent.keyDown(entry(parent.path)!, { key: "ArrowRight" });
     expect(document.activeElement).toBe(entry(child.path));
@@ -336,11 +358,11 @@ describe("Sidebar worktree nesting", () => {
     expect(document.activeElement).toBe(entry(parent.path));
 
     fireEvent.keyDown(entry(parent.path)!, { key: "ArrowLeft" });
-    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([
-      parent.path,
+    expect(useWorktreeStore.getState().byProject[PROJECT_KEY]?.collapsedRefs).toEqual([
+      key(parent.path),
     ]);
     fireEvent.keyDown(entry(parent.path)!, { key: "ArrowRight" });
-    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([]);
+    expect(useWorktreeStore.getState().byProject[PROJECT_KEY]?.collapsedRefs).toEqual([]);
   });
 
   test("offers to enable nesting while metadata is off", async () => {
@@ -372,7 +394,7 @@ describe("Sidebar worktree nesting", () => {
     fireEvent.contextMenu(screen.getByText("Child task"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move to top level" }));
 
-    expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
+    expect(setWorktreeParent).toHaveBeenCalledWith(PROJECT, child.path, null);
   });
 
   test("a failed worktree action shows its error in a toast that can be dismissed", async () => {
@@ -413,7 +435,7 @@ describe("Sidebar worktree nesting", () => {
             // What the store does when the branch already exists.
             useWorktreeStore.setState({
               pendingAddPlan: {
-                projectPath: project.path,
+                project: PROJECT,
                 name: "taken",
                 branch: "taken",
                 worktreePath: "/repo/.worktrees/taken",
@@ -486,7 +508,7 @@ describe("Sidebar worktree nesting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
 
     await waitFor(() =>
-      expect(createWorktree).toHaveBeenCalledWith(project.path, "sub-task-part-2", {
+      expect(createWorktree).toHaveBeenCalledWith(PROJECT, "sub-task-part-2", {
         parentPath: parent.path,
         fromParent: false,
         title: "Sub task: part 2",
@@ -521,7 +543,7 @@ describe("Sidebar worktree nesting", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
       await waitFor(() =>
-        expect(createWorktree).toHaveBeenCalledWith(project.path, "stacked", {
+        expect(createWorktree).toHaveBeenCalledWith(PROJECT, "stacked", {
           parentPath: parent.path,
           fromParent: true,
           title: undefined,
@@ -571,7 +593,7 @@ describe("Sidebar worktree nesting", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() =>
-      expect(setWorktreeTitle).toHaveBeenCalledWith(project.path, parent.path, "Parent work"),
+      expect(setWorktreeTitle).toHaveBeenCalledWith(PROJECT, parent.path, "Parent work"),
     );
   });
 });
@@ -687,7 +709,7 @@ describe("Sidebar Home entry", () => {
     expect(home.getAttribute("aria-current")).toBeNull();
 
     fireEvent.click(home);
-    expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
+    expect(useWorktreeStore.getState().activeWorktree).toBeNull();
     expect(screen.getByRole("button", { name: /^Home\b/ }).getAttribute("aria-current")).toBe(
       "page",
     );

@@ -2,6 +2,7 @@ import { LoaderIcon } from "lucide-react";
 import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { abbreviateHomePath } from "@/lib/home-path";
@@ -15,9 +16,9 @@ import {
   searchWorkspaceSymbols,
   symbolKey,
 } from "@/lib/workspace-symbols";
+import { useQueryScope } from "@/queries/use-scope";
 import { useProjectStore } from "@/store/projects";
 import { useSymbolSearchStore } from "@/store/symbol-search";
-import { useWorktreeStore } from "@/store/worktrees";
 
 import { SymbolKindIcon } from "./SymbolKindIcon";
 
@@ -27,14 +28,14 @@ const RESOLVE_TIMEOUT_MS = 2000;
 
 interface SearchState {
   /** The worktree and trimmed query `results` answer. */
-  wtPath: string | null;
+  wt: WorktreeRef | null;
   query: string;
   results: WorkspaceSymbolResult[];
   /** Every server has answered or given up. */
   done: boolean;
 }
 
-const NO_SEARCH: SearchState = { wtPath: null, query: "", results: [], done: true };
+const NO_SEARCH: SearchState = { wt: null, query: "", results: [], done: true };
 const NO_RESULTS: WorkspaceSymbolResult[] = [];
 
 /**
@@ -42,7 +43,7 @@ const NO_RESULTS: WorkspaceSymbolResult[] = [];
  * changes, debounced, showing each server's answer as it arrives. A newer query cancels the
  * requests in flight (`$/cancelRequest`).
  */
-function useWorkspaceSymbolSearch(isOpen: boolean, wtPath: string | null, query: string) {
+function useWorkspaceSymbolSearch(isOpen: boolean, wt: WorktreeRef | null, query: string) {
   const [state, setState] = useState<SearchState>(NO_SEARCH);
   const trimmed = query.trim();
 
@@ -52,12 +53,12 @@ function useWorkspaceSymbolSearch(isOpen: boolean, wtPath: string | null, query:
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !wtPath || !trimmed) return;
+    if (!isOpen || !wt || !trimmed) return;
     const tokens = new monaco.CancellationTokenSource();
     const timer = setTimeout(() => {
-      const sources = getConnectedLspClients(wtPath);
-      void searchWorkspaceSymbols(sources, trimmed, wtPath, tokens.token, (results, done) =>
-        setState({ wtPath, query: trimmed, results, done }),
+      const sources = getConnectedLspClients(wt);
+      void searchWorkspaceSymbols(sources, trimmed, wt, tokens.token, (results, done) =>
+        setState({ wt, query: trimmed, results, done }),
       );
     }, DEBOUNCE_MS);
     return () => {
@@ -65,11 +66,11 @@ function useWorkspaceSymbolSearch(isOpen: boolean, wtPath: string | null, query:
       tokens.cancel();
       tokens.dispose();
     };
-  }, [isOpen, wtPath, trimmed]);
+  }, [isOpen, wt, trimmed]);
 
-  if (!trimmed || !wtPath) return { results: NO_RESULTS, searching: false };
+  if (!trimmed || !wt) return { results: NO_RESULTS, searching: false };
   // Keep showing the previous query's answer, in this worktree, while the next one arrives.
-  const current = state.wtPath === wtPath;
+  const current = state.wt !== null && sameWorktreeRef(state.wt, wt);
   return {
     results: current ? state.results : NO_RESULTS,
     searching: !current || state.query !== trimmed || !state.done,
@@ -88,10 +89,11 @@ export function SymbolSearchModal() {
   const query = useSymbolSearchStore((s) => s.query);
   const close = useSymbolSearchStore((s) => s.close);
   const setQuery = useSymbolSearchStore((s) => s.setQuery);
-  const wtPath = useWorktreeStore((s) => s.activeWorktreePath);
+  const { activeWorktree } = useQueryScope();
+  const wtPath = activeWorktree?.path ?? null;
   const homeDir = useProjectStore((s) => s.homeDir);
 
-  const { results, searching } = useWorkspaceSymbolSearch(isOpen, wtPath, query);
+  const { results, searching } = useWorkspaceSymbolSearch(isOpen, activeWorktree, query);
   const visible = useMemo(() => results.slice(0, MAX_VISIBLE), [results]);
 
   const openSymbol = useCallback(

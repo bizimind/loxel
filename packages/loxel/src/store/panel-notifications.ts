@@ -14,47 +14,69 @@ import { create } from "zustand";
 
 import { wsClient } from "@/api/client";
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
+import {
+  type ServerId,
+  type WorktreeRef,
+  type WorktreeRefKey,
+  formatWorktreeRef,
+  worktreeRef,
+} from "@/api/worktree-ref";
+
+/**
+ * A notification and the server that sent it. The worktree paths in its source are on that server;
+ * the server's own form of it ({@link ServerNotification}) names none.
+ */
+export interface ClientNotification extends ServerNotification {
+  readonly server: ServerId;
+}
 
 function extractPanelId(n: ServerNotification): string | undefined {
   return isPanelSource(n.source) ? n.source.panelId : undefined;
 }
 
-function extractWorktreePath(n: ServerNotification): string | undefined {
-  // A Home panel's (null) marks no worktree.
-  return isPanelSource(n.source) ? (n.source.worktreePath ?? undefined) : undefined;
+/**
+ * The worktree a notification's source names: null for Home, undefined when it names none (an
+ * inbox notification that opened in whatever the window showed, or the server's own).
+ */
+export function notificationWorktree(n: ClientNotification): WorktreeRef | null | undefined {
+  const { source } = n;
+  if (source.kind !== "inbox" && !isPanelSource(source)) return undefined;
+  const path = source.worktreePath;
+  return typeof path === "string" ? worktreeRef(n.server, path) : path;
 }
 
-function buildIndexes(notifications: readonly ServerNotification[]): {
+function buildIndexes(notifications: readonly ClientNotification[]): {
   panelIndex: Set<string>;
-  worktreeIndex: Set<string>;
+  worktreeIndex: Set<WorktreeRefKey>;
 } {
   const panelIndex = new Set<string>();
-  const worktreeIndex = new Set<string>();
+  const worktreeIndex = new Set<WorktreeRefKey>();
   for (const n of notifications) {
     const pid = extractPanelId(n);
     if (pid) panelIndex.add(pid);
-    const wtp = extractWorktreePath(n);
-    if (wtp) worktreeIndex.add(wtp);
+    // Only panels' notifications mark their worktree; a Home panel's (null) marks none.
+    const wt = isPanelSource(n.source) ? notificationWorktree(n) : undefined;
+    if (wt) worktreeIndex.add(formatWorktreeRef(wt));
   }
   return { panelIndex, worktreeIndex };
 }
 
 interface PanelNotificationState {
   /** Ordered notification list (newest first). */
-  notifications: ServerNotification[];
+  notifications: ClientNotification[];
 
   /** Derived: panelIds with at least one notification. Rebuilt on every mutation. */
   panelIndex: Set<string>;
-  /** Derived: worktreePaths with at least one notification. Rebuilt on every mutation. */
-  worktreeIndex: Set<string>;
+  /** Derived: worktrees with at least one panel notification. Rebuilt on every mutation. */
+  worktreeIndex: Set<WorktreeRefKey>;
 
   /** Dismiss a closed panel's notifications on the server. */
   unregisterPanel: (panelId: string) => void;
 
-  /** Server-sync: replace all notifications (sent on connect/reconnect). */
-  syncAll: (notifications: readonly ServerNotification[]) => void;
-  /** Server-sync: add a notification broadcast by the server. */
-  addFromServer: (notification: ServerNotification) => void;
+  /** Server-sync: replace all notifications (`server` sends them on connect/reconnect). */
+  syncAll: (server: ServerId, notifications: readonly ServerNotification[]) => void;
+  /** Server-sync: add a notification `server` broadcast. */
+  addFromServer: (server: ServerId, notification: ServerNotification) => void;
   /** Server-sync: remove a notification by id. */
   removeFromServer: (id: string) => void;
   /** Server-sync: remove all notifications for a panel. */
@@ -76,8 +98,8 @@ export function hasPanelNotification(s: PanelNotificationState, panelId: string)
 }
 
 /** Selector: returns true if any panel in the given worktree has an unread notification. */
-export function hasWorktreeNotification(s: PanelNotificationState, worktreePath: string): boolean {
-  return s.worktreeIndex.has(worktreePath);
+export function hasWorktreeNotification(s: PanelNotificationState, wt: WorktreeRef): boolean {
+  return s.worktreeIndex.has(formatWorktreeRef(wt));
 }
 
 export const usePanelNotificationStore = create<PanelNotificationState>()((set) => ({
@@ -91,15 +113,15 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set) 
 
   // --- Server sync ---
 
-  syncAll: (incoming) => {
-    const notifications = [...incoming];
+  syncAll: (server, incoming) => {
+    const notifications = incoming.map((n) => ({ ...n, server }));
     const { panelIndex, worktreeIndex } = buildIndexes(notifications);
     set({ notifications, panelIndex, worktreeIndex });
   },
 
-  addFromServer: (notification) =>
+  addFromServer: (server, notification) =>
     set((s) => {
-      const notifications = [notification, ...s.notifications];
+      const notifications = [{ ...notification, server }, ...s.notifications];
       const { panelIndex, worktreeIndex } = buildIndexes(notifications);
       return { notifications, panelIndex, worktreeIndex };
     }),

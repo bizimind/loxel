@@ -4,14 +4,16 @@ import * as monaco from "monaco-editor";
 import { ITextModelService } from "monaco-editor/editor/common/services/resolverService.js";
 import { StandaloneServices } from "monaco-editor/editor/standalone/browser/standaloneServices.js";
 
-import { isLiveEditorModel, isPreviewModel } from "./live-editor-model";
+import { localServerId } from "@/api/local-server";
+
+import { type EditorFile, isLiveEditorModel, isPreviewModel } from "./live-editor-model";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 
 const files = new Map<string, string>([
   ["/repo/a.py", "def a(): ...\n"],
   ["/usr/lib/python3.12/os.py", "import abc\n"],
 ]);
-const readFile = mock(async (path: string) => {
+const readFile = mock(async ({ path }: EditorFile) => {
   const content = files.get(path);
   if (content === undefined) throw new Error(`ENOENT ${path}`);
   return content;
@@ -56,16 +58,25 @@ describe("installPeekModelResolver", () => {
     await expect(resolve("other-scheme://a/b.java")).rejects.toThrow();
   });
 
+  test("reads a file of the server its URI names, and leaves a URI with none to the service", async () => {
+    const ref = await resolve("file://test-server/repo/a.py");
+    expect(readFile.mock.calls).toEqual([[{ server: localServerId(), path: "/repo/a.py" }]]);
+    ref.dispose();
+
+    await expect(resolve("file:///repo/a.py")).rejects.toThrow();
+    expect(readFile).toHaveBeenCalledTimes(1);
+  });
+
   test("gives a file no tab has open a read-only snapshot that is never registered", async () => {
     const created = mock();
     disposables.push(monaco.editor.onDidCreateModel(created));
 
-    const ref = await resolve("file:///usr/lib/python3.12/os.py");
+    const ref = await resolve("file://test-server/usr/lib/python3.12/os.py");
     const model = ref.object.textEditorModel;
 
     expect(model.getValue()).toBe("import abc\n");
     expect(model.getLanguageId()).toBe("python");
-    expect(model.uri.toString()).toBe("file:///usr/lib/python3.12/os.py");
+    expect(model.uri.toString()).toBe("file://test-server/usr/lib/python3.12/os.py");
     expect(isPreviewModel(model)).toBe(true);
     expect(isLiveEditorModel(model)).toBe(false);
     expect(monaco.editor.getModel(model.uri)).toBeNull();
@@ -75,9 +86,9 @@ describe("installPeekModelResolver", () => {
 
   test("reads each reference its own snapshot, disposed with it", async () => {
     files.set("/repo/c.py", "def c(): ...\n");
-    const first = await resolve("loxel://HEAD/repo/c.py");
+    const first = await resolve("loxel://test-server/repo/c.py");
     files.set("/repo/c.py", "def c(): return 1\n");
-    const second = await resolve("loxel://HEAD/repo/c.py");
+    const second = await resolve("loxel://test-server/repo/c.py");
     const model = first.object.textEditorModel;
 
     // A reference some consumer never disposes can't pin an old read for later peeks.
@@ -94,11 +105,11 @@ describe("installPeekModelResolver", () => {
     const tab = monaco.editor.createModel(
       "edited",
       "python",
-      monaco.Uri.parse("file:///repo/a.py"),
+      monaco.Uri.parse("file://test-server/repo/a.py"),
     );
     disposables.push(tab);
 
-    const ref = await resolve("file:///repo/a.py");
+    const ref = await resolve("file://test-server/repo/a.py");
 
     expect(ref.object.textEditorModel).toBe(tab);
     expect(readFile).not.toHaveBeenCalled();
@@ -121,12 +132,12 @@ describe("installPeekModelResolver", () => {
   });
 
   test("rejects with the read error and reads again on the next request", async () => {
-    const error = await resolve("file:///repo/gone.py").catch((e: unknown) => e);
+    const error = await resolve("file://test-server/repo/gone.py").catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(Error);
     expect(error).toMatchObject({ cause: new Error("ENOENT /repo/gone.py") });
     files.set("/repo/gone.py", "back\n");
-    const ref = await resolve("file:///repo/gone.py");
+    const ref = await resolve("file://test-server/repo/gone.py");
     expect(ref.object.textEditorModel.getValue()).toBe("back\n");
     expect(readFile).toHaveBeenCalledTimes(2);
     ref.dispose();
@@ -139,7 +150,7 @@ describe("keepPreviewModelsReadOnly", () => {
     const tab = monaco.editor.createModel("x", "python");
     disposables.push(editor, tab);
     keepPreviewModelsReadOnly(editor);
-    const ref = await resolve("file:///repo/a.py");
+    const ref = await resolve("file://test-server/repo/a.py");
     const readOnly = () => editor.getOption(monaco.editor.EditorOption.readOnly);
 
     editor.setModel(ref.object.textEditorModel);
@@ -156,7 +167,7 @@ describe("Find References", () => {
   HTMLCanvasElement.prototype.getContext = (() => canvas) as never;
 
   test("peeks into a file no tab has open, and closing the peek disposes the snapshot", async () => {
-    const other = monaco.Uri.parse("file:///repo/a.py");
+    const other = monaco.Uri.parse("file://test-server/repo/a.py");
     const preview = Promise.withResolvers<monaco.editor.ICodeEditor>();
     disposables.push(
       monaco.languages.registerReferenceProvider("python", {
@@ -173,7 +184,11 @@ describe("Find References", () => {
         });
       }),
     );
-    const source = monaco.editor.createModel("a()\n", "python", monaco.Uri.parse("file:///b.py"));
+    const source = monaco.editor.createModel(
+      "a()\n",
+      "python",
+      monaco.Uri.parse("file://test-server/b.py"),
+    );
     const editor = monaco.editor.create(document.createElement("div"), {
       model: source,
       minimap: { enabled: false },

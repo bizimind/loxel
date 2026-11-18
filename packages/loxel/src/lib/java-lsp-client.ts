@@ -1,7 +1,7 @@
 import { wsClient } from "@/api/client";
 import { javaToolchain } from "@/api/java-env-model";
+import { getQueryScope } from "@/queries/use-scope";
 import { useLspStatusStore } from "@/store/lsp-status";
-import { useWorktreeStore } from "@/store/worktrees";
 
 import { createLspClient } from "./lsp-client";
 import { createToolchainServerRecovery } from "./toolchain-server-recovery";
@@ -20,7 +20,7 @@ wsClient.subscribe(
     changedMessage: javaToolchain.changedMessage,
     client: javaLspClient,
     stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/java-lsp"),
-    activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,
+    activeWorktree: () => getQueryScope().activeWorktree,
   }),
 );
 

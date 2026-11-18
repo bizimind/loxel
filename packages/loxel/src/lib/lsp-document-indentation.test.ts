@@ -77,27 +77,27 @@ const notification = (uri: string, tabSize: number, indentSize: number, insertSp
 
 describe("reportDocumentIndentation", () => {
   test("reports open and created live models of its languages, and their changes", () => {
-    const open = new FakeModel("loxel://head/repo/a.ts", "typescript");
+    const open = new FakeModel("loxel://test-server/repo/a.ts", "typescript");
     const { sent, create } = setup([
       open,
-      new FakeModel("file:///repo/a.py", "python"),
+      new FakeModel("file://test-server/repo/a.py", "python"),
       new FakeModel("loxel://abc123/repo/a.ts#old", "typescript"),
     ]);
-    expect(sent).toEqual([notification("loxel://head/repo/a.ts", 4, 4, true)]);
+    expect(sent).toEqual([notification("loxel://test-server/repo/a.ts", 4, 4, true)]);
 
     open.options = { tabSize: 8, indentSize: 2, insertSpaces: false };
     for (const l of open.listeners.options) l();
-    create(new FakeModel("loxel://head/repo/b.ts", "typescript"));
+    create(new FakeModel("loxel://test-server/repo/b.ts", "typescript"));
 
     expect(sent.slice(1)).toEqual([
-      notification("loxel://head/repo/a.ts", 8, 2, false),
-      notification("loxel://head/repo/b.ts", 4, 4, true),
+      notification("loxel://test-server/repo/a.ts", 8, 2, false),
+      notification("loxel://test-server/repo/b.ts", 4, 4, true),
     ]);
   });
 
   test("stops listening to disposed models and when disposed", () => {
-    const first = new FakeModel("loxel://head/repo/a.ts", "typescript");
-    const second = new FakeModel("loxel://head/repo/b.ts", "typescript");
+    const first = new FakeModel("loxel://test-server/repo/a.ts", "typescript");
+    const second = new FakeModel("loxel://test-server/repo/b.ts", "typescript");
     const { reporter, createdListeners } = setup([first, second]);
     first.dispose();
     expect(first.listeners.options.size).toBe(0);

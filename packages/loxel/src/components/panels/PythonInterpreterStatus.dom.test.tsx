@@ -3,6 +3,7 @@ import { afterEach, describe, expect, jest, mock, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { localRef } from "@/api/local-server";
 import type { PythonEnvResponse } from "@/api/python-env-model";
 
 const ENV: PythonEnvResponse = {
@@ -39,7 +40,7 @@ mock.module("@/store/tools-bar", () => ({
   subscribeCenterApi: () => () => {},
 }));
 
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { PythonInterpreterStatus } = await import("./PythonInterpreterStatus");
 
 afterEach(() => {
@@ -50,7 +51,7 @@ afterEach(() => {
 
 describe("PythonInterpreterStatus", () => {
   test("shows and selects the interpreter of the active panel's worktree, not the active one", async () => {
-    useWorktreeStore.setState({ activeWorktreePath: "/wt-b" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/wt-b")));
     render(
       <QueryClientProvider client={new QueryClient()}>
         <PythonInterpreterStatus />

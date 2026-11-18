@@ -3,12 +3,15 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import type { AddWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import { localRef, localServerId } from "@/api/local-server";
-import { toServerId, worktreeRef } from "@/api/worktree-ref";
+import { formatWorktreeRef, toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
+import { STORAGE_PREFIX } from "@/lib/env";
 
 const PROJECT = "/repo";
 const WT_PATH = "/repo/.worktrees/feat-x";
 const NEW_PATH = "/repo/.worktrees/new-wt";
+const P = localRef(PROJECT);
+const PK = formatWorktreeRef(P);
 
 let plan: WorktreeRemovePlan;
 let removeCalls: {
@@ -80,6 +83,7 @@ const { useFileSearchStore } = await import("./file-search");
 const { registerLayoutCache } = await import("./worktree-cache");
 const { getWorktreeUI } = await import("./worktree-ui");
 const {
+  activeWorktreeFields,
   deriveOwningWorktree,
   isListedWorktree,
   getNumberedWorktrees,
@@ -89,8 +93,12 @@ const {
   persistedProjectStates,
   toggleArchivedPaths,
   useWorktreeStore,
+  worktreeKey,
 } = await import("./worktrees");
 const { useProjectStore } = await import("./projects");
+
+/** The key of a worktree listed under the project. */
+const key = (path: string) => worktreeKey(P, path);
 
 const worktree: WorktreeEntry = {
   path: WT_PATH,
@@ -126,9 +134,65 @@ beforeEach(() => {
     cleanHookHeld: false,
   };
   useWorktreeStore.setState({
-    byProject: { [PROJECT]: { worktrees: [worktree] } },
+    byProject: { [PK]: { worktrees: [worktree] } },
     pendingRemovePlan: null,
     pendingAddPlan: null,
+  });
+});
+
+describe("the active worktree", () => {
+  afterEach(() => useWorktreeStore.getState().reset());
+
+  test("switches by ref, keeping the session copy in step", async () => {
+    const elsewhere = worktreeRef(toServerId("elsewhere"), WT_PATH);
+
+    await useWorktreeStore.getState().switchWorktree(elsewhere);
+
+    const state = useWorktreeStore.getState();
+    expect(state.activeWorktree).toEqual(elsewhere);
+    expect(sessionStorage.getItem(`${STORAGE_PREFIX}-activeWorktree`)).toBe(
+      formatWorktreeRef(elsewhere),
+    );
+
+    useWorktreeStore.getState().showHome();
+    expect(useWorktreeStore.getState().activeWorktree).toBeNull();
+    expect(sessionStorage.getItem(`${STORAGE_PREFIX}-activeWorktree`)).toBeNull();
+  });
+
+  test("a switch to the worktree already shown changes nothing subscribers see", async () => {
+    await useWorktreeStore.getState().switchWorktree(localRef(WT_PATH));
+    const shown = useWorktreeStore.getState().activeWorktree;
+    const seen: unknown[] = [];
+    const unsubscribe = useWorktreeStore.subscribe(
+      (s) => s.activeWorktree,
+      (wt) => seen.push(wt),
+    );
+
+    await useWorktreeStore.getState().switchWorktree(localRef(WT_PATH));
+    await useWorktreeStore.getState().switchWorktree(worktreeRef(toServerId("elsewhere"), WT_PATH));
+    unsubscribe();
+
+    expect(useWorktreeStore.getState().activeWorktree).not.toBe(shown);
+    expect(seen).toEqual([worktreeRef(toServerId("elsewhere"), WT_PATH)]);
+  });
+
+  test("falls back when the listed projects no longer hold the active worktree's server", () => {
+    const project = {
+      id: "p1",
+      server: localServerId(),
+      path: PROJECT,
+      name: "repo",
+      addedAt: "",
+      isBare: false,
+      worktreesDir: "/repo/.worktrees",
+      worktreeMetadata: false,
+      worktrees: [worktree],
+    };
+    useWorktreeStore.setState(activeWorktreeFields(worktreeRef(toServerId("gone"), WT_PATH)));
+
+    useWorktreeStore.getState().applyEnrichedProjects([project]);
+
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(P);
   });
 });
 
@@ -145,6 +209,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -155,12 +220,12 @@ describe("refreshProjectWorktrees", () => {
         },
       ],
     });
-    useWorktreeStore.setState({ activeWorktreePath: WT_PATH });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(WT_PATH)));
     listResult = { worktrees: [other] };
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(other.path));
   });
 
   test("falls back to the root checkout for a regular project", async () => {
@@ -168,6 +233,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -178,11 +244,11 @@ describe("refreshProjectWorktrees", () => {
         },
       ],
     });
-    useWorktreeStore.setState({ activeWorktreePath: WT_PATH });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(WT_PATH)));
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(PROJECT);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(PROJECT));
   });
 
   test("keeps the regular project's root checkout active", async () => {
@@ -190,6 +256,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -200,11 +267,11 @@ describe("refreshProjectWorktrees", () => {
         },
       ],
     });
-    useWorktreeStore.setState({ activeWorktreePath: PROJECT });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(PROJECT)));
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(PROJECT);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(PROJECT));
   });
 
   test("does not disturb a similarly prefixed different project", async () => {
@@ -213,6 +280,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -223,6 +291,7 @@ describe("refreshProjectWorktrees", () => {
         },
         {
           id: "p2",
+          server: localServerId(),
           path: "/repo-other",
           name: "other repo",
           addedAt: "",
@@ -233,11 +302,11 @@ describe("refreshProjectWorktrees", () => {
         },
       ],
     });
-    useWorktreeStore.setState({ activeWorktreePath: active });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(active)));
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(active);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(active));
   });
 
   test("recognizes stale external WT_DIR membership from the worktree store", async () => {
@@ -246,6 +315,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -258,13 +328,13 @@ describe("refreshProjectWorktrees", () => {
       ],
     });
     useWorktreeStore.setState({
-      activeWorktreePath: external,
-      byProject: { [PROJECT]: { worktrees: [{ ...worktree, path: external }] } },
+      ...activeWorktreeFields(localRef(external)),
+      byProject: { [PK]: { worktrees: [{ ...worktree, path: external }] } },
     });
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
+    expect(useWorktreeStore.getState().activeWorktree).toBeNull();
   });
 
   test("ignores an older refresh response that resolves after a newer one", async () => {
@@ -282,6 +352,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -292,17 +363,17 @@ describe("refreshProjectWorktrees", () => {
         },
       ],
     });
-    useWorktreeStore.setState({ activeWorktreePath: other.path });
+    useWorktreeStore.setState(activeWorktreeFields(localRef(other.path)));
 
-    const older = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
-    const newer = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    const older = useWorktreeStore.getState().refreshProjectWorktrees(P);
+    const newer = useWorktreeStore.getState().refreshProjectWorktrees(P);
     resolveNewer({ worktrees: [other] });
     await newer;
     resolveOlder({ worktrees: [] });
     await older;
 
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([other]);
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([other]);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(other.path));
   });
 
   test("does not reuse request IDs after the store resets", async () => {
@@ -320,6 +391,7 @@ describe("refreshProjectWorktrees", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -331,17 +403,17 @@ describe("refreshProjectWorktrees", () => {
       ],
     });
 
-    const beforeReset = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    const beforeReset = useWorktreeStore.getState().refreshProjectWorktrees(P);
     useWorktreeStore.getState().reset();
-    useWorktreeStore.setState({ activeWorktreePath: other.path });
-    const afterReset = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    useWorktreeStore.setState(activeWorktreeFields(localRef(other.path)));
+    const afterReset = useWorktreeStore.getState().refreshProjectWorktrees(P);
     resolveAfterReset({ worktrees: [other] });
     await afterReset;
     resolveBeforeReset({ worktrees: [] });
     await beforeReset;
 
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([other]);
-    expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([other]);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(other.path));
   });
 });
 
@@ -355,13 +427,21 @@ describe("a worktree removed outside the app", () => {
   beforeEach(() => {
     useProjectStore.setState({
       projects: [
-        { id: "p", path: PROJECT, name: "repo", addedAt: "", isBare: true, worktrees: [] },
+        {
+          id: "p",
+          server: localServerId(),
+          path: PROJECT,
+          name: "repo",
+          addedAt: "",
+          isBare: true,
+          worktrees: [],
+        },
       ] as never,
     });
     useWorktreeStore.setState({
-      activeWorktreePath: OTHER_WT,
+      ...activeWorktreeFields(localRef(OTHER_WT)),
       byProject: {
-        [PROJECT]: { worktrees: [worktree, { ...worktree, path: OTHER_WT, wtName: "other" }] },
+        [PK]: { worktrees: [worktree, { ...worktree, path: OTHER_WT, wtName: "other" }] },
       },
     });
     listResult = { worktrees: [{ ...worktree, path: OTHER_WT, wtName: "other" }] };
@@ -398,9 +478,9 @@ describe("a worktree removed outside the app", () => {
     );
 
     try {
-      await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+      await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-      expect(useWorktreeStore.getState().activeWorktreePath).toBe(OTHER_WT);
+      expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(OTHER_WT));
       expect(getWorktreeUI(localRef(WT_PATH))).not.toBe(worktreeUi);
       expect(layoutCache.has(WT_PATH)).toBe(false);
       expect(layoutCache.has(OTHER_WT)).toBe(true);
@@ -431,7 +511,7 @@ describe("a worktree removed outside the app", () => {
   test("leaves an entry still being created alone", async () => {
     useWorktreeStore.setState({
       byProject: {
-        [PROJECT]: {
+        [PK]: {
           worktrees: [
             { ...worktree, path: OTHER_WT, wtName: "other" },
             { ...worktree, pending: "creating" },
@@ -441,7 +521,7 @@ describe("a worktree removed outside the app", () => {
     });
     const worktreeUi = getWorktreeUI(localRef(WT_PATH));
 
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
     expect(getWorktreeUI(localRef(WT_PATH))).toBe(worktreeUi);
   });
@@ -450,6 +530,7 @@ describe("a worktree removed outside the app", () => {
 describe("applyEnrichedProjects", () => {
   const project = {
     id: "p1",
+    server: localServerId(),
     path: PROJECT,
     name: "repo",
     addedAt: "",
@@ -461,44 +542,48 @@ describe("applyEnrichedProjects", () => {
   test("keeps persisted order and archived lists when the server returns no worktrees", () => {
     useWorktreeStore.setState({
       byProject: {
-        [PROJECT]: { worktrees: [worktree], customOrder: [WT_PATH], archivedPaths: [WT_PATH] },
+        [PK]: { worktrees: [worktree], customOrder: [key(WT_PATH)], archivedRefs: [key(WT_PATH)] },
       },
     });
 
     useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [] }]);
 
-    const state = useWorktreeStore.getState().byProject[PROJECT];
+    const state = useWorktreeStore.getState().byProject[PK];
     expect(state?.worktrees).toEqual([worktree]);
-    expect(state?.customOrder).toEqual([WT_PATH]);
-    expect(state?.archivedPaths).toEqual([WT_PATH]);
+    expect(state?.customOrder).toEqual([key(WT_PATH)]);
+    expect(state?.archivedRefs).toEqual([key(WT_PATH)]);
   });
 
   test("prunes persisted lists against a non-empty server response", () => {
     const gone = "/repo/.worktrees/gone";
     useWorktreeStore.setState({
       byProject: {
-        [PROJECT]: { worktrees: [worktree], customOrder: [gone, WT_PATH], archivedPaths: [gone] },
+        [PK]: {
+          worktrees: [worktree],
+          customOrder: [key(gone), key(WT_PATH)],
+          archivedRefs: [key(gone)],
+        },
       },
     });
 
     useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
 
-    const state = useWorktreeStore.getState().byProject[PROJECT];
-    expect(state?.customOrder).toEqual([WT_PATH]);
-    expect(state?.archivedPaths).toEqual([]);
+    const state = useWorktreeStore.getState().byProject[PK];
+    expect(state?.customOrder).toEqual([key(WT_PATH)]);
+    expect(state?.archivedRefs).toEqual([]);
   });
 });
 
 describe("requestRemoveWorktree", () => {
   test("always stages a pending plan for confirmation", async () => {
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
 
     expect(planRemoveCalls).toEqual([WT_PATH]);
     expect(removeCalls).toEqual([]);
     expect(useWorktreeStore.getState().pendingRemovePlan).toEqual({
       ...plan,
       wtPath: WT_PATH,
-      projectPath: PROJECT,
+      project: P,
     });
   });
 });
@@ -510,6 +595,7 @@ describe("confirmRemoveWorktree", () => {
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -527,52 +613,50 @@ describe("confirmRemoveWorktree", () => {
     removeGate = new Promise((resolve) => {
       finishRemoval = resolve;
     });
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
 
     const removal = useWorktreeStore
       .getState()
       .confirmRemoveWorktree({ deleteBranch: false, force: false });
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([
       { ...worktree, pending: "removing" },
     ]);
 
     // A list refresh while the request is in flight keeps the marker.
     listResult = { worktrees: [worktree] };
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees?.[0]?.pending).toBe(
-      "removing",
-    );
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees?.[0]?.pending).toBe("removing");
 
     listResult = { worktrees: [] };
     finishRemoval();
     await removal;
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([]);
   });
 
   test("forwards the user's force and deleteBranch choices", async () => {
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
     await useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: true, force: true });
 
     expect(removeCalls).toEqual([
       { wtPath: WT_PATH, options: { deleteBranch: true, force: true, nested: "move-up" } },
     ]);
     expect(useWorktreeStore.getState().pendingRemovePlan).toBeNull();
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([]);
   });
 
   test("restores the entry when the removal fails", async () => {
     removeGate = Promise.reject(new Error("locked"));
     listResult = { worktrees: [worktree] };
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
 
     await expect(
       useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: false, force: false }),
     ).rejects.toThrow("locked");
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([worktree]);
   });
 
   test("forwards a keep-branch, no-force removal unchanged", async () => {
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
     await useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: false, force: false });
 
     expect(removeCalls[0]!.options).toEqual({
@@ -584,20 +668,21 @@ describe("confirmRemoveWorktree", () => {
 
   test("marks the nested worktrees removing too when they are removed with it", async () => {
     const child: WorktreeEntry = { ...worktree, path: `${WT_PATH}-child`, wtName: "feat-x-child" };
-    useWorktreeStore.setState({ byProject: { [PROJECT]: { worktrees: [worktree, child] } } });
+    useWorktreeStore.setState({ byProject: { [PK]: { worktrees: [worktree, child] } } });
     plan = { ...plan, nested: [{ path: child.path, dirty: false }] };
     let release: () => void = () => {};
     removeGate = new Promise((resolve) => {
       release = resolve;
     });
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
 
     const done = useWorktreeStore
       .getState()
       .confirmRemoveWorktree({ deleteBranch: false, force: false, nested: "remove" });
-    expect(
-      useWorktreeStore.getState().byProject[PROJECT]?.worktrees.map((wt) => wt.pending),
-    ).toEqual(["removing", "removing"]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees.map((wt) => wt.pending)).toEqual([
+      "removing",
+      "removing",
+    ]);
     release();
     await done;
     expect(removeCalls[0]!.options.nested).toBe("remove");
@@ -610,13 +695,13 @@ describe("confirmRemoveWorktree", () => {
 
   test("surfaces partial success when the branch could not be deleted", async () => {
     branchDeleteSucceeds = false;
-    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+    await useWorktreeStore.getState().requestRemoveWorktree(P, worktree);
 
     await expect(
       useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: true, force: true }),
     ).rejects.toThrow("worktree was removed");
 
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([]);
   });
 });
 
@@ -628,14 +713,14 @@ describe("createWorktree", () => {
     wtName: "new-wt",
   };
   const pendingOf = (path: string) =>
-    useWorktreeStore.getState().byProject[PROJECT]?.worktrees.find((wt) => wt.path === path)
-      ?.pending;
+    useWorktreeStore.getState().byProject[PK]?.worktrees.find((wt) => wt.path === path)?.pending;
 
   beforeEach(() => {
     useProjectStore.setState({
       projects: [
         {
           id: "p1",
+          server: localServerId(),
           path: PROJECT,
           name: "repo",
           addedAt: "",
@@ -654,21 +739,21 @@ describe("createWorktree", () => {
       finishCreate = resolve;
     });
 
-    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    const started = await useWorktreeStore.getState().createWorktree(P, "new-wt");
     expect(started).not.toBeNull();
     expect(pendingOf(NEW_PATH)).toBe("creating");
 
     // Before git has registered it, then after (while the init hook still runs).
     listResult = { worktrees: [worktree] };
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
     expect(pendingOf(NEW_PATH)).toBe("creating");
     listResult = { worktrees: [worktree, created] };
-    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    await useWorktreeStore.getState().refreshProjectWorktrees(P);
     expect(pendingOf(NEW_PATH)).toBe("creating");
 
     finishCreate();
     expect(await started?.created).toBe(true);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree, created]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([worktree, created]);
     expect(toasts).toEqual([]);
     expect(initHookOffers).toEqual([]);
   });
@@ -677,7 +762,7 @@ describe("createWorktree", () => {
     createHookSkipped = true;
     listResult = { worktrees: [worktree, created] };
 
-    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    const started = await useWorktreeStore.getState().createWorktree(P, "new-wt");
 
     expect(await started?.created).toBe(true);
     expect(initHookOffers).toEqual([NEW_PATH]);
@@ -685,9 +770,9 @@ describe("createWorktree", () => {
 
   test("a second create of a worktree still being created does not start", async () => {
     createGate = new Promise(() => {});
-    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    await useWorktreeStore.getState().createWorktree(P, "new-wt");
 
-    await expect(useWorktreeStore.getState().createWorktree(PROJECT, "new-wt")).rejects.toThrow(
+    await expect(useWorktreeStore.getState().createWorktree(P, "new-wt")).rejects.toThrow(
       "already being created",
     );
     expect(createCalls).toEqual(["new-wt"]);
@@ -695,7 +780,7 @@ describe("createWorktree", () => {
 
   test("reloading the projects mid-create keeps the entry pending", async () => {
     createGate = new Promise(() => {});
-    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    await useWorktreeStore.getState().createWorktree(P, "new-wt");
     const project = useProjectStore.getState().projects[0]!;
 
     useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
@@ -710,10 +795,10 @@ describe("createWorktree", () => {
     createGate = Promise.reject(new Error("Branch 'new-wt' is already checked out"));
     listResult = { worktrees: [worktree] };
 
-    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    const started = await useWorktreeStore.getState().createWorktree(P, "new-wt");
 
     expect(await started?.created).toBe(false);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree]);
+    expect(useWorktreeStore.getState().byProject[PK]?.worktrees).toEqual([worktree]);
     expect(toasts).toEqual([
       "Could not create worktree 'new-wt': Branch 'new-wt' is already checked out",
     ]);
@@ -722,7 +807,7 @@ describe("createWorktree", () => {
   test("a branch that exists parks the plan for the dialog and starts nothing", async () => {
     addPlan = { ...addPlan, branchConflict: { kind: "exists" } };
 
-    expect(await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt")).toBeNull();
+    expect(await useWorktreeStore.getState().createWorktree(P, "new-wt")).toBeNull();
 
     expect(useWorktreeStore.getState().pendingAddPlan?.name).toBe("new-wt");
     expect(createCalls).toEqual([]);
@@ -731,7 +816,7 @@ describe("createWorktree", () => {
 
   test("confirming a parked plan starts the create the same way", async () => {
     addPlan = { ...addPlan, branchConflict: { kind: "exists" } };
-    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    await useWorktreeStore.getState().createWorktree(P, "new-wt");
     listResult = { worktrees: [worktree, created] };
 
     const started = await useWorktreeStore.getState().confirmCreateWorktree("use-existing");
@@ -745,7 +830,12 @@ describe("createWorktree", () => {
 
 describe("deriveOwningWorktree", () => {
   function project(path: string, worktreePaths: string[], isBare = false) {
-    return { path, isBare, worktrees: worktreePaths.map((p) => worktree(p)) };
+    return {
+      server: localServerId(),
+      path,
+      isBare,
+      worktrees: worktreePaths.map((p) => worktree(p)),
+    };
   }
   function worktree(path: string): WorktreeEntry {
     return { path, branch: "topic", commit: "abc", isMain: false, createdAt: null };
@@ -762,7 +852,11 @@ describe("deriveOwningWorktree", () => {
 
   test("uses the live worktree list over the projects snapshot", () => {
     const projects = [project("/repos/app", [])];
-    const byProject = { "/repos/app": { worktrees: [worktree("/repos/app/.worktrees/new")] } };
+    const byProject = {
+      [formatWorktreeRef(localRef("/repos/app"))]: {
+        worktrees: [worktree("/repos/app/.worktrees/new")],
+      },
+    };
 
     expect(deriveOwningWorktree("/repos/app/.worktrees/new/src", projects, byProject)).toBe(
       "/repos/app/.worktrees/new",
@@ -796,46 +890,117 @@ describe("worktree nesting", () => {
   const loose: WorktreeEntry = { ...worktree, path: "/repo/.worktrees/loose", wtName: "loose" };
 
   test("numbers worktrees in visible order, skipping archived and collapsed subtrees", () => {
-    const ps = { worktrees: [parent, child, loose], customOrder: [WT_PATH, loose.path] };
-    expect(getNumberedWorktrees(ps).map((wt) => wt.path)).toEqual([
+    const ps = { worktrees: [parent, child, loose], customOrder: [key(WT_PATH), key(loose.path)] };
+    expect(getNumberedWorktrees(P, ps).map((wt) => wt.path)).toEqual([
       WT_PATH,
       child.path,
       loose.path,
     ]);
-    expect(getNumberedWorktrees({ ...ps, collapsedPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual(
-      [WT_PATH, loose.path],
-    );
-    expect(getNumberedWorktrees({ ...ps, archivedPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual([
-      loose.path,
-    ]);
+    expect(
+      getNumberedWorktrees(P, { ...ps, collapsedRefs: [key(WT_PATH)] }).map((wt) => wt.path),
+    ).toEqual([WT_PATH, loose.path]);
+    expect(
+      getNumberedWorktrees(P, { ...ps, archivedRefs: [key(WT_PATH)] }).map((wt) => wt.path),
+    ).toEqual([loose.path]);
   });
 
   test("persists and merges collapsed worktrees with the other lists", () => {
     const persisted = persistedProjectStates({
-      [PROJECT]: { worktrees: [parent], collapsedPaths: [WT_PATH] },
-      "/empty": { worktrees: [] },
+      [PK]: { worktrees: [parent], collapsedRefs: [key(WT_PATH)] },
+      [formatWorktreeRef(localRef("/empty"))]: { worktrees: [] },
     });
-    expect(persisted).toEqual({ [PROJECT]: { collapsedPaths: [WT_PATH] } });
+    expect(persisted).toEqual({ [PK]: { collapsedRefs: [key(WT_PATH)] } });
 
     const merged = mergePersistedProjectStates(
-      { [PROJECT]: { worktrees: [parent] } },
-      { [PROJECT]: { collapsedPaths: [WT_PATH, 3], archivedPaths: "bad" } },
+      { [PK]: { worktrees: [parent] } },
+      { [PK]: { collapsedRefs: [key(WT_PATH), 3], archivedRefs: "bad" } },
+      localServerId(),
     );
-    expect(merged[PROJECT]).toEqual({ worktrees: [parent], collapsedPaths: [WT_PATH] });
+    expect(merged[PK]).toEqual({ worktrees: [parent], collapsedRefs: [key(WT_PATH)] });
   });
 
   test("brings worktrees saved as hidden back archived", () => {
     const merged = mergePersistedProjectStates(
-      { [PROJECT]: { worktrees: [parent] } },
-      { [PROJECT]: { hiddenPaths: [WT_PATH] } },
+      { [PK]: { worktrees: [parent] } },
+      { [PK]: { hiddenPaths: [WT_PATH] } },
+      localServerId(),
     );
-    expect(merged[PROJECT]?.archivedPaths).toEqual([WT_PATH]);
+    expect(merged[PK]?.archivedRefs).toEqual([key(WT_PATH)]);
+  });
+
+  test("loads lists saved as bare paths as the window's server's refs", () => {
+    const server = toServerId("window-server");
+    const project = worktreeRef(server, PROJECT);
+    const projectKey = formatWorktreeRef(project);
+    const onServer = (path: string) => worktreeKey(project, path);
+
+    const merged = mergePersistedProjectStates(
+      {},
+      {
+        [PROJECT]: {
+          customOrder: [loose.path, WT_PATH],
+          archivedPaths: [WT_PATH],
+          collapsedPaths: [child.path],
+        },
+      },
+      server,
+    );
+
+    expect(merged).toEqual({
+      [projectKey]: {
+        worktrees: [],
+        customOrder: [onServer(loose.path), onServer(WT_PATH)],
+        archivedRefs: [onServer(WT_PATH)],
+        collapsedRefs: [onServer(child.path)],
+      },
+    });
+    // Saved back as refs, they load as they are, on whichever server they name.
+    const again = mergePersistedProjectStates({}, persistedProjectStates(merged), localServerId());
+    expect(again).toEqual(merged);
+  });
+
+  test("loads Windows paths saved bare as paths, not as refs on a drive-letter server", () => {
+    const server = toServerId("window-server");
+    const project = worktreeRef(server, "C:\\repo");
+
+    const merged = mergePersistedProjectStates(
+      {},
+      { "C:\\repo": { archivedPaths: ["C:/repo/.worktrees/a"] } },
+      server,
+    );
+
+    expect(merged).toEqual({
+      [formatWorktreeRef(project)]: {
+        worktrees: [],
+        archivedRefs: [worktreeKey(project, "C:/repo/.worktrees/a")],
+      },
+    });
+  });
+
+  test("keeps the same project path on two servers apart", () => {
+    const elsewhere = worktreeRef(toServerId("elsewhere"), PROJECT);
+    const merged = mergePersistedProjectStates(
+      { [PK]: { worktrees: [parent] } },
+      { [formatWorktreeRef(elsewhere)]: { archivedRefs: [worktreeKey(elsewhere, WT_PATH)] } },
+      localServerId(),
+    );
+    expect(merged[PK]).toEqual({ worktrees: [parent] });
+    expect(merged[formatWorktreeRef(elsewhere)]?.archivedRefs).toEqual([
+      worktreeKey(elsewhere, WT_PATH),
+    ]);
+    // A list naming another server's worktrees leaves this project's alone.
+    expect(
+      getWorktreeRows(P, {
+        worktrees: [parent, loose],
+        archivedRefs: [worktreeKey(elsewhere, WT_PATH)],
+      }).map((row) => row.wt.path),
+    ).toEqual([WT_PATH, loose.path]);
   });
 
   test("lists archived worktrees, with their nested ones, only in the Archive group", () => {
-    const ps = { worktrees: [parent, child, loose], archivedPaths: [WT_PATH] };
-    expect(getWorktreeRows(ps).map((row) => row.wt.path)).toEqual([loose.path]);
-    const [archivedRoot, ...others] = getWorktreeTrees(ps).archived;
+    const ps = { worktrees: [parent, child, loose], archivedRefs: [key(WT_PATH)] };
+    expect(getWorktreeRows(P, ps).map((row) => row.wt.path)).toEqual([loose.path]);
+    const [archivedRoot, ...others] = getWorktreeTrees(P, ps).archived;
     expect(others).toEqual([]);
     expect(archivedRoot?.wt.path).toBe(WT_PATH);
     expect(archivedRoot?.children.map((node) => node.wt.path)).toEqual([child.path]);
@@ -853,15 +1018,15 @@ describe("worktree nesting", () => {
   });
 
   test("markArchived archives a worktree in its own right, once", () => {
-    useWorktreeStore.getState().markArchived(PROJECT, WT_PATH);
-    useWorktreeStore.getState().markArchived(PROJECT, WT_PATH);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.archivedPaths).toEqual([WT_PATH]);
+    useWorktreeStore.getState().markArchived(P, WT_PATH);
+    useWorktreeStore.getState().markArchived(P, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PK]?.archivedRefs).toEqual([key(WT_PATH)]);
   });
 
   test("toggleCollapsed folds and unfolds a worktree", () => {
-    useWorktreeStore.getState().toggleCollapsed(PROJECT, WT_PATH);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.collapsedPaths).toEqual([WT_PATH]);
-    useWorktreeStore.getState().toggleCollapsed(PROJECT, WT_PATH);
-    expect(useWorktreeStore.getState().byProject[PROJECT]?.collapsedPaths).toEqual([]);
+    useWorktreeStore.getState().toggleCollapsed(P, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PK]?.collapsedRefs).toEqual([key(WT_PATH)]);
+    useWorktreeStore.getState().toggleCollapsed(P, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PK]?.collapsedRefs).toEqual([]);
   });
 });

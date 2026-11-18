@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { localRef } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type {
   InboxOpenMessage,
@@ -11,7 +12,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
-import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { deriveProject, projectRef, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
@@ -125,7 +126,7 @@ async function revealFolder(rawPath: string): Promise<void> {
     if (owner === activeWorktree?.path) {
       showPanel("projectFiles");
     } else {
-      await switchWorktree(owner);
+      await switchWorktree(localRef(owner));
       showPanelAfterLayoutRestore("projectFiles");
     }
     // The switch sets the active worktree synchronously, so this targets the owner's store.
@@ -171,10 +172,10 @@ export function openFile(
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
     const { projects } = useProjectStore.getState();
-    const { activeWorktreePath, byProject } = useWorktreeStore.getState();
+    const { activeWorktree, byProject } = useWorktreeStore.getState();
 
     const target =
-      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
+      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktree?.path;
     if (!target) {
       showToast("Open a project before opening other files");
       return undefined;
@@ -213,7 +214,7 @@ export function openUrl(
   return inOrder(async () => {
     await whenProjectsLoaded();
     if (worktreePath) await refreshIfUnlisted(worktreePath);
-    const target = worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+    const target = worktreePath ?? useWorktreeStore.getState().activeWorktree?.path ?? null;
     return openInWorktree(target, { kind: "url", url, ...options, inboxId });
   });
 }
@@ -229,7 +230,7 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
   if (deriveOwningWorktree(worktreePath, projects, byProject) === worktreePath) return;
   const project = deriveProject(worktreePath, projects);
   if (!project) return;
-  await refreshProjectWorktrees(project.path).catch((err: unknown) => {
+  await refreshProjectWorktrees(projectRef(project)).catch((err: unknown) => {
     log.warn("Could not refresh a project's worktrees", {
       error: err instanceof Error ? err : undefined,
       project: project.path,
@@ -245,7 +246,8 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * the panel was queued.
  */
 async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
-  const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
+  const { activeWorktree, switchWorktree } = useWorktreeStore.getState();
+  const activeWorktreePath = activeWorktree?.path ?? null;
   const layoutKey = target ?? HOME_LAYOUT_KEY;
   const ui = getWorktreeUI(layoutWorktree(layoutKey)).getState();
   const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
@@ -255,7 +257,8 @@ async function openInWorktree(target: string | null, open: PendingOpen): Promise
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
-  if (focus && target !== null && target !== activeWorktreePath) await switchWorktree(target);
+  if (focus && target !== null && target !== activeWorktreePath)
+    await switchWorktree(localRef(target));
   return true;
 }
 
@@ -304,7 +307,7 @@ export async function openPath(path: string, location?: FileLocation): Promise<v
     return;
   }
   const filePath = info?.path ?? path;
-  if (useWorktreeStore.getState().activeWorktreePath === null) {
+  if (useWorktreeStore.getState().activeWorktree === null) {
     await openFileFromHome(filePath, location);
     return;
   }

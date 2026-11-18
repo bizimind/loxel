@@ -293,7 +293,7 @@ function FileDiffView({
   // Context lines of the new side, read from git at the diff's commit (the working tree if none).
   const loadContextLines = useCallback(
     async (startLine: number, endLine: number) => {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = useWorktreeStore.getState().activeWorktree?.path;
       if (!wt) return [];
       const result = await api.getFileLines(wt, {
         path: filePath,

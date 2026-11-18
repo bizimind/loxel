@@ -17,6 +17,7 @@ import {
 import { useCallback, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
+import { formatWorktreeRef, sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import type { NestedRemoval } from "@/api/worktree-removal-model";
 import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { Button } from "@/components/ui/button";
@@ -26,20 +27,23 @@ import { showToast } from "@/components/ui/toast";
 import { copyToClipboard } from "@/lib/clipboard";
 import { askToTrustRepo } from "@/lib/repo-trust-dialog";
 import { archivedSet, resolveParents } from "@/lib/worktree-hierarchy";
-import { useWorktreeStore } from "@/store/worktrees";
+import { projectListPaths, useWorktreeStore } from "@/store/worktrees";
 
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { worktreeLabel, worktreeName } from "./worktree-labels";
 
 const EMPTY_WORKTREES: WorktreeEntry[] = [];
 
-export function useWorktreeContextMenu(projectPath: string) {
+/** The context menu of `project`'s worktrees. `project` must keep its identity across renders. */
+export function useWorktreeContextMenu(project: WorktreeRef) {
   const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
   const confirmRemoveWorktree = useWorktreeStore((s) => s.confirmRemoveWorktree);
   const setWorktreeParent = useWorktreeStore((s) => s.setWorktreeParent);
   const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
   const pendingRemovePlan = useWorktreeStore((s) =>
-    s.pendingRemovePlan?.projectPath === projectPath ? s.pendingRemovePlan : null,
+    s.pendingRemovePlan && sameWorktreeRef(s.pendingRemovePlan.project, project)
+      ? s.pendingRemovePlan
+      : null,
   );
 
   const [contextMenu, setContextMenu] = useState<{
@@ -58,12 +62,12 @@ export function useWorktreeContextMenu(projectPath: string) {
     async (wt: WorktreeEntry) => {
       setContextMenu(null);
       try {
-        await requestRemoveWorktree(projectPath, wt);
+        await requestRemoveWorktree(project, wt);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to inspect worktree");
       }
     },
-    [requestRemoveWorktree, projectPath],
+    [requestRemoveWorktree, project],
   );
 
   const handlePlanRemoveConfirm = useCallback(
@@ -83,16 +87,16 @@ export function useWorktreeContextMenu(projectPath: string) {
     async (path: string, parentPath: string | null) => {
       setContextMenu(null);
       try {
-        await setWorktreeParent(projectPath, path, parentPath);
+        await setWorktreeParent(project, path, parentPath);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to move worktree");
       }
     },
-    [setWorktreeParent, projectPath],
+    [setWorktreeParent, project],
   );
 
   return {
-    projectPath,
+    project,
     contextMenu,
     setContextMenu,
     enablingNesting,
@@ -123,19 +127,20 @@ export function WorktreeContextMenu({
   const toggleArchived = useWorktreeStore((s) => s.toggleArchived);
   const markArchived = useWorktreeStore((s) => s.markArchived);
   const wt = menu.contextMenu?.worktree;
+  const projectKey = formatWorktreeRef(menu.project);
   const isArchived = useWorktreeStore((s) => {
-    const ps = s.byProject[menu.projectPath];
+    const ps = s.byProject[projectKey];
     return (
       wt !== undefined &&
       ps !== undefined &&
-      archivedSet(ps.worktrees, ps.archivedPaths ?? []).has(wt.path)
+      archivedSet(ps.worktrees, projectListPaths(menu.project, ps).archived).has(wt.path)
     );
   });
-  const nesting = useWorktreeStore((s) => s.byProject[menu.projectPath]?.worktreeMetadata);
+  const nesting = useWorktreeStore((s) => s.byProject[projectKey]?.worktreeMetadata);
   const isNested = useWorktreeStore(
     (s) =>
       wt?.parentWtId !== undefined &&
-      (s.byProject[menu.projectPath]?.worktrees.some(
+      (s.byProject[projectKey]?.worktrees.some(
         (other) => other.wtId === wt.parentWtId && other.path !== wt.path,
       ) ??
         false),
@@ -198,7 +203,7 @@ export function WorktreeContextMenu({
                 <ContextMenuItem
                   onClick={() => {
                     // Archived with its parent, it stays archived at the Archive's top level.
-                    if (isArchived) markArchived(menu.projectPath, wt.path);
+                    if (isArchived) markArchived(menu.project, wt.path);
                     void menu.handleSetParent(wt.path, null);
                   }}
                 >
@@ -218,7 +223,7 @@ export function WorktreeContextMenu({
               Enable worktree nesting…
             </ContextMenuItem>
           )}
-          <ContextMenuItem onClick={() => toggleArchived(menu.projectPath, wt.path)}>
+          <ContextMenuItem onClick={() => toggleArchived(menu.project, wt.path)}>
             {isArchived ? (
               <ArchiveRestoreIcon className="size-3.5" />
             ) : (
@@ -245,7 +250,7 @@ export function WorktreeContextMenu({
 
       {menu.enablingNesting && (
         <EnableNestingDialog
-          projectPath={menu.projectPath}
+          project={menu.project}
           onClose={() => menu.setEnablingNesting(false)}
         />
       )}
@@ -266,7 +271,8 @@ function RemoveWorktreeDialog({
   const [force, setForce] = useState(false);
   const [nested, setNested] = useState<NestedRemoval>("move-up");
   const worktrees =
-    useWorktreeStore((s) => s.byProject[plan.projectPath]?.worktrees) ?? EMPTY_WORKTREES;
+    useWorktreeStore((s) => s.byProject[formatWorktreeRef(plan.project)]?.worktrees) ??
+    EMPTY_WORKTREES;
   const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
   // Once trusted, planning again clears the notice, and the removal runs clean.wt.sh.
   const trustForCleanHook = async () => {
@@ -279,7 +285,7 @@ function RemoveWorktreeDialog({
       const entry = worktrees.find((wt) => wt.path === plan.wtPath);
       // Not when the removal was cancelled meanwhile: planning again would reopen the dialog.
       const stillAsking = useWorktreeStore.getState().pendingRemovePlan?.wtPath === plan.wtPath;
-      if (trusted && entry && stillAsking) await requestRemoveWorktree(plan.projectPath, entry);
+      if (trusted && entry && stillAsking) await requestRemoveWorktree(plan.project, entry);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not change repository trust");
     }

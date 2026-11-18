@@ -3,6 +3,8 @@ import { describe, expect, mock, test } from "bun:test";
 import type { WorkspaceSymbolItem } from "@bizimind/monaco-lsp-client";
 import * as monaco from "monaco-editor";
 
+import { localRef } from "@/api/local-server";
+
 import { registerVirtualDocumentScheme } from "./virtual-documents";
 import type { WorkspaceSymbolResult, WorkspaceSymbolSource } from "./workspace-symbols";
 import {
@@ -50,7 +52,7 @@ describe("rankWorkspaceSymbols", () => {
     const names = ["getUser", "user", "User", "useOfRange", "users", "loadUserAccounts", "ruse"];
     const ranked = rank(
       "User",
-      names.map((n) => [item(n, `file://${WT}/a.ts`), `${WT}/a.ts`]),
+      names.map((n) => [item(n, `file://test-server${WT}/a.ts`), `${WT}/a.ts`]),
     );
     expect(ranked.map((r) => r.split(" ")[0])).toEqual([
       "User",
@@ -104,9 +106,9 @@ describe("rankWorkspaceSymbols", () => {
   });
 
   test("keeps the same symbol once when two servers report it", () => {
-    const ts = item("Config", `loxel://HEAD${WT}/src/config.ts`, 3);
-    const astro = item("Config", `file://${WT}/src/config.ts`, 3);
-    const other = item("Config", `file://${WT}/src/config.ts`, 8);
+    const ts = item("Config", `loxel://test-server${WT}/src/config.ts`, 3);
+    const astro = item("Config", `file://test-server${WT}/src/config.ts`, 3);
+    const other = item("Config", `file://test-server${WT}/src/config.ts`, 8);
     expect(
       rank("Config", [
         [ts, `${WT}/src/config.ts`],
@@ -150,7 +152,7 @@ describe("searchWorkspaceSymbols", () => {
     await searchWorkspaceSymbols(
       sources,
       query,
-      WT,
+      localRef(WT),
       searchToken,
       (results, done) => calls.push({ names: results.map((r) => r.symbol.name), done, results }),
       timeoutMs,
@@ -159,8 +161,10 @@ describe("searchWorkspaceSymbols", () => {
   }
 
   test("merges every source's answer and maps file and loxel URIs to paths", async () => {
-    const ts = source(async () => [item("parseConfig", `loxel://HEAD${WT}/src/my%20config.ts`)]);
-    const py = source(async () => [item("parse", `file://${WT}/tool/parse.py`)]);
+    const ts = source(async () => [
+      item("parseConfig", `loxel://test-server${WT}/src/my%20config.ts`),
+    ]);
+    const py = source(async () => [item("parse", `file://test-server${WT}/tool/parse.py`)]);
 
     const calls = await search([ts, py], "parse");
 
@@ -179,11 +183,11 @@ describe("searchWorkspaceSymbols", () => {
           answerSlow = resolve;
         }),
     );
-    const fast = source(async () => [item("fast", `file://${WT}/a.ts`)]);
+    const fast = source(async () => [item("fast", `file://test-server${WT}/a.ts`)]);
 
     const searching = search([slow, fast], "f");
     await Bun.sleep(0);
-    answerSlow([item("fastest", `file://${WT}/b.ts`)]);
+    answerSlow([item("fastest", `file://test-server${WT}/b.ts`)]);
     const calls = await searching;
 
     expect(calls.map(({ names, done }) => ({ names, done }))).toEqual([
@@ -204,7 +208,7 @@ describe("searchWorkspaceSymbols", () => {
         }),
       resolveWorkspaceSymbol: async (symbol) => symbol,
     };
-    const ok = source(async () => [item("a", `file://${WT}/a.ts`)]);
+    const ok = source(async () => [item("a", `file://test-server${WT}/a.ts`)]);
 
     const calls = await search([hung, ok], "a", token, 20);
 
@@ -215,11 +219,14 @@ describe("searchWorkspaceSymbols", () => {
   test("leaves out a failing source and symbols whose URI cannot be opened", async () => {
     const failing = source(() => Promise.reject(new Error("server crashed")));
     const ok = source(async () => [
-      item("a", `file://${WT}/a.ts`),
+      item("a", `file://test-server${WT}/a.ts`),
       item("b", "untitled:Untitled-1"),
       item("c", "not a uri"),
       item("d", `loxel://abc123${WT}/d.ts#old`),
-      item("e", `loxel://HEAD${WT}/e%20f/%C3%BC.ts`),
+      item("e", `loxel://test-server${WT}/e%20f/%C3%BC.ts`),
+      // Another server's file, and a file of no server.
+      item("f", `file://other-server${WT}/f.ts`),
+      item("g", `file://${WT}/g.ts`),
     ]);
 
     const calls = await search([failing, ok], "");
@@ -236,7 +243,7 @@ describe("searchWorkspaceSymbols", () => {
     const tokens = new monaco.CancellationTokenSource();
     const slow = source(async () => {
       tokens.cancel();
-      return [item("a", `file://${WT}/a.ts`)];
+      return [item("a", `file://test-server${WT}/a.ts`)];
     });
 
     expect(await search([slow], "a", tokens.token)).toEqual([]);
@@ -305,14 +312,14 @@ describe("symbols in a server's read-only documents", () => {
   test("are kept with their URI, after the project's files, and other schemes are dropped", async () => {
     registerVirtualDocumentScheme({ scheme: "symbols-doc" }, "java");
     const library = item("List", "symbols-doc://contents/java.util/List.java?=p/x%28List.class");
-    const own = item("List", `file://${WT}/src/List.java`);
+    const own = item("List", `file://test-server${WT}/src/List.java`);
     const unknown = item("List", "unknown-scheme://contents/List.java");
     const onResults = mock<(results: WorkspaceSymbolResult[], done: boolean) => void>();
 
     await searchWorkspaceSymbols(
       [source(() => Promise.resolve([library, own, unknown]))],
       "List",
-      WT,
+      localRef(WT),
       new monaco.CancellationTokenSource().token,
       onResults,
     );

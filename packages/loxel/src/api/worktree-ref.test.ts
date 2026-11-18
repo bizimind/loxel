@@ -14,7 +14,7 @@ const REF = worktreeRef(SERVER, "/home/u/repo/.worktrees/a");
 
 describe("WorktreeRef", () => {
   test("round-trips through its string form", () => {
-    expect(formatWorktreeRef(REF)).toBe(`${SERVER}:/home/u/repo/.worktrees/a`);
+    expect<string>(formatWorktreeRef(REF)).toBe(`${SERVER}:/home/u/repo/.worktrees/a`);
     expect(parseWorktreeRef(formatWorktreeRef(REF))).toEqual(REF);
   });
 
@@ -27,6 +27,7 @@ describe("WorktreeRef", () => {
     expect(parseWorktreeRef("/no/server")).toBeNull();
     expect(parseWorktreeRef(":/no/server")).toBeNull();
     expect(parseWorktreeRef(`${SERVER}:`)).toBeNull();
+    expect(parseWorktreeRef("/repo/a:b")).toBeNull();
   });
 
   test("is equal by server and path", () => {

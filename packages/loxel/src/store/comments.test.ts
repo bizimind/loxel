@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
 import type { DiffFileContext, PlacedThread } from "@/api/review-model";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 /** Pending placed-threads requests, resolved by the test in any order */
 const pending: ((threads: PlacedThread[]) => void)[] = [];
@@ -46,7 +47,7 @@ const placedIds = () =>
 describe("fetchPlacedThreads", () => {
   beforeEach(() => {
     pending.length = 0;
-    useWorktreeStore.setState({ activeWorktreePath: "/repo" });
+    useWorktreeStore.setState(activeWorktreeFields(localRef("/repo")));
     useCommentStore.getState().clearAll();
   });
 

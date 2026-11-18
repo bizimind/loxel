@@ -9,14 +9,15 @@ import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 import type { Highlighter } from "shiki";
 
 import { wsClient } from "@/api/client";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { sameWorktreeRef, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import { getQueryScope, projectRefOf } from "@/queries/use-scope";
 import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
 import { followEditorThemes } from "./editor-themes";
 import { getHighlighter } from "./highlighter";
-import { isLiveEditorModel } from "./live-editor-model";
+import { editorFile, isLiveEditorModel } from "./live-editor-model";
 import { BUILTIN_THEMES } from "./loxel-theme";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
@@ -102,36 +103,35 @@ void getHighlighter().then((highlighter) => {
   followEditorThemes(highlighter, bridgeShiki);
 });
 
-// Connect to yaml-language-server — LSP features register async when capabilities arrive
-connectYamlLsp();
+/** The active worktree; null with Home. */
+function activeWorktree(): WorktreeRef | null {
+  return getQueryScope().activeWorktree;
+}
 
-// A restarted Loxel server dropped every language-server socket: reconnect the clients now
-// instead of waiting out their backoff, and those that gave up meanwhile.
-wsClient.onReconnect(resumeLanguageServers);
+const activeWorktreeListeners = new Set<(wt: WorktreeRef | null) => void>();
 
-// Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
-// the worktree path so project-level features (cross-file refs, module
-// resolution) resolve correctly.
-// Reconnect whenever the active worktree changes.
-{
-  const reconnectPerWorktree = (wtPath: string) => {
-    connectTsLsp(wtPath);
-  };
-  const initialWt = useWorktreeStore.getState().activeWorktreePath;
-  if (initialWt) reconnectPerWorktree(initialWt);
-  useWorktreeStore.subscribe((state, prev) => {
-    if (state.activeWorktreePath === prev.activeWorktreePath) return;
-    if (state.activeWorktreePath) reconnectPerWorktree(state.activeWorktreePath);
-    // The last worktree of a bare project was removed: nothing is left to serve.
-    else disconnectTsLsp();
-  });
+/**
+ * Calls `onChange` with the active worktree each time another one becomes active. One store
+ * subscription serves every listener, so a store change reads the scope once.
+ */
+function onActiveWorktreeChange(onChange: (wt: WorktreeRef | null) => void): void {
+  if (activeWorktreeListeners.size === 0) {
+    let current = activeWorktree();
+    useWorktreeStore.subscribe(() => {
+      const next = activeWorktree();
+      if (next === current || (next && current && sameWorktreeRef(next, current))) return;
+      current = next;
+      for (const listener of activeWorktreeListeners) listener(next);
+    });
+  }
+  activeWorktreeListeners.add(onChange);
 }
 
 // Some LSPs are expensive to spawn (they walk the whole workspace) and most
 // worktrees have zero files for them. Defer spawning until a matching model
 // exists in the active worktree, and disconnect when the last one goes away.
 function createLazyLspConnector(opts: LspClient): void {
-  let activeWt: string | null = useWorktreeStore.getState().activeWorktreePath ?? null;
+  let activeWt = activeWorktree();
   let modelCount = 0;
   // Models counted at creation; `isMatch` can change meanwhile (projects load, worktree switch).
   let counted = new WeakSet<monaco.editor.ITextModel>();
@@ -141,10 +141,12 @@ function createLazyLspConnector(opts: LspClient): void {
     if (!activeWt) return false;
     // Wherever its URI's path seems to lead: it holds the connection it opened on.
     if (opts.ownsVirtualDocument(model)) return true;
-    if (!isLiveEditorModel(model)) return false;
-    if (isWithin(model.uri.path, activeWt)) return true;
-    // Files outside every project (the Others section) are served by the active worktree's LSP.
-    return !deriveProject(model.uri.path, useProjectStore.getState().projects);
+    const file = editorFile(model.uri);
+    if (!file || !isLiveEditorModel(model) || file.server !== activeWt.server) return false;
+    if (isWithin(file.path, activeWt.path)) return true;
+    // Files outside every project of its server (the Others section) are served by the active
+    // worktree's LSP.
+    return !projectRefOf(worktreeRef(file.server, file.path));
   };
 
   const countExistingModels = (): number => {
@@ -183,15 +185,40 @@ function createLazyLspConnector(opts: LspClient): void {
     if (modelCount === 0) syncConnection();
   });
 
-  useWorktreeStore.subscribe((state, prev) => {
-    if (state.activeWorktreePath === prev.activeWorktreePath) return;
-    activeWt = state.activeWorktreePath;
+  onActiveWorktreeChange((wt) => {
+    activeWt = wt;
     modelCount = countExistingModels();
     syncConnection();
   });
 }
 
-for (const client of lazyLspClients) createLazyLspConnector(client);
+/**
+ * Connect the language servers: YAML at once, TypeScript to the active worktree, the lazy ones as
+ * their files open. Their worktrees are refs on the window's server, so `main.tsx` calls this once
+ * that server is known, before the first render.
+ */
+export function startLanguageServers(): void {
+  // Connect to yaml-language-server — LSP features register async when capabilities arrive
+  connectYamlLsp();
+
+  // A restarted Loxel server dropped every language-server socket: reconnect the clients now
+  // instead of waiting out their backoff, and those that gave up meanwhile.
+  wsClient.onReconnect(resumeLanguageServers);
+
+  // Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
+  // the worktree path so project-level features (cross-file refs, module
+  // resolution) resolve correctly.
+  // Reconnect whenever the active worktree changes.
+  const initialWt = activeWorktree();
+  if (initialWt) connectTsLsp(initialWt);
+  onActiveWorktreeChange((wt) => {
+    if (wt) connectTsLsp(wt);
+    // The last worktree of a bare project was removed: nothing is left to serve.
+    else disconnectTsLsp();
+  });
+
+  for (const client of lazyLspClients) createLazyLspConnector(client);
+}
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
 // Permissive mode: comments/trailing commas are NOT flagged here.

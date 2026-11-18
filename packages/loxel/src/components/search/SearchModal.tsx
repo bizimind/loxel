@@ -37,7 +37,7 @@ export function SearchModal() {
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
 
   const currentScopesKey = scopesKey(scopes);
 

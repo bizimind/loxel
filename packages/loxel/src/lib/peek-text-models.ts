@@ -5,10 +5,11 @@ import { StandaloneServices } from "monaco-editor/editor/standalone/browser/stan
 import { IInstantiationService } from "monaco-editor/platform/instantiation/common/instantiation.js";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { editorFilePath, isPreviewModel, markPreviewModel } from "./live-editor-model";
+import { type EditorFile, editorFile, isPreviewModel, markPreviewModel } from "./live-editor-model";
 import { toMonacoLanguage } from "./monaco-theme";
 import { resolveLanguage } from "./resolve-language";
 import {
@@ -18,8 +19,8 @@ import {
 } from "./virtual-documents";
 
 export interface PreviewSource {
-  /** The content of the file at `path`. */
-  readFile(path: string): Promise<string>;
+  /** The content of `file`. */
+  readFile(file: EditorFile): Promise<string>;
   /** The Monaco language of the file at `path`. */
   languageOf(path: string, content: string): string;
   /** The text and language of a language server's read-only document, while it is connected. */
@@ -28,7 +29,7 @@ export interface PreviewSource {
 
 /**
  * Lets Monaco's peek widgets (Peek Definition, Find References, the `Cmd`-hover definition
- * preview) show editor files (`editorFilePath`) no tab has open. They get their models from the
+ * preview) show editor files (`editorFile`) no tab has open. They get their models from the
  * standalone text model service, which only finds registered models and rejects every other URI
  * with "Model not found"; this wraps its `createModelReference`.
  *
@@ -54,13 +55,14 @@ export function installPeekModelResolver(
 
   service.createModelReference = async (resource) => {
     if (monaco.editor.getModel(resource)) return fallback(resource);
-    const path = editorFilePath(resource);
+    const file = editorFile(resource);
+    const path = file?.path ?? null;
     const reading =
-      path === null
+      file === null
         ? source.readVirtualDocument(resource.toString())
         : source
-            .readFile(path)
-            .then((content) => ({ content, language: source.languageOf(path, content) }));
+            .readFile(file)
+            .then((content) => ({ content, language: source.languageOf(file.path, content) }));
     if (!reading) return fallback(resource);
 
     let content: string;
@@ -114,11 +116,17 @@ export function keepPreviewModelsReadOnly(editor: monaco.editor.ICodeEditor): vo
   });
 }
 
-/** Files are read for the active worktree, whose language servers answer the peek. */
+/**
+ * Files are read for the active worktree, whose language servers answer the peek, from the
+ * window's server, the only one they are reached on.
+ */
 const previewSource: PreviewSource = {
-  async readFile(path) {
-    const worktree = useWorktreeStore.getState().activeWorktreePath;
-    return (await api.getFilePreviewContent(path, worktree)).content;
+  async readFile(file) {
+    if (file.server !== localServerId()) {
+      throw new Error(`${file.path} is on server ${file.server}, which this window cannot read`);
+    }
+    const worktree = useWorktreeStore.getState().activeWorktree?.path;
+    return (await api.getFilePreviewContent(file.path, worktree)).content;
   },
   languageOf(path, content) {
     const associations = selectEffectiveFileAssociations(useSettingsStore.getState());

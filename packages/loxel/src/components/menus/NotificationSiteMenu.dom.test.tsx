@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { localServerId } from "@/api/local-server";
 import type { NotificationSource, ServerNotification } from "@/api/notification-model";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { DEFAULT_BACKGROUND_TABS, useSettingsStore } from "@/store/settings-store";
@@ -28,7 +29,7 @@ const mutes = () => useSettingsStore.getState().browser.notificationMutes;
 
 /** The bell, opened on this one notification; the site menu opens inside its popup. */
 async function openBell(n: ServerNotification): Promise<void> {
-  usePanelNotificationStore.getState().syncAll([n]);
+  usePanelNotificationStore.getState().syncAll(localServerId(), [n]);
   render(<NotificationBell />);
   fireEvent.click(screen.getByRole("button"));
   fireEvent.contextMenu(await screen.findByText("New message"));
@@ -50,7 +51,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  usePanelNotificationStore.getState().syncAll([]);
+  usePanelNotificationStore.getState().syncAll(localServerId(), []);
 });
 
 describe("a browser notification's context menu in the bell", () => {

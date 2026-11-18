@@ -18,7 +18,7 @@ import {
 
 import { frontendLog } from "./frontend-logger";
 import { setConfiguredSchemas } from "./json-schema-registry";
-import { editorFilePath, isLiveEditorModel } from "./live-editor-model";
+import { editorFile, isLiveEditorModel } from "./live-editor-model";
 import { classifySchemaGlob, schemaExcludeGlob, schemaFilePatterns } from "./schema-glob";
 import { isRemoteSchemaUrl, schemaGlobMatches, schemaUrlsNamedBy } from "./schema-references";
 
@@ -53,8 +53,8 @@ export function requestSchemasForOpenFiles(): void {
   const remoteUrls = new Set<string>();
   for (const model of monaco.editor.getModels()) {
     if (!isLiveEditorModel(model)) continue;
-    const path = editorFilePath(model.uri);
-    if (path === null) continue;
+    const path = editorFile(model.uri)?.path;
+    if (path === undefined) continue;
     const language = model.getLanguageId();
     for (const url of schemaUrlsNamedBy(language, model.getValue())) remoteUrls.add(url);
     if (language !== "json" && language !== "toml") continue;

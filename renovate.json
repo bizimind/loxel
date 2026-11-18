@@ -3,6 +3,7 @@
   "description": "Bumps the versions Dependabot cannot read: the language-server manifests in packages/loxel/scripts/language-servers/, the Go toolchain and Bun. Runs self-hosted, weekly, from .github/workflows/renovate.yml, which is its schedule. Dependabot keeps everything it covers (.github/dependabot.yml), so only custom managers run here. See packages/loxel/docs/LANGUAGE_SERVERS.md.",
   "enabledManagers": ["custom.jsonata", "custom.regex"],
   "dependencyDashboard": false,
+  "vulnerabilityAlerts": { "enabled": false },
   "minimumReleaseAge": "7 days",
   "labels": ["dependencies"],
   "semanticCommits": "enabled",

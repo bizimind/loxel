@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { cleanup, renderHook } from "@testing-library/react";
 
 import { wsClient } from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { localServerId, localRef } from "@/api/local-server";
 import type { WsClientMessage } from "@/api/ws-protocol";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
-import { useWorktreeStore } from "@/store/worktrees";
+import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 import { useWsSubscription } from "./useWsSubscription";
 
@@ -21,7 +21,7 @@ beforeAll(() => {
   spyOn(wsClient, "send").mockImplementation((message) => {
     sent.push(message);
   });
-  useWorktreeStore.setState({ activeWorktreePath: WT });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
   const server = localServerId();
   for (const path of [EXTERNAL, `${WT}/src/a.ts`]) {
     useEditorStateStore.getState().openFile(fileEditorKey(server, path), server, path);

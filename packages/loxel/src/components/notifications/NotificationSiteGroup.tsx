@@ -1,9 +1,8 @@
 import { ChevronUpIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { ServerNotification } from "@/api/notification-model";
 import { Favicon } from "@/components/browser/Favicon";
-import { usePanelNotificationStore } from "@/store/panel-notifications";
+import { type ClientNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 
 import { NotificationItem, sourceLabel } from "./NotificationItem";
 
@@ -16,7 +15,7 @@ export function NotificationSiteGroup({
   onNavigate,
 }: {
   /** Two or more, newest first. */
-  notifications: readonly [ServerNotification, ...ServerNotification[]];
+  notifications: readonly [ClientNotification, ...ClientNotification[]];
   onNavigate?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);

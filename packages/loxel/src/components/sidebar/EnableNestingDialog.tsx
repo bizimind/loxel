@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { WorktreeMetadataAction } from "@/api/client";
 import * as api from "@/api/client";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -11,10 +12,10 @@ import { useWorktreeStore } from "@/store/worktrees";
  * commands and tradeoffs), and turns it on once the user confirms.
  */
 export function EnableNestingDialog({
-  projectPath,
+  project,
   onClose,
 }: {
-  projectPath: string;
+  project: WorktreeRef;
   onClose: () => void;
 }) {
   const enableWorktreeMetadata = useWorktreeStore((s) => s.enableWorktreeMetadata);
@@ -26,7 +27,7 @@ export function EnableNestingDialog({
   useEffect(() => {
     let cancelled = false;
     api
-      .planEnableWorktreeMetadata(projectPath)
+      .planEnableWorktreeMetadata(project.path)
       .then((plan) => !cancelled && setAction(plan.action))
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to inspect the repo");
@@ -34,13 +35,13 @@ export function EnableNestingDialog({
     return () => {
       cancelled = true;
     };
-  }, [projectPath]);
+  }, [project.path]);
 
   const handleConfirm = async () => {
     setBusy(true);
     setError(null);
     try {
-      await enableWorktreeMetadata(projectPath);
+      await enableWorktreeMetadata(project);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to enable worktree nesting");

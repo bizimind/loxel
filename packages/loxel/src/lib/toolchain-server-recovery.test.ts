@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
+import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import type { LspStopReason } from "@/lib/lsp-connection";
 
@@ -7,12 +9,12 @@ import { createToolchainServerRecovery } from "./toolchain-server-recovery";
 
 const CHANGED = { type: "java_env_changed", wtPath: "/wt" } as const satisfies WsMessage;
 
-function setup(reason: LspStopReason | null, activeWt: string | null = "/wt") {
+function setup(reason: LspStopReason | null, activeWt: WorktreeRef | null = localRef("/wt")) {
   const calls: string[] = [];
   const handle = createToolchainServerRecovery({
     changedMessage: CHANGED.type,
     client: {
-      connect: (wtPath) => calls.push(`connect ${wtPath}`),
+      connect: (wt) => calls.push(`connect ${wt?.server}:${wt?.path}`),
       disconnect: () => calls.push("disconnect"),
     },
     stoppedServer: () => (reason ? { name: "Java", reason, detail: "" } : undefined),
@@ -25,7 +27,7 @@ describe("createToolchainServerRecovery", () => {
   test("starts a server that could not start again from scratch", () => {
     const { calls, handle } = setup("start-failed");
     handle(CHANGED);
-    expect(calls).toEqual(["disconnect", "connect /wt"]);
+    expect(calls).toEqual(["disconnect", "connect test-server:/wt"]);
   });
 
   test.each(["replaced", "crashed", "unreachable"] as const)("leaves a server %s", (reason) => {
@@ -41,7 +43,13 @@ describe("createToolchainServerRecovery", () => {
   });
 
   test("ignores another worktree's change", () => {
-    const { calls, handle } = setup("start-failed", "/other");
+    const { calls, handle } = setup("start-failed", localRef("/other"));
+    handle(CHANGED);
+    expect(calls).toEqual([]);
+  });
+
+  test("ignores a change of the same path while a worktree of another server is active", () => {
+    const { calls, handle } = setup("start-failed", worktreeRef(toServerId("other-server"), "/wt"));
     handle(CHANGED);
     expect(calls).toEqual([]);
   });

@@ -12,7 +12,7 @@ const manageRepoTrust = jest.fn(async (_wtPath: string) => {});
 mock.module("@/lib/repo-trust-dialog", () => ({ ...originalDialog, manageRepoTrust }));
 
 const { RepoTrustStatus } = await import("./RepoTrustStatus");
-const { useWorktreeStore } = await import("@/store/worktrees");
+const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 
 const WT = "/repo/wt";
 
@@ -27,7 +27,7 @@ function renderStatus(status: Status) {
 }
 
 beforeEach(() => {
-  useWorktreeStore.setState({ activeWorktreePath: WT });
+  useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
   manageRepoTrust.mockClear();
 });
 
