@@ -613,7 +613,7 @@ describe("withoutHiddenActions", () => {
   });
 });
 
-// The gopls that ships, built from scripts/gopls-module/ by `build:language-servers gopls`.
+// The gopls that ships, built at its manifest version by `build:language-servers gopls`.
 describe.skipIf(!(await builtBinaryExists(resolve(import.meta.dir, "../../build", GOPLS))))(
   "GoLspManager with the built gopls",
   () => {
