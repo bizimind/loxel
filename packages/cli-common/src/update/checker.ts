@@ -29,9 +29,10 @@ export function compareVersions(a: string, b: string): number {
  */
 export async function checkForUpdates(
   manifestUrl: string,
+  packageName: string,
   currentVersion: string,
 ): Promise<UpdateCheckResult> {
-  const manifest = await fetchManifest(manifestUrl);
+  const manifest = await fetchManifest(manifestUrl, packageName);
   const hasUpdate = compareVersions(manifest.version, currentVersion) > 0;
 
   return { hasUpdate, currentVersion, latestVersion: manifest.version, manifest };

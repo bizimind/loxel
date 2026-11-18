@@ -53,6 +53,7 @@ async function writeCache(cacheFile: string, cache: Cache): Promise<void> {
  */
 export async function checkForUpdatesWithCache(
   manifestUrl: string,
+  packageName: string,
   currentVersion: string,
   config: CacheConfig,
   options?: { skipCache?: boolean },
@@ -74,17 +75,24 @@ export async function checkForUpdatesWithCache(
   }
 
   // Fetch fresh manifest
-  const manifest = await fetchManifest(manifestUrl);
+  const manifest = await fetchManifest(manifestUrl, packageName);
 
-  // Update cache
-  await writeCache(config.cacheFile, {
-    last_check: new Date().toISOString(),
-    latest_version: manifest.version,
-  });
+  await recordUpdateCheck(config, manifest.version);
 
   const hasUpdate = compareVersions(manifest.version, currentVersion) > 0;
 
   return { hasUpdate, currentVersion, latestVersion: manifest.version, manifest };
+}
+
+/**
+ * Record a check that found `latestVersion`, so the next one waits for the cache TTL. Also called
+ * after a failed automatic update, with the running version, so it is not retried on every command.
+ */
+export async function recordUpdateCheck(config: CacheConfig, latestVersion: string): Promise<void> {
+  await writeCache(config.cacheFile, {
+    last_check: new Date().toISOString(),
+    latest_version: latestVersion,
+  });
 }
 
 /**

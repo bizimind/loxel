@@ -5,7 +5,7 @@ import { Command } from "commander";
 import { createResult } from "../result.ts";
 import { runAction } from "../runner.ts";
 import type { UpdateConfig } from "../update/index.ts";
-import { createUpdateSystem } from "../update/index.ts";
+import { compareVersions, createUpdateSystem } from "../update/index.ts";
 
 export interface UpdateOptions {
   json?: boolean;
@@ -40,15 +40,18 @@ export async function runUpdateCommand(
     };
   }
 
+  // `--force` reinstalls the latest release; it never installs an older one, which a replayed old
+  // manifest (validly signed, once) could otherwise roll the binary back to.
+  if (compareVersions(updateInfo.latestVersion, updateInfo.currentVersion) < 0) {
+    throw new Error(
+      `Refusing to downgrade from ${updateInfo.currentVersion} to ${updateInfo.latestVersion}`,
+    );
+  }
+
   onProgress?.(`Updating from ${updateInfo.currentVersion} to ${updateInfo.latestVersion}...`);
 
-  try {
-    const manifest = updateInfo.manifest ?? (await updateSystem.fetchManifest());
-    await updateSystem.performUpdate(manifest);
-  } catch (err) {
-    await updateSystem.cleanupFailedUpdate();
-    throw err;
-  }
+  const manifest = updateInfo.manifest ?? (await updateSystem.fetchManifest());
+  await updateSystem.performUpdate(manifest);
 
   // Verify the update by running the new binary
   let newVersion: string;

@@ -161,8 +161,8 @@ async function runWithAutoUpdate(): Promise<void> {
 
   const updated = await maybeAutoUpdate({ ...updateConfig, isAutoUpdateEnabled }, process.argv);
   if (updated) {
-    // maybeAutoUpdate already re-executed and exited
-    process.exit(0);
+    // maybeAutoUpdate already re-ran the command on the new binary and set its exit code
+    process.exit();
   }
 
   await program.parseAsync();

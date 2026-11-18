@@ -1,0 +1,27 @@
+name: Import signing certificate
+description: Import the Developer ID certificate into a build keychain codesign can use
+
+inputs:
+  certificate:
+    description: The .p12 certificate, base64 (the LOXEL_CERTIFICATE secret)
+    required: true
+  password:
+    description: The certificate's password (the LOXEL_CERTIFICATE_PWD secret)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Import signing certificate
+      shell: bash
+      run: |
+        echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+        security create-keychain -p "temp" build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "temp" build.keychain
+        security import "$RUNNER_TEMP/certificate.p12" -k build.keychain -P "$PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -s -k "temp" build.keychain
+        rm "$RUNNER_TEMP/certificate.p12"
+      env:
+        CERTIFICATE: ${{ inputs.certificate }}
+        PASSWORD: ${{ inputs.password }}

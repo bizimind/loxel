@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
-import { chmod, rename, unlink } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { verifyCodeSignature } from "./code-signature.ts";
 import type { BinaryInfo, Manifest } from "./manifest.ts";
 import { getBinaryInfo } from "./manifest.ts";
 import { getCurrentPlatform } from "./platform.ts";
@@ -44,7 +45,8 @@ export interface PerformUpdateOptions {
 }
 
 /**
- * Perform an atomic binary update.
+ * Perform an atomic binary update. The binary must match the SHA-256 in the (signed) manifest and,
+ * on macOS, carry the release code signature; otherwise the running binary is left as it was.
  */
 export async function performUpdate(
   manifest: Manifest,
@@ -67,25 +69,20 @@ export async function performUpdate(
       `Refusing to update: binary path "${currentBinaryPath}" does not appear to be ${options.packageName}`,
     );
   }
-  const tempPath = `${currentBinaryPath}.update`;
-
   const buffer = await downloadAndVerify(binaryInfo);
 
-  await Bun.write(tempPath, buffer);
-  await chmod(tempPath, 0o755);
-
-  // Atomic replace
-  await rename(tempPath, currentBinaryPath);
-}
-
-/**
- * Clean up a failed update by removing the temp file.
- */
-export async function cleanupFailedUpdate(): Promise<void> {
-  const tempPath = `${process.execPath}.update`;
+  // Unique and created exclusively, so concurrent updates (several agents running the CLI as its
+  // update check comes due) never verify or install one another's half-written file.
+  const tempPath = `${currentBinaryPath}.update-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
-    await unlink(tempPath);
-  } catch {
-    // Ignore if file doesn't exist
+    await writeFile(tempPath, buffer, { flag: "wx" });
+    await chmod(tempPath, 0o755);
+    if (process.platform === "darwin") await verifyCodeSignature(tempPath, options.packageName);
+    // Atomic replace
+    await rename(tempPath, currentBinaryPath);
+  } catch (err) {
+    // Never leave a rejected or half-written binary next to the real one.
+    await unlink(tempPath).catch(() => undefined);
+    throw err;
   }
 }

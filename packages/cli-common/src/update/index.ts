@@ -2,11 +2,16 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { checkForUpdatesWithCache, shouldCheckForUpdates, type CacheConfig } from "./cache.ts";
+import {
+  checkForUpdatesWithCache,
+  recordUpdateCheck,
+  shouldCheckForUpdates,
+  type CacheConfig,
+} from "./cache.ts";
 import { checkForUpdates, type UpdateCheckResult } from "./checker.ts";
 import { fetchManifest, type Manifest } from "./manifest.ts";
 import { getCurrentPlatform } from "./platform.ts";
-import { cleanupFailedUpdate, isRunningCompiled, performUpdate } from "./updater.ts";
+import { isRunningCompiled, performUpdate } from "./updater.ts";
 
 // Re-export all types and functions
 export { checkForUpdates, compareVersions, type UpdateCheckResult } from "./checker.ts";
@@ -25,7 +30,6 @@ export {
 } from "./manifest.ts";
 export { getCurrentPlatform, type Platform } from "./platform.ts";
 export {
-  cleanupFailedUpdate,
   downloadAndVerify,
   isRunningCompiled,
   performUpdate,
@@ -77,27 +81,28 @@ export function createUpdateSystem(config: UpdateConfig) {
       const currentVersion = config.getCurrentVersion();
 
       if (config.cacheEnabled) {
-        return checkForUpdatesWithCache(manifestUrl, currentVersion, cacheConfig, options);
+        return checkForUpdatesWithCache(
+          manifestUrl,
+          config.packageName,
+          currentVersion,
+          cacheConfig,
+          options,
+        );
       }
 
-      return checkForUpdates(manifestUrl, currentVersion);
+      return checkForUpdates(manifestUrl, config.packageName, currentVersion);
     },
 
     /**
      * Fetch the manifest.
      */
-    fetchManifest: () => fetchManifest(manifestUrl),
+    fetchManifest: () => fetchManifest(manifestUrl, config.packageName),
 
     /**
      * Perform the update.
      */
     performUpdate: (manifest: Manifest) =>
       performUpdate(manifest, { packageName: config.packageName }),
-
-    /**
-     * Clean up a failed update.
-     */
-    cleanupFailedUpdate,
 
     /**
      * Check if running as a compiled binary.
@@ -131,7 +136,8 @@ export interface MaybeAutoUpdateConfig extends UpdateConfig {
 
 /**
  * Perform auto-update if conditions are met (like wt's maybeAutoUpdate).
- * Returns true if an update was performed and the command should be re-executed.
+ * Returns true if an update was performed and the command already re-ran on the new binary, whose
+ * exit status is then in `process.exitCode`.
  */
 export async function maybeAutoUpdate(
   config: MaybeAutoUpdateConfig,
@@ -157,25 +163,37 @@ export async function maybeAutoUpdate(
     return false;
   }
 
-  const updateInfo = await updateSystem.checkForUpdates();
-  if (!updateInfo.hasUpdate) {
+  try {
+    const updateInfo = await updateSystem.checkForUpdates();
+    if (!updateInfo.hasUpdate) {
+      return false;
+    }
+
+    process.stderr.write(
+      `Updating ${config.packageName} from ${updateInfo.currentVersion} to ${updateInfo.latestVersion}...\n`,
+    );
+
+    const manifest = updateInfo.manifest ?? (await updateSystem.fetchManifest());
+    await updateSystem.performUpdate(manifest);
+  } catch (err) {
+    // Best effort: the command runs on the installed binary, and the next attempt waits for the
+    // cache TTL instead of failing every command. `<cli> update` reports the failure in full.
+    const message = err instanceof Error ? err.message.split("\n", 1)[0] : String(err);
+    process.stderr.write(
+      `Automatic update of ${config.packageName} failed: ${message}\nRun \`${config.packageName} update\` to retry.\n`,
+    );
+    await recordUpdateCheck(getCacheConfig(config), config.getCurrentVersion());
     return false;
   }
 
-  process.stderr.write(
-    `Updating ${config.packageName} from ${updateInfo.currentVersion} to ${updateInfo.latestVersion}...\n`,
-  );
-
-  const manifest = updateInfo.manifest ?? (await updateSystem.fetchManifest());
-  await updateSystem.performUpdate(manifest);
-
   process.stderr.write("Update complete. Re-running command...\n");
 
-  // Re-exec the current command with the new binary
-  // Must use process.execPath (real filesystem path) not process.argv[0] (may be internal bunfs path)
-  // Use spawnSync with array args to avoid shell metacharacter injection
-  const result = spawnSync(process.execPath, argv.slice(1), { stdio: "inherit" });
+  // Re-exec the current command with the new binary, passing on its exit status. process.execPath
+  // is the real file; argv[0] is "bun" and argv[1] the bundle's internal "/$bunfs/root/..." path,
+  // so only the arguments after them are the command's. Array args: no shell, no injection.
+  const result = spawnSync(process.execPath, argv.slice(2), { stdio: "inherit" });
   if (result.error) throw result.error;
+  process.exitCode = result.status ?? 1;
 
   return true;
 }
