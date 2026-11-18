@@ -43,7 +43,8 @@ export interface LspUriTranslation {
  * Only URI-valued properties are rewritten (`uri`, `targetUri`, the keys of a workspace edit's
  * `changes` and so on), wherever they are, so document text, edits' new text and hover markdown
  * pass untouched. Both directions rewrite the same properties, so opaque data a server gets back
- * (a completion item's `data`, a command's arguments) is what it sent. Every other URI, a library's
+ * (a completion item's `data`, a command's arguments) is what it sent, but for a `loxel://HEAD/`
+ * coming back as `loxel://head/`, which the server bridges match in any casing. Every other URI, a library's
  * `jdt://` document or another server's file, passes as it is.
  */
 export function lspUriTranslation(server: ServerId): LspUriTranslation {
@@ -102,9 +103,12 @@ function rewriteUris<T>(value: T, rewrite: (uri: string) => string): T {
 }
 
 function rewriteValue(value: unknown, rewrite: (uri: string) => string): unknown {
+  // Plain index loops that skip primitives: semantic tokens and completion lists are long arrays.
   if (Array.isArray(value)) {
     let copy: unknown[] | undefined;
-    for (const [i, item] of value.entries()) {
+    for (let i = 0; i < value.length; i++) {
+      const item: unknown = value[i];
+      if (typeof item !== "object" || item === null) continue;
       const next = rewriteValue(item, rewrite);
       if (next !== item) (copy ??= [...value])[i] = next;
     }
@@ -112,11 +116,21 @@ function rewriteValue(value: unknown, rewrite: (uri: string) => string): unknown
   }
   if (!isRecord(value)) return value;
   let copy: Record<string, unknown> | undefined;
-  for (const [key, item] of Object.entries(value)) {
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    const item = value[key];
     let next: unknown;
-    if (typeof item === "string") next = URI_KEYS.has(key) ? rewrite(item) : item;
-    else if (URI_MAP_KEYS.has(key) && isRecord(item)) next = rewriteKeys(item, rewrite);
-    else next = rewriteValue(item, rewrite);
+    if (typeof item === "string") {
+      if (!URI_KEYS.has(key)) continue;
+      next = rewrite(item);
+    } else if (typeof item !== "object" || item === null) {
+      continue;
+    } else if (URI_MAP_KEYS.has(key) && isRecord(item)) {
+      next = rewriteKeys(item, rewrite);
+    } else {
+      next = rewriteValue(item, rewrite);
+    }
     if (next !== item) (copy ??= { ...value })[key] = next;
   }
   return copy ?? value;

@@ -103,41 +103,28 @@ void getHighlighter().then((highlighter) => {
   followEditorThemes(highlighter, bridgeShiki);
 });
 
-// Connect to yaml-language-server — LSP features register async when capabilities arrive
-connectYamlLsp();
-
-// A restarted Loxel server dropped every language-server socket: reconnect the clients now
-// instead of waiting out their backoff, and those that gave up meanwhile.
-wsClient.onReconnect(resumeLanguageServers);
-
 /** The active worktree; null with Home. */
 function activeWorktree(): WorktreeRef | null {
   return getQueryScope().activeWorktree;
 }
 
-/** Calls `onChange` with the active worktree each time another one becomes active. */
-function onActiveWorktreeChange(onChange: (wt: WorktreeRef | null) => void): void {
-  let current = activeWorktree();
-  useWorktreeStore.subscribe(() => {
-    const next = activeWorktree();
-    if (next === current || (next && current && sameWorktreeRef(next, current))) return;
-    current = next;
-    onChange(next);
-  });
-}
+const activeWorktreeListeners = new Set<(wt: WorktreeRef | null) => void>();
 
-// Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
-// the worktree path so project-level features (cross-file refs, module
-// resolution) resolve correctly.
-// Reconnect whenever the active worktree changes.
-{
-  const initialWt = activeWorktree();
-  if (initialWt) connectTsLsp(initialWt);
-  onActiveWorktreeChange((wt) => {
-    if (wt) connectTsLsp(wt);
-    // The last worktree of a bare project was removed: nothing is left to serve.
-    else disconnectTsLsp();
-  });
+/**
+ * Calls `onChange` with the active worktree each time another one becomes active. One store
+ * subscription serves every listener, so a store change reads the scope once.
+ */
+function onActiveWorktreeChange(onChange: (wt: WorktreeRef | null) => void): void {
+  if (activeWorktreeListeners.size === 0) {
+    let current = activeWorktree();
+    useWorktreeStore.subscribe(() => {
+      const next = activeWorktree();
+      if (next === current || (next && current && sameWorktreeRef(next, current))) return;
+      current = next;
+      for (const listener of activeWorktreeListeners) listener(next);
+    });
+  }
+  activeWorktreeListeners.add(onChange);
 }
 
 // Some LSPs are expensive to spawn (they walk the whole workspace) and most
@@ -205,7 +192,33 @@ function createLazyLspConnector(opts: LspClient): void {
   });
 }
 
-for (const client of lazyLspClients) createLazyLspConnector(client);
+/**
+ * Connect the language servers: YAML at once, TypeScript to the active worktree, the lazy ones as
+ * their files open. Their worktrees are refs on the window's server, so `main.tsx` calls this once
+ * that server is known, before the first render.
+ */
+export function startLanguageServers(): void {
+  // Connect to yaml-language-server — LSP features register async when capabilities arrive
+  connectYamlLsp();
+
+  // A restarted Loxel server dropped every language-server socket: reconnect the clients now
+  // instead of waiting out their backoff, and those that gave up meanwhile.
+  wsClient.onReconnect(resumeLanguageServers);
+
+  // Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
+  // the worktree path so project-level features (cross-file refs, module
+  // resolution) resolve correctly.
+  // Reconnect whenever the active worktree changes.
+  const initialWt = activeWorktree();
+  if (initialWt) connectTsLsp(initialWt);
+  onActiveWorktreeChange((wt) => {
+    if (wt) connectTsLsp(wt);
+    // The last worktree of a bare project was removed: nothing is left to serve.
+    else disconnectTsLsp();
+  });
+
+  for (const client of lazyLspClients) createLazyLspConnector(client);
+}
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
 // Permissive mode: comments/trailing commas are NOT flagged here.

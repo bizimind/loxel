@@ -54,6 +54,7 @@ describe("editorFile", () => {
   test("is null for a URI with no server, as servers send them", () => {
     expect(editorFile(uri("file", ""))).toBeNull();
     expect(editorFile(uri("loxel", "HEAD"))).toBeNull();
+    expect(editorFile(uri("loxel", "head"))).toBeNull();
     expect(editorFile(uri("file", "host:80"))).toBeNull();
   });
 

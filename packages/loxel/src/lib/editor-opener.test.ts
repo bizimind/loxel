@@ -75,10 +75,14 @@ describe("createEditorOpener", () => {
       handled: true,
       calls: [[at("/usr/lib/python3.12/os.py"), { line: 3, column: 5 }]],
     });
-    // A source that is no editor file has no server to give it.
-    expect(open("file:///usr/lib/os.py", sourceAt("inmemory://model/1"))).toEqual({
-      handled: false,
-      calls: [],
+    expect(open("loxel://HEAD/repo/b.ts")).toEqual({
+      handled: true,
+      calls: [[at("/repo/b.ts"), { line: 3, column: 5 }]],
+    });
+    // In a read-only document's tab, which is no editor file, the window's server.
+    expect(open("file:///usr/lib/os.py", sourceAt("jdt://contents/List.class"))).toEqual({
+      handled: true,
+      calls: [[at("/usr/lib/os.py"), { line: 3, column: 5 }]],
     });
   });
 

@@ -34,16 +34,22 @@ function openEditorFile(file: EditorFile, location: FileLocation): void {
 }
 
 /**
- * The file a navigation target names: an editor model URI (see `editorFile`), or a `file:///` URI
- * with no server, such as a link in a server's hover text, which names a file of the server whose
- * model it was shown in.
+ * The file a navigation target names: an editor model URI (see `editorFile`), or a URI that names
+ * no server (`file:///<path>`, or `loxel://HEAD/<path>` as the TypeScript bridge writes it), such
+ * as a link in a server's hover text. That one names a file of the server whose model it was shown
+ * in, or of the window's for a model that is no editor file (a read-only document's tab, whose
+ * connection is on the window's server).
  */
 function targetFile(resource: monaco.Uri, source: monaco.editor.ICodeEditor): EditorFile | null {
   const file = editorFile(resource);
-  if (file || resource.scheme !== "file" || resource.authority || resource.query) return file;
+  if (file || resource.query || resource.fragment) return file;
+  const namesNoServer =
+    (resource.scheme === "file" && !resource.authority) ||
+    (resource.scheme === "loxel" && resource.authority.toLowerCase() === "head");
+  if (!namesNoServer) return null;
   const sourceUri = source.getModel()?.uri;
-  const sourceFile = sourceUri ? editorFile(sourceUri) : null;
-  return sourceFile ? { server: sourceFile.server, path: resource.path } : null;
+  const server = (sourceUri ? editorFile(sourceUri)?.server : undefined) ?? localServerId();
+  return { server, path: resource.path };
 }
 
 /**

@@ -42,13 +42,15 @@ export function editorFileUri(file: EditorFile, scheme: EditorUriScheme): monaco
  * for files no tab has open. Diff and history sides (`loxel://<ref>/<path>#<side>`, including
  * working-tree sides at `loxel://working-tree/...#new`) and compare sides
  * (`loxel://compare/...#<panel>-<side>`) carry a fragment and are not editor files, and neither is
- * a URI with no authority, such as a `file:///` link in a server's hover text.
+ * a URI that names no server, such as a `file:///` link in a server's hover text or a
+ * `loxel://HEAD/` one the TypeScript bridge wrote.
  */
 export function editorFile(uri: ModelUri): EditorFile | null {
   if (uri.query || uri.fragment || !uri.authority) return null;
   if (uri.scheme !== "file" && uri.scheme !== "loxel") return null;
-  // Only what `serverAuthority` writes: no port, user info or uppercase.
-  if (!SERVER_AUTHORITY.test(uri.authority)) return null;
+  // Only what `serverAuthority` writes: no port, user info or uppercase. `head` is the authority
+  // the servers' own `loxel:` URIs use, which names no server.
+  if (!SERVER_AUTHORITY.test(uri.authority) || uri.authority === "head") return null;
   return { server: toServerId(uri.authority), path: uri.path };
 }
 
