@@ -43,6 +43,12 @@ export function setupOuterDockview(api: DockviewApi): void {
     centerHostGroup.header.hidden = true;
   }
 
+  // No outer group shows tabs, including one created later (a panel opened into a zone with no
+  // group). The first restore runs before this listener exists, so applyHiddenHeaders covers it.
+  api.onDidAddGroup((group) => {
+    group.header.hidden = true;
+  });
+
   // Sidebar panel drag (DraggablePanelHeader) — sync toolbar entries after drop
   api.onWillDragPanel((event) => {
     const draggedId = event.panel.id as PanelId;
