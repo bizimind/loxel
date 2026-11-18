@@ -75,7 +75,8 @@ const { dispatchLoxelEvent } = await import("./loxel-events");
 type OutboxEntry = import("./save-outbox").OutboxEntry;
 type OutboxStorage = import("./save-outbox").OutboxStorage;
 const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
-const { localServerId } = await import("@/api/local-server");
+const localServerModule = await import("@/api/local-server");
+const { localServerId } = localServerModule;
 const { useProjectStore } = await import("@/store/projects");
 
 const TEST_SERVER = localServerId();
@@ -393,6 +394,22 @@ describe("recovery", () => {
     expect(outboxEntriesForTests().map((e) => [e.status, e.disk])).toEqual([
       ["review", "A\nb\nc\n"],
     ]);
+  });
+
+  test("a save in review is shown at start, before the window's server is known", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e1", leftBehind({ status: "review", disk: "A\nb\nc\n" }));
+    // main.tsx starts the outbox while it still waits for `/api/version`.
+    const unknown = spyOn(localServerModule, "localServerId").mockImplementation(() => {
+      throw new Error("The window's server is not known yet");
+    });
+    try {
+      await initSaveOutbox({ storage });
+    } finally {
+      unknown.mockRestore();
+    }
+    expect(opened).toEqual([FILE]);
+    expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
   });
 
   test("the entries of a window still open are left to it", async () => {

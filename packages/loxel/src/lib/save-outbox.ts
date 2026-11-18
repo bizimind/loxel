@@ -8,7 +8,6 @@
  */
 
 import * as api from "@/api/client";
-import { localServerId } from "@/api/local-server";
 import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -26,7 +25,6 @@ import {
   type EditorFileEntry,
   type EditorKey,
   diskBase,
-  fileEditorKey,
   isFileTabKey,
   useEditorStateStore,
 } from "@/store/editor-state";
@@ -690,10 +688,13 @@ function toReview(entry: OutboxEntry, disk: string | null): void {
   // An open editor already shows the edits (with its conflict or deleted banner).
   if (ownerEditor(entry)) return;
   const name = getDisplayFilename(entry.filePath);
-  // An entry names no server yet (#1456): its file is on the window's.
-  const tabKey = fileEditorKey(localServerId(), entry.filePath);
-  const tab = useEditorStateStore.getState().files.get(tabKey);
-  if (tab) {
+  // An entry names no server yet (#1456), so its file's tab is found by path. Recovered entries
+  // get here before the window's server is known, so no key is built from it.
+  const [tabKey, tab] =
+    [...useEditorStateStore.getState().files].find(
+      ([key, editor]) => editor.filePath === entry.filePath && isFileTabKey(key, editor),
+    ) ?? [];
+  if (tabKey && tab) {
     // The file's tab is open (the save came from a closed compare side, or the tab was reopened
     // while the save was being sent): show the edits there if it has none of its own.
     const applied =

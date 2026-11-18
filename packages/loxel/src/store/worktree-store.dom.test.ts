@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 
 import { localRef, localServerId } from "@/api/local-server";
 import { toServerId, worktreeRef } from "@/api/worktree-ref";
@@ -22,6 +22,8 @@ const THERE = worktreeRef(toServerId("other-server"), PATH);
 const counter = createWorktreeStore<{ count: number }>(() => ({ count: 0 }));
 
 afterEach(() => {
+  cleanup();
+  counter.getStore(null).setState({ count: 0 }); // Home's instance is never purged
   for (const wt of [HERE, THERE]) {
     purgeWorktreeStores(wt);
     purgeWorktreeCache(wt);
