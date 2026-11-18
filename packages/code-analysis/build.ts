@@ -22,6 +22,13 @@
  *    `$bunfs`, where package resolution is unavailable. Patched to use Acorn's
  *    public static `version` export, which Bun can bundle normally.
  *
+ * One more patch hardens it: `getAliasTypes` in `module-classifiers.mjs` turns the
+ * analyzed project's `package.json` `workspaces` globs (through picomatch, which has an
+ * unpatched backtracking flaw, CVE-2026-112366) and its `imports` and tsconfig `paths`
+ * keys into regexes, so a project's own config could stall every resolved import.
+ * Its alias types only feed `dependencyTypes`, which the import-graph plugin never
+ * reads, so the patch makes it return no alias types and output is unchanged.
+ *
  * All patches are applied before `bun build --compile` and restored afterward.
  *
  * After compiling, the binary runs the import-graph plugin over `src` as a smoke
@@ -107,6 +114,20 @@ const patches: Patch[] = [
         `  transpile: (pSource) => pSource,`,
         `};`,
       ].join("\n");
+    },
+  },
+  {
+    // Patch 5: classify no import as aliased (see the header).
+    path: join(nmDir, "extract/resolve/module-classifiers.mjs"),
+    apply(content) {
+      const signature = /export function getAliasTypes\([^)]*\)\s*\{/g;
+      const matches = content.match(signature)?.length ?? 0;
+      if (matches !== 1) {
+        throw new Error(
+          `build: expected 1 getAliasTypes in module-classifiers.mjs, found ${matches}`,
+        );
+      }
+      return content.replace(signature, "$&\n\treturn [];");
     },
   },
 ];

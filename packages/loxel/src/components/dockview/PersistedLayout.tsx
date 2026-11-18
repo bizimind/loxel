@@ -3,6 +3,7 @@ import { DockviewReact } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
@@ -197,7 +198,8 @@ export function PersistedLayoutComponent({
   const pendingPayloadRef = useRef<Map<string, string>>(new Map());
   const [hydrated, setHydrated] = useState(false);
 
-  useEffect(() => registerLayoutCache(cacheRef.current), []);
+  // Layouts are stored on the window's server, under their worktree's bare path.
+  useEffect(() => registerLayoutCache(localServerId(), cacheRef.current), []);
 
   // Stable refs for callbacks to avoid stale closures
   const onLayoutRestoredRef = useRef(onLayoutRestored);

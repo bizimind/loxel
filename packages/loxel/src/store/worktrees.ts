@@ -670,11 +670,11 @@ export function isListedWorktree(path: string): boolean {
  * at the same path starts fresh. `discarded`: the user removed it in Loxel, giving up what it held.
  */
 function releaseWorktree(path: string, discarded = false): void {
-  purgeWorktreeStores(path);
-  closeLayoutBrowserPages(path);
-  purgeWorktreeCache(path);
-  useFileSearchStore.getState().purgeWorktree(path);
   const ref = localRef(path);
+  purgeWorktreeStores(ref);
+  closeLayoutBrowserPages(path);
+  purgeWorktreeCache(ref);
+  useFileSearchStore.getState().purgeWorktree(path);
   const homeServer = localServerId();
   queryClient.removeQueries({
     predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, ref, homeServer),

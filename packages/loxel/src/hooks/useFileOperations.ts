@@ -9,6 +9,7 @@ import { deleteFile, renameFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
+import { getQueryScope } from "@/queries/use-scope";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -69,7 +70,7 @@ export function useFileOperations(
         return;
       }
       try {
-        const wt = useWorktreeStore.getState().activeWorktreePath;
+        const wt = getQueryScope().activeWorktree;
         if (!wt) {
           treeRef.current?.focusPath(path);
           return;
@@ -104,7 +105,7 @@ export function useFileOperations(
     const { path } = deleteTarget;
     setDeleteTarget(null);
     try {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = getQueryScope().activeWorktree;
       if (!wt) return;
 
       await deleteFile({ wt, path, isDetached: isDetachedPath(path) });

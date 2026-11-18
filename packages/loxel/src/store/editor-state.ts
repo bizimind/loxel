@@ -1,12 +1,42 @@
 import { create } from "zustand";
 
+import type { ServerId } from "../api/worktree-ref";
 import type { SaveOptions } from "../lib/save-editor-content";
 import { threeWayMerge } from "../lib/three-way-merge";
 
 export type EditorFileState = "clean" | "dirty" | "saving" | "diverged";
 
+/**
+ * An editor's key in `useEditorStateStore`, built only by `fileEditorKey` or `viewEditorKey`, so a
+ * bare path cannot address an editor.
+ */
+export type EditorKey = string & { readonly editorKeyBrand: unique symbol };
+
+/**
+ * The key of a file's own tab: the file's server and absolute path, so a file has at most one tab
+ * and the same path on two servers gets two.
+ */
+export function fileEditorKey(server: ServerId, filePath: string): EditorKey {
+  return `file:${server}:${filePath}` as EditorKey;
+}
+
+/**
+ * The key of another view of a file, such as a side of a compare panel: `viewId` names the view
+ * and must be unique in the window.
+ */
+export function viewEditorKey(viewId: string): EditorKey {
+  return `view:${viewId}` as EditorKey;
+}
+
+/** Whether `key` is the key of `entry`'s file tab, rather than of another view of the file. */
+export function isFileTabKey(key: EditorKey, entry: EditorFileEntry): boolean {
+  return key === fileEditorKey(entry.server, entry.filePath);
+}
+
 export interface EditorFileEntry {
-  /** Absolute path of the file this editor shows; several entries can share one. */
+  /** The server that holds the file. */
+  server: ServerId;
+  /** Absolute path of the file this editor shows, on `server`; several entries can share one. */
   filePath: string;
   /** Unique per mounted editor: a tab closed and reopened on the same key gets a new one. Ties a
    *  save waiting in the outbox ([save-outbox.ts](../lib/save-outbox.ts)) to the editor that made it. */
@@ -64,55 +94,56 @@ export interface PendingEdit {
 }
 
 /**
- * One entry per open editor, keyed by its editor key: the file path for a file's own tab (so a
- * path has at most one tab), or a key of the editor's choosing for other views of the file, such
- * as a side of a compare panel. Editors of the same file reconcile with disk independently; a
- * save by one reaches the others as an external change. All actions below take the editor key.
+ * One entry per open editor, keyed by its editor key: `fileEditorKey` for a file's own tab, or
+ * `viewEditorKey` for other views of the file, such as a side of a compare panel. Editors of the
+ * same file reconcile with disk independently; a save by one reaches the others as an external
+ * change. All actions below take the editor key.
  */
 interface EditorStateStore {
-  files: Map<string, EditorFileEntry>;
+  files: Map<EditorKey, EditorFileEntry>;
 
-  /** Register an editor; `filePath` defaults to the key. Idempotent. */
-  openFile: (key: string, filePath?: string) => void;
-  closeFile: (key: string) => void;
-  markDirty: (key: string) => void;
-  markSaving: (key: string, nonce: string) => void;
-  handleSaveError: (key: string, nonce: string) => void;
+  /** Register an editor of `filePath` on `server`. Idempotent. */
+  openFile: (key: EditorKey, server: ServerId, filePath: string) => void;
+  closeFile: (key: EditorKey) => void;
+  markDirty: (key: EditorKey) => void;
+  markSaving: (key: EditorKey, nonce: string) => void;
+  handleSaveError: (key: EditorKey, nonce: string) => void;
   /** The server wrote `content` for the save `nonce`: it is the merge base from now on, if that
    *  save is the newest one in flight (an older save's late response would be stale). */
-  markWritten: (key: string, nonce: string, content: string) => void;
+  markWritten: (key: EditorKey, nonce: string, content: string) => void;
   /** Mark whether a save of this editor waits in the outbox. */
-  setQueued: (key: string, queued: boolean) => void;
+  setQueued: (key: EditorKey, queued: boolean) => void;
   /**
    * Take over an outbox save in a freshly mounted editor that shows its content: `dirty` on
    * `base`, or `diverged` from `disk` when the save conflicted with the file on disk.
    */
-  adoptQueuedEdit: (key: string, edit: { base: string | null; disk: string | null }) => void;
+  adoptQueuedEdit: (key: EditorKey, edit: { base: string | null; disk: string | null }) => void;
   /** Core state machine: handle an external disk change notification. */
-  handleDiskChange: (key: string, nonces: string[], diskContent: string) => void;
-  acceptDiskVersion: (key: string) => void;
-  keepMyChanges: (key: string) => void;
-  clearPendingNonce: (key: string, nonce: string) => void;
+  handleDiskChange: (key: EditorKey, nonces: string[], diskContent: string) => void;
+  acceptDiskVersion: (key: EditorKey) => void;
+  keepMyChanges: (key: EditorKey) => void;
+  clearPendingNonce: (key: EditorKey, nonce: string) => void;
   /** Record whether the file exists on disk. `handleDiskChange` clears the flag itself. */
-  setDeleted: (key: string, deleted: boolean) => void;
+  setDeleted: (key: EditorKey, deleted: boolean) => void;
   /** Mark an open file as moving to `newPath`, or clear it (null) if the move is abandoned. */
-  setMovedTo: (key: string, newPath: string | null) => void;
+  setMovedTo: (key: EditorKey, newPath: string | null) => void;
   /** Register (or clear, with null) the editor's `takePendingEdit`. */
-  registerPendingEdit: (key: string, take: (() => PendingEdit | null) | null) => void;
+  registerPendingEdit: (key: EditorKey, take: (() => PendingEdit | null) | null) => void;
   /** Set the merge base content (called when state reaches clean). */
-  setBaseContent: (key: string, content: string) => void;
+  setBaseContent: (key: EditorKey, content: string) => void;
   /** Register editor callbacks for 3-way auto-merge. */
   registerEditorCallbacks: (
-    key: string,
+    key: EditorKey,
     getContent: () => string | null,
     applyContent: (merged: string, programmatic: boolean) => string | null,
   ) => void;
   /** Unregister editor callbacks (on unmount). */
-  unregisterEditorCallbacks: (key: string) => void;
+  unregisterEditorCallbacks: (key: EditorKey) => void;
 }
 
-function defaultEntry(filePath: string): EditorFileEntry {
+function defaultEntry(server: ServerId, filePath: string): EditorFileEntry {
   return {
+    server,
     filePath,
     instanceId: crypto.randomUUID(),
     state: "clean",
@@ -133,11 +164,11 @@ function defaultEntry(filePath: string): EditorFileEntry {
 export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
   files: new Map(),
 
-  openFile: (key, filePath = key) => {
+  openFile: (key, server, filePath) => {
     set((s) => {
       if (s.files.has(key)) return s;
       const files = new Map(s.files);
-      files.set(key, defaultEntry(filePath));
+      files.set(key, defaultEntry(server, filePath));
       return { files };
     });
   },
@@ -549,9 +580,13 @@ export function diskBase(entry: EditorFileEntry): string | null {
   return entry.mergedDiskContent ?? entry.baseContent;
 }
 
-/** Distinct paths of every open editor. */
-export function openEditorPaths(files: Map<string, EditorFileEntry>): string[] {
-  return [...new Set([...files.values()].map((entry) => entry.filePath))];
+/** Distinct paths of every open editor of a file on `server`. */
+export function openEditorPaths(
+  files: Map<EditorKey, EditorFileEntry>,
+  server: ServerId,
+): string[] {
+  const paths = [...files.values()].filter((entry) => entry.server === server);
+  return [...new Set(paths.map((entry) => entry.filePath))];
 }
 
 interface AutoMergeOptions {
@@ -575,11 +610,11 @@ interface AutoMergeOptions {
 function tryAutoMerge(
   entry: EditorFileEntry,
   diskContent: string,
-  key: string,
+  key: EditorKey,
   setFn: (
     fn: (s: {
-      files: Map<string, EditorFileEntry>;
-    }) => { files: Map<string, EditorFileEntry> } | { files: Map<string, EditorFileEntry> },
+      files: Map<EditorKey, EditorFileEntry>;
+    }) => { files: Map<EditorKey, EditorFileEntry> } | { files: Map<EditorKey, EditorFileEntry> },
   ) => void,
   options?: AutoMergeOptions,
 ): boolean {

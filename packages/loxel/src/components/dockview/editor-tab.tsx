@@ -2,8 +2,9 @@ import type { IDockviewPanelHeaderProps } from "dockview-react";
 
 import { useFileTabRename } from "@/hooks/useFileTabRename";
 import { getDisplayFilename } from "@/lib/detached-path";
-import { useEditorStateStore } from "@/store/editor-state";
+import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 
+import { panelServerOf } from "./panel-context";
 import { DELETED_TAB_TITLE_CLASS, DivergedDot, FileContextMenuItems, QueuedDot, Tab } from "./tab";
 
 interface EditorTabProps {
@@ -20,9 +21,10 @@ export function EditorTab({ props, icon }: EditorTabProps) {
   const filePath = props.params.filePath;
   const filename = getDisplayFilename(filePath);
   const handleRename = useFileTabRename(filePath);
-  const isDiverged = useEditorStateStore((s) => s.files.get(filePath)?.state === "diverged");
-  const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
-  const isQueued = useEditorStateStore((s) => s.files.get(filePath)?.queued ?? false);
+  const key = fileEditorKey(panelServerOf(props.params.worktreePath), filePath);
+  const isDiverged = useEditorStateStore((s) => s.files.get(key)?.state === "diverged");
+  const isDeleted = useEditorStateStore((s) => s.files.get(key)?.deleted ?? false);
+  const isQueued = useEditorStateStore((s) => s.files.get(key)?.queued ?? false);
 
   let leading: React.ReactNode = null;
   if (isDiverged) leading = <DivergedDot title="File changed on disk" />;

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
+
 const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
 
@@ -9,7 +11,7 @@ const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, dropInb
 const { wsClient } = await import("@/api/client");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
-const { HOME_LAYOUT_KEY } = await import("@/store/active-worktree");
+const { HOME_LAYOUT_KEY, layoutWorktree } = await import("@/store/active-worktree");
 const { getWorktreeUI } = await import("@/store/worktree-ui");
 const { useWorktreeStore } = await import("@/store/worktrees");
 
@@ -50,11 +52,12 @@ describe("opens from outside the window", () => {
   afterEach(() => {
     for (const cleanup of cleanups) cleanup();
     for (const key of [MAIN, OTHER, HOME_LAYOUT_KEY])
-      getWorktreeUI(key).getState().takePendingOpens();
+      getWorktreeUI(layoutWorktree(key)).getState().takePendingOpens();
     setCenterApi(null);
   });
 
-  const pending = (worktree: string) => getWorktreeUI(worktree).getState().pendingOpens;
+  const pending = (worktree: string) =>
+    getWorktreeUI(layoutWorktree(worktree)).getState().pendingOpens;
 
   test("a page for the worktree on screen opens right away", async () => {
     await openUrl(MAIN, { url: URL_TARGET });
@@ -158,7 +161,7 @@ describe("opens from outside the window", () => {
     expect(pending(OTHER)).toHaveLength(1);
     expect(sent).toEqual([]);
 
-    for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
+    for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
       dispatchPendingOpen(open);
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     const done = { type: "inbox_open_done", inboxId: "in-1" };
@@ -182,7 +185,7 @@ describe("opens from outside the window", () => {
 
     await openFromInbox("in-2", message);
     dropInboxOpen("in-2");
-    for (const open of getWorktreeUI(OTHER).getState().takePendingOpens())
+    for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
       dispatchPendingOpen(open);
     expect(created).toEqual([]);
     expect(sent).toEqual([]);
@@ -264,7 +267,7 @@ describe("opens from outside the window", () => {
     await Promise.all([first, second]);
     expect(pending(fresh)).toEqual([{ kind: "url", url: URL_TARGET, focus: false }]);
     expect(openedFiles).toEqual([`${MAIN}/a.md`]);
-    getWorktreeUI(fresh).getState().takePendingOpens();
+    getWorktreeUI(localRef(fresh)).getState().takePendingOpens();
   });
 
   test("a failed worktree refresh still opens in the worktree the server named", async () => {
@@ -278,6 +281,6 @@ describe("opens from outside the window", () => {
     await openUrl(fresh, { url: URL_TARGET, focus: false });
 
     expect(pending(fresh)).toEqual([{ kind: "url", url: URL_TARGET, focus: false }]);
-    getWorktreeUI(fresh).getState().takePendingOpens();
+    getWorktreeUI(localRef(fresh)).getState().takePendingOpens();
   });
 });

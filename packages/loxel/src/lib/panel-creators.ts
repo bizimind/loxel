@@ -18,14 +18,16 @@ import type { AgentOrigin } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
 import { HOME_KEY } from "@/api/home-model";
+import { localServerId } from "@/api/local-server";
 import type {
   PanelOpenOptions,
   PanelPlacement,
   PlacementTab,
   SplitDirection,
 } from "@/api/panel-placement-model";
+import type { ServerId } from "@/api/worktree-ref";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
-import { getPanelWorktreePath } from "@/components/dockview/panel-context";
+import { getPanelServer, getPanelWorktree } from "@/components/dockview/panel-context";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { showToast } from "@/components/ui/toast";
@@ -42,9 +44,9 @@ import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-d
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { activeLayoutKey, layoutWorktree } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
-import { useEditorStateStore } from "@/store/editor-state";
+import { fileEditorKey, isFileTabKey, useEditorStateStore } from "@/store/editor-state";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -514,7 +516,8 @@ export function reopenClosedTab(): void {
   const layoutKey = getCenterApiLayoutKey();
   // While switching worktrees the center is about to be replaced, and the panel with it.
   if (!dv || !layoutKey || layoutKey !== activeLayoutKey()) return;
-  const tab = takeLastClosedTab(layoutKey, (id) => dv.getPanel(id) !== undefined);
+  const worktree = layoutWorktree(layoutKey);
+  const tab = takeLastClosedTab(worktree, (id) => dv.getPanel(id) !== undefined);
   if (!tab) return;
 
   const { groupId, index, ...options } = tab;
@@ -524,7 +527,7 @@ export function reopenClosedTab(): void {
     options.params = { ...options.params, terminalId };
     const title = options.title ?? nextPanelTitle(dv, "Terminal");
     options.title = title;
-    if (layoutKey !== HOME_LAYOUT_KEY) {
+    if (worktree) {
       getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
     }
   }
@@ -538,7 +541,7 @@ export function reopenClosedTab(): void {
     : addPlacedPanel(dv, undefined, options);
   if (panel.group.id !== groupId) {
     const newIndex = panel.group.panels.indexOf(panel);
-    retargetClosedTabs(layoutKey, groupId, panel.group.id, newIndex - index);
+    retargetClosedTabs(worktree, groupId, panel.group.id, newIndex - index);
   }
   uiLog.info("Panel reopened", { panelId: options.id });
 }
@@ -654,22 +657,24 @@ export async function handleFileMoved(
 
   const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
   if (!oldPanel) return false;
+  const server = getPanelServer(oldPanel);
+  const oldKey = fileEditorKey(server, oldPath);
 
   // An editor in conflict holds edits that may not overwrite the disk version, so it cannot be
   // carried over by saving; it stays on the old path, which then shows as deleted.
   const store = useEditorStateStore.getState();
-  if (store.files.get(oldPath)?.state === "diverged") return false;
+  if (store.files.get(oldKey)?.state === "diverged") return false;
 
   // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
   // state. A clean old tab is just dropped; one with unsaved edits stays on its old path, shown
   // as deleted, since there is no tab to carry the edits into.
   if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
-    const oldState = store.files.get(oldPath)?.state;
+    const oldState = store.files.get(oldKey)?.state;
     if (oldState === "dirty" || oldState === "saving") {
-      store.setDeleted(oldPath, true);
+      store.setDeleted(oldKey, true);
       return false;
     }
-    store.closeFile(oldPath);
+    store.closeFile(oldKey);
     oldPanel.api.close();
     return false;
   }
@@ -677,14 +682,15 @@ export async function handleFileMoved(
   movesInProgress.add(oldPath);
   try {
     // From here on the old path's autosave and disk events no longer apply.
-    store.setMovedTo(oldPath, newPath);
-    const state = store.files.get(oldPath)?.state;
+    store.setMovedTo(oldKey, newPath);
+    const state = store.files.get(oldKey)?.state;
     if (state === "dirty" || state === "saving") {
-      const carried = await carryPendingEdit(oldPath, newPath, getPanelWorktreePath(oldPanel));
+      const worktreePath = getPanelWorktree(oldPanel)?.path ?? null;
+      const carried = await carryPendingEdit(server, oldPath, newPath, worktreePath);
       if (!carried) {
         const current = useEditorStateStore.getState();
-        current.setMovedTo(oldPath, null);
-        current.setDeleted(oldPath, true);
+        current.setMovedTo(oldKey, null);
+        current.setDeleted(oldKey, true);
         return false;
       }
     }
@@ -702,6 +708,7 @@ export async function handleFileMoved(
  * write, leaving the edits in the old editor.
  */
 async function carryPendingEdit(
+  server: ServerId,
   oldPath: string,
   newPath: string,
   worktreePath: string | null,
@@ -714,7 +721,7 @@ async function carryPendingEdit(
     return false;
   }
   // Taken after the read, so edits typed meanwhile are included (autosave is off while moving).
-  const entry = useEditorStateStore.getState().files.get(oldPath);
+  const entry = useEditorStateStore.getState().files.get(fileEditorKey(server, oldPath));
   const pending = entry?.takePendingEdit?.() ?? null;
   if (!entry || !pending) return true;
 
@@ -730,7 +737,13 @@ async function carryPendingEdit(
     content = merged.merged;
   }
   // Awaited: if the write fails, the edits must stay in the old tab rather than be dropped.
-  return saveEditorContent(newPath, content, worktreePath, pending.options);
+  return saveEditorContent(
+    newPath,
+    content,
+    worktreePath,
+    pending.options,
+    fileEditorKey(server, newPath),
+  );
 }
 
 /** Open the moved file's tab in the old tab's place and close the old one. */
@@ -779,10 +792,19 @@ function replaceMovedPanel(
  * autosave cannot re-create the file.
  */
 function markOtherViewsDeleted(path: string): void {
+  const server = centerServer();
   const store = useEditorStateStore.getState();
   for (const [key, entry] of store.files) {
-    if (key !== entry.filePath && isWithin(entry.filePath, path)) store.setDeleted(key, true);
+    if (entry.server !== server || isFileTabKey(key, entry)) continue;
+    if (isWithin(entry.filePath, path)) store.setDeleted(key, true);
   }
+}
+
+/** The server holding the center layout's files: its worktree's, or the window's in Home. */
+function centerServer(): ServerId {
+  const layoutKey = getCenterApiLayoutKey();
+  const worktree = layoutKey === null ? null : layoutWorktree(layoutKey);
+  return worktree?.server ?? localServerId();
 }
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */
@@ -796,7 +818,7 @@ export function handleFileDeleted(filePath: string): void {
   for (const panel of dv.panels) {
     const panelPath = getPanelFilePath(panel.params);
     if (panelPath === filePath || panelPath?.startsWith(filePath + "/")) {
-      useEditorStateStore.getState().closeFile(panelPath);
+      useEditorStateStore.getState().closeFile(fileEditorKey(getPanelServer(panel), panelPath));
       panel.api.close();
     }
   }

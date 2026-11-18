@@ -1,6 +1,7 @@
 import type { editor as monacoEditor } from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { ServerId } from "@/api/worktree-ref";
 import {
   type MergeCallbacks,
   useDiskSyncedContent,
@@ -10,7 +11,7 @@ import { computeLineEdits } from "@/lib/compute-line-edits";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
-import { useEditorStateStore } from "@/store/editor-state";
+import { type EditorKey, useEditorStateStore, viewEditorKey } from "@/store/editor-state";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 
 import type { DiffSide } from "./SideBySideDiffView";
@@ -26,13 +27,16 @@ export const REDIFF_DELAY_MS = 100;
  * Editor-state key of an editable diff side (see `useEditorStateStore`): the view that owns the
  * side (a compare panel's id, or the working-tree file of a git diff) and which side it is.
  */
-export function editableSideKey(ownerId: string, side: "old" | "new"): string {
-  return `${ownerId}:${side}`;
+export function editableSideKey(ownerId: string, side: "old" | "new"): EditorKey {
+  return viewEditorKey(`${ownerId}:${side}`);
 }
 
-/** Editor-state key of the editable working-tree side of a git diff, by the file's absolute path. */
-export function workingTreeSideKey(absPath: string): string {
-  return editableSideKey(`working-tree:${absPath}`, "new");
+/**
+ * Editor-state key of the editable working-tree side of a git diff, by the file's server and
+ * absolute path.
+ */
+export function workingTreeSideKey(server: ServerId, absPath: string): EditorKey {
+  return editableSideKey(`working-tree:${server}:${absPath}`, "new");
 }
 
 export interface EditableSide {
@@ -70,7 +74,7 @@ export interface EditableSide {
  * unmounting. While an editor is mounted, disk content and merges are applied to it and reach the
  * text through its change events.
  */
-export function useEditableSide(filePath: string, editorKey: string): EditableSide {
+export function useEditableSide(filePath: string, editorKey: EditorKey): EditableSide {
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   const [text, setText] = useState<string | null>(null);
   const textRef = useRef<string | null>(null);

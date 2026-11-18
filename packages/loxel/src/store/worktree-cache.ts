@@ -8,22 +8,35 @@
  */
 import type { SerializedDockview } from "dockview-react";
 
+import { formatWorktreeRef, type ServerId, type WorktreeRef } from "@/api/worktree-ref";
+import { getQueryScope } from "@/queries/use-scope";
+
 import { useCommentStore } from "./comments";
-import { getActiveWorktreeKey } from "./worktree-store";
 
 // --- Generic per-worktree cache for component-local state ---
 
-/** Arbitrary worktree values keyed by `${scopeKey}::${key}`. */
-const worktreeCache = new Map<string, unknown>();
+/** Arbitrary values per worktree (by `formatWorktreeRef`, `null` for Home), then by key. */
+const worktreeCache = new Map<string | null, Map<string, unknown>>();
+
+function activeScope(): string | null {
+  const { activeWorktree } = getQueryScope();
+  return activeWorktree && formatWorktreeRef(activeWorktree);
+}
 
 /** Get a cached value for the current scope. Cast at the call site. */
 export function getWorktreeValue(key: string): unknown {
-  return worktreeCache.get(`${getActiveWorktreeKey()}::${key}`);
+  return worktreeCache.get(activeScope())?.get(key);
 }
 
 /** Save a value for the current scope. */
 export function setWorktreeValue(key: string, value: unknown): void {
-  worktreeCache.set(`${getActiveWorktreeKey()}::${key}`, value);
+  const scope = activeScope();
+  let values = worktreeCache.get(scope);
+  if (!values) {
+    values = new Map();
+    worktreeCache.set(scope, values);
+  }
+  values.set(key, value);
 }
 
 /** Get a saved inner dockview layout for the current scope. */
@@ -36,26 +49,28 @@ export function setWorktreeInnerLayout(containerId: string, layout: SerializedDo
   setWorktreeValue(containerId, layout);
 }
 
-/** Each mounted layout's own cache of the layouts it has shown, keyed by worktree. */
-const layoutCaches = new Set<Map<string, unknown>>();
+/**
+ * Each mounted layout's own cache of the layouts it has shown, keyed by layout key: a worktree's
+ * bare path, as the layout is stored under on `server`, the server that holds it.
+ */
+const layoutCaches = new Map<Map<string, unknown>, ServerId>();
 
-/** Have `cache` purged with its worktree. Returns an unregister function. */
-export function registerLayoutCache(cache: Map<string, unknown>): () => void {
-  layoutCaches.add(cache);
+/** Have `cache`, of layouts stored on `server`, purged with its worktrees. Returns an unregister function. */
+export function registerLayoutCache(server: ServerId, cache: Map<string, unknown>): () => void {
+  layoutCaches.set(cache, server);
   return () => layoutCaches.delete(cache);
 }
 
 /** Purge cached values for a worktree (worktree removal cleanup). */
-export function purgeWorktreeCache(scopeKey: string): void {
-  for (const cache of layoutCaches) cache.delete(scopeKey);
-  const prefix = `${scopeKey}::`;
-  for (const key of worktreeCache.keys()) {
-    if (key.startsWith(prefix)) worktreeCache.delete(key);
+export function purgeWorktreeCache(worktree: WorktreeRef): void {
+  for (const [cache, server] of layoutCaches) {
+    if (server === worktree.server) cache.delete(worktree.path);
   }
+  worktreeCache.delete(formatWorktreeRef(worktree));
 }
 
 /**
- * Transition to a new worktree, after `activeWorktreePath` has changed (worktree store hooks and
+ * Transition to a new worktree, after the active worktree has changed (worktree store hooks and
  * imperative accessors follow it on their own). Clears comment state (comments are diff-specific,
  * not persisted across scopes).
  */

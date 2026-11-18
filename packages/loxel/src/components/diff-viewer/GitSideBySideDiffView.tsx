@@ -6,7 +6,7 @@ import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
-import { localRef } from "@/api/local-server";
+import { type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import {
   computeFileDiff,
   splitGitLines,
@@ -28,7 +28,7 @@ import { toMonacoLanguage } from "@/lib/monaco-theme";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
-import { useEditorStateStore } from "@/store/editor-state";
+import { type EditorKey, useEditorStateStore } from "@/store/editor-state";
 import { getWorktreeUI } from "@/store/worktree-ui";
 
 interface GitSideBySideDiffViewProps {
@@ -77,24 +77,48 @@ function workingTreeModelUri(absPath: string) {
 export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
   const activeWorktreePath = useQueryScope().activeWorktree?.path ?? null;
   const { file, newRef, worktreePath } = props;
+  const worktree = useDiffWorktree(worktreePath);
+  const panelContext = useMemo(() => ({ worktree: worktree ?? null }), [worktree]);
   const absPath = worktreePath ? `${worktreePath}/${fileDiffPath(file)}` : null;
   // Open while the file is shown editable here, so a file deleted meanwhile stays editable, like
   // an editor tab: it keeps unsaved edits and offers to re-create the file.
   const sideOpen = useEditorStateStore(
-    (s) => absPath !== null && s.files.has(workingTreeSideKey(absPath)),
+    (s) =>
+      worktree !== undefined &&
+      absPath !== null &&
+      s.files.has(workingTreeSideKey(worktree.server, absPath)),
   );
   // A deleted file has no working-tree file to edit. Files are read and saved through the active
   // worktree (the diff viewer's), so the uncommitted changes of another worktree stay read-only.
   const editable =
     !newRef && worktreePath === activeWorktreePath && (file.status !== "deleted" || sideOpen);
-  if (!worktreePath || !absPath || !editable) return <ReadOnlyGitDiffView {...props} />;
+  if (!worktreePath || !worktree || !absPath || !editable)
+    return <ReadOnlyGitDiffView {...props} />;
 
   return (
     // The diff viewer is a worktree's panel without a panel worktree of its own; the editable side
     // reads and saves its file through this one, as an editor tab of the worktree would.
-    <PanelContext.Provider value={{ worktreePath }}>
-      <WorkingTreeDiffView key={absPath} {...props} worktreePath={worktreePath} absPath={absPath} />
+    <PanelContext.Provider value={panelContext}>
+      <WorkingTreeDiffView
+        key={absPath}
+        {...props}
+        worktreePath={worktreePath}
+        worktree={worktree}
+        absPath={absPath}
+      />
     </PanelContext.Provider>
+  );
+}
+
+/**
+ * The ref of the diff's worktree. A diff source names a worktree of the active worktree's
+ * repository by path, so it is on the active worktree's server.
+ */
+function useDiffWorktree(worktreePath: string | undefined): WorktreeRef | undefined {
+  const server = useQueryScope().activeWorktree?.server;
+  return useMemo(
+    () => (server && worktreePath ? worktreeRef(server, worktreePath) : undefined),
+    [server, worktreePath],
   );
 }
 
@@ -102,13 +126,14 @@ export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
 function ReadOnlyGitDiffView({ file, oldRef, newRef, worktreePath }: GitSideBySideDiffViewProps) {
   const { activeProject, activeWorktree } = useQueryScope();
   const activeWorktreePath = activeWorktree?.path ?? null;
+  const worktree = useDiffWorktree(worktreePath);
 
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
 
   const { lines: oldLines, isLoading: loadingOld } = useOldSideLines(file, oldRef, worktreePath);
   const { data: newFile, isLoading: loadingNew } = useQuery({
-    queryKey: queryKeys.fileContent(activeProject, filePath, newRef, localRef(worktreePath)),
+    queryKey: queryKeys.fileContent(activeProject, filePath, newRef, worktree),
     queryFn: () => {
       // When viewing uncommitted changes, read new side from disk
       if (worktreePath && !newRef) {
@@ -179,12 +204,13 @@ function WorkingTreeDiffView({
   file,
   oldRef,
   worktreePath,
+  worktree,
   absPath,
   onWorkingTreeFileChange,
-}: GitSideBySideDiffViewProps & { worktreePath: string; absPath: string }) {
+}: GitSideBySideDiffViewProps & { worktreePath: string; worktree: WorktreeRef; absPath: string }) {
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
-  const editorKey = workingTreeSideKey(absPath);
+  const editorKey = workingTreeSideKey(worktree.server, absPath);
   const side = useEditableSide(absPath, editorKey);
 
   // Lines are split as the server splits them (CRLF lines keep their "\r"), so comment anchors
@@ -201,7 +227,7 @@ function WorkingTreeDiffView({
     return { newLines, hunks };
   }, [newText, oldDiffLines, loadingOld]);
 
-  useKeepEditedFileSelected(worktreePath, filePath, editorKey);
+  useKeepEditedFileSelected(worktree, filePath, editorKey);
 
   // The diff refetch places comments once git sees the change; a save refetches them sooner.
   const onFileChangeRef = useRef(onWorkingTreeFileChange);
@@ -268,19 +294,19 @@ function WorkingTreeDiffView({
  * Once the file is edited here, keep it selected and shown even if it leaves the diff (an edit can
  * make it match its base), until another file is selected or this view goes away.
  */
-function useKeepEditedFileSelected(worktreePath: string, filePath: string, editorKey: string) {
+function useKeepEditedFileSelected(worktree: WorktreeRef, filePath: string, editorKey: EditorKey) {
   const isDirty = useEditorStateStore((s) => s.files.get(editorKey)?.state === "dirty");
   useEffect(() => {
     if (!isDirty) return;
-    const ui = getWorktreeUI(worktreePath).getState();
+    const ui = getWorktreeUI(worktree).getState();
     if (ui.selectedDiffFile === filePath) ui.setEditedDiffFile(filePath);
-  }, [isDirty, worktreePath, filePath]);
+  }, [isDirty, worktree, filePath]);
   useEffect(
     () => () => {
-      const ui = getWorktreeUI(worktreePath).getState();
+      const ui = getWorktreeUI(worktree).getState();
       if (ui.editedDiffFile === filePath) ui.setEditedDiffFile(null);
     },
-    [worktreePath, filePath],
+    [worktree, filePath],
   );
 }
 
@@ -288,9 +314,10 @@ function useKeepEditedFileSelected(worktreePath: string, filePath: string, edito
 function useOldSideLines(file: FileDiff, oldRef: string | undefined, worktreePath?: string) {
   const { activeProject, activeWorktree } = useQueryScope();
   const activeWorktreePath = activeWorktree?.path ?? null;
+  const worktree = useDiffWorktree(worktreePath);
   const oldPath = file.oldPath || file.newPath;
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.fileContent(activeProject, oldPath, oldRef, localRef(worktreePath)),
+    queryKey: queryKeys.fileContent(activeProject, oldPath, oldRef, worktree),
     queryFn: () =>
       oldRef
         ? api.getFileContent({ path: oldPath, ref: oldRef, wt: activeWorktreePath ?? undefined })
@@ -309,6 +336,7 @@ function useGitDiffDiagnostics(
 ) {
   const { activeProject, activeWorktree } = useQueryScope();
   const activeWorktreePath = activeWorktree?.path ?? null;
+  const worktree = useDiffWorktree(worktreePath);
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
 
@@ -321,7 +349,7 @@ function useGitDiffDiagnostics(
     enabled: !!oldRef && !!activeWorktreePath && hasTypeScriptDiagnostics(oldPath),
   });
   const { data: newDiagData } = useQuery({
-    queryKey: queryKeys.diagnostics(activeProject, newRef, localRef(worktreePath)),
+    queryKey: queryKeys.diagnostics(activeProject, newRef, worktree),
     queryFn: () => {
       if (!activeWorktreePath) return Promise.resolve({ diagnostics: [] });
       if (worktreePath && !newRef)

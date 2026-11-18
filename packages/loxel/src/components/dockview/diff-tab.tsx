@@ -5,9 +5,9 @@ import { useEffect, useState } from "react";
 import { workingTreeSideKey } from "@/components/diff/use-editable-side";
 import { useDiffTitle } from "@/hooks/useDiffTitle";
 import type { PatchDiffParams } from "@/lib/panel-creators";
+import { useQueryScope } from "@/queries/use-scope";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
 
 import { DELETED_TAB_TITLE_CLASS, DivergedDot, Tab, usePanelTitle } from "./tab";
 
@@ -24,10 +24,13 @@ export function DiffTab(props: IDockviewPanelHeaderProps) {
     props.api.setTitle(diffTitle);
   }, [diffTitle, props.api]);
 
-  const worktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  // The diff viewer edits files of the active worktree only.
+  const { activeWorktree } = useQueryScope();
   const selectedFile = useWorktreeUI((s) => s.selectedDiffFile);
   const key =
-    worktreePath && selectedFile ? workingTreeSideKey(`${worktreePath}/${selectedFile}`) : null;
+    activeWorktree && selectedFile
+      ? workingTreeSideKey(activeWorktree.server, `${activeWorktree.path}/${selectedFile}`)
+      : null;
   const isDiverged = useEditorStateStore(
     (s) => key !== null && s.files.get(key)?.state === "diverged",
   );

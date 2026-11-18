@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
@@ -44,9 +45,10 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (wtPath !== wt) return;
-      const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
-        (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
-      );
+      const externalPaths = openEditorPaths(
+        useEditorStateStore.getState().files,
+        localServerId(), // the server `wsClient` reaches
+      ).filter((p) => p.startsWith("/") && !p.startsWith(wt + "/"));
       if (externalPaths.length === 0) return;
       wsClient.send({
         type: "register_external_files",
