@@ -387,6 +387,8 @@ export const ZONE_DIRECTION_MAP = { left: "left", bottom: "below", right: "right
 
 /** Initial size for each zone (width for left/right, height for bottom). */
 export const ZONE_INITIAL_SIZES = { left: 250, bottom: 300, right: 320 } as const;
+/** The smallest an open zone can be dragged: a side zone's width, the bottom zone's height. */
+export const ZONE_MIN_SIZES = { left: 220, bottom: 120, right: 220 } as const;
 
 /** Icon for a sidebar panel (returns undefined for center-only panels). */
 export function getPanelIcon(panelId: PanelId): LucideIcon | undefined {
