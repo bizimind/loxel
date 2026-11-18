@@ -693,12 +693,12 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
 
   const project = findProjectForPath(wtPath);
   if (!project) {
-    sendTo(ws, { type: "error", message: `No project found for path: ${wtPath}` });
+    sendTo(ws, { type: "error", message: `No project found for path: ${wtPath}`, wtPath });
     return;
   }
 
   if (project.isBare && wtPath === project.cwd) {
-    sendTo(ws, { type: "error", message: "Cannot subscribe to bare repo root" });
+    sendTo(ws, { type: "error", message: "Cannot subscribe to bare repo root", wtPath });
     return;
   }
 
@@ -1224,6 +1224,7 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         sendTo(ws, {
           type: "error",
           message: `Subscribe failed: ${err instanceof Error ? err.message : "unknown"}`,
+          wtPath: msg.worktreePath,
         });
       });
       break;

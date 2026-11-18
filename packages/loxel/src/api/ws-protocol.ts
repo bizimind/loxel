@@ -96,7 +96,8 @@ export type WsMessage =
       data: { tableName?: string; tableId?: number; scope: "schema" | "data" | "views" };
     }
   // Global (sent to all clients)
-  | { type: "error"; message: string }
+  /** `wtPath`: the worktree whose subscription the server refused. */
+  | { type: "error"; message: string; wtPath?: string }
   | ({ type: "terminal_exit"; id: string } & TerminalEnd)
   | ({ type: "terminal_notice"; id: string } & TerminalNotice)
   | ({ type: "terminal_state" } & TerminalState)

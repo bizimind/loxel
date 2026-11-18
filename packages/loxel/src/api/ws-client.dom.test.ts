@@ -314,20 +314,31 @@ describe("WsClient.whenSubscribed", () => {
     expect(await settled(client.whenSubscribed("/other"))).toBe(true);
   });
 
-  test("stops waiting when the subscription ends or the server refuses one", async () => {
-    const { client, socket } = connected();
+  test("stops waiting when the subscription ends", async () => {
+    const { client } = connected();
     client.subscribeWorktree("/left");
-    client.subscribeWorktree("/refused");
     const left = client.whenSubscribed("/left");
-    const refused = client.whenSubscribed("/refused");
 
     client.unsubscribeWorktree("/left");
     expect(await settled(left)).toBe(true);
-    expect(await settled(refused)).toBe(false);
+  });
 
-    socket.receive({ type: "error", message: "Subscribe failed: no project" });
+  test("a refused subscription stops only its own worktree's wait", async () => {
+    const { client, socket } = connected();
+    client.subscribeWorktree("/refused");
+    client.subscribeWorktree("/shown");
+    const refused = client.whenSubscribed("/refused");
+    const shown = client.whenSubscribed("/shown");
+
+    socket.receive({ type: "error", message: "No project found", wtPath: "/refused" });
     expect(await settled(refused)).toBe(true);
     // Nothing will confirm it now: later reads go out at once, to fail as they did before.
     expect(await settled(client.whenSubscribed("/refused"))).toBe(true);
+    // The other subscription is still being answered, and an error naming no worktree is not one.
+    socket.receive({ type: "error", message: "Something else" });
+    expect(await settled(shown)).toBe(false);
+
+    socket.receive({ type: "worktree_files_resynced", wtPath: "/shown", projectPath: "/" });
+    expect(await settled(shown)).toBe(true);
   });
 });

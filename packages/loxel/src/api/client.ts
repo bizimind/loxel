@@ -1044,11 +1044,11 @@ export class WsClient {
             this.confirmedWorktrees.add(message.wtPath);
             this.releaseWaiters(message.wtPath);
           }
-          // A subscription the server refused names no worktree, and none of them will be
-          // confirmed now: their reads go out (and fail) as they would without the wait.
-          if (message.type === "error") {
-            for (const worktreePath of this.worktrees) this.confirmedWorktrees.add(worktreePath);
-            this.releaseWaiters();
+          // A refused subscription will not be confirmed: that worktree's reads go out (and fail)
+          // as they would without the wait. The others' subscriptions are still answered.
+          if (message.type === "error" && message.wtPath !== undefined) {
+            this.confirmedWorktrees.add(message.wtPath);
+            this.releaseWaiters(message.wtPath);
           }
           for (const listener of this.listeners) {
             listener(message);
@@ -1305,7 +1305,7 @@ export class WsClient {
    * Settles once the server has the resources of `worktreePath`, which this window subscribed to:
    * until then it answers requests for the worktree's files with 404s, on a first visit and after
    * a reconnect (to a server that may have restarted) alike. Settles at once for a worktree the
-   * window is not subscribed to, and when the subscription ends or the server refuses one.
+   * window is not subscribed to, and when the subscription ends or the server refuses it.
    */
   whenSubscribed(worktreePath: string): Promise<void> {
     if (!this.worktrees.has(worktreePath) || this.confirmedWorktrees.has(worktreePath)) {

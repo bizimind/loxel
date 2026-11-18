@@ -28,7 +28,7 @@ export function createToolchainServerRecovery({
     if (message.type !== changedMessage || !("wtPath" in message)) return;
     if (stoppedServer()?.reason !== "start-failed") return;
     const wt = activeWorktree();
-    if (wt === null || message.wtPath === null) return;
+    if (wt === null || typeof message.wtPath !== "string") return;
     // `wsClient`'s messages name worktrees of the window's server.
     if (!sameWorktreeRef(wt, worktreeRef(localServerId(), message.wtPath))) return;
     client.disconnect();
