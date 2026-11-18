@@ -57,6 +57,10 @@ If Loxel's server can't be reached when a save happens (it is restarting, for ex
 
 Closing the tab, reloading the window or quitting Loxel doesn't lose a save that is still waiting. It goes through when the server is back, or the next time Loxel starts, and Loxel tells you which files it saved from the last session. A save left from an earlier session is written only if the file is still as you left it: if it changed since, even in a way that would merge, the file opens again with your edits and the conflict banner, so you decide. The same happens to a save that can't be merged. Opening the file while its save is still waiting shows your edits, not the older version on disk. If you remove the file's worktree, or delete its project, in Loxel while a save is still waiting, the save is discarded with it and Loxel tells you. If the worktree goes any other way (removed outside Loxel, or moved), the save is no longer retried, and your edits show the next time you open the file.
 
+### Saves the file system refuses
+
+If a save fails for a reason that won't pass by itself, such as a read-only file or a folder you can't write to, a banner at the top of the editor says the file could not be saved and why. Your edits stay in the editor, and they are kept when you switch worktrees, close the tab, reload the window or quit Loxel: the next time you open the file, or the next time Loxel starts, it shows them again with the banner. If the file changed on disk meanwhile, your edits are merged with that change, or the [conflict banner](#conflict-detection) appears. Fix the cause and click **Try again** in the banner (or press `Cmd+S`), or click **Discard changes** to give your edits up and load the file as it is on disk.
+
 ---
 
 ## Formatter auto-detection

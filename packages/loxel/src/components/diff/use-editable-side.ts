@@ -53,6 +53,10 @@ export interface EditableSide {
   language: string;
   /** The file is missing on disk */
   isDeleted: boolean;
+  /** Why the server refused this side's last save, or null. */
+  saveRefused: string | null;
+  /** Save now (Cmd+S). */
+  saveNow: () => Promise<void>;
   /** The file changed on disk in a way that conflicts with this side's unsaved edits */
   isDiverged: boolean;
   /** The file could not be read at all */
@@ -60,6 +64,8 @@ export interface EditableSide {
   onContentChange: (value: string) => void;
   onEditorMount: (editor: IStandaloneCodeEditor) => void;
   acceptDisk: () => void;
+  /** Give up the unsaved edits for the disk version. */
+  discardEdits: () => Promise<void>;
   keepMine: () => void;
   recreateFile: () => Promise<void>;
 }
@@ -103,12 +109,14 @@ export function useEditableSide(filePath: string, editorKey: EditorKey): Editabl
     diskContent,
     editorFileState,
     isDeleted,
+    saveRefused,
     isError,
     isProgrammaticRef,
     getSerializedContentRef,
     handleChange,
     handleAcceptDisk,
     handleKeepMine,
+    discardEdits,
     saveNow,
     recreateFile,
   } = disk;
@@ -186,11 +194,14 @@ export function useEditableSide(filePath: string, editorKey: EditorKey): Editabl
     diskText: diskContent,
     language,
     isDeleted,
+    saveRefused,
+    saveNow,
     isDiverged: editorFileState === "diverged",
     loadFailed: isError && text === null,
     onContentChange,
     onEditorMount,
     acceptDisk,
+    discardEdits: () => discardEdits(acceptDisk),
     keepMine: handleKeepMine,
     recreateFile,
   };

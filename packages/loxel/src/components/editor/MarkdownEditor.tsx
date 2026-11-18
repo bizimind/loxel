@@ -34,6 +34,7 @@ import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor
 import { attachMermaidPreviewControls } from "@/components/editor/mermaid-preview-controls";
 import { MermaidDiagramViewer } from "@/components/editor/MermaidDiagramViewer";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import { SaveRefusedBanner } from "@/components/editor/SaveRefusedBanner";
 import { installSoftLineBreaks } from "@/components/editor/soft-line-break";
 import {
   type MergeCallbacks,
@@ -323,6 +324,8 @@ export function MarkdownEditor({
     diskContent,
     editorFileState,
     isDeleted,
+    saveRefused,
+    discardEdits,
     recreateFile,
     cacheKey,
     isError,
@@ -384,6 +387,9 @@ export function MarkdownEditor({
 
   // Crepe key for destroy+recreate on accept-disk-version
   const [crepeKey, setCrepeKey] = useState(0);
+  /** The disk version was just accepted into the cache: the editor being torn down must not
+   *  write its edits back over it. */
+  const acceptedDiskRef = useRef(false);
 
   // Conflict resolution: accept disk version — update frontmatter from accepted content
   const handleAcceptDisk = useCallback(() => {
@@ -392,6 +398,7 @@ export function MarkdownEditor({
       const { frontmatter: acceptedFm } = splitFrontmatter(accepted);
       frontmatterRef.current = acceptedFm;
       setFrontmatter(acceptedFm);
+      acceptedDiskRef.current = true;
     }
     setCrepeKey((k) => k + 1);
   }, [hookAcceptDisk]);
@@ -666,14 +673,18 @@ export function MarkdownEditor({
       mergeGetRef.current = null;
       mergeApplyRef.current = null;
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      const acceptedDisk = acceptedDiskRef.current;
+      acceptedDiskRef.current = false;
       try {
         // Save selection position for restoration on remount
         crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
           editorSelectionCache.set(effectCacheKey, view.state.selection.anchor);
         });
-        const body = serializeBody(crepe);
-        editorContentCache.set(effectCacheKey, mergeFrontmatter(frontmatterRef.current, body));
+        if (!acceptedDisk) {
+          const body = serializeBody(crepe);
+          editorContentCache.set(effectCacheKey, mergeFrontmatter(frontmatterRef.current, body));
+        }
       } catch {
         // Editor may already be partially destroyed
       }
@@ -951,6 +962,13 @@ export function MarkdownEditor({
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
       {isDeleted && <DeletedFileBanner filePath={filePath} onRecreate={recreateFile} />}
+      {saveRefused !== null && editorFileState !== "diverged" && (
+        <SaveRefusedBanner
+          reason={saveRefused}
+          onRetry={() => void saveNow()}
+          onDiscard={() => void discardEdits(handleAcceptDisk)}
+        />
+      )}
       <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />

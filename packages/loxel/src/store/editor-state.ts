@@ -45,6 +45,9 @@ export interface EditorFileEntry {
   /** A save of this editor failed because the server could not be reached and waits in the
    *  outbox for a retry. Orthogonal to `state`, which stays `dirty` meanwhile. */
   queued: boolean;
+  /** Why the server refused this editor's last save (its error message), or null. The outbox
+   *  keeps the edits for review meanwhile; `state` stays `dirty`. */
+  saveRefused: string | null;
   /** The file no longer exists on disk (deleted externally after it was opened, or missing on
    *  load). Autosave is suspended until content arrives again — from an external restore or
    *  from a confirmed explicit save that re-creates it. Orthogonal to `state`, which keeps
@@ -113,6 +116,8 @@ interface EditorStateStore {
   markWritten: (key: EditorKey, nonce: string, content: string) => void;
   /** Mark whether a save of this editor waits in the outbox. */
   setQueued: (key: EditorKey, queued: boolean) => void;
+  /** Record why the server refused this editor's save, or null once one is no longer refused. */
+  setSaveRefused: (key: EditorKey, reason: string | null) => void;
   /**
    * Take over an outbox save in a freshly mounted editor that shows its content: `dirty` on
    * `base`, or `diverged` from `disk` when the save conflicted with the file on disk.
@@ -121,6 +126,8 @@ interface EditorStateStore {
   /** Core state machine: handle an external disk change notification. */
   handleDiskChange: (key: EditorKey, nonces: string[], diskContent: string) => void;
   acceptDiskVersion: (key: EditorKey) => void;
+  /** Record `content` as the disk version, for `acceptDiskVersion` to take (discarding edits). */
+  setDiskContent: (key: EditorKey, content: string) => void;
   keepMyChanges: (key: EditorKey) => void;
   clearPendingNonce: (key: EditorKey, nonce: string) => void;
   /** Record whether the file exists on disk. `handleDiskChange` clears the flag itself. */
@@ -148,6 +155,7 @@ function defaultEntry(server: ServerId, filePath: string): EditorFileEntry {
     instanceId: crypto.randomUUID(),
     state: "clean",
     queued: false,
+    saveRefused: null,
     deleted: false,
     movedTo: null,
     takePendingEdit: null,
@@ -242,6 +250,16 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       if (!entry || entry.queued === queued) return s;
       const files = new Map(s.files);
       files.set(key, { ...entry, queued });
+      return { files };
+    });
+  },
+
+  setSaveRefused: (key, reason) => {
+    set((s) => {
+      const entry = s.files.get(key);
+      if (!entry || entry.saveRefused === reason) return s;
+      const files = new Map(s.files);
+      files.set(key, { ...entry, saveRefused: reason });
       return { files };
     });
   },
@@ -476,6 +494,16 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
         mergedDiskContent: null,
         diskContent: null,
       });
+      return { files };
+    });
+  },
+
+  setDiskContent: (key, content) => {
+    set((s) => {
+      const entry = s.files.get(key);
+      if (!entry) return s;
+      const files = new Map(s.files);
+      files.set(key, { ...entry, diskContent: content });
       return { files };
     });
   },

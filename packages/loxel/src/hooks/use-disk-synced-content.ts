@@ -14,7 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
+import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
+import { frontendLog } from "@/lib/frontend-logger";
 import { type SaveOptions, type SaveReason, saveEditorContent } from "@/lib/save-editor-content";
 import {
   adoptOutboxEntry,
@@ -64,6 +66,8 @@ export interface UseDiskSyncedContentOptions<T> {
   mergeCallbacks?: MergeCallbacks | null;
 }
 
+const log = frontendLog.child("files");
+
 export interface DiskSyncedContent<T> {
   /** Parsed disk content. Changes when query refetches. Falls back to cache while loading. */
   diskContent: T | null;
@@ -71,6 +75,8 @@ export interface DiskSyncedContent<T> {
   editorFileState: EditorFileState;
   /** The file no longer exists on disk. Autosave is suspended; see `saveNow` / `recreateFile`. */
   isDeleted: boolean;
+  /** Why the server refused this editor's last save, or null; its edits are kept meanwhile. */
+  saveRefused: string | null;
   /** Cache key (absolute file path). */
   cacheKey: string;
   /** This editor's key in `useEditorStateStore`. */
@@ -106,6 +112,11 @@ export interface DiskSyncedContent<T> {
   autoSaveOptionsRef: MutableRefObject<SaveOptions | undefined>;
   /** Accept disk version. Returns parsed T for the editor to apply. Updates cache + store. */
   handleAcceptDisk: () => T | null;
+  /**
+   * Give up the unsaved edits (a refused save's **Discard changes**): read the file, then take
+   * its version with `acceptDisk`, the editor's own **Accept disk version**.
+   */
+  discardEdits: (acceptDisk: () => void) => Promise<void>;
   /** Keep editor's changes. Re-arms autosave. */
   handleKeepMine: () => void;
   /** Call on user edit. Updates cache + markDirty + debounce autosave. */
@@ -183,6 +194,7 @@ export function useDiskSyncedContent<T>(
   // --- Editor state ---
   const editorFileState = useEditorStateStore((s) => s.files.get(editorKey)?.state ?? "clean");
   const isDeleted = useEditorStateStore((s) => s.files.get(editorKey)?.deleted ?? false);
+  const saveRefused = useEditorStateStore((s) => s.files.get(editorKey)?.saveRefused ?? null);
 
   // --- A save of this file still in the outbox ---
   // A file's own tab opening while a save of the file waits in the outbox (its tab was closed
@@ -423,6 +435,27 @@ export function useDiskSyncedContent<T>(
     return parsed;
   }, [editorKey, cacheKey]);
 
+  const discardEdits = useCallback(async (acceptDisk: () => void) => {
+    const key = editorKeyRef.current;
+    const path = filePathRef.current;
+    let content: string;
+    try {
+      ({ content } = await api.getFileContentByPath(path, worktreePathRef.current));
+    } catch (error) {
+      log.error("Failed to read a file to discard its edits", { path, error });
+      showToast(`Could not read ${getDisplayFilename(path)} to discard the changes`);
+      return;
+    }
+    if (key !== editorKeyRef.current) return;
+    // A pending autosave would write the edits again, or the disk version just taken.
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
+    autosaveTimerRef.current = null;
+    autosaveCapTimerRef.current = null;
+    useEditorStateStore.getState().setDiskContent(key, content);
+    acceptDisk();
+  }, []);
+
   const handleKeepMine = useCallback(() => {
     useEditorStateStore.getState().keepMyChanges(editorKey);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
@@ -476,6 +509,7 @@ export function useDiskSyncedContent<T>(
     diskContent,
     editorFileState,
     isDeleted,
+    saveRefused,
     cacheKey,
     editorKey,
     isError,
@@ -487,6 +521,7 @@ export function useDiskSyncedContent<T>(
     saveOptionsRef,
     autoSaveOptionsRef,
     handleAcceptDisk,
+    discardEdits,
     handleKeepMine,
     handleChange,
     isProgrammaticRef,
