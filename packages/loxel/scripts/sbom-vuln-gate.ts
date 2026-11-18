@@ -31,7 +31,7 @@ export interface TrivyReport {
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function optionalNumber(value: unknown): number | undefined {
@@ -68,7 +68,8 @@ export function parseReport(json: unknown): TrivyReport {
     throw new Error("Trivy report's Results is not a list");
   return {
     Results: (results ?? []).map((result: unknown) => {
-      const vulnerabilities = isObject(result) ? (result.Vulnerabilities ?? []) : [];
+      if (!isObject(result)) throw new Error("A Trivy result is not an object");
+      const vulnerabilities = result.Vulnerabilities ?? [];
       if (!Array.isArray(vulnerabilities))
         throw new Error("A Trivy result's Vulnerabilities is not a list");
       return { Vulnerabilities: vulnerabilities.map(parseVulnerability) };

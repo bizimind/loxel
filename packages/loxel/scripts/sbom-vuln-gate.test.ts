@@ -114,5 +114,7 @@ describe("parseReport", () => {
       }),
     ).toThrow();
     expect(() => parseReport({ Results: {} })).toThrow("not a list");
+    expect(() => parseReport({ Results: [null] })).toThrow("not an object");
+    expect(() => parseReport({ Results: [[]] })).toThrow("not an object");
   });
 });
