@@ -38,7 +38,7 @@ function hasDragType(e: React.DragEvent): boolean {
 
 async function moveDetachedFile(filePath: string, destDir: string) {
   try {
-    const wt = useWorktreeStore.getState().activeWorktreePath;
+    const wt = getQueryScope().activeWorktree?.path;
     if (!wt) return;
     const { newPath } = await api.moveDetachedFileToProject({
       wt,
@@ -79,7 +79,7 @@ export function useProjectFileDrag(
   getTreeRoot: (path: string) => string | null,
 ) {
   const [dropTargetDir, setDropTargetDir] = useState<string | null>(null);
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
 
   /** Whether the item being dragged may be dropped into `destDir`. */
   const canDropInto = useCallback(

@@ -31,7 +31,7 @@ export function FileSearchModal() {
   const indexByWorktree = useFileSearchStore((s) => s.indexByWorktree);
   const mruByWorktree = useFileSearchStore((s) => s.mruByWorktree);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const entry = activeWorktreePath ? indexByWorktree.get(activeWorktreePath) : undefined;
   const files = entry?.files;
   const truncated = entry?.truncated ?? false;

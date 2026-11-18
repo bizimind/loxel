@@ -87,7 +87,7 @@ Loxel never runs the `wt` CLI; it calls the `@bizimind/wt/lib` API (`planAdd`/`e
 
 ## Renderer worktree model
 
-[worktrees.ts](../src/store/worktrees.ts) (`useWorktreeStore`) holds `byProject` (per project, by the `WorktreeRefKey` of its ref: `worktrees`, `worktreesDir`, `worktreeMetadata`, and the `customOrder`, `archivedRefs` and `collapsedRefs` lists of worktree `WorktreeRefKey`s), `activeWorktree` (a `WorktreeRef`, null for Home), `openArchives` (projects whose Archive group is open, by key; not persisted, so every Archive starts closed), and pending add/remove plans, which hold their project's ref. `activeWorktreePath` mirrors the active worktree's path for readers not moved to refs yet; `activeWorktreeFields` is the one way to set the pair.
+[worktrees.ts](../src/store/worktrees.ts) (`useWorktreeStore`) holds `byProject` (per project, by the `WorktreeRefKey` of its ref: `worktrees`, `worktreesDir`, `worktreeMetadata`, and the `customOrder`, `archivedRefs` and `collapsedRefs` lists of worktree `WorktreeRefKey`s), `activeWorktree` (a `WorktreeRef`, null for Home), `openArchives` (projects whose Archive group is open, by key; not persisted, so every Archive starts closed), and pending add/remove plans, which hold their project's ref. `activeWorktreeFields` is the one way to set `activeWorktree`.
 
 A project's worktree list comes from its server, so its entries' paths are on the project's server. The per-project actions take the project's ref and, for one of its worktrees, a path; the hierarchy helpers, the sidebar's rows and drag and drop work on those paths, and `projectListPaths` gives the persisted lists in that form. `worktreeKey(project, path)` is the key of a worktree listed under a project, and `listedWorktrees()` every listed worktree as a ref.
 
@@ -124,9 +124,9 @@ Metadata needs per-worktree config (`extensions.worktreeConfig`). `POST /api/wor
 
 ## Context switching
 
-`switchWorktree(ref)` is synchronous in effect: it sets `activeWorktree` (and its path mirror) and calls `transitionWorktreeState` before its first `await`, and makes no server call. A switch to the worktree already shown keeps the same ref object, so subscribers see no change. Everything else reacts to the active worktree:
+`switchWorktree(ref)` is synchronous in effect: it sets `activeWorktree` and calls `transitionWorktreeState` before its first `await`, and makes no server call. A switch to the worktree already shown keeps the same ref object, so subscribers see no change. Everything else reacts to the active worktree:
 
-1. **Layout.** [App.tsx](../src/App.tsx) renders the outer dockview with `layoutKey={activeWorktreePath}`, so each worktree has its own saved layout, stored per window under `layout:session:<windowId>:<scope>:<worktreePath>` ([layout-key-schema.ts](../src/lib/layout-key-schema.ts)). See [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md).
+1. **Layout.** [App.tsx](../src/App.tsx) renders the outer dockview with `layoutKey={activeWorktree.path}`, so each worktree has its own saved layout, stored per window under `layout:session:<windowId>:<scope>:<worktreePath>` ([layout-key-schema.ts](../src/lib/layout-key-schema.ts)). See [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md).
 2. **Per-worktree stores** resolve to the new instance through the factory hook; comment state is cleared.
 3. **Server subscription.** [useWsSubscription.ts](../src/hooks/useWsSubscription.ts) subscribes to the new worktree immediately and unsubscribes the previous one only after its pending saves drain, so auto-saves during panel unmount still find live server resources. `wsClient` resubscribes every worktree it holds on reconnect, and the hook re-registers open external files whenever the server resyncs the active worktree.
 4. **Queries** derive their scope (`activeProject`, `activeWorktree`, both `WorktreeRef`s; see [Query keys](ARCHITECTURE.md#query-keys)) from [use-scope.ts](../src/queries/use-scope.ts).

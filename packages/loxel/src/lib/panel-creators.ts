@@ -269,7 +269,7 @@ function movePlacedPanel(
  * only the types that need no worktree, and has no component for the others.
  */
 function centerApiFor(type: string): DockviewApi | null {
-  const hasWorktree = useWorktreeStore.getState().activeWorktreePath !== null;
+  const hasWorktree = useWorktreeStore.getState().activeWorktree !== null;
   return hasWorktree || !panelTypeNeedsWorktree(type) ? getCenterApi() : null;
 }
 
@@ -290,7 +290,7 @@ export function createTerminal({
   ...options
 }: CreateTerminalOptions = {}): void {
   const cApi = centerApiFor("terminal");
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  const worktreePath = useWorktreeStore.getState().activeWorktree?.path;
   // A Home terminal belongs to no worktree and starts in the user's home directory.
   const cwd = requestedCwd ?? (worktreePath ? undefined : useProjectStore.getState().homeDir);
   if (!cApi || (!worktreePath && !cwd)) return;
@@ -332,7 +332,7 @@ export async function createEditor(options?: {
   if (!dv || creatingEditor) return;
   creatingEditor = true;
   try {
-    const wt = useWorktreeStore.getState().activeWorktreePath;
+    const wt = useWorktreeStore.getState().activeWorktree?.path;
     // In Home the plan is one of Home's drafts, which belong to no worktree.
     const { name, path: filePath } = await api.createDetachedFile({
       wt: wt ?? HOME_KEY,
@@ -377,7 +377,7 @@ export async function createDrawing(placement?: PanelPlacement): Promise<void> {
       appState: { viewBackgroundColor: "transparent" },
       files: {},
     });
-    const wt = useWorktreeStore.getState().activeWorktreePath;
+    const wt = useWorktreeStore.getState().activeWorktree?.path;
     if (!wt) return;
     const { name, path: filePath } = await api.createDetachedFile({
       wt,
@@ -476,7 +476,7 @@ export async function createCodeEditor(options?: {
   if (!dv || creatingCodeEditor) return;
   creatingCodeEditor = true;
   try {
-    const wt = useWorktreeStore.getState().activeWorktreePath;
+    const wt = useWorktreeStore.getState().activeWorktree?.path;
     if (!wt) return;
     const { name, path: filePath } = await api.createDetachedFile({
       wt,
@@ -588,7 +588,11 @@ export function openFileBacked(
     component: def.component,
     tabComponent: def.tabComponent,
     title: getDisplayFilename(filePath),
-    params: { filePath, worktreePath: useWorktreeStore.getState().activeWorktreePath, ...params },
+    params: {
+      filePath,
+      worktreePath: useWorktreeStore.getState().activeWorktree?.path ?? null,
+      ...params,
+    },
   };
   return slot
     ? cApi.addPanel({ ...options, ...slot })
@@ -925,7 +929,7 @@ export function openCompareFiles(
   if (!cApi) return;
 
   const panelId = `compare-${crypto.randomUUID()}`;
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  const worktreePath = useWorktreeStore.getState().activeWorktree?.path ?? null;
   addPlacedPanel(cApi, placement, {
     id: panelId,
     component: "compare",

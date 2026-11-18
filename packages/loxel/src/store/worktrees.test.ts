@@ -143,20 +143,19 @@ beforeEach(() => {
 describe("the active worktree", () => {
   afterEach(() => useWorktreeStore.getState().reset());
 
-  test("switches by ref, keeping the path mirror and the session copy in step", async () => {
+  test("switches by ref, keeping the session copy in step", async () => {
     const elsewhere = worktreeRef(toServerId("elsewhere"), WT_PATH);
 
     await useWorktreeStore.getState().switchWorktree(elsewhere);
 
     const state = useWorktreeStore.getState();
     expect(state.activeWorktree).toEqual(elsewhere);
-    expect(state.activeWorktreePath).toBe(WT_PATH);
     expect(sessionStorage.getItem(`${STORAGE_PREFIX}-activeWorktree`)).toBe(
       formatWorktreeRef(elsewhere),
     );
 
     useWorktreeStore.getState().showHome();
-    expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
+    expect(useWorktreeStore.getState().activeWorktree).toBeNull();
     expect(sessionStorage.getItem(`${STORAGE_PREFIX}-activeWorktree`)).toBeNull();
   });
 

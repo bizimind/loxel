@@ -58,7 +58,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const queryClient = useQueryClient();
   const treeRef = useRef<FilesTreeHandle>(null);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const displayPath = activeWorktreePath;
   const homeDir = useProjectStore((s) => s.homeDir);
   const rootName = displayPath ? displayPath.split("/").pop() || displayPath : "Project";
@@ -112,7 +112,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const handleRemoveFromOthers = useCallback(
     async (path: string) => {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = getQueryScope().activeWorktree?.path;
       if (!wt) return;
       try {
         await api.removeExternalFolder(wt, path);
@@ -207,7 +207,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   // --- Reveal in explorer ---
   const revealFileInTree = useCallback(
     async (filePath: string) => {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = getQueryScope().activeWorktree?.path;
       if (!wt) return;
       // Load every ancestor below the root of the tree that shows the path.
       const root = getTreeRoot(filePath);
@@ -362,9 +362,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const loadSubtree = useCallback(
     async (path: string): Promise<TreeNode[]> => {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
-      if (!wt) return [];
-      const { activeProject } = getQueryScope();
+      const { activeProject, activeWorktree } = getQueryScope();
+      if (!activeWorktree) return [];
+      const wt = activeWorktree.path;
       const absDir = toAbsoluteDir(path, wt);
       const entries = await queryClient.fetchQuery({
         queryKey: queryKeys.dirContents(activeProject, absDir),
@@ -534,7 +534,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   // watches its expanded folders. Listing them again fixes both.
   useEffect(() => {
     return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-      if (wtPath !== useWorktreeStore.getState().activeWorktreePath) return;
+      if (wtPath !== getQueryScope().activeWorktree?.path) return;
       treeRef.current?.reloadExpanded();
     });
   }, []);

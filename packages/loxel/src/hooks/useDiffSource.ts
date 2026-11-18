@@ -21,7 +21,7 @@ export function useDiffSource(): void {
   const setDiffSource = useRepositoryStore((s) => s.setDiffSource);
   const lookup = useCommitLookup();
   const { data: branchData } = useBranchCommitsQuery();
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
 
   // Auto-select the uncommitted entry when nothing is selected (default state)
   const selectCommit = useRepositoryStore((s) => s.selectCommit);

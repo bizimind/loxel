@@ -45,10 +45,10 @@ const uiLog = frontendLog.child("ui");
  */
 export function CenterHostComponent(_props: IDockviewPanelProps) {
   const mountedKeyRef = useRef(activeLayoutKey());
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   return (
     <CenterLayout
-      layoutKey={activeWorktreePath ?? mountedKeyRef.current}
+      layoutKey={activeWorktree?.path ?? mountedKeyRef.current}
       components={centerComponents}
       tabComponents={centerTabComponents}
     />
@@ -129,7 +129,7 @@ function CenterLayout({
       // Notify server when the last panel showing an external file closes, so its watcher can
       // be cleaned up. Only files outside the worktree are sent; a file still shown by another
       // panel (an editor tab and a compare panel can show the same one) stays watched.
-      const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+      const worktreePath = useWorktreeStore.getState().activeWorktree?.path;
       if (worktreePath) {
         const others = api.panels.filter((p) => p.id !== event.id);
         const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));

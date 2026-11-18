@@ -11,10 +11,9 @@ import { fileParentDir } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getQueryScope } from "@/queries/use-scope";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
 
 function dispatchUndoRedoResult(result: FileOperationResult) {
-  const wt = useWorktreeStore.getState().activeWorktreePath;
+  const wt = getQueryScope().activeWorktree?.path ?? null;
   switch (result.type) {
     case "rename":
     case "move": {
@@ -125,7 +124,7 @@ export function useFileOperations(
     if (operationPendingRef.current) return;
     operationPendingRef.current = true;
     try {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = getQueryScope().activeWorktree?.path;
       if (!wt) return;
       const { result } = await api.undoFileOperation(wt);
       if (result) dispatchUndoRedoResult(result);
@@ -142,7 +141,7 @@ export function useFileOperations(
     if (operationPendingRef.current) return;
     operationPendingRef.current = true;
     try {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = getQueryScope().activeWorktree?.path;
       if (!wt) return;
       const { result } = await api.redoFileOperation(wt);
       if (result) dispatchUndoRedoResult(result);
@@ -159,7 +158,7 @@ export function useFileOperations(
   const handleNewFile = useCallback(
     async (dir: string) => {
       try {
-        const wt = useWorktreeStore.getState().activeWorktreePath;
+        const wt = getQueryScope().activeWorktree?.path;
         if (!wt) return;
         treeRef.current?.expandPath(dir);
         const { path } = await api.createProjectFile(wt, { dir });
@@ -174,7 +173,7 @@ export function useFileOperations(
   const handleNewDir = useCallback(
     async (dir: string) => {
       try {
-        const wt = useWorktreeStore.getState().activeWorktreePath;
+        const wt = getQueryScope().activeWorktree?.path;
         if (!wt) return;
         treeRef.current?.expandPath(dir);
         const { path } = await api.createProjectDir(wt, { dir });

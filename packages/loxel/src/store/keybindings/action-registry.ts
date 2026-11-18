@@ -187,7 +187,7 @@ function isCodeEditorActive(): boolean {
 }
 
 function hasActiveWorktree(): boolean {
-  return useWorktreeStore.getState().activeWorktreePath !== null;
+  return useWorktreeStore.getState().activeWorktree !== null;
 }
 
 /** Whether a center panel of `type` can open where the window is: Home holds only some. */

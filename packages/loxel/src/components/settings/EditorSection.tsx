@@ -79,7 +79,7 @@ export function EditorSection() {
   }, [addFormatterOverride]);
 
   // Fetch detected formatters for the active worktree
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
   const [detectedFormatters, setDetectedFormatters] = useState<DetectedFormatter[]>([]);
   useEffect(() => {
     if (!activeWorktreePath || !formatting.autoDetect) {

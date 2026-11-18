@@ -147,7 +147,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
     if (isToolchainSelectAction(actionId)) {
       // The worktree of the file being edited, which the status bar item shows.
       const wtPath =
-        getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+        getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktree?.path;
       const item = toolchainStatusItems.find((i) => i.toolchain.selectAction.id === actionId);
       if (wtPath && item) void item.select(wtPath);
       return;

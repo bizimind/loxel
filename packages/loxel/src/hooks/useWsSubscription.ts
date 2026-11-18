@@ -43,7 +43,7 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     // say), so tell it again once it confirms the subscription: sent right after the subscribe, the
     // list would arrive before the resources exist and be dropped.
     return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-      const wt = useWorktreeStore.getState().activeWorktreePath;
+      const wt = useWorktreeStore.getState().activeWorktree?.path;
       if (wtPath !== wt) return;
       const externalPaths = openEditorPaths(
         useEditorStateStore.getState().files,
