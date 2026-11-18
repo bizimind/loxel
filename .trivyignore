@@ -4,3 +4,11 @@
 # Not affected: only used at build time (astro remote-image cache for the static site, and got ->
 # cacheable-request in electron-builder for Electron downloads). No shared multi-user HTTP cache.
 CVE-2026-93748 exp:2027-01-03
+
+# picomatch <=4.0.7 (no patched release): ReDoS through single-branch repeated extglobs (+(*), +(*a)).
+# Not affected: Loxel's own matchers take globs only from the user's settings, built-in defaults and
+# language servers' fixed capabilities; yaml-language-server only gets the user's yaml.schemas (its
+# SchemaStore catalog is off); astro-ls and the build tools (astro, vite, electron-builder) glob fixed
+# patterns. The one project-controlled input, dependency-cruiser's `workspaces` matching in the
+# code-analysis binary, is patched out at build time (packages/code-analysis/build.ts, Patch 5).
+CVE-2026-112366 exp:2027-01-17
