@@ -33,7 +33,7 @@ async function makeRepo(): Promise<{ repo: string; ctx: RouteContext }> {
 
   const project = { cwd: repo, isBare: false, worktreesDir: join(repo, ".worktrees") };
   const ctx = {
-    broadcastToProject: () => {},
+    broadcastAll: () => {},
     getProject: (cwd: string) => (cwd === repo ? project : undefined),
     suspendWorktreeWatchers: async () => async () => {},
     completeWorktreeRemoval: () => {},

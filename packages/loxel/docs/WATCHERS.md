@@ -75,7 +75,7 @@ The pause/stop distinction is important during worktree removal. A failed remova
 
 ## Worktree lifecycle
 
-On a `worktrees` event the server broadcasts `worktrees_changed` before reconciling. `broadcastToProject` discovers recipients through the resource entries, so reversing the order can prevent the client that had the deleted worktree open from hearing the update.
+On a `worktrees` event the server broadcasts `worktrees_changed` to every client, subscribed to the project's worktrees or not, since each window's sidebar lists every project; then it reconciles.
 
 That event also fires for config and metadata changes and for worktrees added or moved, so `reconcileWorktrees` asks [`RegisteredWorktrees`](../src/server/registered-worktrees.ts) what happened. It keeps each worktree's admin directory (`<common dir>/worktrees/<id>`, read from the checkout's `.git` file), and compares with the current list. The admin directory is what tells a removal from a move: a move leaves the old path empty too, but only a removal unregisters the worktree.
 

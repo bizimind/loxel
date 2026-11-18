@@ -6,10 +6,13 @@ import { join } from "node:path";
 
 import { setWorktreeMeta } from "@bizimind/wt/lib";
 
+import type { WsMessage } from "@/api/ws-protocol";
+
 import { listProjectWorktrees, projectWorktreesResponse } from "./project-worktrees";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import type { ProjectState } from "./server-state";
+import { worktreesChangedMessage } from "./ws-messages";
 
 /** Run a git command in `cwd`, throwing with stderr on failure. */
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -31,12 +34,14 @@ describe("worktree routes on a regular (non-bare) repo", () => {
   let suspended = 0;
   let resumed = 0;
   let completed = 0;
+  let toAll: WsMessage[] = [];
 
   beforeEach(async () => {
     repo = await realpath(await mkdtemp(join(tmpdir(), "loxel-wt-")));
     suspended = 0;
     resumed = 0;
     completed = 0;
+    toAll = [];
     await git(repo, "init", "--initial-branch=main", ".");
     await git(repo, "config", "user.email", "test@example.com");
     await git(repo, "config", "user.name", "Test");
@@ -54,7 +59,9 @@ describe("worktree routes on a regular (non-bare) repo", () => {
     ctx = {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
-      broadcastAll: () => {},
+      broadcastAll: (message) => {
+        toAll.push(message);
+      },
       sendToActiveWindow: () => false,
       sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
@@ -113,6 +120,8 @@ describe("worktree routes on a regular (non-bare) repo", () => {
     const worktrees = await listProjectWorktrees(repo);
     expect(worktrees.map((wt) => wt.wtName)).toEqual(["feat/nested"]);
     expect(worktrees[0]!.path).toBe(join(repo, ".worktrees", "feat", "nested"));
+    // Every window's sidebar lists the project, subscribed to its worktrees or not.
+    expect(toAll).toEqual([worktreesChangedMessage(repo)]);
   });
 
   test("create on an existing branch reports git's message, not an exit code", async () => {

@@ -2625,7 +2625,7 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    ctx.broadcastAll(worktreesChangedMessage(project.cwd));
     return json(result);
   } catch (err) {
     wtLog.error(`Failed to create worktree '${name}'`, { error: err });
@@ -2679,7 +2679,7 @@ async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promis
 
   try {
     await updateWorktreeMeta(project.cwd, wtPath, update);
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    ctx.broadcastAll(worktreesChangedMessage(project.cwd));
     return json({ success: true });
   } catch (err) {
     wtLog.error("Failed to update worktree metadata", { path: wtPath, error: err });
@@ -2718,7 +2718,7 @@ async function handleEnableWorktreeMetadata(req: Request, ctx: RouteContext): Pr
     if (outcome?.status === "failed") {
       return error(outcome.error ?? "Failed to turn on worktree metadata", 500);
     }
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    ctx.broadcastAll(worktreesChangedMessage(project.cwd));
     return json({ status: outcome?.status ?? "not-needed" });
   } catch (err) {
     wtLog.error("Failed to turn on worktree metadata", { error: err });
@@ -2856,7 +2856,7 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
   } catch (err) {
     return error(describeError(err, "Failed to remove worktree"));
   } finally {
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    ctx.broadcastAll(worktreesChangedMessage(project.cwd));
   }
 }
 

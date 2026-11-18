@@ -1011,7 +1011,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
       if (!project || watcher !== project.watcher) return;
 
       if (event === "worktrees") {
-        broadcastToProject(cwd, worktreesChangedMessage(cwd));
+        broadcastAll(worktreesChangedMessage(cwd));
         await reconcileWorktrees(project).catch((err: unknown) => {
           log.warn("Could not read the worktree list", { projectPath: cwd, error: err });
         });

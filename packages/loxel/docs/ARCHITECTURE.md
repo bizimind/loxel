@@ -54,7 +54,7 @@ Server-to-client delivery uses helpers in server.ts, chosen by scope:
 
 - `broadcastToSubscribers(wtPath)`: clients subscribed to a worktree (`status_changed`, `files_dir_changed`, `file_content_changed`, ...).
 - `broadcastToProject(projectPath)`: clients subscribed to any worktree of the project, deduplicated (`refs_changed`, `log_changed`, `worktree_status_changed`, `localdb_changed`).
-- `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`).
+- `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`, and `worktrees_changed`, since every window's sidebar lists every project).
 - `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`, and `open_url` when no window shows its worktree), see [Per-window identity](#per-window-identity).
 - `sendToWorktreeWindows(wtPath, windowId)`: every subscriber showing a worktree, with a different message for the window in use among them (`open_url` with its placement and focus); returns false when no window shows it, and `open_url` then goes through `sendToActiveWindow`.
 - `sendTo(ws)`: one socket; a terminal session's events reach every connection attached to it, each through its own sink (see [TERMINALS.md](TERMINALS.md#several-clients)).
