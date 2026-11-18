@@ -2,6 +2,7 @@
   "name": "@bizimind/localdb-sdk",
   "version": "0.1.0",
   "description": "Local SQLite-backed structured database SDK with Notion-like schema and view management",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

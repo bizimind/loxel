@@ -36,6 +36,10 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 
 `src/types.ts` holds the LSP 3.17 protocol typings generated upstream; do not edit it by hand.
 
+## License
+
+Upstream's code is MIT ([LICENSE](LICENSE)); Loxel's changes are under the repository's [FSL-1.1-ALv2](../../LICENSE), hence `MIT AND FSL-1.1-ALv2` in `package.json`.
+
 ## Usage
 
 Workspace-only and private; add `"@bizimind/monaco-lsp-client": "workspace:*"`.

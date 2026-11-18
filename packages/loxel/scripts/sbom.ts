@@ -6,11 +6,14 @@
  * The base is pnpm's SBOM of loxel's `dependencies`, which in this package are what ships (Vite
  * bundles them, or a language server is built from them), so it lists each with its whole
  * dependency tree. Run it after `pnpm install`, since pnpm reads licenses from the installed
- * packages. To it are added what the lockfile does not hold: the patched Electron, the Bun runtime
- * that `bun build --compile` puts in loxel-server and the compiled language servers, the component
- * each language server manifest names (see language-server-manifest.ts), and, read from each Go
- * binary among the built language servers, the Go modules and standard library compiled into it.
- * The language servers must be built and staged first (`pnpm run build:server:standalone`).
+ * packages. To it are added what the lockfile does not hold: the patched Electron and the Bun
+ * runtime that `bun build --compile` puts in loxel-server and the compiled language servers, each
+ * with what it bundles (third-party.json); the other things that ship without being packages
+ * (third-party.json); the component each language server manifest names (see
+ * language-server-manifest.ts); and, read from the built language servers, the Go modules and
+ * standard library compiled into each Go binary and the Maven artifacts among their jars. Last,
+ * sbom-licenses.ts fills in the licenses those sources leave out. Build the server and language
+ * servers first (`pnpm run build:server:standalone`).
  */
 
 import { existsSync } from "node:fs";
@@ -21,6 +24,7 @@ import { z } from "zod";
 
 import { electronVersion, type Patch, readPatches } from "./electron-dist";
 import { findGoBinaries, type GoBuildInfo, type GoModule } from "./go-build-info";
+import { findJars, type Jar, type MavenCoordinates } from "./jar-coordinates";
 import {
   type Manifest,
   readAllManifests,
@@ -28,12 +32,23 @@ import {
   type ShippedComponent,
   shippedComponent,
 } from "./language-server-manifest";
+import {
+  joinExpressions,
+  LicenseOverrideSchema,
+  withDepsDevLicenses,
+  withLicenseOverrides,
+  withNpmLegacyLicenses,
+} from "./sbom-licenses";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
 const REPO_ROOT = path.resolve(LOXEL, "..", "..");
 const REPO_URL = "https://github.com/bizimind/loxel";
 /** Where `language-server-binaries.ts build` stages what ships next to loxel-server. */
 const STAGED_LANGUAGE_SERVERS = path.join(LOXEL, "build", "language-servers");
+/** The compiled server, which `build-server.ts compile` writes. */
+const SERVER_BINARY = path.join(LOXEL, "build", "loxel-server");
+/** pnpm's store of the installed packages, `<name>@<version>/node_modules/<name>`. */
+const PNPM_STORE = path.join(REPO_ROOT, "node_modules", ".pnpm");
 
 const ComponentSchema = z.looseObject({ "bom-ref": z.string() });
 const BomSchema = z.looseObject({
@@ -47,7 +62,81 @@ const BomSchema = z.looseObject({
 });
 
 export type Bom = z.infer<typeof BomSchema>;
-type Component = z.infer<typeof ComponentSchema>;
+export type Component = z.infer<typeof ComponentSchema>;
+
+/** Something that ships without a package of its own, or that Electron or Bun bundles. */
+const ThirdPartyEntrySchema = z.strictObject({
+  name: z.string(),
+  version: z.string().optional(),
+  /** Bun's only: the `process.versions` key the shipped Bun reports the version in. */
+  versionKey: z.string().optional(),
+  /** With `{version}` standing for the version. */
+  purl: z.string().optional(),
+  license: z.string(),
+  url: z.string(),
+  note: z.string().optional(),
+});
+/** A jar without Maven coordinates, by its OSGi name: the artifact it repackages. */
+const BundleSchema = z.strictObject({
+  maven: z.string().regex(/^[^:]+:[^:]+$/),
+  license: z.string(),
+  note: z.string(),
+});
+const ThirdPartySchema = z.strictObject({
+  note: z.string(),
+  licenses: z.record(z.string(), LicenseOverrideSchema),
+  bundles: z.record(z.string(), BundleSchema),
+  components: z.array(ThirdPartyEntrySchema),
+  electron: z.strictObject({
+    version: z.string(),
+    note: z.string(),
+    components: z.array(ThirdPartyEntrySchema),
+  }),
+  bun: z.strictObject({ note: z.string(), components: z.array(ThirdPartyEntrySchema) }),
+});
+
+type ThirdPartyEntry = z.infer<typeof ThirdPartyEntrySchema>;
+export type ThirdParty = z.infer<typeof ThirdPartySchema>;
+
+export async function readThirdParty(): Promise<ThirdParty> {
+  return ThirdPartySchema.parse(await Bun.file(path.join(LOXEL, "third-party.json")).json());
+}
+
+function thirdPartyComponent(entry: ThirdPartyEntry, version = entry.version): Component {
+  const purl = version && entry.purl?.replaceAll("{version}", version);
+  return {
+    type: "library",
+    "bom-ref": purl || (version ? `${entry.name}@${version}` : entry.name),
+    name: entry.name,
+    ...(version && { version }),
+    ...(purl && { purl }),
+    licenses: [{ expression: entry.license }],
+    externalReferences: [{ type: "website", url: entry.url }],
+    ...(entry.note && { description: entry.note }),
+  };
+}
+
+/**
+ * A binary with what it bundles, each a dependency of it: the binary's license is its own and
+ * theirs together, since it holds them all.
+ */
+function bundleAdditions(
+  binary: Component,
+  ownLicense: string,
+  bundled: Array<{ entry: ThirdPartyEntry; version?: string }>,
+): Addition[] {
+  const license = joinExpressions(
+    [ownLicense, ...bundled.map(({ entry }) => entry.license)],
+    "AND",
+  );
+  return [
+    { component: { ...binary, licenses: [{ expression: license }] } },
+    ...bundled.map(({ entry, version }) => ({
+      component: thirdPartyComponent(entry, version),
+      parents: [binary["bom-ref"]],
+    })),
+  ];
+}
 
 /** Electron as Loxel ships it: the pinned release with Loxel's patches, each linked at the tag. */
 export function electronComponent(
@@ -62,7 +151,6 @@ export function electronComponent(
     name: "electron",
     version,
     purl,
-    licenses: [{ expression: "MIT" }],
     pedigree: {
       patches: patches.map((patch) => ({
         type: "unofficial",
@@ -74,17 +162,55 @@ export function electronComponent(
   };
 }
 
+/** Electron and what it bundles, which third-party.json must list for the pinned `version`. */
+export function electronAdditions(
+  version: string,
+  patches: Patch[],
+  loxelVersion: string,
+  bundled: ThirdParty["electron"],
+): Addition[] {
+  if (bundled.version !== version) {
+    throw new Error(
+      `third-party.json lists what Electron ${bundled.version} bundles, but package.json pins ${version}: update its "electron"`,
+    );
+  }
+  return bundleAdditions(
+    electronComponent(version, patches, loxelVersion),
+    "MIT",
+    bundled.components.map((entry) => ({ entry })),
+  );
+}
+
 /** The Bun runtime compiled into loxel-server and the Bun-compiled language servers. */
 export function bunComponent(version: string): Component {
   const purl = `pkg:github/oven-sh/bun@bun-v${version}`;
-  return {
-    type: "platform",
-    "bom-ref": purl,
-    name: "bun",
-    version,
-    purl,
-    licenses: [{ expression: "MIT" }],
-  };
+  return { type: "platform", "bom-ref": purl, name: "bun", version, purl };
+}
+
+/**
+ * Bun and what it links, at the versions the shipped Bun reports in `process.versions`
+ * (`versions`). Throws when it no longer reports one third-party.json names.
+ */
+export function bunAdditions(
+  versions: Record<string, string | undefined>,
+  bundled: ThirdParty["bun"],
+): Addition[] {
+  const { bun } = versions;
+  if (!bun) throw new Error("process.versions has no bun");
+  return bundleAdditions(
+    bunComponent(bun),
+    "MIT",
+    bundled.components.map((entry) => {
+      if (!entry.versionKey) return { entry };
+      const version = versions[entry.versionKey];
+      if (!version) {
+        throw new Error(
+          `Bun ${bun} has no process.versions.${entry.versionKey} (third-party.json)`,
+        );
+      }
+      return { entry, version };
+    }),
+  );
 }
 
 export function languageServerComponent(shipped: ShippedComponent): Component {
@@ -136,21 +262,71 @@ export function goAdditions(
   parentOf: (file: string) => string,
   skip: ReadonlySet<string>,
 ): Addition[] {
-  const additions = new Map<string, Addition & { parents: string[] }>();
-  for (const { file, info } of binaries) {
-    const parent = parentOf(file);
+  const found = binaries.flatMap(({ file, info }) => {
     const main = info.main && info.main.version !== "(devel)" ? [info.main] : [];
     const components = [
       goStdlibComponent(info.goVersion),
       ...[...main, ...info.deps].map(goModuleComponent),
     ];
-    for (const component of components) {
-      const ref = component["bom-ref"];
-      if (skip.has(ref) || ref === parent) continue;
-      const existing = additions.get(ref);
-      if (!existing) additions.set(ref, { component, parents: [parent] });
-      else if (!existing.parents.includes(parent)) existing.parents.push(parent);
+    return components.map((component) => ({ component, parent: parentOf(file) }));
+  });
+  return uniqueAdditions(found, skip);
+}
+
+/** A Maven artifact, from a jar's coordinates. */
+export function mavenComponent({ groupId, artifactId, version }: MavenCoordinates): Component {
+  const purl = `pkg:maven/${groupId}/${artifactId}@${encodeURIComponent(version)}`;
+  return { type: "library", "bom-ref": purl, group: groupId, name: artifactId, version, purl };
+}
+
+/**
+ * The Maven artifacts among the jars, each a dependency of `parentOf(file)`, as goAdditions. A
+ * `-SNAPSHOT` is the server's own build, like a Go `(devel)` module: no artifact anyone can look up.
+ * A jar without coordinates is the artifact `bundles` names for its OSGi name, at its OSGi version
+ * without the qualifier; Eclipse's own bundles are part of their server, and any other unnamed one
+ * is warned about.
+ */
+export function jarAdditions(
+  jars: Jar[],
+  parentOf: (file: string) => string,
+  skip: ReadonlySet<string>,
+  bundles: ThirdParty["bundles"],
+): Addition[] {
+  const found = jars.flatMap(({ file, coordinates, bundle }) => {
+    const parent = parentOf(file);
+    const artifacts = coordinates
+      .filter(({ version }) => !version.endsWith("-SNAPSHOT"))
+      .map((coordinate) => ({ component: mavenComponent(coordinate), parent }));
+    const named = bundle && bundles[bundle.symbolicName];
+    if (!bundle || !named) {
+      if (bundle && !bundle.symbolicName.startsWith("org.eclipse.")) {
+        console.warn(`${file} has no Maven coordinates and no "bundles" entry in third-party.json`);
+      }
+      return artifacts;
     }
+    const [groupId = "", artifactId = ""] = named.maven.split(":");
+    const version = bundle.version.split(".").slice(0, 3).join(".");
+    const component = mavenComponent({ groupId, artifactId, version });
+    return [
+      ...artifacts,
+      { component: { ...component, licenses: [{ expression: named.license }] }, parent },
+    ];
+  });
+  return uniqueAdditions(found, skip);
+}
+
+/** One addition per component, with every parent it was found under; those in `skip` left out. */
+function uniqueAdditions(
+  found: Array<{ component: Component; parent: string }>,
+  skip: ReadonlySet<string>,
+): Addition[] {
+  const additions = new Map<string, Addition & { parents: string[] }>();
+  for (const { component, parent } of found) {
+    const ref = component["bom-ref"];
+    if (skip.has(ref) || ref === parent) continue;
+    const existing = additions.get(ref);
+    if (!existing) additions.set(ref, { component, parents: [parent] });
+    else if (!existing.parents.includes(parent)) existing.parents.push(parent);
   }
   return [...additions.values()];
 }
@@ -203,12 +379,17 @@ export function checkNpmDependencies(manifests: Manifest[], packageJson: unknown
 
 /**
  * The SBOM of the app built on this machine. pnpm installs, and so lists, only this machine's
- * platform packages (TypeScript's compiler is one), so each architecture's app gets its own. With
- * `languageServersDir`, the Go binaries in it add their modules.
+ * platform packages (TypeScript's compiler is one), so each architecture's app gets its own.
+ * `bunVersions` is the shipped Bun's `process.versions`. With `languageServersDir`, the Go binaries
+ * and jars in it add their modules and artifacts.
  */
-export async function generateSbom(languageServersDir?: string): Promise<Bom> {
+export async function generateSbom(
+  bunVersions: Record<string, string | undefined>,
+  languageServersDir?: string,
+): Promise<Bom> {
   const packageJson: unknown = await Bun.file(path.join(LOXEL, "package.json")).json();
   checkNpmDependencies(await readAllManifests(), packageJson);
+  const thirdParty = await readThirdParty();
 
   const pnpmSbom: unknown =
     await $`pnpm --filter @bizimind/loxel sbom --sbom-format cyclonedx --sbom-type application --prod`
@@ -220,46 +401,83 @@ export async function generateSbom(languageServersDir?: string): Promise<Bom> {
   // pnpm names the root as an npm package, which Loxel is not.
   bom.metadata.component.purl = `pkg:github/bizimind/loxel@loxel-v${version}`;
 
-  const bunVersion = (await Bun.file(path.join(REPO_ROOT, ".bun-version")).text()).trim();
   const manifests = await readManifests();
   const languageServers = manifests.flatMap((manifest) => {
     const shipped = shippedComponent(manifest);
     return shipped ? [{ manifest, shipped }] : [];
   });
-  const base = withComponents(
-    bom,
-    [
-      electronComponent(electronVersion(packageJson), readPatches(), version),
-      bunComponent(bunVersion),
-      ...languageServers.map(({ shipped }) => languageServerComponent(shipped)),
-    ].map((component) => ({ component })),
-  );
-  if (!languageServersDir) return base;
+  let full = withComponents(bom, [
+    ...electronAdditions(electronVersion(packageJson), readPatches(), version, thirdParty.electron),
+    ...bunAdditions(bunVersions, thirdParty.bun),
+    ...thirdParty.components.map((entry) => ({ component: thirdPartyComponent(entry) })),
+    ...languageServers.map(({ shipped }) => ({ component: languageServerComponent(shipped) })),
+  ]);
 
-  // A staged binary belongs to the manifest whose resource it is staged from (`typescript-lib/tsc`
-  // to the one staging `typescript-lib`); one built from npm packages has no component of its own.
-  const rootRef = bom.metadata.component["bom-ref"];
-  const parentOf = (file: string): string => {
-    const staged = file.split(path.sep)[0];
-    const owner = languageServers.find(({ manifest }) =>
-      manifest.resources.some((resource) => path.basename(resource) === staged),
-    );
-    return owner?.shipped.purl ?? rootRef;
+  if (languageServersDir) {
+    // A staged file belongs to the manifest whose resource it is staged from (`typescript-lib/tsc`
+    // to the one staging `typescript-lib`); one built from npm packages has no component of its
+    // own.
+    const rootRef = bom.metadata.component["bom-ref"];
+    const parentOf = (file: string): string => {
+      const staged = file.split(path.sep)[0];
+      const owner = languageServers.find(({ manifest }) =>
+        manifest.resources.some((resource) => path.basename(resource) === staged),
+      );
+      return owner?.shipped.purl ?? rootRef;
+    };
+    const existing = new Set(full.components.map((component) => component["bom-ref"]));
+    full = withComponents(full, [
+      ...goAdditions(await findGoBinaries(languageServersDir), parentOf, existing),
+      ...jarAdditions(await findJars(languageServersDir), parentOf, existing, thirdParty.bundles),
+    ]);
+  }
+
+  // The overrides first, so the lookups, which only fill in missing licenses, skip them. Without
+  // the language servers there are no Go modules or jars for theirs to match.
+  const overrides = Object.entries(thirdParty.licenses).filter(
+    ([ref]) => languageServersDir || !/^pkg:(golang|maven)\//.test(ref),
+  );
+  let components = withLicenseOverrides(full.components, Object.fromEntries(overrides));
+  components = await withNpmLegacyLicenses(components, PNPM_STORE);
+  components = await withDepsDevLicenses(components);
+  return sorted({ ...full, components });
+}
+
+/** `bom` in a fixed order, since pnpm lists its components in a different one each run. */
+export function sorted(bom: Bom): Bom {
+  const compare = (a: string, b: string): number => (a < b ? -1 : 1);
+  return {
+    ...bom,
+    components: bom.components.toSorted((a, b) => compare(a["bom-ref"], b["bom-ref"])),
+    dependencies: bom.dependencies
+      .map((dependency) => ({ ...dependency, dependsOn: dependency.dependsOn?.toSorted() }))
+      .toSorted((a, b) => compare(a.ref, b.ref)),
   };
-  const existing = new Set(base.components.map((component) => component["bom-ref"]));
-  const binaries = await findGoBinaries(languageServersDir);
-  return withComponents(base, goAdditions(binaries, parentOf, existing));
+}
+
+/** The `process.versions` of the Bun compiled into `binary`, which runs as Bun with BUN_BE_BUN. */
+async function shippedBunVersions(binary: string): Promise<Record<string, string>> {
+  const output = await $`${binary} -e ${"console.log(JSON.stringify(process.versions))"}`
+    .env({ ...process.env, BUN_BE_BUN: "1" })
+    .quiet()
+    .json();
+  return z.record(z.string(), z.string()).parse(output);
 }
 
 if (import.meta.main) {
   const out = Bun.argv[2];
   if (!out) throw new Error("Usage: bun scripts/sbom.ts <out.cdx.json>");
-  if (!existsSync(STAGED_LANGUAGE_SERVERS)) {
-    throw new Error(
-      `${STAGED_LANGUAGE_SERVERS} is missing: build the language servers first (pnpm run build:server:standalone)`,
-    );
+  for (const built of [STAGED_LANGUAGE_SERVERS, SERVER_BINARY]) {
+    if (!existsSync(built)) {
+      throw new Error(
+        `${built} is missing: build the server and language servers first (pnpm run build:server:standalone)`,
+      );
+    }
   }
-  const bom = await generateSbom(STAGED_LANGUAGE_SERVERS);
+  const bom = await generateSbom(await shippedBunVersions(SERVER_BINARY), STAGED_LANGUAGE_SERVERS);
   await Bun.write(out, `${JSON.stringify(bom, null, 2)}\n`);
-  console.log(`Wrote ${out}: ${bom.components.length} components`);
+  const unlicensed = bom.components.filter((component) => !component.licenses);
+  console.log(
+    `Wrote ${out}: ${bom.components.length} components, ${unlicensed.length} without a license`,
+  );
 }

@@ -39,4 +39,4 @@ Check the license before adding a dependency, vendored code, font, template or b
 | MPL, LGPL, EPL                                                  | Only unmodified, as a separate package or binary, shipped with its notice and where to get its source |
 | GPL, AGPL, SSPL, share-alike, non-commercial, none              | Ask the user first                                                                                    |
 
-Keep attributions with what they credit: the upstream `LICENSE` next to vendored assets, as in `packages/loxel/public/icons/LICENSE`. If you copy text from an openly licensed source, such as another company's policy, credit it as its license requires.
+Keep attributions with what they credit: the upstream `LICENSE` next to vendored assets, as in `packages/loxel/public/icons/LICENSE`. Something Loxel ships that is not a package, such as a font or icon set, also gets an entry in `packages/loxel/third-party.json`, so the release SBOM lists it with its license. If you copy text from an openly licensed source, such as another company's policy, credit it as its license requires.
