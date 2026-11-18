@@ -58,8 +58,8 @@ function gitDiffModelUri(path: string, ref: string | undefined, side: "old" | "n
 }
 
 /**
- * Model of the editable working-tree side of an uncommitted diff, by absolute path. Outside
- * `loxel://HEAD`, so it is not taken for an editor tab's live model of the file.
+ * Model of the editable working-tree side of an uncommitted diff, by absolute path. Its fragment
+ * keeps it from being taken for an editor tab's live model of the file (see `editorFile`).
  */
 function workingTreeModelUri(absPath: string) {
   return monaco.Uri.from({

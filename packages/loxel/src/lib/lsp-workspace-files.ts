@@ -3,11 +3,11 @@ import type * as monaco from "monaco-editor";
 
 import * as api from "@/api/client";
 import { ApiError } from "@/api/client";
-import { localRef } from "@/api/local-server";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 
 import { deleteFile, moveFile, renameFile } from "./file-operations";
-import { editorFilePath } from "./live-editor-model";
+import { editorFile } from "./live-editor-model";
 import { pathName, relativeTo } from "./project-file-helpers";
 
 /**
@@ -35,20 +35,19 @@ const PROTECTED_SEGMENTS = new Set([
 
 /**
  * The disk side of language-server workspace edits (rename, code actions, `workspace/applyEdit`)
- * for worktree `wtPath`. Files with no editor model are read and written through the file-content
+ * for worktree `wt`. Files with no editor model are read and written through the file-content
  * routes, unformatted; files are created, renamed, moved and deleted through the file-operation
  * routes, so open tabs follow, the files panel refreshes, and its undo covers those operations.
  *
- * Only files of the worktree itself are changed through it: never anything outside it (the
- * standard library, an environment elsewhere, Others folders, drafts), under a dependency folder
- * (`node_modules`, `site-packages`) or under `.git`. Lexical paths are checked first, then their
+ * Only files of the worktree itself are changed through it: never a file of another server or
+ * anything outside the worktree (the standard library, an environment elsewhere, Others folders,
+ * drafts), under a dependency folder (`node_modules`, `site-packages`) or under `.git`. Lexical paths are checked first, then their
  * real paths, so a symlink cannot lead an edit out of the worktree. Files open in an editor are
  * the exception: text edits change their model, wherever they are, as typing would, and never
  * reach this file system.
  */
-export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
-  // Language-server clients still name their worktree by path (step 6c gives them a ref).
-  const wt = localRef(wtPath);
+export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
+  const wtPath = wt.path;
   let realRoot: Promise<string> | undefined;
   const getRealRoot = () =>
     (realRoot ??= api.getPathInfo(wtPath).then(
@@ -77,7 +76,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
 
   return {
     async stat(uri: monaco.Uri): Promise<WorkspaceFileType | undefined> {
-      const path = editablePath(uri, wtPath);
+      const path = editablePath(uri, wt);
       const info = await pathInfo(path);
       if (info) {
         assertWorktreeFile(info.path, await getRealRoot());
@@ -95,7 +94,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async readFile(uri) {
-      const path = editablePath(uri, wtPath);
+      const path = editablePath(uri, wt);
       const { content } = await api.getFileContentByPath(path, wtPath);
       // The route decodes as UTF-8, replacing invalid bytes: writing that back would corrupt the file.
       if (content.includes("\uFFFD"))
@@ -104,7 +103,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async writeFile(uri, content) {
-      const path = editablePath(uri, wtPath);
+      const path = editablePath(uri, wt);
       await api.writeFileContent({
         path,
         content,
@@ -114,7 +113,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async createFile(uri) {
-      const path = editablePath(uri, wtPath);
+      const path = editablePath(uri, wt);
       const dir = parentOf(path);
       await ensureDir(dir);
       const created = await api.createProjectFile(wtPath, { dir, name: pathName(path) });
@@ -124,8 +123,8 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async rename(source, target) {
-      const sourcePath = editablePath(source, wtPath);
-      const targetPath = editablePath(target, wtPath);
+      const sourcePath = editablePath(source, wt);
+      const targetPath = editablePath(target, wt);
       const targetDir = parentOf(targetPath);
       const newName = pathName(targetPath);
       let path: string;
@@ -139,7 +138,7 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async delete(uri) {
-      await deleteFile({ wt, path: editablePath(uri, wtPath), isDetached: false });
+      await deleteFile({ wt, path: editablePath(uri, wt), isDetached: false });
     },
   };
 }
@@ -149,12 +148,14 @@ export function isInProtectedFolder(relativePath: string): boolean {
   return relativePath.split("/").some((s) => PROTECTED_SEGMENTS.has(s));
 }
 
-/** The absolute path of a worktree file's editor URI (see `editorFilePath`), checked lexically. */
-function editablePath(uri: monaco.Uri, wtPath: string): string {
-  const path = editorFilePath(uri);
-  if (path === null) throw new Error(`${uri.toString(true)} is not a file of the worktree`);
-  assertWorktreeFile(path, wtPath);
-  return path;
+/** The absolute path of a worktree file's editor URI (see `editorFile`), checked lexically. */
+function editablePath(uri: monaco.Uri, wt: WorktreeRef): string {
+  const file = editorFile(uri);
+  if (file?.server !== wt.server) {
+    throw new Error(`${uri.toString(true)} is not a file of the worktree`);
+  }
+  assertWorktreeFile(file.path, wt.path);
+  return file.path;
 }
 
 function assertWorktreeFile(path: string, root: string): void {

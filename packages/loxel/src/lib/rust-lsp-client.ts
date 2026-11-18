@@ -1,7 +1,7 @@
 import { wsClient } from "@/api/client";
 import { rustToolchain } from "@/api/rust-toolchain-model";
+import { getQueryScope } from "@/queries/use-scope";
 import { useLspStatusStore } from "@/store/lsp-status";
-import { useWorktreeStore } from "@/store/worktrees";
 
 import { createLspClient } from "./lsp-client";
 import { createToolchainServerRecovery } from "./toolchain-server-recovery";
@@ -20,7 +20,7 @@ wsClient.subscribe(
     changedMessage: rustToolchain.changedMessage,
     client: rustLspClient,
     stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/rust-lsp"),
-    activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,
+    activeWorktree: () => getQueryScope().activeWorktree,
   }),
 );
 

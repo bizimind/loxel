@@ -9,7 +9,7 @@ import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
-import { usePanelWorktree } from "@/components/dockview/panel-context";
+import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { EditorBanner } from "@/components/editor/EditorBanner";
@@ -29,6 +29,7 @@ import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
+import { editorFileUri } from "@/lib/live-editor-model";
 import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
@@ -251,6 +252,7 @@ export function CodeEditorPanel({
   useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
 
   const panelWorktree = usePanelWorktree();
+  const panelServer = usePanelServer();
   const panelWorktreePath = panelWorktree?.path ?? null;
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);
   const resolvedLang = useMemo(
@@ -344,10 +346,10 @@ export function CodeEditorPanel({
 
     const content = diskContent ?? "";
 
-    const useFileScheme = fileSchemeLanguages.has(language);
-    const uri = useFileScheme
-      ? monaco.Uri.from({ scheme: "file", path: filePath })
-      : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });
+    const uri = editorFileUri(
+      { server: panelServer, path: filePath },
+      fileSchemeLanguages.has(language) ? "file" : "loxel",
+    );
     let model = monaco.editor.getModel(uri);
     if (model) {
       if (model.getValue() !== content) model.setValue(content);
@@ -512,13 +514,13 @@ export function CodeEditorPanel({
       }
       const baseDir = filePath.slice(0, filePath.lastIndexOf("/"));
       // Resolve the $schema URI the same way Monaco's JSON worker does — as a
-      // URL relative to the document's file:// URI. The registered schema uri
-      // must match exactly, or Monaco can't find the inline schema and emits
-      // "No schema request service available".
+      // URL relative to the document's file: URI, server authority included. The
+      // registered schema uri must match exactly, or Monaco can't find the inline
+      // schema and emits "No schema request service available".
       const resolvedUrl =
         schemaUrl.startsWith("http://") || schemaUrl.startsWith("https://")
           ? schemaUrl
-          : new URL(schemaUrl, `file://${filePath}`).href;
+          : new URL(schemaUrl, fileUriStr).href;
       api.resolveSchema(schemaUrl, baseDir).then((schema) => {
         if (schema) setDollarSchema(fileUriStr, resolvedUrl, schema);
         else removeDollarSchema(fileUriStr);

@@ -13,10 +13,10 @@ export const lazyLspClients = Object.values(
 );
 
 /**
- * Monaco languages whose editor models use `file://` URIs: those of the servers above, except a
- * client with `keepsEditorUris`, which need real disk paths (schemas, workspace indexing, import
- * resolution), plus YAML and JSON (schemas).
- * Other languages get `loxel://HEAD/<path>`, which the TypeScript server bridge translates.
+ * Monaco languages whose editor models use `file:` URIs (see `editorFileUri`): those of the servers
+ * above, except a client with `keepsEditorUris`, which need real disk paths (schemas, workspace
+ * indexing, import resolution), plus YAML and JSON (schemas). Other languages get `loxel:` URIs,
+ * which reach their servers as `loxel://head/<path>` for the TypeScript server bridge to translate.
  */
 export const fileSchemeLanguages: ReadonlySet<string> = new Set([
   "json",

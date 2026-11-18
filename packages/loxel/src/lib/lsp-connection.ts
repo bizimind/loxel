@@ -1,3 +1,4 @@
+import { sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
@@ -52,13 +53,13 @@ export interface LspConnectionOptions {
    * client on it. `freshServer` asks for a server started afresh rather than the one an earlier
    * socket left running (see {@link LspConnection.restart}).
    */
-  open(wtPath: string | null, signal: AbortSignal, freshServer: boolean): Promise<LspLink>;
+  open(wt: WorktreeRef | null, signal: AbortSignal, freshServer: boolean): Promise<LspLink>;
   onStateChange(state: LspConnectionState): void;
 }
 
 export interface LspConnection {
-  /** Connect to `wtPath`'s server. A no-op while already connected (or stopped) for that path. */
-  connect: (wtPath: string | null) => void;
+  /** Connect to `wt`'s server. A no-op while already connected (or stopped) for that worktree. */
+  connect: (wt: WorktreeRef | null) => void;
   disconnect: () => void;
   /**
    * Connect again from scratch, whatever the state, with a fresh failure count. The server Loxel
@@ -75,6 +76,10 @@ export interface LspConnection {
   readonly state: LspConnectionState;
 }
 
+function sameTarget(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
+  return a === null || b === null ? a === b : sameWorktreeRef(a, b);
+}
+
 /**
  * The reconnect policy of a language-server client. Every close tears the client down, so its
  * stale providers and diagnostics go away; then, by close code:
@@ -89,7 +94,7 @@ export interface LspConnection {
  *   with {@link LspConnection.restart}.
  */
 export function createLspConnection(options: LspConnectionOptions): LspConnection {
-  let target: { wtPath: string | null } | null = null;
+  let target: { wt: WorktreeRef | null } | null = null;
   let link: LspLink | null = null;
   /** Bumped on every teardown, so a stale open or close is ignored. */
   let generation = 0;
@@ -116,13 +121,13 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     link = null;
   }
 
-  function attempt(wtPath: string | null, freshServer = false): void {
+  function attempt(wt: WorktreeRef | null, freshServer = false): void {
     release();
     const gen = generation;
     const controller = new AbortController();
     pending = controller;
     setState({ state: "connecting" });
-    options.open(wtPath, controller.signal, freshServer).then(
+    options.open(wt, controller.signal, freshServer).then(
       (opened) => {
         if (gen !== generation) {
           opened.dispose();
@@ -137,13 +142,13 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
           if (gen !== generation) return;
           link = null;
           opened.dispose();
-          handleClose(wtPath, close, Date.now() - openedAt);
+          handleClose(wt, close, Date.now() - openedAt);
         });
       },
       () => {
         if (gen !== generation) return;
         pending = null;
-        handleClose(wtPath, null, 0);
+        handleClose(wt, null, 0);
       },
     );
   }
@@ -154,11 +159,11 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
   }
 
   /** `close` is null for a socket that would not open. */
-  function handleClose(wtPath: string | null, close: LspClose | null, lifetimeMs: number): void {
+  function handleClose(wt: WorktreeRef | null, close: LspClose | null, lifetimeMs: number): void {
     const detail = close?.reason ?? "";
     const code = close?.code;
     if (code === LSP_RESTART_CLOSE_CODE) {
-      attempt(wtPath);
+      attempt(wt);
       return;
     }
     if (code === LSP_REPLACED_CLOSE_CODE) {
@@ -172,7 +177,7 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     if (resumed) {
       resumed = false;
       failures = 0;
-      attempt(wtPath);
+      attempt(wt);
       return;
     }
     if (lifetimeMs >= LSP_STABLE_CONNECTION_MS) failures = 0;
@@ -182,16 +187,16 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
       return;
     }
     const delayMs = LSP_RECONNECT_BASE_DELAY_MS * 2 ** (failures - 1);
-    timer = setTimeout(() => attempt(wtPath), delayMs);
+    timer = setTimeout(() => attempt(wt), delayMs);
     setState({ state: "reconnecting", delayMs });
   }
 
   return {
-    connect: (wtPath) => {
-      if (target?.wtPath === wtPath) return;
-      target = { wtPath };
+    connect: (wt) => {
+      if (target && sameTarget(target.wt, wt)) return;
+      target = { wt };
       failures = 0;
-      attempt(wtPath);
+      attempt(wt);
     },
     disconnect: () => {
       target = null;
@@ -202,7 +207,7 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     restart: (restartOptions) => {
       if (!target) return;
       failures = 0;
-      attempt(target.wtPath, restartOptions?.freshServer === true);
+      attempt(target.wt, restartOptions?.freshServer === true);
     },
     resume: () => {
       if (!target) return;
@@ -214,7 +219,7 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
       const stopped = state.state === "stopped" && state.reason !== "replaced";
       if (!waiting && !stopped) return;
       failures = 0;
-      attempt(target.wtPath);
+      attempt(target.wt);
     },
     get state() {
       return state;

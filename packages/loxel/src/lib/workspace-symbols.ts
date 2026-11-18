@@ -1,9 +1,11 @@
 import type { MonacoLspClient, WorkspaceSymbolItem } from "@bizimind/monaco-lsp-client";
 import * as monaco from "monaco-editor";
 
+import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
+
 import { frontendLog } from "./frontend-logger";
 import { fuzzyMatch } from "./fuzzy-match";
-import { editorFilePath } from "./live-editor-model";
+import { editorFile } from "./live-editor-model";
 import { isInProtectedFolder } from "./lsp-workspace-files";
 import type { FileLocation } from "./open-file";
 import { relativeTo } from "./project-file-helpers";
@@ -35,7 +37,7 @@ type Candidate = Omit<WorkspaceSymbolResult, "indices">;
 const SOURCE_TIMEOUT_MS = 3000;
 
 /**
- * Queries `workspace/symbol` on every source at once. Each time a source answers, `onResults`
+ * Queries `workspace/symbol` on every source at once, the language servers of `wt`. Each time a source answers, `onResults`
  * receives everything merged so far (see `rankWorkspaceSymbols`), so a slow server does not hold
  * back the others; `done` is true on the last call. A source that fails, or has not answered
  * after `timeoutMs`, is cancelled and left out. Nothing is reported once `token` is cancelled.
@@ -43,7 +45,7 @@ const SOURCE_TIMEOUT_MS = 3000;
 export async function searchWorkspaceSymbols(
   sources: readonly WorkspaceSymbolSource[],
   query: string,
-  wtPath: string,
+  wt: WorktreeRef,
   token: monaco.CancellationToken,
   onResults: (results: WorkspaceSymbolResult[], done: boolean) => void,
   timeoutMs = SOURCE_TIMEOUT_MS,
@@ -60,10 +62,10 @@ export async function searchWorkspaceSymbols(
       pending -= 1;
       if (token.isCancellationRequested) return;
       for (const symbol of symbols) {
-        const target = symbolTarget(symbol.uri);
+        const target = symbolTarget(symbol.uri, wt.server);
         if (target) candidates.push({ symbol, source, ...target });
       }
-      onResults(rankWorkspaceSymbols(query, candidates, wtPath), pending === 0);
+      onResults(rankWorkspaceSymbols(query, candidates, wt.path), pending === 0);
     }),
   );
 }
@@ -196,12 +198,18 @@ function isProjectFile(filePath: string, wtPath: string): boolean {
   return relative !== undefined && !isInProtectedFolder(relative);
 }
 
-/** What a symbol's URI opens, or null when an editor tab cannot show it. */
-function symbolTarget(uri: string): Pick<Candidate, "filePath" | "virtualDocumentUri"> | null {
+/**
+ * What a symbol's URI opens, or null when an editor tab cannot show it: a file of `server`, the
+ * one whose language servers answered, or a read-only document.
+ */
+function symbolTarget(
+  uri: string,
+  server: ServerId,
+): Pick<Candidate, "filePath" | "virtualDocumentUri"> | null {
   try {
     const parsed = monaco.Uri.parse(uri, true);
-    const filePath = editorFilePath(parsed);
-    if (filePath) return { filePath };
+    const file = editorFile(parsed);
+    if (file) return file.server === server ? { filePath: file.path } : null;
     const virtualDocumentUri = parsed.toString();
     return isVirtualDocumentUri(virtualDocumentUri)
       ? { filePath: parsed.path, virtualDocumentUri }

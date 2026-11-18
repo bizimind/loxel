@@ -63,9 +63,9 @@ afterEach(() => {
 
 describe("editor code actions", () => {
   test("apply in the focused editor tab when one of its servers offers the kind", () => {
-    const { editor } = fakeEditor("file:///wt/app.py");
-    editors.push(fakeEditor("file:///wt/other.py", { focused: false }).editor, editor);
-    offered.set("file:///wt/app.py", ["quickfix", "source.fixAll"]);
+    const { editor } = fakeEditor("file://test-server/wt/app.py");
+    editors.push(fakeEditor("file://test-server/wt/other.py", { focused: false }).editor, editor);
+    offered.set("file://test-server/wt/app.py", ["quickfix", "source.fixAll"]);
 
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(true);
     expect(canRunEditorCodeAction("codeAction.fixAll")).toBe(true);
@@ -73,24 +73,24 @@ describe("editor code actions", () => {
   });
 
   test("Quick Fix applies where a server offers only refactors, which its menu lists too", () => {
-    editors.push(fakeEditor("file:///wt/app.ts").editor);
-    offered.set("file:///wt/app.ts", ["refactor"]);
+    editors.push(fakeEditor("file://test-server/wt/app.ts").editor);
+    offered.set("file://test-server/wt/app.ts", ["refactor"]);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(true);
   });
 
   test("do not apply without a focused editor tab, or in a diff side", () => {
-    offered.set("file:///wt/app.py", ["quickfix"]);
-    offered.set("loxel://HEAD/wt/app.py#new", ["quickfix"]);
-    editors.push(fakeEditor("file:///wt/app.py", { focused: false }).editor);
+    offered.set("file://test-server/wt/app.py", ["quickfix"]);
+    offered.set("loxel://test-server/wt/app.py#new", ["quickfix"]);
+    editors.push(fakeEditor("file://test-server/wt/app.py", { focused: false }).editor);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(false);
 
-    editors.push(fakeEditor("loxel://HEAD/wt/app.py#new").editor);
+    editors.push(fakeEditor("loxel://test-server/wt/app.py#new").editor);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(false);
   });
 
   test("Fix All and Organize Imports need a server that declares their kind", () => {
-    editors.push(fakeEditor("file:///wt/app.yaml").editor);
-    undeclared.add("file:///wt/app.yaml");
+    editors.push(fakeEditor("file://test-server/wt/app.yaml").editor);
+    undeclared.add("file://test-server/wt/app.yaml");
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(true);
     expect(canRunEditorCodeAction("codeAction.fixAll")).toBe(false);
     expect(canRunEditorCodeAction("codeAction.organizeImports")).toBe(false);
@@ -98,51 +98,56 @@ describe("editor code actions", () => {
 
   test("in a peek preview, the preview's editor and file, not the tab's", () => {
     // The tab's editor keeps widget focus: the peek is one of its widgets.
-    const tab = fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true });
-    const peek = fakeEditor("file:///wt/lib.py");
+    const tab = fakeEditor("file://test-server/wt/app.py", { focused: false, widgetFocused: true });
+    const peek = fakeEditor("file://test-server/wt/lib.py");
     editors.push(tab.editor, peek.editor);
-    offered.set("file:///wt/app.py", ["source.fixAll"]);
+    offered.set("file://test-server/wt/app.py", ["source.fixAll"]);
     expect(canRunEditorCodeAction("codeAction.fixAll")).toBe(false);
-    offered.set("file:///wt/lib.py", ["source.fixAll"]);
+    offered.set("file://test-server/wt/lib.py", ["source.fixAll"]);
     runEditorCodeAction("codeAction.fixAll");
     expect(peek.run).toHaveBeenCalledTimes(1);
     expect(tab.run).not.toHaveBeenCalled();
   });
 
   test("in a peek preview's find widget, still the preview", () => {
-    const tab = fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true });
-    const peek = fakeEditor("file:///wt/lib.py", { focused: false, widgetFocused: true });
+    const tab = fakeEditor("file://test-server/wt/app.py", { focused: false, widgetFocused: true });
+    const peek = fakeEditor("file://test-server/wt/lib.py", {
+      focused: false,
+      widgetFocused: true,
+    });
     editors.push(tab.editor, peek.editor);
-    offered.set("file:///wt/lib.py", ["source.fixAll"]);
+    offered.set("file://test-server/wt/lib.py", ["source.fixAll"]);
     runEditorCodeAction("codeAction.fixAll");
     expect(peek.run).toHaveBeenCalledTimes(1);
     expect(tab.run).not.toHaveBeenCalled();
   });
 
   test("a peek of a file no tab has open (a read-only snapshot) gets none", () => {
-    const tab = fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true });
-    editors.push(tab.editor, fakeEditor("file:///wt/lib.py", { preview: true }).editor);
-    offered.set("file:///wt/app.py", ["quickfix"]);
+    const tab = fakeEditor("file://test-server/wt/app.py", { focused: false, widgetFocused: true });
+    editors.push(tab.editor, fakeEditor("file://test-server/wt/lib.py", { preview: true }).editor);
+    offered.set("file://test-server/wt/app.py", ["quickfix"]);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(false);
     runEditorCodeAction("codeAction.quickFix");
     expect(tab.run).not.toHaveBeenCalled();
   });
 
   test("with focus in an editor widget (find, suggest), that editor", () => {
-    editors.push(fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true }).editor);
-    offered.set("file:///wt/app.py", ["quickfix"]);
+    editors.push(
+      fakeEditor("file://test-server/wt/app.py", { focused: false, widgetFocused: true }).editor,
+    );
+    offered.set("file://test-server/wt/app.py", ["quickfix"]);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(true);
   });
 
   test("do not apply in a read-only editor", () => {
-    offered.set("file:///wt/app.py", ["quickfix"]);
-    editors.push(fakeEditor("file:///wt/app.py", { readOnly: true }).editor);
+    offered.set("file://test-server/wt/app.py", ["quickfix"]);
+    editors.push(fakeEditor("file://test-server/wt/app.py", { readOnly: true }).editor);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(false);
   });
 
   test("run Monaco's command in the focused editor, focusing it first", () => {
-    const other = fakeEditor("file:///wt/other.py", { focused: false });
-    const { editor, run } = fakeEditor("file:///wt/app.py");
+    const other = fakeEditor("file://test-server/wt/other.py", { focused: false });
+    const { editor, run } = fakeEditor("file://test-server/wt/app.py");
     editors.push(other.editor, editor);
 
     runEditorCodeAction("codeAction.organizeImports");

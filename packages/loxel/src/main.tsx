@@ -1,8 +1,9 @@
 import "./index.css";
-import "@/lib/monaco-env";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+
+import { startLanguageServers } from "@/lib/monaco-env";
 
 import { fetchLocalServerId } from "./api/client";
 import { setLocalServerId } from "./api/local-server";
@@ -55,6 +56,7 @@ void Promise.race([
   }),
 ]).finally(async () => {
   await serverKnown;
+  startLanguageServers();
   createRoot(root).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

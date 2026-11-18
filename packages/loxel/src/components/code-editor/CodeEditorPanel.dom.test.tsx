@@ -4,6 +4,9 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
+import { localServerId } from "@/api/local-server";
+import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+
 /** The parts of a Monaco model and editor the panel uses; edits go through `userEdit`. */
 class FakeModel {
   constructor(public value: string) {}
@@ -51,6 +54,8 @@ let editor: FakeEditor | null = null;
 let focusCalls = 0;
 /** The content of each model at its creation, which is what `didOpen` sends. */
 let createdWith: string[] = [];
+/** The URI parts of each model at its creation. */
+let createdUris: unknown[] = [];
 mock.module("monaco-editor", () => ({
   Uri: { from: (parts: { path: string }) => parts },
   KeyMod: { CtrlCmd: 0, Shift: 0 },
@@ -61,8 +66,9 @@ mock.module("monaco-editor", () => ({
     getModel: () => null,
     // Opening an editor looks for the schemas its open files need.
     getModels: () => [],
-    createModel: (content: string) => {
+    createModel: (content: string, _language: string, uri: unknown) => {
       createdWith.push(content);
+      createdUris.push(uri);
       return new FakeModel(content);
     },
     create: (_container: unknown, options: { model: FakeModel; readOnly: boolean }) => {
@@ -98,6 +104,7 @@ mock.module("@/components/code-editor/caret-row", () => ({
 }));
 
 const { CodeEditorPanel } = await import("./CodeEditorPanel");
+const { PanelContext } = await import("@/components/dockview/panel-context");
 
 const FILE = "/repo/real.ts";
 
@@ -114,12 +121,14 @@ let fileResponse: () => Response | Promise<Response>;
 let writes: { path: string; content: string }[] = [];
 const realFetch = globalThis.fetch;
 
-function renderPanel() {
+function renderPanel(worktree: WorktreeRef | null = null) {
   // No delay before the hook's one retry, so a failure settles at once.
   const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
   return render(
     <QueryClientProvider client={client}>
-      <CodeEditorPanel filePath={FILE} onClose={() => {}} panelApi={panelApi} />
+      <PanelContext.Provider value={{ worktree }}>
+        <CodeEditorPanel filePath={FILE} onClose={() => {}} panelApi={panelApi} />
+      </PanelContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -133,6 +142,7 @@ beforeEach(() => {
   editor = null;
   focusCalls = 0;
   createdWith = [];
+  createdUris = [];
   saveAction = null;
   writes = [];
   fileResponse = () => Response.json({ content: "REAL" });
@@ -152,6 +162,21 @@ afterEach(() => {
   cleanup();
   globalThis.fetch = realFetch;
   onlineManager.setOnline(true);
+});
+
+describe("CodeEditorPanel model URI", () => {
+  test("names the server of the panel's worktree, or the window's in Home", async () => {
+    renderPanel(worktreeRef(toServerId("other-server"), "/repo"));
+    await waitFor(() => expect(createdWith).toEqual(["REAL"]));
+    cleanup();
+    renderPanel();
+    await waitFor(() => expect(createdWith).toEqual(["REAL", "REAL"]));
+
+    expect(createdUris).toEqual([
+      { scheme: "loxel", authority: "other-server", path: FILE },
+      { scheme: "loxel", authority: localServerId(), path: FILE },
+    ]);
+  });
 });
 
 describe("CodeEditorPanel content load", () => {
