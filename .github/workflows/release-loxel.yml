@@ -168,6 +168,8 @@ jobs:
           scanners: vuln
           format: json
           output: ${{ runner.temp }}/sbom-vulns.json
+          # The action's default Trivy (v0.70.0) cannot decode sbom.ts's CycloneDX 1.7.
+          version: v0.76.1
       - name: Gate on SBOM vulnerabilities
         run: bun packages/loxel/scripts/sbom-vuln-gate.ts "$RUNNER_TEMP/sbom-vulns.json"
 
