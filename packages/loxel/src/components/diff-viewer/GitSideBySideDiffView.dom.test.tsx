@@ -105,7 +105,7 @@ describe("GitSideBySideDiffView", () => {
     headContent = "one\ntwo\nthree\n";
     diskContent = "one\n2\nthree\n";
     useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
-    getWorktreeUI(WT).getState().setSelectedDiffFile("src/a.ts");
+    getWorktreeUI(localRef(WT)).getState().setSelectedDiffFile("src/a.ts");
   });
   afterEach(cleanup);
 
@@ -162,15 +162,15 @@ describe("GitSideBySideDiffView", () => {
   test("keeps an edited file selected until the view goes away", async () => {
     const { unmount } = renderView();
     await waitFor(() => expect(rendered).not.toBeNull());
-    expect(getWorktreeUI(WT).getState().editedDiffFile).toBeNull();
+    expect(getWorktreeUI(localRef(WT)).getState().editedDiffFile).toBeNull();
 
     // Undoing the change makes the file match HEAD, which drops it from the git diff.
     act(() => rendered?.newSide.editable?.onContentChange(headContent));
-    expect(getWorktreeUI(WT).getState().editedDiffFile).toBe("src/a.ts");
+    expect(getWorktreeUI(localRef(WT)).getState().editedDiffFile).toBe("src/a.ts");
     await waitFor(() => expect(rendered?.hunks).toEqual([]));
 
     unmount();
-    expect(getWorktreeUI(WT).getState().editedDiffFile).toBeNull();
+    expect(getWorktreeUI(localRef(WT)).getState().editedDiffFile).toBeNull();
   });
 
   test("reports changes of the file on disk, not its first load", async () => {

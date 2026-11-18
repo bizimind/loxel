@@ -57,8 +57,8 @@ function ids(api: DockviewApi, groupIndex = 0) {
 }
 
 beforeEach(() => {
-  purgeWorktreeStores(WT);
-  purgeWorktreeStores(OTHER_WT);
+  purgeWorktreeStores(localRef(WT));
+  purgeWorktreeStores(localRef(OTHER_WT));
 });
 
 afterEach(() => {
@@ -153,7 +153,7 @@ describe("reopenClosedTab", () => {
     const removedId = b.group.id;
 
     closeCenterTab(b.api);
-    forgetClosedTabGroup(WT, removedId);
+    forgetClosedTabGroup(localRef(WT), removedId);
 
     // Ids are reused once a remounted dockview restarts its counter.
     const reused = api.addGroup({ id: removedId, referencePanel: a.id, direction: "right" });
@@ -178,7 +178,7 @@ describe("reopenClosedTab", () => {
     // Removed without being recorded (their files were deleted), which empties the group.
     q.api.close();
     r.api.close();
-    forgetClosedTabGroup(WT, removedId);
+    forgetClosedTabGroup(localRef(WT), removedId);
 
     reopenClosedTab();
     reopenClosedTab();

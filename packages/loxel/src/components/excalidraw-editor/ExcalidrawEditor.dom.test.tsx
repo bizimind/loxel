@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
-import { useEditorStateStore } from "@/store/editor-state";
+import { localServerId } from "@/api/local-server";
+import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 
 // happy-dom has no canvas or font loading; Excalidraw only needs these calls to exist.
 function noopContext(): unknown {
@@ -145,7 +146,9 @@ describe("ExcalidrawEditor", () => {
       "2 a0",
       "2 a1",
     ]);
-    expect(useEditorStateStore.getState().files.get(FILE)?.state).toBe("clean");
+    expect(
+      useEditorStateStore.getState().files.get(fileEditorKey(localServerId(), FILE))?.state,
+    ).toBe("clean");
 
     // Unmounting flushes a pending autosave, so nothing written means nothing was scheduled.
     unmount();
@@ -164,7 +167,9 @@ describe("ExcalidrawEditor", () => {
       expect(reportedChanges).toBeGreaterThan(changesAfterLoad);
     });
 
-    expect(useEditorStateStore.getState().files.get(FILE)?.state).toBe("clean");
+    expect(
+      useEditorStateStore.getState().files.get(fileEditorKey(localServerId(), FILE))?.state,
+    ).toBe("clean");
     unmount();
     expect(writes).toEqual([]);
   });
@@ -177,7 +182,9 @@ describe("ExcalidrawEditor", () => {
     diskContent = unindexedDrawing(0);
     await act(() => client.invalidateQueries());
     await waitFor(() => expect(api?.getSceneElements()).toHaveLength(2));
-    expect(useEditorStateStore.getState().files.get(FILE)?.state).toBe("clean");
+    expect(
+      useEditorStateStore.getState().files.get(fileEditorKey(localServerId(), FILE))?.state,
+    ).toBe("clean");
   });
 
   test("the first real edit after opening autosaves", async () => {

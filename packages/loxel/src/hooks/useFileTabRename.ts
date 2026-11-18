@@ -4,7 +4,7 @@ import { showToast } from "@/components/ui/toast";
 import { renameFile } from "@/lib/file-operations";
 import { isWithin } from "@/lib/project-file-helpers";
 import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo-queries";
-import { useWorktreeStore } from "@/store/worktrees";
+import { useQueryScope } from "@/queries/use-scope";
 
 /**
  * Rename handler for a file-backed tab, or undefined when the file can't be renamed. Like the
@@ -14,7 +14,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 export function useFileTabRename(
   filePath: string,
 ): ((newName: string) => Promise<void>) | undefined {
-  const wt = useWorktreeStore((s) => s.activeWorktreePath);
+  const wt = useQueryScope().activeWorktree;
   const { data: detachedFiles } = useDetachedFilesQuery();
   const { data: otherEntries } = useExternalFilesQuery();
 
@@ -25,7 +25,7 @@ export function useFileTabRename(
   const isRenameable = useMemo(
     () =>
       isDetached ||
-      (wt !== null && isWithin(filePath, wt)) ||
+      (wt !== null && isWithin(filePath, wt.path)) ||
       (otherEntries?.some((e) => e.isDir && isWithin(filePath, e.path)) ?? false),
     [isDetached, wt, filePath, otherEntries],
   );

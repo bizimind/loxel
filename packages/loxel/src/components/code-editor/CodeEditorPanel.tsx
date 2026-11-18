@@ -7,10 +7,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
-import { localRef } from "@/api/local-server";
 import { caretOptionsFor, trackCaretRow } from "@/components/code-editor/caret-row";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
-import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { usePanelWorktree } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { EditorBanner } from "@/components/editor/EditorBanner";
@@ -226,6 +225,7 @@ export function CodeEditorPanel({
   );
 
   const {
+    editorKey,
     diskContent,
     editorFileState,
     isDeleted,
@@ -250,7 +250,8 @@ export function CodeEditorPanel({
   // Keep save option refs in sync with formatting settings.
   useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
 
-  const panelWorktreePath = usePanelWorktreePath();
+  const panelWorktree = usePanelWorktree();
+  const panelWorktreePath = panelWorktree?.path ?? null;
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);
   const resolvedLang = useMemo(
     () => resolveLanguage(filePath, fileAssociations, diskContent),
@@ -279,7 +280,7 @@ export function CodeEditorPanel({
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
-    queryKey: queryKeys.editorConfig(filePath, localRef(panelWorktreePath ?? undefined)),
+    queryKey: queryKeys.editorConfig(filePath, panelWorktree ?? undefined),
     queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
   });
   const { data: editorConfigData } = editorConfigQuery;
@@ -320,7 +321,7 @@ export function CodeEditorPanel({
   // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
   // only for files tsc can report on.
   const { data: diagData } = useQuery({
-    queryKey: queryKeys.diagnostics(null, undefined, localRef(panelWorktreePath ?? undefined)),
+    queryKey: queryKeys.diagnostics(null, undefined, panelWorktree ?? undefined),
     queryFn: () => api.getDiagnostics(panelWorktreePath!),
     enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });
@@ -601,7 +602,7 @@ export function CodeEditorPanel({
   // render-time ref still reports "clean" — that would wipe the user's just-typed char.
   useEffect(() => {
     if (diskContent === null) return;
-    if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
+    if (useEditorStateStore.getState().files.get(editorKey)?.state !== "clean") return;
     const model = editorRef.current?.getModel();
     if (model && model.getValue() !== diskContent) {
       isProgrammaticRef.current = true;
@@ -609,7 +610,7 @@ export function CodeEditorPanel({
       isProgrammaticRef.current = false;
       setDetectedIndentation(detectIndentation(diskContent));
     }
-  }, [diskContent, filePath]);
+  }, [diskContent, editorKey, filePath]);
 
   // Deferred initial navigation: when diskContent arrives after mount and initial refs are still pending.
   // This handles the case where the editor was created with empty content (a failed load)

@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { DockviewApi, DockviewComponent } from "dockview-react";
 
-import { localRef } from "@/api/local-server";
-
 // The editors' module-level caches pull in Milkdown and Excalidraw; the move only needs to call them.
 mock.module("@/components/editor/MarkdownEditor", () => ({
   renameEditorCacheKey: () => {},
@@ -57,7 +55,11 @@ const {
   patchDiffTitle,
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
-const { useEditorStateStore } = await import("@/store/editor-state");
+const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
+const { localServerId, localRef } = await import("@/api/local-server");
+const TEST_SERVER = localServerId();
+/** The editor key of a file's own tab. */
+const fk = (path: string) => fileEditorKey(TEST_SERVER, path);
 const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 const { useProjectStore } = await import("@/store/projects");
 
@@ -165,11 +167,11 @@ describe("handleFileMoved", () => {
 
   test("marks the old editor entry as moving while the tab is replaced", async () => {
     setup();
-    useEditorStateStore.getState().openFile("/repo/b.ts");
+    useEditorStateStore.getState().openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
 
     expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
 
-    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.movedTo).toBe(
+    expect(useEditorStateStore.getState().files.get(fk("/repo/b.ts"))?.movedTo).toBe(
       "/repo/renamed.ts",
     );
   });
@@ -177,10 +179,10 @@ describe("handleFileMoved", () => {
   /** An open, dirty editor on `/repo/b.ts` whose last clean content was `base`. */
   function dirtyEditor(base: string, edited: string) {
     const store = useEditorStateStore.getState();
-    store.openFile("/repo/b.ts");
-    store.setBaseContent("/repo/b.ts", base);
-    store.markDirty("/repo/b.ts");
-    store.registerPendingEdit("/repo/b.ts", () => ({ content: edited }));
+    store.openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
+    store.setBaseContent(fk("/repo/b.ts"), base);
+    store.markDirty(fk("/repo/b.ts"));
+    store.registerPendingEdit(fk("/repo/b.ts"), () => ({ content: edited }));
   }
 
   test("writes unsaved edits to the new path when the file there is unchanged", async () => {
@@ -215,7 +217,7 @@ describe("handleFileMoved", () => {
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
-    const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
+    const entry = useEditorStateStore.getState().files.get(fk("/repo/b.ts"));
     expect(entry?.movedTo).toBeNull();
     expect(entry?.deleted).toBe(true);
   });
@@ -229,7 +231,7 @@ describe("handleFileMoved", () => {
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/c.ts")).toBeDefined();
-    const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
+    const entry = useEditorStateStore.getState().files.get(fk("/repo/b.ts"));
     expect(entry?.deleted).toBe(true);
     expect(entry?.movedTo).toBeNull();
   });
@@ -244,7 +246,7 @@ describe("handleFileMoved", () => {
 
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
-    const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
+    const entry = useEditorStateStore.getState().files.get(fk("/repo/b.ts"));
     expect(entry?.movedTo).toBeNull();
     expect(entry?.deleted).toBe(true);
   });
@@ -253,16 +255,16 @@ describe("handleFileMoved", () => {
     const { api } = setup();
     const store = useEditorStateStore.getState();
     // Typed into before its first load resolved: dirty, but never reconciled with disk.
-    store.openFile("/repo/b.ts");
-    store.markDirty("/repo/b.ts");
-    store.registerPendingEdit("/repo/b.ts", () => ({ content: "mine\n" }));
+    store.openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
+    store.markDirty(fk("/repo/b.ts"));
+    store.registerPendingEdit(fk("/repo/b.ts"), () => ({ content: "mine\n" }));
     diskContent["/repo/renamed.ts"] = "theirs\n";
 
     expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
-    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.deleted).toBe(true);
+    expect(useEditorStateStore.getState().files.get(fk("/repo/b.ts"))?.deleted).toBe(true);
   });
 
   test("treats a save of ours that landed before the move as our own version", async () => {
@@ -270,11 +272,11 @@ describe("handleFileMoved", () => {
     dirtyEditor("a\n", "a\nmore\nmore again\n");
     const store = useEditorStateStore.getState();
     store.registerEditorCallbacks(
-      "/repo/b.ts",
+      fk("/repo/b.ts"),
       () => "a\nmore\n",
       () => null,
     );
-    store.markSaving("/repo/b.ts", "n1"); // snapshot "a\nmore\n", written before the move
+    store.markSaving(fk("/repo/b.ts"), "n1"); // snapshot "a\nmore\n", written before the move
     diskContent["/repo/renamed.ts"] = "a\nmore\n";
 
     expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
@@ -300,11 +302,11 @@ describe("handleFileMoved", () => {
 
   test("closes the old entry when the new path is already open, and reports no replacement", async () => {
     setup();
-    useEditorStateStore.getState().openFile("/repo/b.ts");
+    useEditorStateStore.getState().openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
 
     expect(await handleFileMoved("/repo/b.ts", "/repo/c.ts")).toBe(false);
 
-    expect(useEditorStateStore.getState().files.has("/repo/b.ts")).toBe(false);
+    expect(useEditorStateStore.getState().files.has(fk("/repo/b.ts"))).toBe(false);
   });
 
   test("records the old path on the new tab only when the move is announced", async () => {
@@ -320,10 +322,10 @@ describe("handleFileMoved", () => {
   test("leaves a tab in conflict on its old path, without writing anything", async () => {
     const { api } = setup();
     const store = useEditorStateStore.getState();
-    store.openFile("/repo/b.ts");
-    store.markDirty("/repo/b.ts");
-    store.handleDiskChange("/repo/b.ts", [], "theirs");
-    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.state).toBe("diverged");
+    store.openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
+    store.markDirty(fk("/repo/b.ts"));
+    store.handleDiskChange(fk("/repo/b.ts"), [], "theirs");
+    expect(useEditorStateStore.getState().files.get(fk("/repo/b.ts"))?.state).toBe("diverged");
 
     expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
@@ -676,25 +678,29 @@ describe("compare panel sides of a deleted or moved file", () => {
   test("are marked deleted, while the file's own tab is closed", () => {
     setup();
     const store = useEditorStateStore.getState();
-    store.openFile("/repo/a.ts");
-    store.openFile("compare-1:old", "/repo/a.ts");
-    store.openFile("compare-1:new", "/repo/c.ts");
+    store.openFile(fk("/repo/a.ts"), TEST_SERVER, "/repo/a.ts");
+    store.openFile(viewEditorKey("compare-1:old"), TEST_SERVER, "/repo/a.ts");
+    store.openFile(viewEditorKey("compare-1:new"), TEST_SERVER, "/repo/c.ts");
 
     handleFileDeleted("/repo/a.ts");
 
     const { files } = useEditorStateStore.getState();
-    expect(files.has("/repo/a.ts")).toBe(false);
-    expect(files.get("compare-1:old")?.deleted).toBe(true);
-    expect(files.get("compare-1:new")?.deleted).toBe(false);
+    expect(files.has(fk("/repo/a.ts"))).toBe(false);
+    expect(files.get(viewEditorKey("compare-1:old"))?.deleted).toBe(true);
+    expect(files.get(viewEditorKey("compare-1:new"))?.deleted).toBe(false);
   });
 
   test("are marked deleted when their file moves, even with no tab open on it", async () => {
     setup();
-    useEditorStateStore.getState().openFile("compare-1:old", "/repo/dir/x.ts");
+    useEditorStateStore
+      .getState()
+      .openFile(viewEditorKey("compare-1:old"), TEST_SERVER, "/repo/dir/x.ts");
 
     expect(await handleFileMoved("/repo/dir/x.ts", "/repo/y.ts")).toBe(false);
 
-    expect(useEditorStateStore.getState().files.get("compare-1:old")?.deleted).toBe(true);
+    expect(useEditorStateStore.getState().files.get(viewEditorKey("compare-1:old"))?.deleted).toBe(
+      true,
+    );
   });
 });
 

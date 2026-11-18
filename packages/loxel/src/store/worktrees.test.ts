@@ -449,13 +449,13 @@ describe("a worktree removed outside the app", () => {
   });
 
   test("releases a worktree that was not the active one", async () => {
-    const worktreeUi = getWorktreeUI(WT_PATH);
+    const worktreeUi = getWorktreeUI(localRef(WT_PATH));
     worktreeUi.getState().queueOpen({ kind: "file", filePath: `${WT_PATH}/a.ts` } as never);
     const layoutCache = new Map<string, unknown>([
       [WT_PATH, {}],
       [OTHER_WT, {}],
     ]);
-    const unregister = registerLayoutCache(layoutCache);
+    const unregister = registerLayoutCache(localServerId(), layoutCache);
     useFileSearchStore.getState().setFiles(WT_PATH, ["a.ts"], false);
     useFileSearchStore.getState().recordOpen(WT_PATH, "a.ts");
     queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH)), {
@@ -482,7 +482,7 @@ describe("a worktree removed outside the app", () => {
       await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
       expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(OTHER_WT));
-      expect(getWorktreeUI(WT_PATH)).not.toBe(worktreeUi);
+      expect(getWorktreeUI(localRef(WT_PATH))).not.toBe(worktreeUi);
       expect(layoutCache.has(WT_PATH)).toBe(false);
       expect(layoutCache.has(OTHER_WT)).toBe(true);
       expect(useFileSearchStore.getState().indexByWorktree.has(WT_PATH)).toBe(false);
@@ -520,11 +520,11 @@ describe("a worktree removed outside the app", () => {
         },
       },
     });
-    const worktreeUi = getWorktreeUI(WT_PATH);
+    const worktreeUi = getWorktreeUI(localRef(WT_PATH));
 
     await useWorktreeStore.getState().refreshProjectWorktrees(P);
 
-    expect(getWorktreeUI(WT_PATH)).toBe(worktreeUi);
+    expect(getWorktreeUI(localRef(WT_PATH))).toBe(worktreeUi);
   });
 });
 

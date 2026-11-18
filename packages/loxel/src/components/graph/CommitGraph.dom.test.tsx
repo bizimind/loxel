@@ -36,7 +36,7 @@ const { CommitGraph } = await import("./CommitGraph");
 
 afterEach(() => {
   cleanup();
-  purgeWorktreeStores("/repo");
+  purgeWorktreeStores(localRef("/repo"));
   mock.restore();
 });
 
@@ -55,7 +55,7 @@ describe("CommitGraph", () => {
     );
 
     await screen.findByText("Initial commit");
-    expect(getWorktreeUI("/repo").getState().graphColumnSizing.graph).toBeGreaterThan(0);
+    expect(getWorktreeUI(localRef("/repo")).getState().graphColumnSizing.graph).toBeGreaterThan(0);
     const loopErrors = consoleError.mock.calls.filter((args) =>
       args.some((arg) => String(arg).includes("Maximum update depth exceeded")),
     );

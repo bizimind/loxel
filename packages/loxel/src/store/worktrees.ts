@@ -859,9 +859,9 @@ export function isListedWorktree(path: string): boolean {
  */
 function releaseWorktree(wt: WorktreeRef, discarded = false): void {
   const { path } = wt;
-  purgeWorktreeStores(path);
+  purgeWorktreeStores(wt);
   closeLayoutBrowserPages(path);
-  purgeWorktreeCache(path);
+  purgeWorktreeCache(wt);
   useFileSearchStore.getState().purgeWorktree(path);
   const homeServer = localServerId();
   queryClient.removeQueries({

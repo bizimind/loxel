@@ -21,7 +21,13 @@ import {
   releaseWorktree,
 } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
-import { type EditorFileEntry, diskBase, useEditorStateStore } from "@/store/editor-state";
+import {
+  type EditorFileEntry,
+  type EditorKey,
+  diskBase,
+  isFileTabKey,
+  useEditorStateStore,
+} from "@/store/editor-state";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { isListedWorktree, useWorktreeStore } from "@/store/worktrees";
 
@@ -42,7 +48,7 @@ export interface OutboxEntry {
   instanceId: string;
   /** The window (page load) that owns the entry. Entries of a window that is gone are recovered. */
   ownerId: string;
-  editorKey: string;
+  editorKey: EditorKey;
   filePath: string;
   worktreePath: string | null;
   /** The disk content the edits were made on: the merge base. null if the editor never had it. */
@@ -352,7 +358,7 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
  * Loxel.
  */
 export function outboxEditorClosing(
-  editorKey: string,
+  editorKey: EditorKey,
   editor: EditorFileEntry,
   worktreePath: string | null,
 ): void {
@@ -360,7 +366,7 @@ export function outboxEditorClosing(
   if (!editor.deleted && !editor.movedTo) return;
   // Kept only for the file's own tab, which a reload brings back: another view of the file (a
   // compare or diff side) gives its edits up with it.
-  if (editor.movedTo || editorKey !== editor.filePath) {
+  if (editor.movedTo || !isFileTabKey(editorKey, editor)) {
     if (entry) removeEntry(entry);
     return;
   }
@@ -410,7 +416,7 @@ export function findAdoptableEntry(filePath: string): OutboxEntry | null {
  * edits on the entry's base, or in conflict with the disk version the save could not merge with.
  * A save in review stays in review.
  */
-export function adoptOutboxEntry(editorKey: string, entry: OutboxEntry): void {
+export function adoptOutboxEntry(editorKey: EditorKey, entry: OutboxEntry): void {
   const store = useEditorStateStore.getState();
   store.adoptQueuedEdit(editorKey, {
     base: entry.base,
@@ -682,14 +688,19 @@ function toReview(entry: OutboxEntry, disk: string | null): void {
   // An open editor already shows the edits (with its conflict or deleted banner).
   if (ownerEditor(entry)) return;
   const name = getDisplayFilename(entry.filePath);
-  const tab = useEditorStateStore.getState().files.get(entry.filePath);
-  if (tab) {
+  // An entry names no server yet (#1456), so its file's tab is found by path. Recovered entries
+  // get here before the window's server is known, so no key is built from it.
+  const [tabKey, tab] =
+    [...useEditorStateStore.getState().files].find(
+      ([key, editor]) => editor.filePath === entry.filePath && isFileTabKey(key, editor),
+    ) ?? [];
+  if (tabKey && tab) {
     // The file's tab is open (the save came from a closed compare side, or the tab was reopened
     // while the save was being sent): show the edits there if it has none of its own.
     const applied =
       tab.state === "clean" ? tab.applyMergedContent?.(entry.content, true) : undefined;
     if (typeof applied === "string") {
-      adoptOutboxEntry(entry.filePath, entry);
+      adoptOutboxEntry(tabKey, entry);
     } else {
       showToast(`Unsaved edits to ${name} are kept until its tab is reopened`, "info");
     }
@@ -758,6 +769,7 @@ function isOutboxEntry(value: unknown): value is OutboxEntry {
     typeof v.id === "string" &&
     typeof v.instanceId === "string" &&
     typeof v.ownerId === "string" &&
+    // An editor key stored by an older version matches no editor; adoption re-keys its entry.
     typeof v.editorKey === "string" &&
     typeof v.filePath === "string" &&
     (typeof v.worktreePath === "string" || v.worktreePath === null) &&

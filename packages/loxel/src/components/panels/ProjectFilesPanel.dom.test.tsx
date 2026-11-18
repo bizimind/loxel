@@ -118,7 +118,9 @@ mock.module("@/queries/use-repo-queries", () => ({
 
 const PROJECT = localRef("/project");
 
+const actualScope = await import("@/queries/use-scope");
 mock.module("@/queries/use-scope", () => ({
+  ...actualScope,
   getQueryScope: () => ({ activeProject: PROJECT, activeWorktree: localRef("/repo") }),
 }));
 

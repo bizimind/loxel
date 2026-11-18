@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+import { localServerId } from "@/api/local-server";
+
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
@@ -10,7 +12,7 @@ mock.module("@/api/client", () => ({
 }));
 
 const { consumeSavedContent, saveEditorContent } = await import("./save-editor-content");
-const { useEditorStateStore } = await import("@/store/editor-state");
+const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
 
 afterEach(() => {
   useEditorStateStore.setState({ files: new Map() });
@@ -19,13 +21,16 @@ afterEach(() => {
 describe("saved content stash", () => {
   test("is handed only to the editor that saved, not to other editors of the file", async () => {
     const store = useEditorStateStore.getState();
-    store.openFile("/repo/a.ts");
-    store.openFile("compare-1:old", "/repo/a.ts");
+    const server = localServerId();
+    const tab = fileEditorKey(server, "/repo/a.ts");
+    const side = viewEditorKey("compare-1:old");
+    store.openFile(tab, server, "/repo/a.ts");
+    store.openFile(side, server, "/repo/a.ts");
 
-    await saveEditorContent("/repo/a.ts", "text", "/repo", undefined, "compare-1:old");
-    const [nonce] = useEditorStateStore.getState().files.get("compare-1:old")!.pendingNonces;
+    await saveEditorContent("/repo/a.ts", "text", "/repo", undefined, side);
+    const [nonce] = useEditorStateStore.getState().files.get(side)!.pendingNonces;
 
-    expect(consumeSavedContent(nonce!, "compare-1:old")).toBe("formatted text");
-    expect(consumeSavedContent(nonce!, "/repo/a.ts")).toBeUndefined();
+    expect(consumeSavedContent(nonce!, side)).toBe("formatted text");
+    expect(consumeSavedContent(nonce!, tab)).toBeUndefined();
   });
 });

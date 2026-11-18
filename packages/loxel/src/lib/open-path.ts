@@ -9,9 +9,9 @@ import type {
 } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
-import { projectRefOf } from "@/queries/use-scope";
+import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
 import { deriveProject, projectRef, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
@@ -118,11 +118,12 @@ async function revealFolder(rawPath: string): Promise<void> {
   await whenProjectsLoaded();
   const path = rawPath.replace(/(.)\/+$/, "$1");
   const { projects } = useProjectStore.getState();
-  const { activeWorktreePath, switchWorktree, byProject } = useWorktreeStore.getState();
+  const { switchWorktree, byProject } = useWorktreeStore.getState();
+  const { activeProject, activeWorktree } = getQueryScope();
 
   const owner = deriveOwningWorktree(path, projects, byProject);
   if (owner) {
-    if (owner === activeWorktreePath) {
+    if (owner === activeWorktree?.path) {
       showPanel("projectFiles");
     } else {
       await switchWorktree(localRef(owner));
@@ -138,22 +139,23 @@ async function revealFolder(rawPath: string): Promise<void> {
     showToast(`${path} is inside ${project.name} but not in any of its worktrees`);
     return;
   }
-  if (!activeWorktreePath) {
+  if (!activeWorktree) {
     showToast("Open a project before opening other folders");
     return;
   }
 
   try {
-    await api.addExternalFolder(activeWorktreePath, path);
+    await api.addExternalFolder(activeWorktree.path, path);
   } catch (err) {
     log.error("Failed to open folder", { error: err instanceof Error ? err : undefined, path });
     showToast(err instanceof Error ? err.message : "Failed to open folder");
     return;
   }
-  const wt = localRef(activeWorktreePath);
-  await queryClient.invalidateQueries({ queryKey: queryKeys.externalFiles(projectRefOf(wt), wt) });
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.externalFiles(activeProject, activeWorktree),
+  });
   showPanel("projectFiles");
-  getWorktreeUI(activeWorktreePath).getState().setPendingReveal({ path, expand: true });
+  getWorktreeUI(activeWorktree).getState().setPendingReveal({ path, expand: true });
 }
 
 /**
@@ -246,7 +248,7 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
 async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
   const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
   const layoutKey = target ?? HOME_LAYOUT_KEY;
-  const ui = getWorktreeUI(layoutKey).getState();
+  const ui = getWorktreeUI(layoutWorktree(layoutKey)).getState();
   const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
   if (centerReady && ui.pendingOpens.length === 0) {
     dispatchPendingOpen(open);

@@ -10,7 +10,6 @@ import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
 
 /**
  * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
@@ -36,8 +35,9 @@ export function useFileClipboard(
     async (targetDir: string) => {
       if (!clipboard) return;
       try {
-        const wt = useWorktreeStore.getState().activeWorktreePath;
-        if (!wt) return;
+        const { activeWorktree } = getQueryScope();
+        if (!activeWorktree) return;
+        const wt = activeWorktree.path;
 
         // Drafts move into the worktree only; everything else stays within its own tree.
         const sourceRoot = isDetachedPath(clipboard.path) ? wt : getTreeRoot(clipboard.path);
@@ -65,7 +65,7 @@ export function useFileClipboard(
             getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
           }
         } else if (clipboard.mode === "cut") {
-          await moveFile({ wt, srcPath: clipboard.path, destDir: targetDir });
+          await moveFile({ wt: activeWorktree, srcPath: clipboard.path, destDir: targetDir });
         } else {
           const { newPath } = await api.copyProjectFile(wt, {
             srcPath: clipboard.path,

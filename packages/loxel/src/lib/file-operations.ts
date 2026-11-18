@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getWorktreeUI } from "@/store/worktree-ui";
@@ -12,7 +13,7 @@ import { getWorktreeUI } from "@/store/worktree-ui";
  * Returns the new absolute path. Throws when the server refuses the rename.
  */
 export async function renameFile(options: {
-  wt: string;
+  wt: WorktreeRef;
   path: string;
   newName: string;
   isDetached: boolean;
@@ -20,14 +21,14 @@ export async function renameFile(options: {
   const { wt, path, newName, isDetached } = options;
   let newPath: string;
   if (isDetached) {
-    await api.renameDetachedFile(wt, path, newName);
+    await api.renameDetachedFile(wt.path, path, newName);
     newPath = path.slice(0, path.lastIndexOf("/") + 1) + newName;
   } else {
-    ({ newPath } = await api.renameProjectFile(wt, { path, newName }));
+    ({ newPath } = await api.renameProjectFile(wt.path, { path, newName }));
   }
   getWorktreeUI(wt).getState().renameProjectPaths(path, newPath);
   window.dispatchEvent(new CustomEvent("loxel-file-moved", { detail: { oldPath: path, newPath } }));
-  invalidateDirQueries(fileParentDir(path, wt));
+  invalidateDirQueries(fileParentDir(path, wt.path));
   return newPath;
 }
 
@@ -38,23 +39,23 @@ export async function renameFile(options: {
  * Returns the new absolute path. Throws when the server refuses the move or the rename.
  */
 export async function moveFile(options: {
-  wt: string;
+  wt: WorktreeRef;
   srcPath: string;
   destDir: string;
   newName?: string;
 }): Promise<string> {
   const { wt, srcPath, destDir, newName } = options;
-  let { newPath } = await api.moveProjectFile(wt, { srcPath, destDir });
+  let { newPath } = await api.moveProjectFile(wt.path, { srcPath, destDir });
   try {
     if (newName && pathName(newPath) !== newName) {
-      ({ newPath } = await api.renameProjectFile(wt, { path: newPath, newName }));
+      ({ newPath } = await api.renameProjectFile(wt.path, { path: newPath, newName }));
     }
   } finally {
     getWorktreeUI(wt).getState().renameProjectPaths(srcPath, newPath);
     window.dispatchEvent(
       new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
     );
-    invalidateDirQueries(fileParentDir(srcPath, wt), destDir || wt);
+    invalidateDirQueries(fileParentDir(srcPath, wt.path), destDir || wt.path);
   }
   return newPath;
 }
@@ -65,16 +66,16 @@ export async function moveFile(options: {
  * selection inside it and refresh the parent directory listing. Throws when the server refuses.
  */
 export async function deleteFile(options: {
-  wt: string;
+  wt: WorktreeRef;
   path: string;
   isDetached: boolean;
 }): Promise<void> {
   const { wt, path, isDetached } = options;
-  if (isDetached) await api.deleteDetachedFile(wt, path);
-  else await api.deleteProjectFile(wt, path);
+  if (isDetached) await api.deleteDetachedFile(wt.path, path);
+  else await api.deleteProjectFile(wt.path, path);
   window.dispatchEvent(new CustomEvent("loxel-file-deleted", { detail: { filePath: path } }));
   const ui = getWorktreeUI(wt).getState();
   const selected = ui.selectedProjectFile;
   if (selected === path || selected?.startsWith(path + "/")) ui.setSelectedProjectFile(null);
-  invalidateDirQueries(fileParentDir(path, wt));
+  invalidateDirQueries(fileParentDir(path, wt.path));
 }
