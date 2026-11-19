@@ -26,8 +26,12 @@ async function detectWorktree(dir: string): Promise<string> {
   return stdout.trim();
 }
 
-/** Launch Loxel, or bring it to the front if it is running; `-g` launches it in the background. */
+/**
+ * Launch Loxel, or bring it to the front if it is running; `-g` launches it in the background.
+ * Only macOS has the app: elsewhere the CLI runs beside a standalone server, which it waits for.
+ */
 function launchLoxel({ background = false } = {}): void {
+  if (process.platform !== "darwin") return;
   const args = background ? ["open", "-g", "-a", "Loxel"] : ["open", "-a", "Loxel"];
   Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
 }

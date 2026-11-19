@@ -192,14 +192,22 @@ jobs:
       # it). Signed under its own identifier, since the app's is com.bizimind.loxel, then notarized:
       # a bare binary cannot be stapled, so Gatekeeper looks the ticket up when a browser download is
       # first run. electron-builder signs the app's own copy (Resources/bin/loxel) with the app.
+      # Hashed now, as uploaded: notarization does not change the file.
       - name: Sign the CLI
-        run: bun packages/cli-common/scripts/codesign-release.ts packages/loxel/build/loxel loxel-cli
-
-      - name: Notarize the CLI
+        id: cli
         run: |
+          bun packages/cli-common/scripts/codesign-release.ts packages/loxel/build/loxel loxel-cli
+          echo "sha256=$(shasum -a 256 packages/loxel/build/loxel | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Submitted without waiting, so Apple's queue overlaps the app build; checked before upload.
+      - name: Submit the CLI for notarization
+        id: cli-notary
+        run: |
+          set -euo pipefail
           ditto -c -k --keepParent packages/loxel/build/loxel "$RUNNER_TEMP/loxel-cli.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/loxel-cli.zip" --wait \
-            --key /tmp/AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+          ID=$(xcrun notarytool submit "$RUNNER_TEMP/loxel-cli.zip" --output-format json \
+            --key /tmp/AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" | jq -r .id)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
@@ -274,6 +282,23 @@ jobs:
       - name: Check the CLI is packaged
         run: packages/loxel/release/mac*/Loxel.app/Contents/Resources/bin/loxel --version
 
+      # notarytool can exit 0 for a rejected submission, so the status decides.
+      - name: Wait for the CLI's notarization
+        run: |
+          set -euo pipefail
+          AUTH=(--key /tmp/AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+          STATUS=$(xcrun notarytool wait "$ID" --output-format json "${AUTH[@]}" | jq -r .status)
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::CLI notarization ended $STATUS"
+            xcrun notarytool log "$ID" "${AUTH[@]}"
+            exit 1
+          fi
+          echo "${{ steps.cli.outputs.sha256 }}  packages/loxel/build/loxel" | shasum -a 256 -c
+        env:
+          ID: ${{ steps.cli-notary.outputs.id }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
       - name: Calculate checksums
         id: sha
         run: |
@@ -285,7 +310,7 @@ jobs:
             # electron-updater checks the downloaded zip against a base64 SHA-512
             echo "sha512_zip_${ARCH}=$(openssl dgst -sha512 -binary "$ZIP" | base64 | tr -d '\n')"
             echo "size_zip_${ARCH}=$(stat -f %z "$ZIP")"
-            echo "sha256_cli_${ARCH}=$(shasum -a 256 packages/loxel/build/loxel | awk '{print $1}')"
+            echo "sha256_cli_${ARCH}=${{ steps.cli.outputs.sha256 }}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload to R2

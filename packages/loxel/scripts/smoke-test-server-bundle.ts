@@ -107,6 +107,9 @@ try {
   panel.type(id, 'echo loxel-""smoke');
   const shows = () => (panel.states.at(-1)?.snapshot ?? "") + panel.text();
   await until(() => shows().includes("loxel-smoke\r\n"), TIMEOUT_MS, "the command's output");
+  // The bundled CLI, from the bin/ directory the server puts first on the terminal's PATH.
+  panel.type(id, 'echo "cli-$(loxel --version)"');
+  await until(() => /cli-\d+\.\d+\.\d+\r\n/.test(shows()), TIMEOUT_MS, "the bundled CLI's version");
   panel.destroy(id);
   panel.close();
   console.log("[smoke] a terminal ran a command through the terminal host");

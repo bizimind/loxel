@@ -307,6 +307,12 @@ export function withPathEntry(path: string | undefined, dir: string): string {
   return path.split(delimiter).includes(dir) ? path : `${dir}${delimiter}${path}`;
 }
 
+/** `path` with `dir` first, moved there if it is further back. */
+export function withPathFirst(path: string | undefined, dir: string): string {
+  const rest = (path ?? "").split(delimiter).filter((entry) => entry !== "" && entry !== dir);
+  return [dir, ...rest].join(delimiter);
+}
+
 /**
  * The `bin` directory beside the compiled server, which holds the `loxel` CLI: the app's
  * `Contents/Resources/bin`, or the standalone server bundle's. Null when the server runs from

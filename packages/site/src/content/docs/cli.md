@@ -23,7 +23,7 @@ Loxel ships the CLI and puts it on the `PATH` of every Loxel terminal, so there 
 ln -sf /Applications/Loxel.app/Contents/Resources/bin/loxel ~/.local/bin/loxel
 ```
 
-Each [release](https://github.com/bizimind/loxel/releases) also lists the CLI on its own for macOS, for machines without the app. A directory your shell's startup files put first on `PATH` wins over the bundled CLI in Loxel terminals too, so remove an old copy of `loxel` from it, or link it as above.
+Each [release](https://github.com/bizimind/loxel/releases) also lists the CLI on its own for macOS. A downloaded copy doesn't update with the app, so the link above is the better choice when Loxel is installed. A directory your shell's startup files put first on `PATH` wins over the bundled CLI in Loxel terminals too, so remove an old copy of `loxel` from it, or link it as above.
 
 ---
 

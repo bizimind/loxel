@@ -12,6 +12,7 @@ import {
   onLoginShellEnvChange,
   resolveLoginShellEnv,
   withPathEntry,
+  withPathFirst,
 } from "./shell-env";
 
 const root = await mkdtemp(join(tmpdir(), "loxel-shell-env-"));
@@ -213,6 +214,13 @@ describe("withPathEntry", () => {
     expect(withPathEntry("/usr/bin:/bin", "/opt/bin")).toBe("/opt/bin:/usr/bin:/bin");
     expect(withPathEntry("/usr/bin:/opt/bin", "/opt/bin")).toBe("/usr/bin:/opt/bin");
     expect(withPathEntry(undefined, "/opt/bin")).toBe("/opt/bin");
+  });
+});
+
+describe("withPathFirst", () => {
+  test("moves the directory to the front", () => {
+    expect(withPathFirst("/usr/bin:/opt/bin:/bin", "/opt/bin")).toBe("/opt/bin:/usr/bin:/bin");
+    expect(withPathFirst(undefined, "/opt/bin")).toBe("/opt/bin");
   });
 });
 

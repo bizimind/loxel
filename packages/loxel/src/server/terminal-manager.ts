@@ -25,7 +25,7 @@ import {
 } from "@/terminal-host";
 
 import { logger } from "./logger";
-import { buildShellSpawnEnv, bundledBinDir, withPathEntry } from "./shell-env";
+import { buildShellSpawnEnv, bundledBinDir, withPathFirst } from "./shell-env";
 import { type FlowControl, TerminalFanout, type TerminalSink } from "./terminal-fanout";
 import {
   commitToolchainEnvChange,
@@ -110,7 +110,7 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // The `loxel` CLI shipped with this server, first so it matches the server it talks to. The
   // login shell's startup files run after this and may still put their own directories first.
   const binDir = bundledBinDir();
-  if (binDir) env.PATH = withPathEntry(env.PATH, binDir);
+  if (binDir) env.PATH = withPathFirst(env.PATH, binDir);
   if (!env.TERM) env.TERM = "xterm-256color";
   // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
   // as an agent's, or their own `loxel` commands would open without focus.
