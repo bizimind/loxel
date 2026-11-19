@@ -4,7 +4,9 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
+import { WsClient } from "@/api/client";
 import { localServerId } from "@/api/local-server";
+import { registerConnection, ServerConnection } from "@/api/server-connection";
 import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 
 /** The parts of a Monaco model and editor the panel uses; edits go through `userEdit`. */
@@ -149,6 +151,8 @@ const panelApi = {
 
 let fileResponse: () => Response | Promise<Response>;
 let writes: { path: string; content: string }[] = [];
+/** The files the panel read, by URL. */
+let fileReads: string[] = [];
 let writeResponse: () => Response;
 const realFetch = globalThis.fetch;
 
@@ -178,11 +182,15 @@ beforeEach(() => {
   createdUris = [];
   saveAction = null;
   writes = [];
+  fileReads = [];
   fileResponse = () => Response.json({ content: "REAL" });
   writeResponse = () => Response.json({ success: true });
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/file-content")) return fileResponse();
+    if (url.includes("/file-content")) {
+      fileReads.push(url);
+      return fileResponse();
+    }
     if (url.includes("/file-write")) {
       writes.push(JSON.parse(String(init?.body)));
       return writeResponse();
@@ -201,15 +209,28 @@ afterEach(() => {
 
 describe("CodeEditorPanel model URI", () => {
   test("names the server of the panel's worktree, or the window's in Home", async () => {
-    renderPanel(worktreeRef(toServerId("other-server"), "/repo"));
-    await waitFor(() => expect(createdWith).toEqual(["REAL"]));
-    cleanup();
-    renderPanel();
-    await waitFor(() => expect(createdWith).toEqual(["REAL", "REAL"]));
+    const other = toServerId("other-server");
+    const unregister = registerConnection(
+      new ServerConnection({ server: other, baseUrl: "/peers/other-server", ws: new WsClient() }),
+    );
+    try {
+      renderPanel(worktreeRef(other, "/repo"));
+      await waitFor(() => expect(createdWith).toEqual(["REAL"]));
+      cleanup();
+      renderPanel();
+      await waitFor(() => expect(createdWith).toEqual(["REAL", "REAL"]));
+    } finally {
+      unregister();
+    }
 
     expect(createdUris).toEqual([
       { scheme: "loxel", authority: "other-server", path: FILE },
       { scheme: "loxel", authority: localServerId(), path: FILE },
+    ]);
+    // Each read went to its own server's connection.
+    expect(fileReads.map((url) => url.split("?")[0])).toEqual([
+      "/peers/other-server/api/file-content",
+      "/api/file-content",
     ]);
   });
 });

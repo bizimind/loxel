@@ -1,6 +1,6 @@
 // Adapters
 export type { DataAdapter } from "./adapters/data-adapter.ts";
-export { makeRestAdapter } from "./adapters/rest.ts";
+export { localDbApiUrl, makeRestAdapter } from "./adapters/rest.ts";
 
 // Field registry
 export {

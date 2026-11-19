@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:t
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
-import { localServerId } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
 import type { RepoTrustEntry } from "@/api/repo-trust-model";
 import { queryKeys } from "@/queries/query-keys";
 
 const originalClient = await import("@/api/repo-trust-client");
-const forgetRepoTrust = jest.fn(async (_id: string) => {});
+const forgetRepoTrust = jest.fn(async (_server: string, _id: string) => {});
 // The list asks again on every open; it answers with what the cache already holds.
 const listRepoTrust = jest.fn(async () => ({ repositories: REPOSITORIES }));
 mock.module("@/api/repo-trust-client", () => ({
@@ -113,12 +113,16 @@ describe("Settings > Security repository trust", () => {
   test("trust changes go through the trust dialog, and Forget clears the answer", () => {
     renderSection();
     fireEvent.click(within(row("/code/declined")).getByRole("button", { name: "Trust" }));
-    expect(manageRepoTrust).toHaveBeenCalledWith("/code/declined", { declineOnCancel: false });
+    expect(manageRepoTrust).toHaveBeenCalledWith(localRef("/code/declined"), {
+      declineOnCancel: false,
+    });
 
     fireEvent.click(within(row("/code/trusted")).getByRole("button", { name: "Stop Trusting" }));
-    expect(manageRepoTrust).toHaveBeenCalledWith("/code/trusted", { declineOnCancel: false });
+    expect(manageRepoTrust).toHaveBeenCalledWith(localRef("/code/trusted"), {
+      declineOnCancel: false,
+    });
 
     fireEvent.click(within(row("/code/gone")).getByRole("button", { name: "Forget" }));
-    expect(forgetRepoTrust).toHaveBeenCalledWith("git:/code/gone/.git");
+    expect(forgetRepoTrust).toHaveBeenCalledWith(localServerId(), "git:/code/gone/.git");
   });
 });

@@ -1,5 +1,10 @@
 import * as api from "@/api/client";
-import { type WorktreeRef, type WorktreeRefKey, formatWorktreeRef } from "@/api/worktree-ref";
+import {
+  type ServerId,
+  type WorktreeRef,
+  type WorktreeRefKey,
+  formatWorktreeRef,
+} from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -110,7 +115,7 @@ function stashContent(nonce: string, content: string, editorKey: EditorKey): voi
 }
 
 /**
- * Write editor content with a fresh nonce. Resolves to whether the server accepted the write;
+ * Write editor content to `filePath` on `server` with a fresh nonce. Resolves to whether the server accepted the write;
  * completion of the save is still the nonce echo. Callers that keep the content elsewhere on
  * failure (e.g. a move carrying edits) use the result; others can ignore it.
  *
@@ -122,6 +127,7 @@ function stashContent(nonce: string, content: string, editorKey: EditorKey): voi
  * made on disk meanwhile are merged rather than overwritten.
  */
 export async function saveEditorContent(
+  server: ServerId,
   filePath: string,
   content: string,
   worktree: WorktreeRef | null | undefined,
@@ -146,18 +152,19 @@ export async function saveEditorContent(
     ensureRetryScheduled();
     return false;
   }
-  return writeEditorContent(filePath, content, worktree, options, editorKey);
+  return writeEditorContent(server, filePath, content, worktree, options, editorKey);
 }
 
 /** `saveEditorContent` without waiting for the outbox: the disk is known to hold the base. */
 export async function writeEditorContent(
+  server: ServerId,
   filePath: string,
   content: string,
   worktree: WorktreeRef | null | undefined,
   options: SaveOptions | undefined,
   editorKey: EditorKey,
 ): Promise<boolean> {
-  const result = await postEditorContent(filePath, content, worktree, options, editorKey);
+  const result = await postEditorContent(server, filePath, content, worktree, options, editorKey);
   return result.ok;
 }
 
@@ -166,6 +173,7 @@ export async function writeEditorContent(
  * the file still holds that (a retried save merged onto what it read).
  */
 export async function postEditorContent(
+  server: ServerId,
   filePath: string,
   content: string,
   worktree: WorktreeRef | null | undefined,
@@ -199,11 +207,11 @@ export async function postEditorContent(
   try {
     // Stored before it is sent, so a reload or a crash while it is in flight keeps it.
     await outbox?.stored;
-    const result = await api.writeFileContent({
+    const result = await api.writeFileContent(server, {
       path: filePath,
       content,
       nonce,
-      worktreePath: worktreePath ?? undefined,
+      worktree: worktree ?? undefined,
       format: options?.format,
       formattingSettings: options?.formattingSettings,
       expectedContent,

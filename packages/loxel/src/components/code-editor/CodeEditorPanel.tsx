@@ -285,8 +285,8 @@ export function CodeEditorPanel({
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
-    queryKey: queryKeys.editorConfig(filePath, panelWorktree ?? undefined),
-    queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
+    queryKey: queryKeys.editorConfig(panelServer, filePath, panelWorktree ?? undefined),
+    queryFn: ({ signal }) => api.getEditorConfig(panelServer, filePath, panelWorktree, signal),
   });
   const { data: editorConfigData } = editorConfigQuery;
   // Read-only until the first `.editorconfig` load settles, so the first edit already indents by
@@ -327,7 +327,7 @@ export function CodeEditorPanel({
   // only for files tsc can report on.
   const { data: diagData } = useQuery({
     queryKey: queryKeys.diagnostics(null, undefined, panelWorktree ?? undefined),
-    queryFn: () => api.getDiagnostics(panelWorktreePath!),
+    queryFn: () => api.getDiagnostics(panelWorktree!),
     enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });
 
@@ -524,7 +524,7 @@ export function CodeEditorPanel({
         schemaUrl.startsWith("http://") || schemaUrl.startsWith("https://")
           ? schemaUrl
           : new URL(schemaUrl, fileUriStr).href;
-      api.resolveSchema(schemaUrl, baseDir).then((schema) => {
+      api.resolveSchema(panelServer, schemaUrl, baseDir).then((schema) => {
         if (schema) setDollarSchema(fileUriStr, resolvedUrl, schema);
         else removeDollarSchema(fileUriStr);
       });

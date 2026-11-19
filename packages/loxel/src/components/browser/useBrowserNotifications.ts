@@ -7,7 +7,8 @@
  */
 import { type RefObject, useCallback, useEffect } from "react";
 
-import { wsClient } from "@/api/client";
+import { sendTo } from "@/api/client";
+import type { ServerId } from "@/api/worktree-ref";
 import {
   type BrowserNotification,
   type NotificationPermissionRequest,
@@ -106,6 +107,7 @@ function faviconFor(page: PanelPage, origin: string): string | undefined {
  * layout of `worktreePath` (null: Home's), with the favicon the panel's tab shows for `page`.
  */
 function showInNotificationCenter(
+  server: ServerId,
   notification: BrowserNotification,
   panelId: string,
   worktreePath: string | null,
@@ -113,7 +115,7 @@ function showInNotificationCenter(
 ): void {
   const { ref, origin, title, body, tag } = notification;
   const faviconUrl = faviconFor(page, origin);
-  wsClient.send({
+  sendTo(server, {
     type: "browser_notification_show",
     source: {
       kind: "browser",
@@ -133,13 +135,14 @@ export type NotificationPermissionAnswer = NotificationSiteDecision | "dismiss";
 
 /**
  * The web notifications of the webview with this guest webContents id (null until it is ready),
- * shown in the notification center as coming from the browser panel `panelId` in the layout of
- * `worktreePath` (null: Home's), whether or not that layout is shown, with the favicon of the page
+ * shown in the notification center of `server` (the layout's) as coming from the browser panel
+ * `panelId` in the layout of `worktreePath` (null: Home's), whether or not that layout is shown, with the favicon of the page
  * `pageRef` holds when one arrives. `request` is the oldest open permission request, for the
  * panel's prompt, and `answer` replies to it: Allow and Block are saved for the site, Dismiss
  * decides nothing.
  */
 export function useBrowserNotifications(
+  server: ServerId,
   webContentsId: number | null,
   panelId: string,
   worktreePath: string | null,
@@ -156,11 +159,11 @@ export function useBrowserNotifications(
     if (webContentsId === null) return;
     return router.subscribe(webContentsId, {
       opened: (notification) =>
-        showInNotificationCenter(notification, panelId, worktreePath, pageRef.current),
+        showInNotificationCenter(server, notification, panelId, worktreePath, pageRef.current),
       request: add,
       withdraw: remove,
     });
-  }, [webContentsId, panelId, worktreePath, pageRef, add, remove]);
+  }, [server, webContentsId, panelId, worktreePath, pageRef, add, remove]);
 
   const request = requests[0] ?? null;
   const answer = useCallback(

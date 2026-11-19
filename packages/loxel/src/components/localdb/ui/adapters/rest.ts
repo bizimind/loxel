@@ -8,16 +8,27 @@ import type {
   ViewMeta,
 } from "@bizimind/localdb-sdk";
 
+import { localConnection } from "@/api/local-server";
+import { connectionOf } from "@/api/server-connection";
 import type { WorktreeRef } from "@/api/worktree-ref";
 import { queryKeys } from "@/queries/query-keys";
 
 import type { DataAdapter } from "./data-adapter.ts";
 
 /**
+ * The localdb API of `project`'s server, which keeps the project's databases. With no project
+ * (Home) it is the window's own server's, which answers that no project is named.
+ */
+export function localDbApiUrl(project: WorktreeRef | null | undefined): string {
+  const connection = project ? connectionOf(project.server) : localConnection();
+  return connection.apiUrl("/localdb");
+}
+
+/**
  * Creates a DataAdapter that calls a REST API.
  * The server must expose endpoints matching the localdb REST route convention.
  *
- * @param baseUrl - e.g. "/api/localdb" or "https://host/api/localdb"
+ * @param baseUrl - e.g. `localDbApiUrl(project)` or "https://host/api/localdb"
  */
 export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null): DataAdapter {
   const base = baseUrl.replace(/\/$/, "");

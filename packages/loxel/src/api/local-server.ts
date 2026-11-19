@@ -1,9 +1,10 @@
+import { connectionOf, type ServerConnection } from "./server-connection";
 import { type ServerId, type WorktreeRef, toServerId, worktreeRef } from "./worktree-ref";
 
 /**
- * The server this window was loaded from, and the one it talks to: main.tsx sets it from
- * `GET /api/version` before the first render, and `WsClient` reloads the page when a hello names
- * another, so it never changes while the page lives.
+ * The server this window was loaded from: main.tsx sets it from `GET /api/version` before the
+ * first render (`connectLocalServer`, which also makes its connection), and `WsClient` reloads the
+ * page when a hello names another, so it never changes while the page lives.
  */
 let localServer: ServerId | null = null;
 const localServerKnown = Promise.withResolvers<ServerId>();
@@ -38,4 +39,12 @@ export function localRef(path: string | undefined): WorktreeRef | undefined;
 export function localRef(path: string | null | undefined): WorktreeRef | null | undefined;
 export function localRef(path: string | null | undefined): WorktreeRef | null | undefined {
   return path === null || path === undefined ? path : worktreeRef(localServerId(), path);
+}
+
+/**
+ * The connection to this window's own server, for what belongs to the window rather than to a
+ * worktree: its stored state, its log, its settings. Each caller says why in a comment.
+ */
+export function localConnection(): ServerConnection {
+  return connectionOf(localServerId());
 }

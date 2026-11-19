@@ -68,7 +68,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
     set({ loading: true });
     try {
       const scopeWt = requireActiveWorktree();
-      const placed = await api.postPlacedThreads(scopeWt.path, reviewIds, files);
+      const placed = await api.postPlacedThreads(scopeWt, reviewIds, files);
 
       // A newer fetch superseded this one, and owns the loading flag now.
       if (seq !== placedThreadsFetchSeq) return;
@@ -107,7 +107,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   createThread: async (data) => {
-    const thread = await api.createCommentThread(requireActiveWorktree().path, data);
+    const thread = await api.createCommentThread(requireActiveWorktree(), data);
     // Optimistically insert as a placed thread (client knows the position since it just created it)
     const placed: PlacedThread = {
       ...thread,
@@ -127,7 +127,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   addReply: async (threadId, body) => {
-    const comment = await api.addCommentReply(requireActiveWorktree().path, threadId, body);
+    const comment = await api.addCommentReply(requireActiveWorktree(), threadId, body);
     set((s) => {
       const map = new Map(s.placedThreadsByFile);
       for (const [key, threads] of map) {
@@ -154,21 +154,17 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   resolveThread: async (threadId) => {
-    const updated = await api.updateCommentThread(
-      requireActiveWorktree().path,
-      threadId,
-      "resolved",
-    );
+    const updated = await api.updateCommentThread(requireActiveWorktree(), threadId, "resolved");
     set((s) => updateThreadInState(s, updated));
   },
 
   reopenThread: async (threadId) => {
-    const updated = await api.updateCommentThread(requireActiveWorktree().path, threadId, "open");
+    const updated = await api.updateCommentThread(requireActiveWorktree(), threadId, "open");
     set((s) => updateThreadInState(s, updated));
   },
 
   deleteThread: async (threadId) => {
-    await api.deleteCommentThread(requireActiveWorktree().path, threadId);
+    await api.deleteCommentThread(requireActiveWorktree(), threadId);
     set((s) => {
       const map = new Map(s.placedThreadsByFile);
       for (const [key, threads] of map) {

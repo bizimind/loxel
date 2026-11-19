@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { runInitHook } from "@/api/client";
 import { getRepoTrust, setRepoTrust } from "@/api/repo-trust-client";
 import type { RepoTrustStatus } from "@/api/repo-trust-model";
+import { type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { ConfirmationOptions } from "@/components/ui/confirm-dialog-host";
 import { requestAnswer } from "@/components/ui/confirm-dialog-host";
 import { showToast } from "@/components/ui/toast";
@@ -64,17 +65,17 @@ function stopTrustingQuestion({ repository }: RepoTrustStatus): ConfirmationOpti
  * replaced (`answer` null) was not answered, and one already declined needs no new row.
  */
 async function recordAnswer(
-  wtPath: string,
+  wt: WorktreeRef,
   status: RepoTrustStatus,
   answer: boolean | null,
 ): Promise<boolean> {
   if (answer === true) {
-    await setRepoTrust({ worktreePath: wtPath, decision: "trusted" });
+    await setRepoTrust(wt, { decision: "trusted" });
     return true;
   }
   if (answer === false && status.decision === "undecided") {
     // The server keeps trust given in another window while this question was open.
-    await setRepoTrust({ worktreePath: wtPath, decision: "declined", unlessTrusted: true });
+    await setRepoTrust(wt, { decision: "declined", unlessTrusted: true });
   }
   return false;
 }
@@ -87,19 +88,19 @@ async function recordAnswer(
  * dialog leaves the answer listed as it was.
  */
 export async function manageRepoTrust(
-  wtPath: string,
+  wt: WorktreeRef,
   { declineOnCancel = true }: { declineOnCancel?: boolean } = {},
 ): Promise<void> {
   try {
-    const status = await getRepoTrust(wtPath);
+    const status = await getRepoTrust(wt);
     if (status.decision === "trusted") {
       const answer = await requestAnswer(stopTrustingQuestion(status));
-      if (answer) await setRepoTrust({ worktreePath: wtPath, decision: "declined" });
+      if (answer) await setRepoTrust(wt, { decision: "declined" });
       return;
     }
     const answer = await requestAnswer(trustQuestion(status));
     // From Settings a cancel is backing out of a dialog the user opened, not an answer.
-    await recordAnswer(wtPath, status, answer === false && !declineOnCancel ? null : answer);
+    await recordAnswer(wt, status, answer === false && !declineOnCancel ? null : answer);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not change repository trust");
   }
@@ -110,10 +111,10 @@ export async function manageRepoTrust(
  * true when the repository is trusted, already or by this answer. "Not Now" records it declined.
  */
 export async function askToTrustRepo(
-  wtPath: string,
+  wt: WorktreeRef,
   ask: { title: string; reason: ReactNode; confirmLabel: string },
 ): Promise<boolean> {
-  const status = await getRepoTrust(wtPath);
+  const status = await getRepoTrust(wt);
   if (status.decision === "trusted") return true;
   const answer = await requestAnswer({
     title: ask.title,
@@ -126,7 +127,7 @@ export async function askToTrustRepo(
     confirmLabel: ask.confirmLabel,
     cancelLabel: "Not Now",
   });
-  return recordAnswer(wtPath, status, answer);
+  return recordAnswer(wt, status, answer);
 }
 
 /** The offers still to show, one at a time: a newer confirmation would cancel the one showing. */
@@ -137,14 +138,15 @@ let offers: Promise<void> = Promise.resolve();
  * offers to trust the repository and run it now. Offers queue, so worktrees created together each
  * get theirs; one whose repository was trusted meanwhile runs its hook without asking again.
  */
-export function offerToRunInitHook(projectPath: string, wtPath: string): Promise<void> {
-  offers = offers.then(() => offerOnce(projectPath, wtPath));
+export function offerToRunInitHook(project: WorktreeRef, wtPath: string): Promise<void> {
+  offers = offers.then(() => offerOnce(project, wtPath));
   return offers;
 }
 
-async function offerOnce(projectPath: string, wtPath: string): Promise<void> {
+/** `wtPath` is a worktree of `project`, on its server. */
+async function offerOnce(project: WorktreeRef, wtPath: string): Promise<void> {
   try {
-    const trusted = await askToTrustRepo(wtPath, {
+    const trusted = await askToTrustRepo(worktreeRef(project.server, wtPath), {
       title: "Trust this repository and run init.wt.sh?",
       reason: (
         <>
@@ -155,7 +157,7 @@ async function offerOnce(projectPath: string, wtPath: string): Promise<void> {
       confirmLabel: "Trust and Run",
     });
     if (!trusted) return;
-    const { hookRan } = await runInitHook(projectPath, wtPath);
+    const { hookRan } = await runInitHook(project, wtPath);
     if (!hookRan) showToast("init.wt.sh did not finish. Any output it gave is in the Logs panel.");
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not run init.wt.sh");

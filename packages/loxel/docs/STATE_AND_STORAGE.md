@@ -62,7 +62,7 @@ Per-worktree state survives switching within a window's lifetime but not a reloa
 
 ### Client: `createServerStorage`
 
-[server-storage.ts](../src/store/server-storage.ts) implements zustand's `StateStorage` on top of `GET/PUT /api/stores/:key` ([client.ts](../src/api/client.ts) `getStore`/`putStore`). Persisted stores use `persist(..., { storage: createJSONStorage(() => serverXStorage), partialize, ... })`, with one prebuilt storage instance per store key exported from `server-storage.ts`.
+[server-storage.ts](../src/store/server-storage.ts) implements zustand's `StateStorage` on top of `GET/PUT /api/stores/:key` ([client.ts](../src/api/client.ts) `getStore`/`putStore`, on the window's own server's connection). Persisted stores use `persist(..., { storage: createJSONStorage(() => serverXStorage), partialize, ... })`, with one prebuilt storage instance per store key exported from `server-storage.ts`.
 
 - **Key.** The server row key is the argument to `createServerStorage` (`settings`, `ui`, ...). The persist `name` (`${STORAGE_PREFIX}-settings`, where `STORAGE_PREFIX` is `loxel` or `loxel-dev`) is only used to find legacy localStorage data. Server keys need no environment prefix because dev and prod state directories are separate.
 - **Value.** The raw string zustand persist produces: `{"state": <partialized state>, "version": n}`.

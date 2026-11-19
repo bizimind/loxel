@@ -10,7 +10,9 @@ import {
 import { useCallback, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { DetectPathResult, ProjectSetupResult, WorkspaceSetup } from "@/api/project-model";
+import { type ServerId, worktreeRef } from "@/api/worktree-ref";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { showToast } from "@/components/ui/toast";
@@ -40,9 +42,15 @@ type NewStep = "form" | "workspace-config";
 
 const log = frontendLog.child("worktrees");
 
+/** The server the wizard adds projects on: the window's own, the one a window adds to so far. */
+function wizardServer(): ServerId {
+  return localServerId();
+}
+
 /** Offers to run the first worktree's setup hook when the new project's repository held it back. */
 function offerHeldInitHook(project: ProjectSetupResult): void {
-  if (project.initHookSkippedAt) void offerToRunInitHook(project.path, project.initHookSkippedAt);
+  if (!project.initHookSkippedAt) return;
+  void offerToRunInitHook(worktreeRef(wizardServer(), project.path), project.initHookSkippedAt);
 }
 
 /**
@@ -110,7 +118,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setDetecting(true);
     setErrorMsg(null);
     try {
-      const result = await api.detectPath(trimmed);
+      const result = await api.detectPath(wizardServer(), trimmed);
       setDetection(result);
       setImportName(result.name);
       setImportApply(result.setup ? defaultSetupActions(result.setup) : []);
@@ -199,7 +207,11 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!detection) return;
     await submit(
       () =>
-        api.addProject({ path: detection.path, name: importName || undefined, apply: importApply }),
+        api.addProject(wizardServer(), {
+          path: detection.path,
+          name: importName || undefined,
+          apply: importApply,
+        }),
       "Failed to add project",
     );
   }, [detection, importName, importApply, submit]);
@@ -208,7 +220,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!newName.trim()) return;
     await submit(
       () =>
-        api.createProject({
+        api.createProject(wizardServer(), {
           name: newName.trim(),
           location: newLocation,
           setup: newSetup,
@@ -223,7 +235,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!detection) return;
     await submit(
       () =>
-        api.cloneProject({
+        api.cloneProject(wizardServer(), {
           url: detection.path,
           destination: cloneDestination,
           setup: importSetup,
@@ -238,7 +250,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!detection) return;
     await submit(
       () =>
-        api.initProject({
+        api.initProject(wizardServer(), {
           path: detection.path,
           name: importName || undefined,
           setup: importSetup,
@@ -253,7 +265,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
     if (!detection) return;
     await submit(
       () =>
-        api.convertProject({
+        api.convertProject(wizardServer(), {
           path: detection.path,
           copyFiles: importConfig.copyFiles,
           setupCommands: importConfig.setupCommands,

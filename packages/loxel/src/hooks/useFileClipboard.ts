@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 
 import * as api from "@/api/client";
 import type { DirEntry } from "@/api/project-files-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { moveFile } from "@/lib/file-operations";
@@ -11,6 +12,14 @@ import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { getWorktreeUI } from "@/store/worktree-ui";
+import { useWorktreeStore } from "@/store/worktrees";
+
+/** A cut or copied file: its path on the server of `source`, the worktree it was taken in. */
+interface FileClipboard {
+  source: WorktreeRef;
+  path: string;
+  mode: "cut" | "copy";
+}
 
 /**
  * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
@@ -22,14 +31,16 @@ export function useFileClipboard(
   activeWorktreePath: string | null,
   getTreeRoot: (path: string) => string | null,
 ) {
-  const [clipboard, setClipboard] = useState<{ path: string; mode: "cut" | "copy" } | null>(null);
+  const [clipboard, setClipboard] = useState<FileClipboard | null>(null);
 
   const handleCut = useCallback((path: string) => {
-    setClipboard({ path, mode: "cut" });
+    const source = getQueryScope().activeWorktree;
+    if (source) setClipboard({ source, path, mode: "cut" });
   }, []);
 
   const handleCopyFile = useCallback((path: string) => {
-    setClipboard({ path, mode: "copy" });
+    const source = getQueryScope().activeWorktree;
+    if (source) setClipboard({ source, path, mode: "copy" });
   }, []);
 
   const handlePaste = useCallback(
@@ -38,6 +49,11 @@ export function useFileClipboard(
       try {
         const { activeWorktree } = getQueryScope();
         if (!activeWorktree) return;
+        // The path is on its source's server: another server's file is not there to move.
+        if (clipboard.source.server !== activeWorktree.server) {
+          showToast("Can't move or copy between servers");
+          return;
+        }
         const wt = activeWorktree.path;
 
         // Drafts move into the worktree only; everything else stays within its own tree.
@@ -49,8 +65,7 @@ export function useFileClipboard(
 
         if (isDetachedPath(clipboard.path)) {
           if (clipboard.mode === "cut") {
-            const { newPath } = await api.moveDetachedFileToProject({
-              wt,
+            const { newPath } = await api.moveDetachedFileToProject(activeWorktree, {
               path: clipboard.path,
               destPath: targetDir,
             });
@@ -60,8 +75,7 @@ export function useFileClipboard(
               newPath,
             });
           } else {
-            const { newPath } = await api.copyDetachedFileToProject({
-              wt,
+            const { newPath } = await api.copyDetachedFileToProject(activeWorktree, {
               path: clipboard.path,
               destPath: targetDir,
             });
@@ -70,7 +84,7 @@ export function useFileClipboard(
         } else if (clipboard.mode === "cut") {
           await moveFile({ wt: activeWorktree, srcPath: clipboard.path, destDir: targetDir });
         } else {
-          const { newPath } = await api.copyProjectFile(wt, {
+          const { newPath } = await api.copyProjectFile(activeWorktree, {
             srcPath: clipboard.path,
             destDir: targetDir,
           });
@@ -100,7 +114,10 @@ export function useFileClipboard(
     [queryClient, activeWorktreePath, getTreeRoot],
   );
 
-  const cutPath = clipboard?.mode === "cut" ? clipboard.path : null;
+  // Another server's file is not the one shown at the same path: no cut mark, nothing to paste.
+  const activeServer = useWorktreeStore((s) => s.activeWorktree?.server);
+  const shown = clipboard?.source.server === activeServer ? clipboard : null;
+  const cutPath = shown?.mode === "cut" ? shown.path : null;
 
-  return { clipboard, cutPath, handleCut, handleCopyFile, handlePaste, resolveTargetDir };
+  return { clipboard: shown, cutPath, handleCut, handleCopyFile, handlePaste, resolveTargetDir };
 }

@@ -5,6 +5,7 @@ import {
   AgentTerminalPolicySchema,
 } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { NotificationSequence } from "@/api/ws-protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,7 +214,8 @@ function AgentTerminalsSetting() {
             size="xs"
             className="ml-auto shrink-0"
             onClick={() => {
-              api.clearAgentTerminalWorktrees().catch((err: unknown) => {
+              // The list is the window's own server's (its `agent_terminals_changed`).
+              api.clearAgentTerminalWorktrees(localServerId()).catch((err: unknown) => {
                 showToast(`Could not clear: ${err instanceof Error ? err.message : String(err)}`);
               });
             }}

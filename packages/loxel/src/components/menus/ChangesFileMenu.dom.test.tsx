@@ -5,10 +5,15 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 
 import { toServerId } from "@/api/worktree-ref";
 
+/** The servers asked whether the file is on disk. */
+const checkedOn: string[] = [];
 const originalClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...originalClient,
-  getPathInfo: async (path: string) => ({ path, isDir: false }),
+  getPathInfo: async (server: string, path: string) => {
+    checkedOn.push(server);
+    return { path, isDir: false };
+  },
 }));
 
 const { ChangesFileMenu } = await import("./ChangesFileMenu");
@@ -41,5 +46,6 @@ describe("a changes entry's menu", () => {
     await waitFor(() =>
       expect(queryClient.getQueryData(queryKeys.pathExists(THERE, FILE))).toBe(true),
     );
+    expect(checkedOn).toEqual([THERE]);
   });
 });

@@ -89,6 +89,7 @@ import {
 } from "./app-updater";
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
 import { installClientCertificatePicker } from "./browser-client-certificates";
+import { installBrowserDownloads } from "./browser-downloads";
 import { requestExternalApp } from "./browser-external-apps";
 import { installBrowserFavicons } from "./browser-favicons";
 import { installLocalNetworkAccess } from "./browser-local-network";
@@ -1144,6 +1145,7 @@ app.whenReady().then(async () => {
     );
     installBrowserFavicons(browserSession);
     installLocalNetworkAccess(browserSession);
+    installBrowserDownloads(browserSession);
     installClientCertificatePicker(browserSession);
     installServiceWorkerNotifications(browserSession);
 

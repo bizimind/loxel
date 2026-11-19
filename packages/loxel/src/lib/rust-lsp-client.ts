@@ -1,4 +1,3 @@
-import { wsClient } from "@/api/client";
 import { rustToolchain } from "@/api/rust-toolchain-model";
 import { getQueryScope } from "@/queries/use-scope";
 import { useLspStatusStore } from "@/store/lsp-status";
@@ -15,13 +14,11 @@ const rustLspClient = createLspClient({
   showMessages: true,
 });
 
-wsClient.subscribe(
-  createToolchainServerRecovery({
-    changedMessage: rustToolchain.changedMessage,
-    client: rustLspClient,
-    stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/rust-lsp"),
-    activeWorktree: () => getQueryScope().activeWorktree,
-  }),
-);
+createToolchainServerRecovery({
+  changedMessage: rustToolchain.changedMessage,
+  client: rustLspClient,
+  stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/rust-lsp"),
+  activeWorktree: () => getQueryScope().activeWorktree,
+});
 
 export default rustLspClient;

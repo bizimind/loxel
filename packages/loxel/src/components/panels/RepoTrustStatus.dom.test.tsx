@@ -5,10 +5,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { localRef } from "@/api/local-server";
 import type { RepoTrustStatus as Status } from "@/api/repo-trust-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { queryKeys } from "@/queries/query-keys";
 
 const originalDialog = await import("@/lib/repo-trust-dialog");
-const manageRepoTrust = jest.fn(async (_wtPath: string) => {});
+const manageRepoTrust = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/repo-trust-dialog", () => ({ ...originalDialog, manageRepoTrust }));
 
 const { RepoTrustStatus } = await import("./RepoTrustStatus");
@@ -48,7 +49,7 @@ describe("RepoTrustStatus", () => {
     const button = screen.getByRole("button", { name: "Restricted" });
     expect(button.title).toContain("Build scripts don't run.");
     fireEvent.click(button);
-    expect(manageRepoTrust).toHaveBeenCalledWith(WT);
+    expect(manageRepoTrust).toHaveBeenCalledWith(localRef(WT));
   });
 
   test("a declined repository stays quiet, whatever is restricted", () => {

@@ -103,6 +103,12 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ---
 
+## Downloads
+
+When a page downloads a file, Loxel asks where to save it. While it asks, further downloads from that page are cancelled, so a site can't pile up save dialogs. Every file you download is marked as downloaded from the internet, as files from Safari or Chrome are, so macOS checks a downloaded app, script or installer when you first open it.
+
+---
+
 ## Site permissions
 
 Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. A site that wants your camera or microphone, to send notifications, to open a link in another app, or to reach your dev servers and devices on your network asks you first (see [Camera and microphone](#camera-and-microphone), [Other apps](#other-apps), [Local network](#local-network) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.

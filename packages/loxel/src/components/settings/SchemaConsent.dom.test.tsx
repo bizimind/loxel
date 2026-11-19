@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import { localServerId } from "@/api/local-server";
 import { EMPTY_SCHEMA_CONSENT_STATE } from "@/api/schema-consent-model";
 
 const decisions: unknown[][] = [];
@@ -10,10 +11,12 @@ const switches: boolean[] = [];
 const originalClient = await import("@/api/client");
 await mock.module("@/api/client", () => ({
   ...originalClient,
-  decideSchemaConsent: async (...args: unknown[]) => {
+  decideSchemaConsent: async (server: string, ...args: unknown[]) => {
+    expect(server).toBe(localServerId());
     decisions.push(args);
   },
-  setSchemaNeverFetch: async (neverFetch: boolean) => {
+  setSchemaNeverFetch: async (server: string, neverFetch: boolean) => {
+    expect(server).toBe(localServerId());
     switches.push(neverFetch);
   },
 }));

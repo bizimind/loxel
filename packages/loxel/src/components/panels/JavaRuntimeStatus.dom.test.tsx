@@ -16,13 +16,13 @@ const JDK: NonNullable<JavaEnvResponse["env"]> = {
 };
 
 const originalClient = await import("@/api/java-env-client");
-const getJavaEnv = jest.fn(async (_wtPath: string): Promise<JavaEnvResponse> => ({
+const getJavaEnv = jest.fn(async (_wt: WorktreeRef): Promise<JavaEnvResponse> => ({
   env: JDK,
   overridePath: null,
   ignoredJavaHome: null,
   projectIssue: null,
 }));
-const reloadJavaProjects = jest.fn(async (_request: { worktreePath: string }) => {});
+const reloadJavaProjects = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/api/java-env-client", () => ({ ...originalClient, getJavaEnv, reloadJavaProjects }));
 
 const originalRuntime = await import("@/lib/java-runtime");
@@ -76,7 +76,7 @@ describe("JavaRuntimeStatus", () => {
     const note = await screen.findByRole("button", { name: "Project not fully loaded" });
     expect(note.title).toBe(detail);
     fireEvent.click(note);
-    expect(reloadJavaProjects.mock.calls).toEqual([[{ worktreePath: "/wt-a" }]]);
+    expect(reloadJavaProjects.mock.calls).toEqual([[localRef("/wt-a")]]);
   });
 
   test("shows no note when nothing holds the projects back", async () => {
@@ -117,7 +117,7 @@ describe("JavaRuntimeStatus", () => {
     renderStatus();
 
     const button = await screen.findByRole("button", { name: "Java 21.0.5 (Temurin)" });
-    expect(getJavaEnv.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
+    expect(getJavaEnv.mock.calls.map(([wt]) => wt)).toEqual([localRef("/wt-a")]);
     expect(button.title).toContain(JDK.path);
     expect(button.title).toContain("Detected from JAVA_HOME");
     expect(button.className).toContain("text-muted-foreground");

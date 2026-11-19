@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import * as api from "@/api/client";
+import { formatWorktreeRef } from "@/api/worktree-ref";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { FileTypeIcon } from "@/lib/file-icons";
@@ -37,7 +38,8 @@ export function SearchModal() {
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  const activeWorktreePath = activeWorktree?.path ?? null;
 
   const currentScopesKey = scopesKey(scopes);
 
@@ -57,11 +59,12 @@ export function SearchModal() {
   const availableDirs = useSearchStore((s) => s.availableDirs) ?? [];
   const fetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen || !activeWorktreePath) return;
-    if (fetchedForRef.current === activeWorktreePath && availableDirs.length > 0) return;
-    fetchedForRef.current = activeWorktreePath;
+    if (!isOpen || !activeWorktree) return;
+    const fetchedFor = formatWorktreeRef(activeWorktree);
+    if (fetchedForRef.current === fetchedFor && availableDirs.length > 0) return;
+    fetchedForRef.current = fetchedFor;
     api
-      .getSearchScopes(activeWorktreePath)
+      .getSearchScopes(activeWorktree)
       .then((res) => {
         const store = useSearchStore.getState();
         store.setAvailablePackages(res.packages);
@@ -71,11 +74,11 @@ export function SearchModal() {
       .catch((err) => {
         log.warn("Failed to fetch search scopes", { error: err });
       });
-  }, [isOpen, activeWorktreePath, availableDirs.length]);
+  }, [isOpen, activeWorktree, availableDirs.length]);
 
   // Debounced search
   useEffect(() => {
-    if (!isOpen || !query.trim() || !activeWorktreePath) {
+    if (!isOpen || !query.trim() || !activeWorktree) {
       if (!query.trim()) {
         useSearchStore.getState().setLoading(false);
         useSearchStore.getState().setResults([], false);
@@ -95,7 +98,7 @@ export function SearchModal() {
     const timer = setTimeout(() => {
       api
         .search(
-          activeWorktreePath,
+          activeWorktree,
           { q: query, regex, caseSensitive, wholeWord, scope, paths, globs },
           controller.signal,
         )
@@ -119,7 +122,7 @@ export function SearchModal() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isOpen, query, regex, caseSensitive, wholeWord, activeWorktreePath, currentScopesKey]);
+  }, [isOpen, query, regex, caseSensitive, wholeWord, activeWorktree, currentScopesKey]);
 
   const close = useSearchStore((s) => s.close);
 

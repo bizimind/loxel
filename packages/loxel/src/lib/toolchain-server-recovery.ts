@@ -1,8 +1,7 @@
-import { localServerId } from "@/api/local-server";
-import { sameWorktreeRef, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
-import type { WsMessage } from "@/api/ws-protocol";
+import { sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import type { StoppedLanguageServer } from "@/store/lsp-status";
 
+import { onLoxelEvent } from "./loxel-events";
 import type { LspClient } from "./lsp-client";
 
 interface ToolchainServerRecovery {
@@ -16,22 +15,21 @@ interface ToolchainServerRecovery {
 /**
  * Bring a language server back when the toolchain of its worktree changes, if it could not start:
  * installing what it was missing takes no restart of Loxel. A server stopped for any other reason
- * stays as it is, above all one another window took over. Only this client is touched.
+ * stays as it is, above all one another window took over. Only this client is touched. Listens to
+ * every server's changes (`loxel-toolchain-changed`, from ws-bridge); returns the unsubscribe.
  */
 export function createToolchainServerRecovery({
   changedMessage,
   client,
   stoppedServer,
   activeWorktree,
-}: ToolchainServerRecovery): (message: WsMessage) => void {
-  return (message) => {
-    if (message.type !== changedMessage || !("wtPath" in message)) return;
+}: ToolchainServerRecovery): () => void {
+  return onLoxelEvent("loxel-toolchain-changed", (changed) => {
+    if (changed.changedMessage !== changedMessage) return;
     if (stoppedServer()?.reason !== "start-failed") return;
     const wt = activeWorktree();
-    if (wt === null || typeof message.wtPath !== "string") return;
-    // `wsClient`'s messages name worktrees of the window's server.
-    if (!sameWorktreeRef(wt, worktreeRef(localServerId(), message.wtPath))) return;
+    if (wt === null || !sameWorktreeRef(wt, changed.wt)) return;
     client.disconnect();
     client.connect(wt);
-  };
+  });
 }

@@ -120,10 +120,11 @@ describe("panel notifications of two servers", () => {
 
       store().dismiss(mine!);
       expect(sent).toEqual([{ type: "notification_dismiss", id: "a" }]);
-      // The window has no connection to that server: never sent to its own instead.
-      expect(() => store().dismiss(theirs!)).toThrow("No connection to server");
-      expect(() => store().dismissPanel(THERE, "panel-a")).toThrow("No connection to server");
-      expect(sent).toHaveLength(1);
+      // The window has no connection to that server: dropped, never sent to its own instead.
+      expect(() => store().dismiss(theirs!)).not.toThrow();
+      expect(() => store().dismissPanel(THERE, "panel-a")).not.toThrow();
+      expect(() => store().unregisterPanel(THERE, "panel-a")).not.toThrow();
+      expect(sent).toEqual([{ type: "notification_dismiss", id: "a" }]);
     } finally {
       send.mockRestore();
     }

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
-import { hasConnection, wsClientOf } from "@/api/client";
+import { sendTo, wsClientOf } from "@/api/client";
+import { hasConnection } from "@/api/server-connection";
 import { type WorktreeRef, sameWorktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
@@ -35,7 +36,8 @@ export function useWsSubscription(activeWorktree: WorktreeRef | null): void {
       onWorktreeSavesDrained(prev, () => {
         // Switched back before its saves drained: it is the shown worktree again.
         if (sameOptionalWorktreeRef(prevWtRef.current, prev)) return;
-        wsClientOf(prev.server).unsubscribeWorktree(prev);
+        // A server the window lost its connection to holds no subscription of it.
+        if (hasConnection(prev.server)) wsClientOf(prev.server).unsubscribeWorktree(prev);
       });
     }
   }, [activeWorktree]);
@@ -51,7 +53,7 @@ export function useWsSubscription(activeWorktree: WorktreeRef | null): void {
         (p) => p.startsWith("/") && !p.startsWith(wt.path + "/"),
       );
       if (externalPaths.length === 0) return;
-      wsClientOf(wt.server).send({
+      sendTo(wt.server, {
         type: "register_external_files",
         worktreePath: wt.path,
         filePaths: externalPaths,

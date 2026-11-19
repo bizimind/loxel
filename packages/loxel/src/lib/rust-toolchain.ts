@@ -92,9 +92,8 @@ function choiceItem(choice: RustToolchainChoice, chosen: string | null, home: st
  * is left to the user's terminal.
  */
 export async function selectRustToolchain(wt: WorktreeRef): Promise<void> {
-  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const items = getRustToolchainCandidates(wtPath).then(({ candidates, automatic, chosen }) => {
+  const items = getRustToolchainCandidates(wt).then(({ candidates, automatic, chosen }) => {
     const list: QuickPickItem[] = [
       {
         id: AUTOMATIC_ID,
@@ -112,7 +111,7 @@ export async function selectRustToolchain(wt: WorktreeRef): Promise<void> {
 
   try {
     const toolchain = picked === AUTOMATIC_ID ? null : picked.slice(TOOLCHAIN_ID_PREFIX.length);
-    const response = await setRustToolchainChoice({ worktreePath: wtPath, toolchain });
+    const response = await setRustToolchainChoice(wt, { toolchain });
     setToolchainStatusData(rustToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Rust toolchain");

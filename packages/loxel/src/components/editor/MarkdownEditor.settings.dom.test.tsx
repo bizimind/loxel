@@ -24,7 +24,7 @@ const EDITED = ["+ xone", "+ two", "", "Title", "=====", "", "last paragraph", "
 /** Creating a Crepe editor under happy-dom takes a couple of seconds; each test does it twice. */
 const EDITOR_TEST_TIMEOUT_MS = 30_000;
 
-const writeFileContent = jest.fn(async (options: { content: string }) => ({
+const writeFileContent = jest.fn(async (_server: string, options: { content: string }) => ({
   success: true,
   content: options.content,
 }));
@@ -143,7 +143,7 @@ describe("MarkdownEditor markdown output settings", () => {
 
       // Autosave posts exactly that content.
       await waitFor(() => expect(writeFileContent).toHaveBeenCalled());
-      expect(writeFileContent.mock.calls[0]?.[0].content).toBe(EDITED);
+      expect(writeFileContent.mock.calls[0]?.[1].content).toBe(EDITED);
     },
     EDITOR_TEST_TIMEOUT_MS,
   );

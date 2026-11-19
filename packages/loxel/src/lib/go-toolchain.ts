@@ -22,7 +22,7 @@ function showGoStatus(wt: WorktreeRef, status: GoEnvResponse): void {
 /** Look for the worktree's Go again, for one installed in a directory new to the login-shell PATH. */
 export async function refreshGoToolchain(wt: WorktreeRef): Promise<void> {
   try {
-    showGoStatus(wt, await refreshGoEnv(wt.path));
+    showGoStatus(wt, await refreshGoEnv(wt));
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not look for Go");
   }
@@ -41,9 +41,8 @@ function automaticDescription(env: GoEnv | null, homeDir: string | null): string
  * user's terminal.
  */
 export async function selectGoToolchain(wt: WorktreeRef): Promise<void> {
-  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const state = refreshGoToolchain(wt).then(() => getGoToolchainCandidates(wtPath));
+  const state = refreshGoToolchain(wt).then(() => getGoToolchainCandidates(wt));
   const items = state.then(({ candidates, automatic, chosen }) => {
     const list: QuickPickItem[] = [
       {
@@ -80,7 +79,7 @@ export async function selectGoToolchain(wt: WorktreeRef): Promise<void> {
   }
 
   try {
-    showGoStatus(wt, await setGoToolchainChoice({ worktreePath: wtPath, goPath }));
+    showGoStatus(wt, await setGoToolchainChoice(wt, { goPath }));
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Go toolchain");
   }

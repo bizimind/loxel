@@ -41,8 +41,7 @@ async function moveDetachedFile(filePath: string, destDir: string) {
   try {
     const wt = getQueryScope().activeWorktree;
     if (!wt) return;
-    const { newPath } = await api.moveDetachedFileToProject({
-      wt: wt.path,
+    const { newPath } = await api.moveDetachedFileToProject(wt, {
       path: filePath,
       destPath: destDir,
     });

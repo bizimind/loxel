@@ -29,7 +29,7 @@ const ACTIVE: RustToolchainResponse = {
 
 let response = ACTIVE;
 const originalClient = await import("@/api/rust-toolchain-client");
-const getRustToolchain = jest.fn(async (_wtPath: string) => response);
+const getRustToolchain = jest.fn(async (_wt: WorktreeRef) => response);
 mock.module("@/api/rust-toolchain-client", () => ({ ...originalClient, getRustToolchain }));
 
 const originalLib = await import("@/lib/rust-toolchain");
@@ -76,7 +76,7 @@ describe("RustToolchainStatus", () => {
     renderStatus();
 
     const button = await screen.findByRole("button", { name: "Rust 1.99.1 (stable)" });
-    expect(getRustToolchain.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
+    expect(getRustToolchain.mock.calls.map(([wt]) => wt)).toEqual([localRef("/wt-a")]);
     expect(button.className).toContain("text-muted-foreground");
     fireEvent.click(button);
     expect(selectRustToolchain.mock.calls).toEqual([[localRef("/wt-a")]]);

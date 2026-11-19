@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:t
 import type { InitAction } from "@bizimind/wt/lib";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { localServerId } from "@/api/local-server";
 import type { AddProjectRequest, DetectPathResult, ProjectSetupResult } from "@/api/project-model";
 
 const fetchRefspec: InitAction = {
@@ -57,7 +58,9 @@ const added: ProjectSetupResult = {
   isBare: true,
 };
 
-const addProject = jest.fn(async (_req: AddProjectRequest): Promise<ProjectSetupResult> => added);
+const addProject = jest.fn(
+  async (_server: string, _req: AddProjectRequest): Promise<ProjectSetupResult> => added,
+);
 const originalClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...originalClient,
@@ -102,7 +105,7 @@ describe("AddProjectWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => expect(showAddedProject).toHaveBeenCalledWith(added));
-    expect(addProject).toHaveBeenCalledWith({
+    expect(addProject).toHaveBeenCalledWith(localServerId(), {
       path: "/repos/shop.git",
       name: "shop",
       apply: ["worktree-metadata-on"],

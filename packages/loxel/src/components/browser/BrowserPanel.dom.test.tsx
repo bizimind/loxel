@@ -12,6 +12,7 @@ import {
 import type { DockviewPanelApi } from "dockview-react";
 
 import { wsClient } from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type {
   JavaScriptDialogClosed,
   JavaScriptDialogRequest,
@@ -91,7 +92,13 @@ function renderPanel({ ready = true, url = "about:blank" } = {}) {
   render(
     <>
       <button type="button">Elsewhere</button>
-      <BrowserPanel url={url} panelId="browser-test" panelApi={panelApi} worktreePath={null} />
+      <BrowserPanel
+        url={url}
+        panelId="browser-test"
+        panelApi={panelApi}
+        worktreePath={null}
+        server={localServerId()}
+      />
     </>,
   );
   const webview = document.querySelector<HTMLElement>("webview")!;

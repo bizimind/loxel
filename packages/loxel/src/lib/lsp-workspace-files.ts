@@ -2,8 +2,8 @@ import type { WorkspaceFileSystem, WorkspaceFileType } from "@bizimind/monaco-ls
 import type * as monaco from "monaco-editor";
 
 import * as api from "@/api/client";
-import { ApiError } from "@/api/client";
-import type { WorktreeRef } from "@/api/worktree-ref";
+import { ApiError } from "@/api/server-connection";
+import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 
 import { deleteFile, moveFile, renameFile } from "./file-operations";
@@ -50,7 +50,7 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
   const wtPath = wt.path;
   let realRoot: Promise<string> | undefined;
   const getRealRoot = () =>
-    (realRoot ??= api.getPathInfo(wtPath).then(
+    (realRoot ??= api.getPathInfo(wt.server, wtPath).then(
       (info) => info.path,
       (error: unknown) => {
         realRoot = undefined;
@@ -60,10 +60,10 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
 
   /** Creates `dir` and its missing parents inside the worktree. */
   async function ensureDir(dir: string): Promise<void> {
-    if (dir === wtPath || (await pathInfo(dir))) return;
+    if (dir === wtPath || (await pathInfo(wt.server, dir))) return;
     const parent = parentOf(dir);
     await ensureDir(parent);
-    const { path } = await api.createProjectDir(wtPath, { dir: parent, name: pathName(dir) });
+    const { path } = await api.createProjectDir(wt, { dir: parent, name: pathName(dir) });
     invalidateDirQueries(wt, parent);
     if (path !== dir) await refuseStray(path, `${dir} already exists`);
   }
@@ -77,14 +77,14 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
   return {
     async stat(uri: monaco.Uri): Promise<WorkspaceFileType | undefined> {
       const path = editablePath(uri, wt);
-      const info = await pathInfo(path);
+      const info = await pathInfo(wt.server, path);
       if (info) {
         assertWorktreeFile(info.path, await getRealRoot());
         return info.isDir ? "directory" : "file";
       }
       // Nothing there yet: the nearest existing folder is where it would be created.
       for (let dir = parentOf(path); dir !== wtPath; dir = parentOf(dir)) {
-        const dirInfo = await pathInfo(dir);
+        const dirInfo = await pathInfo(wt.server, dir);
         if (dirInfo) {
           assertWorktreeFile(dirInfo.path, await getRealRoot());
           break;
@@ -95,7 +95,7 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
 
     async readFile(uri) {
       const path = editablePath(uri, wt);
-      const { content } = await api.getFileContentByPath(path, wtPath);
+      const { content } = await api.getFileContentByPath(wt.server, path, wt);
       // The route decodes as UTF-8, replacing invalid bytes: writing that back would corrupt the file.
       if (content.includes("\uFFFD"))
         throw new Error(`${path} is not UTF-8 text, so it is not changed`);
@@ -104,11 +104,11 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
 
     async writeFile(uri, content) {
       const path = editablePath(uri, wt);
-      await api.writeFileContent({
+      await api.writeFileContent(wt.server, {
         path,
         content,
         nonce: crypto.randomUUID(),
-        worktreePath: wtPath,
+        worktree: wt,
       });
     },
 
@@ -116,7 +116,7 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
       const path = editablePath(uri, wt);
       const dir = parentOf(path);
       await ensureDir(dir);
-      const created = await api.createProjectFile(wtPath, { dir, name: pathName(path) });
+      const created = await api.createProjectFile(wt, { dir, name: pathName(path) });
       invalidateDirQueries(wt, dir);
       // The route picks a free name when the file appeared meanwhile.
       if (created.path !== path) await refuseStray(created.path, `${path} already exists`);
@@ -169,10 +169,13 @@ function assertWorktreeFile(path: string, root: string): void {
   }
 }
 
-/** The real path and kind of `path`, or undefined when nothing is there. */
-async function pathInfo(path: string): Promise<{ path: string; isDir: boolean } | undefined> {
+/** The real path and kind of `path` on `server`, or undefined when nothing is there. */
+async function pathInfo(
+  server: ServerId,
+  path: string,
+): Promise<{ path: string; isDir: boolean } | undefined> {
   try {
-    return await api.getPathInfo(path);
+    return await api.getPathInfo(server, path);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return undefined;
     throw error;

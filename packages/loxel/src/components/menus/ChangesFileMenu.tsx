@@ -61,7 +61,7 @@ export function ChangesFileMenu({
   const { data: onDisk = false } = useQuery({
     queryKey: queryKeys.pathExists(server, absolutePath),
     queryFn: () =>
-      getPathInfo(absolutePath).then(
+      getPathInfo(server, absolutePath).then(
         () => true,
         () => false,
       ),

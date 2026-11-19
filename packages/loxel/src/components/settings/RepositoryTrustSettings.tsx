@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { localServerId } from "@/api/local-server";
 import { forgetRepoTrust, listRepoTrust } from "@/api/repo-trust-client";
 import type { RepoTrustDecision, RepoTrustEntry } from "@/api/repo-trust-model";
+import { worktreeRef } from "@/api/worktree-ref";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { manageRepoTrust } from "@/lib/repo-trust-dialog";
@@ -40,12 +41,14 @@ function canForget(entry: RepoTrustEntry): boolean {
 }
 
 function forget(entry: RepoTrustEntry): void {
-  forgetRepoTrust(entry.id).catch((err: unknown) => {
+  // The list is the window's own server's (`RepositoryTrustSettings`).
+  forgetRepoTrust(localServerId(), entry.id).catch((err: unknown) => {
     showToast(err instanceof Error ? err.message : "Could not forget the repository's answer");
   });
 }
 
 function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
+  // A worktree of the window's own server, whose list this is.
   const { worktreePath } = entry;
   // The folder's own name leads, since long paths share their start.
   const name = entry.repository.slice(entry.repository.lastIndexOf("/") + 1) || entry.repository;
@@ -94,7 +97,11 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
           <Button
             variant="ghost"
             size="xs"
-            onClick={() => void manageRepoTrust(worktreePath, { declineOnCancel: false })}
+            onClick={() =>
+              void manageRepoTrust(worktreeRef(localServerId(), worktreePath), {
+                declineOnCancel: false,
+              })
+            }
           >
             Stop Trusting
           </Button>
@@ -103,7 +110,11 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
           <Button
             variant="outline"
             size="xs"
-            onClick={() => void manageRepoTrust(worktreePath, { declineOnCancel: false })}
+            onClick={() =>
+              void manageRepoTrust(worktreeRef(localServerId(), worktreePath), {
+                declineOnCancel: false,
+              })
+            }
           >
             Trust
           </Button>
@@ -130,8 +141,9 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
  */
 export function RepositoryTrustSettings() {
   const { data, error } = useQuery({
+    // Settings show the window's own server's answers.
     queryKey: queryKeys.repoTrustList(localServerId()),
-    queryFn: listRepoTrust,
+    queryFn: () => listRepoTrust(localServerId()),
     // Only trust changes are pushed; projects and worktrees come and go too, so ask on each open.
     refetchOnMount: "always",
   });

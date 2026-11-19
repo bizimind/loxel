@@ -22,7 +22,7 @@ export function JavaRuntimeStatus() {
 
   if (!active) return null;
 
-  const { wt, wtPath, status } = active;
+  const { wt, status } = active;
   const { env, overridePath, ignoredJavaHome, projectIssue } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
   const tooltip = [
@@ -42,7 +42,7 @@ export function JavaRuntimeStatus() {
           type="button"
           className="text-warning hover:text-foreground cursor-pointer transition-colors"
           title={projectIssue.detail}
-          onClick={() => void reloadJavaProjects({ worktreePath: wtPath })}
+          onClick={() => void reloadJavaProjects(wt)}
         >
           {projectIssue.label}
         </button>

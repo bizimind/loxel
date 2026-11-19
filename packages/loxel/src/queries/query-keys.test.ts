@@ -5,6 +5,7 @@ import { toServerId, worktreeRef } from "@/api/worktree-ref";
 
 import {
   isDirContentsKeyBelow,
+  isEditorConfigKeyBelow,
   isKeyWithinWorktree,
   isWorkingTreeDiffKey,
   keyServer,
@@ -47,9 +48,11 @@ describe("queryKeys", () => {
   });
 
   test("keeps Home's keys without a server", () => {
-    expect(parts(queryKeys.editorConfig("/drafts/a.md"))).toEqual([
-      "editorConfig",
+    expect(parts(queryKeys.fileContent(null, "/drafts/a.md"))).toEqual([
+      "fileContent",
+      null,
       "/drafts/a.md",
+      undefined,
       undefined,
     ]);
   });
@@ -96,13 +99,24 @@ describe("isDirContentsKeyBelow", () => {
 describe("keyServer", () => {
   test("is the server of a key's ref or server part, and null for Home's", () => {
     expect(keyServer(queryKeys.status(null, WT))).toBe(localServerId());
-    expect(keyServer(queryKeys.editorConfig("/a.ts", worktreeRef(ELSEWHERE, "/x")))).toBe(
-      ELSEWHERE,
-    );
+    expect(
+      keyServer(queryKeys.editorConfig(ELSEWHERE, "/a.ts", worktreeRef(ELSEWHERE, "/x"))),
+    ).toBe(ELSEWHERE);
     expect(keyServer(queryKeys.repoTrustList(ELSEWHERE))).toBe(ELSEWHERE);
     expect(keyServer(queryKeys.pathExists(ELSEWHERE, "/a"))).toBe(ELSEWHERE);
-    expect(keyServer(queryKeys.editorConfig("/drafts/a.md"))).toBeNull();
+    expect(keyServer(queryKeys.fileContent(null, "/drafts/a.md"))).toBeNull();
     expect(keyServer(queryKeys.diff(null, { type: "staged", worktree: "/x" }))).toBeNull();
+  });
+});
+
+describe("isEditorConfigKeyBelow", () => {
+  test("matches only the given server's keys under the directory", () => {
+    const here = queryKeys.editorConfig(localServerId(), "/repo/src/a.ts");
+    const there = queryKeys.editorConfig(ELSEWHERE, "/repo/src/a.ts");
+    expect(isEditorConfigKeyBelow(here, localServerId(), "/repo/")).toBe(true);
+    expect(isEditorConfigKeyBelow(there, localServerId(), "/repo/")).toBe(false);
+    expect(isEditorConfigKeyBelow(there, ELSEWHERE, "")).toBe(true);
+    expect(isEditorConfigKeyBelow(here, localServerId(), "/other/")).toBe(false);
   });
 });
 
@@ -130,7 +144,7 @@ describe("isKeyWithinWorktree", () => {
       queryKeys.dirContents(project, `${WT.path}/src`),
       queryKeys.fileContent(project, `${WT.path}/a.ts`),
       queryKeys.fileContent(project, "a.ts", undefined, wt),
-      queryKeys.editorConfig(`${WT.path}/a.ts`, wt),
+      queryKeys.editorConfig(ELSEWHERE, `${WT.path}/a.ts`, wt),
       queryKeys.pathExists(ELSEWHERE, `${WT.path}/a`),
       queryKeys.diff(project, { type: "uncommitted", worktree: WT.path }),
     ];
@@ -140,7 +154,7 @@ describe("isKeyWithinWorktree", () => {
   });
 
   test("counts a key naming no server as the window's own server's", () => {
-    const homeKey = queryKeys.editorConfig(`${WT.path}/a.ts`);
+    const homeKey = queryKeys.fileContent(null, `${WT.path}/a.ts`);
     expect(isKeyWithinWorktree(homeKey, WT, HOME)).toBe(true);
     expect(isKeyWithinWorktree(homeKey, worktreeRef(ELSEWHERE, WT.path), HOME)).toBe(false);
   });

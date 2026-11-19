@@ -18,7 +18,7 @@ const ENV: PythonEnvResponse = {
 };
 
 const originalClient = await import("@/api/python-env-client");
-const getPythonEnv = jest.fn(async (_wtPath: string) => ENV);
+const getPythonEnv = jest.fn(async (_wt: WorktreeRef) => ENV);
 mock.module("@/api/python-env-client", () => ({ ...originalClient, getPythonEnv }));
 
 const originalInterpreter = await import("@/lib/python-interpreter");
@@ -63,7 +63,7 @@ describe("PythonInterpreterStatus", () => {
     );
 
     const button = await screen.findByRole("button", { name: "Python 3.12.1 (api/.venv)" });
-    expect(getPythonEnv.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
+    expect(getPythonEnv.mock.calls.map(([wt]) => wt)).toEqual([localRef("/wt-a")]);
     fireEvent.click(button);
     expect(selectPythonInterpreter.mock.calls).toEqual([[localRef("/wt-a")]]);
   });

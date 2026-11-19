@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import type { ServerId } from "@/api/worktree-ref";
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
@@ -91,6 +92,8 @@ interface BrowserPanelProps {
   panelApi: DockviewPanelApi | null;
   /** The worktree whose layout the panel is in, or null for Home's. */
   worktreePath: string | null;
+  /** The server of the panel's layout, which keeps its page's notifications. */
+  server: ServerId;
   /**
    * How many times the page was resumed from a freeze (see `store/browser-pages.ts`). Chromium
    * leaves a resumed page hidden, so each one hides the webview for a frame to show it again.
@@ -103,6 +106,7 @@ export function BrowserPanel({
   panelId,
   panelApi,
   worktreePath,
+  server,
   resumes = 0,
 }: BrowserPanelProps) {
   const webviewRef = useRef<WebviewTag | null>(null);
@@ -175,7 +179,7 @@ export function BrowserPanel({
   // The page's web notifications go to the notification center, with its favicon; a site asking
   // to show them gets a bar under the toolbar.
   const { request: notificationRequest, answer: answerNotificationRequest } =
-    useBrowserNotifications(webContentsId, panelId, worktreePath, pageRef);
+    useBrowserNotifications(server, webContentsId, panelId, worktreePath, pageRef);
   // A site asking for the camera or microphone gets a bar under the toolbar too.
   const {
     request: mediaRequest,

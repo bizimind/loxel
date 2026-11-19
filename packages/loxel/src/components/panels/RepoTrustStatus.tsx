@@ -19,10 +19,9 @@ const toldRepositories = new Set<string>();
  */
 export function RepoTrustStatus() {
   const { activeProject, activeWorktree } = useQueryScope();
-  const wtPath = activeWorktree?.path ?? null;
   const { data } = useQuery({
     queryKey: queryKeys.repoTrust(activeProject, activeWorktree),
-    queryFn: wtPath ? () => getRepoTrust(wtPath) : skipToken,
+    queryFn: activeWorktree ? () => getRepoTrust(activeWorktree) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on repo_trust_changed
   });
   // A repository the user declined stays quiet: they answered, and the palette still asks.
@@ -39,12 +38,12 @@ export function RepoTrustStatus() {
     );
   }, [restricted, repository]);
 
-  if (!wtPath || !data || (!trusted && !restricted)) return null;
+  if (!activeWorktree || !data || (!trusted && !restricted)) return null;
 
   return (
     <button
       type="button"
-      onClick={() => void manageRepoTrust(wtPath)}
+      onClick={() => void manageRepoTrust(activeWorktree)}
       title={
         trusted
           ? `${data.repository} is trusted. Click to stop trusting it.`

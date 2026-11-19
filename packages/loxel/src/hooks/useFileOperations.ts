@@ -122,7 +122,7 @@ export function useFileOperations(
     try {
       const wt = getQueryScope().activeWorktree;
       if (!wt) return;
-      const { result } = await api.undoFileOperation(wt.path);
+      const { result } = await api.undoFileOperation(wt);
       if (result) dispatchUndoRedoResult(wt, result);
     } catch (err) {
       frontendLog
@@ -139,7 +139,7 @@ export function useFileOperations(
     try {
       const wt = getQueryScope().activeWorktree;
       if (!wt) return;
-      const { result } = await api.redoFileOperation(wt.path);
+      const { result } = await api.redoFileOperation(wt);
       if (result) dispatchUndoRedoResult(wt, result);
     } catch (err) {
       frontendLog
@@ -154,7 +154,7 @@ export function useFileOperations(
   const handleNewFile = useCallback(
     async (dir: string) => {
       try {
-        const wt = getQueryScope().activeWorktree?.path;
+        const wt = getQueryScope().activeWorktree;
         if (!wt) return;
         treeRef.current?.expandPath(dir);
         const { path } = await api.createProjectFile(wt, { dir });
@@ -169,7 +169,7 @@ export function useFileOperations(
   const handleNewDir = useCallback(
     async (dir: string) => {
       try {
-        const wt = getQueryScope().activeWorktree?.path;
+        const wt = getQueryScope().activeWorktree;
         if (!wt) return;
         treeRef.current?.expandPath(dir);
         const { path } = await api.createProjectDir(wt, { dir });

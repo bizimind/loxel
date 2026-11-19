@@ -63,14 +63,14 @@ export function NewWorktreeDialog({
     let cancelled = false;
     setBasePlan(null);
     api
-      .planWorktreeBase(project.path, parentPath)
+      .planWorktreeBase(project, parentPath)
       .then((plan) => !cancelled && setBasePlan(plan))
       // Only a hint: the create itself reports anything that is really wrong.
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [project.path, parentPath]);
+  }, [project, parentPath]);
 
   /** Set when the dialog is closed while a create is still being planned. */
   const abandoned = useRef(false);
