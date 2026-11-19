@@ -70,6 +70,7 @@ const {
   outboxEntriesForTests,
   resetSaveOutboxForTests,
   retryQueuedSaves,
+  unsavedFilesOf,
 } = await import("./save-outbox");
 const { dispatchLoxelEvent } = await import("./loxel-events");
 type OutboxEntry = import("./save-outbox").OutboxEntry;
@@ -914,5 +915,33 @@ describe("a worktree that is gone", () => {
       subscribe.mockRestore();
       useProjectStore.setState({ projects: [] });
     }
+  });
+});
+
+describe("unsavedFilesOf", () => {
+  test("counts the worktree's unsaved editors and waiting saves, every window's, not those in flight", async () => {
+    const { storage, stored } = memoryStorage();
+    await initSaveOutbox({ storage });
+    // This window: a save the server could not take, and an editor not saved yet.
+    openEditor("a\nb\nc\n", { current: "a\nb\nc\nd\n" });
+    serverDown = true;
+    await saveEditorContent(FILE, "a\nb\nc\nd\n", "/repo", undefined, KEY);
+    const typed = fileEditorKey(TEST_SERVER, "/repo/typed.ts");
+    useEditorStateStore.getState().openFile(typed, TEST_SERVER, "/repo/typed.ts");
+    useEditorStateStore.getState().markDirty(typed);
+    // Another window, still open: a save waiting, one in flight, and one of another worktree.
+    const other = { ownerId: "other-window", status: "queued" } as const;
+    stored.set("o1", leftBehind({ ...other, id: "o1", filePath: "/repo/queued.ts" }));
+    stored.set(
+      "o2",
+      leftBehind({ ...other, id: "o2", filePath: "/repo/sending.ts", status: "sending" }),
+    );
+    stored.set("o3", leftBehind({ ...other, id: "o3", filePath: "/x/a.ts", worktreePath: "/x" }));
+
+    expect((await unsavedFilesOf(TEST_SERVER, "/repo")).toSorted()).toEqual([
+      FILE,
+      "/repo/queued.ts",
+      "/repo/typed.ts",
+    ]);
   });
 });

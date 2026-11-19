@@ -369,6 +369,10 @@ export function useWsBridge(): void {
           const project = localRef(message.projectPath);
           queryClient.invalidateQueries({ queryKey: queryKeys.projectCommits(project) });
           queryClient.invalidateQueries({ queryKey: queryKeys.projectBranchCommits(project) });
+          // Branches created, deleted or checked out outside Loxel (a terminal, an agent).
+          if (message.type === "refs_changed") {
+            queryClient.invalidateQueries({ queryKey: queryKeys.branches(project) });
+          }
           // A commit or reset moves what uncommitted/staged diffs compare against. Commit and
           // range diffs are keyed by SHA; an amend or rebase yields new SHAs, hence new keys.
           queryClient.invalidateQueries({

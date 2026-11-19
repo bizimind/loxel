@@ -115,6 +115,9 @@ describe("isKeyWithinWorktree", () => {
       true,
     );
     expect(isKeyWithinWorktree(queryKeys.pathExists(HOME, `${WT.path}/a`), WT, HOME)).toBe(true);
+    const diff = (worktree: string) => queryKeys.diff(PROJECT, { type: "uncommitted", worktree });
+    expect(isKeyWithinWorktree(diff(WT.path), WT, HOME)).toBe(true);
+    expect(isKeyWithinWorktree(diff(`${WT.path}2`), WT, HOME)).toBe(false);
     const sibling = localRef(`${WT.path}2`);
     expect(isKeyWithinWorktree(queryKeys.status(PROJECT, sibling), WT, HOME)).toBe(false);
   });
@@ -129,6 +132,7 @@ describe("isKeyWithinWorktree", () => {
       queryKeys.fileContent(project, "a.ts", undefined, wt),
       queryKeys.editorConfig(`${WT.path}/a.ts`, wt),
       queryKeys.pathExists(ELSEWHERE, `${WT.path}/a`),
+      queryKeys.diff(project, { type: "uncommitted", worktree: WT.path }),
     ];
     for (const key of keys) expect(isKeyWithinWorktree(key, WT, HOME)).toBe(false);
     // And the other way: releasing the other server's worktree leaves this one's.

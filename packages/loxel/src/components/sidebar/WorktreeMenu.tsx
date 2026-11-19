@@ -14,7 +14,7 @@ import {
   PencilIcon,
   TrashIcon,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import { formatWorktreeRef, sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
@@ -25,7 +25,9 @@ import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { showToast } from "@/components/ui/toast";
 import { copyToClipboard } from "@/lib/clipboard";
+import { pathName } from "@/lib/project-file-helpers";
 import { askToTrustRepo } from "@/lib/repo-trust-dialog";
+import { unsavedFilesOf } from "@/lib/save-outbox";
 import { archivedSet, resolveParents } from "@/lib/worktree-hierarchy";
 import { projectListPaths, useWorktreeStore } from "@/store/worktrees";
 
@@ -258,12 +260,42 @@ export function WorktreeContextMenu({
   );
 }
 
+type RemovePlan = NonNullable<ReturnType<typeof useWorktreeStore.getState>["pendingRemovePlan"]>;
+
+/**
+ * The files whose edits Loxel holds unsaved, for the worktree the plan removes and each nested
+ * one, by worktree path; null until read.
+ */
+function useUnsavedFiles(plan: RemovePlan): ReadonlyMap<string, string[]> | null {
+  const [unsaved, setUnsaved] = useState<ReadonlyMap<string, string[]> | null>(null);
+  useEffect(() => {
+    let current = true;
+    const paths = [plan.worktreePath, ...plan.nested.map((wt) => wt.path)];
+    void Promise.all(
+      paths.map(async (path) => [path, await unsavedFilesOf(plan.project.server, path)] as const),
+    ).then((found) => {
+      if (current) setUnsaved(new Map(found));
+    });
+    return () => {
+      current = false;
+    };
+  }, [plan]);
+  return unsaved;
+}
+
+/** The warning for edits Loxel holds unsaved, naming the files when there are few. */
+function unsavedEditsWarning(files: readonly string[]): string {
+  const count = files.length === 1 ? "1 unsaved edit" : `${files.length} unsaved edits`;
+  const names = files.length <= 3 ? `: ${files.map((file) => pathName(file)).join(", ")}` : "";
+  return `${count} in Loxel${names}. ${files.length === 1 ? "It" : "They"} will be lost.`;
+}
+
 function RemoveWorktreeDialog({
   plan,
   onConfirm,
   onCancel,
 }: {
-  plan: NonNullable<ReturnType<typeof useWorktreeStore.getState>["pendingRemovePlan"]>;
+  plan: RemovePlan;
   onConfirm: (options: { deleteBranch: boolean; force: boolean; nested: NestedRemoval }) => void;
   onCancel: () => void;
 }) {
@@ -295,13 +327,20 @@ function RemoveWorktreeDialog({
   const them = nestedCount === 1 ? "it" : "them";
   const removingNested = nested === "remove" && nestedCount > 0;
   const dirtyNested = removingNested ? plan.nested.filter((wt) => wt.dirty).length : 0;
+  const unsaved = useUnsavedFiles(plan);
+  const removedPaths = [
+    plan.worktreePath,
+    ...(removingNested ? plan.nested.map((wt) => wt.path) : []),
+  ];
+  const unsavedFiles = removedPaths.flatMap((path) => unsaved?.get(path) ?? []);
   // Where "move up" puts the children: under the removed worktree's parent, or the top level.
   const parentPath = resolveParents(worktrees).get(plan.wtPath) ?? null;
   const parent = worktrees.find((wt) => wt.path === parentPath);
 
   const branch = plan.branch;
-  const needsForce = plan.dirty || dirtyNested > 0;
-  const blocked = needsForce && !force;
+  const needsForce = plan.dirty || dirtyNested > 0 || unsavedFiles.length > 0;
+  // Not before Loxel's own unsaved edits are counted, which takes a read of the outbox.
+  const blocked = unsaved === null || (needsForce && !force);
   const removeLabel = removingNested ? `Remove ${nestedCount + 1} worktrees` : "Remove worktree";
   const deleteOffered = branch !== null || removingNested;
 
@@ -371,6 +410,14 @@ function RemoveWorktreeDialog({
               {plan.dirty && dirtyNested === 0
                 ? "This worktree has uncommitted or untracked files. They will be lost."
                 : "Some of these worktrees have uncommitted or untracked files. They will be lost."}
+            </p>
+          </div>
+        )}
+
+        {unsavedFiles.length > 0 && (
+          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
+            <p className="text-warning text-[11px] font-medium break-words">
+              {unsavedEditsWarning(unsavedFiles)}
             </p>
           </div>
         )}
