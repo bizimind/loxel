@@ -1,7 +1,12 @@
 import * as api from "@/api/client";
 import { localServerId } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
-import { type ServerId, type WorktreeRef, sameWorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import {
+  type ServerId,
+  type WorktreeRef,
+  worktreeRef,
+  sameOptionalWorktreeRef,
+} from "@/api/worktree-ref";
 import type {
   InboxOpenMessage,
   OpenFilePanel,
@@ -72,10 +77,6 @@ function owningWorktree(server: ServerId, path: string): WorktreeRef | null {
 function activeWorktreeOn(server: ServerId): WorktreeRef | null {
   const { activeWorktree } = useWorktreeStore.getState();
   return activeWorktree?.server === server ? activeWorktree : null;
-}
-
-function sameTarget(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
-  return a === b || (a !== null && b !== null && sameWorktreeRef(a, b));
 }
 
 /**
@@ -167,7 +168,7 @@ async function revealFolder(server: ServerId, rawPath: string): Promise<void> {
 
   const owner = owningWorktree(server, path);
   if (owner) {
-    if (sameTarget(owner, activeWorktree)) {
+    if (sameOptionalWorktreeRef(owner, activeWorktree)) {
       showPanel("projectFiles");
     } else {
       await switchWorktree(owner);
@@ -298,7 +299,7 @@ async function refreshIfUnlisted(server: ServerId, worktreePath: string): Promis
  */
 async function openInWorktree(target: WorktreeRef | null, open: PendingOpen): Promise<boolean> {
   const { activeWorktree, switchWorktree } = useWorktreeStore.getState();
-  const isActive = sameTarget(target, activeWorktree);
+  const isActive = sameOptionalWorktreeRef(target, activeWorktree);
   const ui = getWorktreeUI(target).getState();
   const centerReady = isActive && getCenterApiLayoutKey() === layoutKeyOf(target);
   if (centerReady && ui.pendingOpens.length === 0) {

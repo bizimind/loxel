@@ -5,6 +5,7 @@ import {
   formatWorktreeRef,
   isWorktreeRef,
   parseWorktreeRef,
+  sameOptionalWorktreeRef,
   sameWorktreeRef,
   toServerId,
   worktreeRef,
@@ -35,6 +36,14 @@ describe("WorktreeRef", () => {
     expect(sameWorktreeRef(REF, worktreeRef(SERVER, REF.path))).toBe(true);
     expect(sameWorktreeRef(REF, worktreeRef(toServerId("other"), REF.path))).toBe(false);
     expect(sameWorktreeRef(REF, worktreeRef(SERVER, "/home/u/repo"))).toBe(false);
+  });
+
+  test("is equal as an optional ref only to the same ref, or null to null", () => {
+    expect(sameOptionalWorktreeRef(null, null)).toBe(true);
+    expect(sameOptionalWorktreeRef(REF, null)).toBe(false);
+    expect(sameOptionalWorktreeRef(null, REF)).toBe(false);
+    expect(sameOptionalWorktreeRef(REF, worktreeRef(SERVER, REF.path))).toBe(true);
+    expect(sameOptionalWorktreeRef(REF, worktreeRef(toServerId("other"), REF.path))).toBe(false);
   });
 
   test("recognizes a ref among untyped data", () => {

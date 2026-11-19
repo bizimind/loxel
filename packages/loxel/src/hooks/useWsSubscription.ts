@@ -1,17 +1,13 @@
 import { useEffect, useRef } from "react";
 
 import { hasConnection, wsClientOf } from "@/api/client";
-import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
+import { type WorktreeRef, sameWorktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
-
-function sameWorktree(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
-  return a === b || (a !== null && b !== null && sameWorktreeRef(a, b));
-}
 
 /**
  * Subscribe to worktrees for push events, on the server that holds each.
@@ -26,7 +22,7 @@ export function useWsSubscription(activeWorktree: WorktreeRef | null): void {
   useEffect(() => {
     const prev = prevWtRef.current;
     prevWtRef.current = activeWorktree;
-    if (sameWorktree(prev, activeWorktree)) return;
+    if (sameOptionalWorktreeRef(prev, activeWorktree)) return;
     // A worktree of a server the window has no connection to (a session restored after the server's
     // id changed) is subscribed nowhere: the project list moves the window off it.
     if (activeWorktree && hasConnection(activeWorktree.server)) {
@@ -38,7 +34,7 @@ export function useWsSubscription(activeWorktree: WorktreeRef | null): void {
     if (prev && hasConnection(prev.server)) {
       onWorktreeSavesDrained(prev, () => {
         // Switched back before its saves drained: it is the shown worktree again.
-        if (sameWorktree(prevWtRef.current, prev)) return;
+        if (sameOptionalWorktreeRef(prevWtRef.current, prev)) return;
         wsClientOf(prev.server).unsubscribeWorktree(prev);
       });
     }

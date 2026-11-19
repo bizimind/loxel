@@ -15,6 +15,7 @@ import {
   parseWorktreeRef,
   sameWorktreeRef,
   worktreeRef,
+  sameOptionalWorktreeRef,
 } from "@/api/worktree-ref";
 import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-model";
 import { showToast } from "@/components/ui/toast";
@@ -426,7 +427,7 @@ function activeWorktreeChange(
   wt: WorktreeRef | null,
 ): Partial<WorktreeState> {
   const current = state.activeWorktree;
-  if (current === wt || (current && wt && sameWorktreeRef(current, wt))) return {};
+  if (sameOptionalWorktreeRef(current, wt)) return {};
   return activeWorktreeFields(wt);
 }
 

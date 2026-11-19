@@ -44,6 +44,11 @@ export function sameWorktreeRef(a: WorktreeRef, b: WorktreeRef): boolean {
   return a.server === b.server && a.path === b.path;
 }
 
+/** {@link sameWorktreeRef} for optional refs (Home, or none): two nulls are the same, a null and a ref are not. */
+export function sameOptionalWorktreeRef(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
+  return a === null || b === null ? a === b : sameWorktreeRef(a, b);
+}
+
 /** Whether `value` has a ref's shape, for data typed `unknown` such as the parts of a query key. */
 export function isWorktreeRef(value: unknown): value is WorktreeRef {
   return (
