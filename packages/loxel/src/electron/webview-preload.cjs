@@ -301,3 +301,35 @@ contextBridge.executeInMainWorld({
     },
   ],
 });
+
+// Reports the page's camera and microphone permission to navigator.permissions.query(). Chromium
+// asks main's check, which can only answer granted or denied, so a site the user hasn't decided
+// for would read "denied" and video calls would show the devices as blocked instead of asking.
+// Main answers "prompt" for those, and null for frames it leaves to Chromium. See browser-media.ts.
+
+// Must match BROWSER_MEDIA_PERMISSION in ipc-channels.ts.
+const BROWSER_MEDIA_PERMISSION = "browser-media:permission";
+
+contextBridge.executeInMainWorld({
+  func: (pageStates) => {
+    const permissions = globalThis.Permissions?.prototype;
+    const query = permissions && Object.getOwnPropertyDescriptor(permissions, "query")?.value;
+    if (typeof query !== "function") return;
+    permissions.query = function (descriptor, ...rest) {
+      const status = Reflect.apply(query, this, [descriptor, ...rest]);
+      const name = descriptor?.name;
+      if (name !== "camera" && name !== "microphone") return status;
+      return status.then((result) => {
+        const chromium = Object.getPrototypeOf(result);
+        Object.defineProperty(result, "state", {
+          get() {
+            const states = pageStates();
+            return states ? states[name] : Reflect.get(chromium, "state", this);
+          },
+        });
+        return result;
+      });
+    };
+  },
+  args: [() => ipcRenderer.sendSync(BROWSER_MEDIA_PERMISSION)],
+});

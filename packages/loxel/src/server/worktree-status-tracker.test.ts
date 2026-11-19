@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 
@@ -92,11 +92,39 @@ function makeTracker(
     urgentDelayMs: 10,
     activityIntervalMs: 200,
     requestMaxAgeMs: opts.requestMaxAgeMs ?? 60_000,
+    now: () => clock,
   });
   return { tracker, published };
 }
 
+/**
+ * A fake clock: `setTimeout` from Bun's fake timers, `Date.now()` replaced by the tracker's
+ * injected `now`, because Bun's fake timers move `Date.now()` on some platforms only.
+ */
+let clock = 0;
+
+/** Let pending promise chains run out: a released sweep finishing, the follow-up it schedules. */
+async function settle(): Promise<void> {
+  // Microtask turns only (fake timers may hold setImmediate); the deepest chain is a few deep.
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+/** Move the clock forward a millisecond at a time, settling after each step's timers. */
+async function advance(ms: number): Promise<void> {
+  for (let i = 0; i < ms; i++) {
+    clock++;
+    jest.advanceTimersByTime(1);
+    await settle();
+  }
+}
+
 describe("WorktreeStatusTracker", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    clock = 0;
+  });
+  afterEach(() => jest.useRealTimers());
+
   test("sweeps once and serves the cache until invalidated", async () => {
     const git = fakeGit();
     git.state.set(OTHER, dirty(OTHER, ["x"]));
@@ -121,7 +149,10 @@ describe("WorktreeStatusTracker", () => {
 
     // An unwatched worktree changed without any event the tracker could see.
     git.state.set(OTHER, dirty(OTHER, ["agent-edit"]));
-    await Bun.sleep(80);
+    await advance(50);
+    expect(await tracker.get()).toEqual([]); // still within the max age
+    expect(git.sweeps).toBe(1);
+    await advance(1);
     expect(await tracker.get()).toEqual([dirty(OTHER, ["agent-edit"])]);
     expect(git.sweeps).toBe(2);
   });
@@ -138,7 +169,7 @@ describe("WorktreeStatusTracker", () => {
     const { tracker } = makeTracker(git, { listeners: false });
     const release = git.hold();
     const first = tracker.get();
-    await Bun.sleep(5);
+    await settle();
 
     // Commits land while the sweep is reading: its answer is already stale.
     tracker.invalidate();
@@ -161,7 +192,9 @@ describe("WorktreeStatusTracker", () => {
 
     tracker.invalidate();
     tracker.invalidate();
-    await Bun.sleep(60);
+    await advance(9);
+    expect(git.sweeps).toBe(1); // coalesced behind the urgent delay
+    await advance(1);
 
     expect(git.sweeps).toBe(2);
     expect(published.at(-1)).toEqual([dirty(OTHER, ["x"])]);
@@ -177,10 +210,12 @@ describe("WorktreeStatusTracker", () => {
 
     expect(published.at(-1)).toEqual([dirty(MAIN, ["f9"])]);
     expect(git.sweeps).toBe(1);
-    await Bun.sleep(100);
+    await advance(199);
     expect(git.sweeps).toBe(1); // still inside the activity interval
-    await Bun.sleep(200);
+    await advance(1);
     expect(git.sweeps).toBe(2); // one sweep for the whole burst
+    await advance(500);
+    expect(git.sweeps).toBe(2);
   });
 
   test("activity sweeps are spaced from the end of a slow sweep", async () => {
@@ -191,16 +226,18 @@ describe("WorktreeStatusTracker", () => {
     // A sweep slower than the activity interval.
     const release = git.hold();
     tracker.invalidate();
-    await Bun.sleep(20);
+    await advance(10);
     expect(git.sweeps).toBe(2);
-    await Bun.sleep(300);
+    await advance(300);
     release();
-    await Bun.sleep(5);
+    await settle();
+    await advance(5);
 
+    // Spaced from the start, this sweep would run after the urgent delay; from the end, in 195 ms.
     tracker.update(MAIN, status(["edit"]));
-    await Bun.sleep(100);
+    await advance(194);
     expect(git.sweeps).toBe(2); // not immediately after the slow sweep finished
-    await Bun.sleep(200);
+    await advance(1);
     expect(git.sweeps).toBe(3);
   });
 
@@ -211,17 +248,20 @@ describe("WorktreeStatusTracker", () => {
 
     const release = git.hold();
     tracker.invalidate();
-    await Bun.sleep(20);
+    await advance(10);
     expect(git.sweeps).toBe(2);
-    // An unwatched worktree changes after the slow sweep already read it, then the user edits.
+    // An unwatched worktree changes after the slow sweep already read it, then the user edits,
+    // in the same millisecond the sweep began (as when the event loop stalls).
     git.state.set(OTHER, dirty(OTHER, ["late"]));
     tracker.update(MAIN, status());
-    await Bun.sleep(300); // the activity timer fires mid-sweep and joins it
+    await advance(300); // the activity timer fires mid-sweep and joins it
+    expect(git.sweeps).toBe(2);
     release();
+    await settle();
 
-    await Bun.sleep(100);
+    await advance(199);
     expect(git.sweeps).toBe(2); // spaced from the end of the slow sweep
-    await Bun.sleep(200);
+    await advance(1);
     expect(git.sweeps).toBe(3);
     expect(published.at(-1)).toEqual([dirty(OTHER, ["late"])]);
   });
@@ -235,7 +275,7 @@ describe("WorktreeStatusTracker", () => {
     const release = git.hold();
     tracker.invalidate();
     const pending = tracker.get();
-    await Bun.sleep(5);
+    await settle();
     live.set(MAIN, status(["newest"]));
     release();
 
@@ -261,14 +301,14 @@ describe("WorktreeStatusTracker", () => {
     const git = fakeGit();
     const { tracker } = makeTracker(git);
     tracker.update(OTHER, status(["x"]));
-    await Bun.sleep(60);
+    await advance(10);
     expect(git.sweeps).toBe(1);
 
     // A path that never matches the list (e.g. reached through a symlink).
     for (let i = 0; i < 5; i++) tracker.update("/elsewhere", status(["y"]));
-    await Bun.sleep(60);
+    await advance(199);
     expect(git.sweeps).toBe(1);
-    await Bun.sleep(250);
+    await advance(1);
     expect(git.sweeps).toBe(2);
   });
 
@@ -285,13 +325,13 @@ describe("WorktreeStatusTracker", () => {
     const git = fakeGit();
     const quiet = makeTracker(git, { listeners: false });
     quiet.tracker.invalidate();
-    await Bun.sleep(40);
+    await advance(1000);
     expect(git.sweeps).toBe(0);
 
     const disposed = makeTracker(git);
     disposed.tracker.invalidate();
     disposed.tracker.dispose();
-    await Bun.sleep(40);
+    await advance(1000);
     expect(git.sweeps).toBe(0);
   });
 });

@@ -52,8 +52,10 @@ import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserConte
 import { ExclusiveAccessNotice } from "./ExclusiveAccessNotice";
 import { faviconCandidates, pickFavicon } from "./favicon-loads";
 import { JavaScriptDialog } from "./JavaScriptDialog";
+import { MediaPermissionBar, MediaSystemBlockedBar } from "./MediaPermissionBar";
 import { NotificationPermissionBar } from "./NotificationPermissionBar";
 import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
+import { useBrowserMediaPermissions } from "./useBrowserMediaPermissions";
 import { useBrowserNotifications } from "./useBrowserNotifications";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
 import { addressBarUrl } from "./web-search";
@@ -176,6 +178,13 @@ export function BrowserPanel({
   // to show them gets a bar under the toolbar.
   const { request: notificationRequest, answer: answerNotificationRequest } =
     useBrowserNotifications(server, webContentsId, panelId, worktreePath, pageRef);
+  // A site asking for the camera or microphone gets a bar under the toolbar too.
+  const {
+    request: mediaRequest,
+    answer: answerMediaRequest,
+    systemBlocked: mediaSystemBlocked,
+    dismissSystemBlocked: dismissMediaSystemBlocked,
+  } = useBrowserMediaPermissions(webContentsId, pageUrl);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -584,6 +593,18 @@ export function BrowserPanel({
           request={notificationRequest}
           onAnswer={answerNotificationRequest}
         />
+      )}
+
+      {mediaRequest && (
+        <MediaPermissionBar
+          key={mediaRequest.id}
+          request={mediaRequest}
+          onAnswer={answerMediaRequest}
+        />
+      )}
+
+      {mediaSystemBlocked && (
+        <MediaSystemBlockedBar notice={mediaSystemBlocked} onDismiss={dismissMediaSystemBlocked} />
       )}
 
       {/* Error banner */}
