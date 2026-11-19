@@ -66,8 +66,8 @@ describe("isMorePrivate", () => {
     expect(isMorePrivate("public", "public")).toBe(false);
   });
 
-  test("local network pages need it for this machine; pages on this machine never do", () => {
-    expect(isMorePrivate("loopback", "local")).toBe(true);
+  test("pages on this machine or the local network never do, as in Chromium", () => {
+    expect(isMorePrivate("loopback", "local")).toBe(false);
     expect(isMorePrivate("local", "local")).toBe(false);
     expect(isMorePrivate("public", "local")).toBe(false);
     expect(isMorePrivate("loopback", "loopback")).toBe(false);

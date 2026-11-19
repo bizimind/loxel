@@ -1,9 +1,8 @@
 /**
- * Local Network Access for browser panels, as in Chrome: a page may only reach a more private
- * address space than its own (`address-space.ts`) with its site's permission. Public sites ask
- * before they reach this machine or devices on the local network, and local network pages before
- * they reach this machine. Pages on this machine (dev servers on `localhost`) reach anything, so
- * a dev server's page calls its API on another port without asking.
+ * Local Network Access for browser panels, as in Chrome: a public page may only reach this machine
+ * or the local network (`address-space.ts`) with its site's permission. Pages on this machine or
+ * the local network reach anything, so a dev server's page, on `localhost` or its LAN address,
+ * calls its API on another port without asking.
  *
  * Electron turns Chromium's own checks off, so main gates the browser session's requests itself,
  * in `webRequest`, which sees every frame's subresources, fetches, websockets, subframes and
@@ -230,7 +229,8 @@ async function admit(browserSession: Session, details: RequestDetails): Promise<
   if (!NETWORK_PROTOCOLS.has(url.protocol)) return true;
   const caller = callerOf(details);
   const space = await callerSpace(browserSession, caller);
-  if (space === "loopback") return true;
+  // Pages on this machine or the local network reach anything.
+  if (space !== "public") return true;
   if (isMorePrivate(await targetSpace(browserSession, url.hostname), space)) {
     return allowedFor(caller);
   }

@@ -265,9 +265,10 @@ describe("a page's own address space", () => {
     const intranet = await panel("https://intranet.example", "10.0.0.5");
     const printer = await intranet.request("http://192.168.1.20/");
     expect(await settled(printer.fate)).toBe(true);
-    // A local network page asks before reaching this machine.
-    void intranet.request("http://localhost:1/");
-    await afterMicrotasks(() => intranet.requests().length === 1, "the intranet prompt");
+    // A local network page reaches this machine too, as a dev server on its LAN address does.
+    const api = await intranet.request("http://localhost:1/");
+    expect(await settled(api.fate)).toBe(true);
+    expect(intranet.requests()).toEqual([]);
 
     // A public page whose name later resolves to the local network stays public.
     dns.set("rebind.example", ["93.184.216.34"]);

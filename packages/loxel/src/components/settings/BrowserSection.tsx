@@ -189,9 +189,9 @@ function LocalNetworkSites() {
     <div className="space-y-1.5">
       <label className="text-muted-foreground text-xs">Local Network</label>
       <p className="text-muted-foreground text-[10px]">
-        Sites ask before they connect to apps on this Mac, such as your dev servers, or to devices
-        on your local network, such as a router or printer. Pages on this Mac never ask. Remove a
-        site to have it ask again.
+        Sites on the internet ask before they connect to apps on this Mac, such as your dev servers,
+        or to devices on your local network, such as a router or printer. Pages on this Mac or your
+        local network never ask. Remove a site to have it ask again.
       </p>
       {origins.length === 0 ? (
         <p className="text-muted-foreground pt-1 text-xs">No sites allowed or blocked yet.</p>

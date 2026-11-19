@@ -12,12 +12,13 @@ export type AddressSpace = "loopback" | "local" | "public";
 const PRIVACY: Record<AddressSpace, number> = { loopback: 0, local: 1, public: 2 };
 
 /**
- * Whether a request from `initiator` to `target` needs the site's permission: public pages
- * reaching the local network or this machine, and local network pages reaching this machine.
- * Pages on this machine (dev servers) reach anything.
+ * Whether a request from `initiator` to `target` needs the site's permission: a public page
+ * reaching this machine or the local network. As in current Chromium, this machine and the local
+ * network count as one for this, so a page on either reaches anything: a dev server opened on its
+ * LAN address calls its API on `localhost` without asking.
  */
 export function isMorePrivate(target: AddressSpace, initiator: AddressSpace): boolean {
-  return PRIVACY[target] < PRIVACY[initiator];
+  return initiator === "public" && target !== "public";
 }
 
 /** The more private of two spaces. */
