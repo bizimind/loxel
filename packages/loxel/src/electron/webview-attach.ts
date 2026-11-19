@@ -43,6 +43,9 @@ export function secureWebviewAttach(
   webPreferences.allowRunningInsecureContent = false;
   webPreferences.webviewTag = false;
   webPreferences.experimentalFeatures = false;
+  // Electron's defaults, which Loxel never changes: no plugins, and no navigating to a dropped file.
+  webPreferences.plugins = false;
+  webPreferences.navigateOnDragDrop = false;
   delete webPreferences.enableBlinkFeatures;
   // Loxel's own preload (which also runs in subframes, sandboxed, without Node.js).
   configureWebviewDialogs(webPreferences);

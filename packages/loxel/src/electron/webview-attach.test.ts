@@ -20,6 +20,8 @@ const asked = (): WebPreferences => ({
   webviewTag: true,
   experimentalFeatures: true,
   enableBlinkFeatures: "SomeFeature",
+  plugins: true,
+  navigateOnDragDrop: true,
 });
 
 describe("secureWebviewAttach", () => {
@@ -36,6 +38,8 @@ describe("secureWebviewAttach", () => {
       allowRunningInsecureContent: false,
       webviewTag: false,
       experimentalFeatures: false,
+      plugins: false,
+      navigateOnDragDrop: false,
     });
     expect(webPreferences.preload).toEndWith("/webview-preload.cjs");
     expect(webPreferences).not.toHaveProperty("enableBlinkFeatures");
