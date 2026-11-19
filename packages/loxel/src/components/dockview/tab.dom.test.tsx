@@ -6,6 +6,7 @@ import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 import { FOCUS_AREA_ATTR } from "@/lib/focus-targets";
 import { registerPanelFocus } from "@/lib/panel-focus";
 import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { setBrowserPageLoading } from "@/store/browser-pages";
 import { setCenterApi } from "@/store/tools-bar";
 
@@ -227,12 +228,15 @@ describe("Rename Tab action", () => {
       view: { content: { element: document.createElement("div") } },
     };
     group.activePanel = panel;
-    setCenterApi({
-      activePanel: panel,
-      groups: [group],
-      getPanel: () => panel,
-      hasMaximizedGroup: () => false,
-    } as unknown as DockviewApi);
+    setCenterApi(
+      {
+        activePanel: panel,
+        groups: [group],
+        getPanel: () => panel,
+        hasMaximizedGroup: () => false,
+      } as unknown as DockviewApi,
+      HOME_LAYOUT_KEY,
+    );
     return group.element;
   }
 

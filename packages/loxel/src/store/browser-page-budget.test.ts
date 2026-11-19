@@ -6,6 +6,7 @@ import { localRef } from "@/api/local-server";
 import type { BrowserPageUsage } from "@/electron/browser-page-protocol";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
+import { layoutKeyOf } from "./active-worktree";
 import {
   BUDGET_PROFILES,
   type PageCandidate,
@@ -122,7 +123,11 @@ describe("reviewing background pages", () => {
     });
     useWorktreeStore.setState(activeWorktreeFields(localRef("/wt/shown")));
     useSettingsStore.setState((s) => ({ browser: { ...s.browser, backgroundTabs: "balanced" } }));
-    attachBrowserPage("busy", { layoutKey: "/wt/a", url: "https://busy.test/", slot });
+    attachBrowserPage("busy", {
+      layoutKey: layoutKeyOf(localRef("/wt/a")),
+      url: "https://busy.test/",
+      slot,
+    });
     setBrowserPageWebContents("busy", GUEST);
   });
 
@@ -154,7 +159,11 @@ describe("reviewing background pages", () => {
   test("leaves a page shown during the measurement alone", async () => {
     hideFor(10 * MINUTE);
     const review = reviewBackgroundPages();
-    attachBrowserPage("busy", { layoutKey: "/wt/a", url: "https://busy.test/", slot });
+    attachBrowserPage("busy", {
+      layoutKey: layoutKeyOf(localRef("/wt/a")),
+      url: "https://busy.test/",
+      slot,
+    });
     await review;
     expect(setBrowserPageFrozen).not.toHaveBeenCalled();
   });

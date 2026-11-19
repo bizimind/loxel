@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { type ActiveEditorFile, getActiveEditorFile } from "@/lib/reveal-in-explorer";
 import { getCenterApi, subscribeCenterApi } from "@/store/tools-bar";
 
@@ -21,7 +22,8 @@ export function useActiveEditorFile(): ActiveEditorFile | null {
       setActiveEditorFile((current) => {
         const next = getActiveEditorFile();
         const same =
-          current?.filePath === next?.filePath && current?.worktreePath === next?.worktreePath;
+          current?.editorKey === next?.editorKey &&
+          sameOptionalWorktreeRef(current?.worktree ?? null, next?.worktree ?? null);
         return same ? current : next;
       });
     updateActiveEditorFile();

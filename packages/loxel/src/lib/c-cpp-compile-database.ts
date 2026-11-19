@@ -7,7 +7,7 @@ import {
   type CompileDatabaseFileResponse,
   type CompileDatabaseStatus,
 } from "@/api/c-cpp-compile-database-model";
-import { localRef } from "@/api/local-server";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { projectRefOf } from "@/queries/use-scope";
@@ -125,11 +125,12 @@ export function automaticDescription(status: CompileDatabaseStatus, wtPath: stri
 }
 
 /**
- * Let the user choose worktree `wtPath`'s compile database in the command palette: one found, a path
+ * Let the user choose worktree `wt`'s compile database in the command palette: one found, a path
  * they enter, or automatic detection. The choice is saved per worktree on the server, and clangd
  * restarts with it.
  */
-export async function selectCompileDatabase(wtPath: string): Promise<void> {
+export async function selectCompileDatabase(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
   const state = getCompileDatabaseStatus(wtPath);
   const items = state.then((status) => {
@@ -167,7 +168,6 @@ export async function selectCompileDatabase(wtPath: string): Promise<void> {
   try {
     await setCompileDatabaseChoice({ worktreePath: wtPath, path: chosen });
     // The status and each file's answer, whose keys extend it.
-    const wt = localRef(wtPath);
     await queryClient.invalidateQueries({
       queryKey: queryKeys.toolchainStatus(cCppToolchain.id, projectRefOf(wt), wt),
     });

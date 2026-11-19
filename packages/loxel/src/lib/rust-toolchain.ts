@@ -5,6 +5,7 @@ import {
   type RustToolchainSource,
   rustToolchain,
 } from "@/api/rust-toolchain-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick } from "@/store/command-palette";
@@ -86,11 +87,12 @@ function choiceItem(choice: RustToolchainChoice, chosen: string | null, home: st
 }
 
 /**
- * Let the user choose worktree `wtPath`'s Rust toolchain in the command palette: an installed one,
+ * Let the user choose worktree `wt`'s Rust toolchain in the command palette: an installed one,
  * or automatic detection. The choice is saved per worktree on the server. Installing a toolchain
  * is left to the user's terminal.
  */
-export async function selectRustToolchain(wtPath: string): Promise<void> {
+export async function selectRustToolchain(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
   const items = getRustToolchainCandidates(wtPath).then(({ candidates, automatic, chosen }) => {
     const list: QuickPickItem[] = [
@@ -111,7 +113,7 @@ export async function selectRustToolchain(wtPath: string): Promise<void> {
   try {
     const toolchain = picked === AUTOMATIC_ID ? null : picked.slice(TOOLCHAIN_ID_PREFIX.length);
     const response = await setRustToolchainChoice({ worktreePath: wtPath, toolchain });
-    setToolchainStatusData(rustToolchain, wtPath, response);
+    setToolchainStatusData(rustToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Rust toolchain");
   }

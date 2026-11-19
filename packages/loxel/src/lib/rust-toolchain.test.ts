@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, mock, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
 import type { RustToolchainCandidatesResponse } from "@/api/rust-toolchain-model";
 
 const STATUS = { toolchain: { status: "none", rustupPath: null, detail: null }, chosen: null };
@@ -34,7 +35,7 @@ afterEach(() => setRustToolchainChoice.mockClear());
 describe("selectRustToolchain", () => {
   test("a toolchain named like the automatic entry is still that toolchain", async () => {
     pick = (ids) => ids.at(-1) ?? "";
-    await selectRustToolchain("/wt");
+    await selectRustToolchain(localRef("/wt"));
     expect(setRustToolchainChoice.mock.calls).toEqual([
       [{ worktreePath: "/wt", toolchain: "automatic" }],
     ] as never);
@@ -42,7 +43,7 @@ describe("selectRustToolchain", () => {
 
   test("the automatic entry clears the choice", async () => {
     pick = (ids) => ids[0] ?? "";
-    await selectRustToolchain("/wt");
+    await selectRustToolchain(localRef("/wt"));
     expect(setRustToolchainChoice.mock.calls).toEqual([
       [{ worktreePath: "/wt", toolchain: null }],
     ] as never);

@@ -9,7 +9,7 @@ import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 import type { Highlighter } from "shiki";
 
 import { wsClient } from "@/api/client";
-import { sameWorktreeRef, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import { type WorktreeRef, worktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { getQueryScope, projectRefOf } from "@/queries/use-scope";
 import { useUIStore } from "@/store/ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -119,7 +119,7 @@ function onActiveWorktreeChange(onChange: (wt: WorktreeRef | null) => void): voi
     let current = activeWorktree();
     useWorktreeStore.subscribe(() => {
       const next = activeWorktree();
-      if (next === current || (next && current && sameWorktreeRef(next, current))) return;
+      if (sameOptionalWorktreeRef(next, current)) return;
       current = next;
       for (const listener of activeWorktreeListeners) listener(next);
     });

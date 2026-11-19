@@ -1,4 +1,4 @@
-import { sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
+import { type WorktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
@@ -74,10 +74,6 @@ export interface LspConnection {
    */
   resume: () => void;
   readonly state: LspConnectionState;
-}
-
-function sameTarget(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
-  return a === null || b === null ? a === b : sameWorktreeRef(a, b);
 }
 
 /**
@@ -193,7 +189,7 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
 
   return {
     connect: (wt) => {
-      if (target && sameTarget(target.wt, wt)) return;
+      if (target && sameOptionalWorktreeRef(target.wt, wt)) return;
       target = { wt };
       failures = 0;
       attempt(wt);

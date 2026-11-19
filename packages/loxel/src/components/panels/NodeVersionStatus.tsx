@@ -14,7 +14,7 @@ export function NodeVersionStatus() {
 
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, status } = active;
   const { env, pin, pinProblem, overridePath } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
   const tooltip = [
@@ -32,7 +32,7 @@ export function NodeVersionStatus() {
       label={env ? nodeInstallLabel(env) : "Select Node Version"}
       tooltip={tooltip}
       warning={!env || pinProblem !== null || overrideUnusable}
-      onSelect={() => void selectNodeVersion(wtPath)}
+      onSelect={() => void selectNodeVersion(wt)}
     />
   );
 }

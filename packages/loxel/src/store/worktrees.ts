@@ -15,6 +15,7 @@ import {
   parseWorktreeRef,
   sameWorktreeRef,
   worktreeRef,
+  sameOptionalWorktreeRef,
 } from "@/api/worktree-ref";
 import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-model";
 import { showToast } from "@/components/ui/toast";
@@ -35,6 +36,7 @@ import {
 import { isKeyWithinWorktree } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 
+import { layoutKeyOf } from "./active-worktree";
 import { closeLayoutBrowserPages } from "./browser-pages";
 import { type ListedProject, projectOf, projectRef, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
@@ -425,7 +427,7 @@ function activeWorktreeChange(
   wt: WorktreeRef | null,
 ): Partial<WorktreeState> {
   const current = state.activeWorktree;
-  if (current === wt || (current && wt && sameWorktreeRef(current, wt))) return {};
+  if (sameOptionalWorktreeRef(current, wt)) return {};
   return activeWorktreeFields(wt);
 }
 
@@ -863,9 +865,8 @@ export function isListedWorktree(wt: WorktreeRef): boolean {
  * at the same path starts fresh. `discarded`: the user removed it in Loxel, giving up what it held.
  */
 function releaseWorktree(wt: WorktreeRef, discarded = false): void {
-  const { path } = wt;
   purgeWorktreeStores(wt);
-  closeLayoutBrowserPages(path);
+  closeLayoutBrowserPages(layoutKeyOf(wt));
   purgeWorktreeCache(wt);
   const homeServer = localServerId();
   queryClient.removeQueries({

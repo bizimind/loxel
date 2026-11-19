@@ -14,7 +14,7 @@ import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { SaveRefusedBanner } from "@/components/editor/SaveRefusedBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
-import { useEditorStateStore } from "@/store/editor-state";
+import { type EditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useUIStore } from "@/store/ui";
 
 import "@/styles/excalidraw-theme.css";
@@ -57,23 +57,23 @@ interface ExcalidrawData {
 }
 
 /**
- * In-memory content cache keyed by absolute path (project root + filePath).
- * Secondary cache — disk is source of truth.
+ * In-memory content cache keyed by the file's tab key (`fileEditorKey`: its server and absolute
+ * path). Secondary cache — disk is source of truth.
  * Preserves drawing content across layout swaps.
  */
-const drawingContentCache = new Map<string, ExcalidrawData>();
+const drawingContentCache = new Map<EditorKey, ExcalidrawData>();
 
-/** Pre-seed the content cache so a new drawing opens with the given data. */
-export function setDrawingContent(key: string, data: ExcalidrawData): void {
+/** Pre-seed the content cache so a new drawing of the file `key` opens with the given data. */
+export function setDrawingContent(key: EditorKey, data: ExcalidrawData): void {
   drawingContentCache.set(key, data);
 }
 
-/** Migrate a cache entry when a file is moved (e.g., draft → project). */
-export function renameDrawingCacheKey(oldPath: string, newPath: string): void {
-  const content = drawingContentCache.get(oldPath);
+/** Migrate a cache entry when a file is moved (e.g., draft → project), by tab key. */
+export function renameDrawingCacheKey(oldKey: EditorKey, newKey: EditorKey): void {
+  const content = drawingContentCache.get(oldKey);
   if (content !== undefined) {
-    drawingContentCache.set(newPath, content);
-    drawingContentCache.delete(oldPath);
+    drawingContentCache.set(newKey, content);
+    drawingContentCache.delete(oldKey);
   }
 }
 
@@ -89,8 +89,8 @@ let drawingTeardownActive = false;
  * Snapshot all drawing cache entries, run the callback, then fully restore them.
  * Excalidraw fires onChange with empty elements during teardown (api.clear),
  * which corrupts the cache. Full restore is required (not selective) because
- * with absolute-path cache keys, teardown may write corrupt entries under
- * new-scope keys that wouldn't exist in the snapshot.
+ * teardown may write corrupt entries under new-scope keys that wouldn't exist
+ * in the snapshot.
  *
  * The drawingTeardownActive flag suppresses onChange handlers during the callback,
  * preventing markDirty / autosave scheduling of corrupt data.

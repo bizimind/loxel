@@ -13,7 +13,7 @@ import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
-import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { getActiveEditorFile } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
 import type { ThemePreference } from "@/lib/theme-preference";
 import { THEME_PREFERENCE_LABELS, THEME_PREFERENCES } from "@/lib/theme-preference";
@@ -182,8 +182,8 @@ export interface ActionDef {
 
 /** Whether the active center panel is a code editor tab (one that publishes its indentation). */
 function isCodeEditorActive(): boolean {
-  const filePath = getActiveEditorFilePath();
-  return filePath !== null && useEditorIndentationStore.getState().byFile.has(filePath);
+  const active = getActiveEditorFile();
+  return active !== null && useEditorIndentationStore.getState().byFile.has(active.editorKey);
 }
 
 function hasActiveWorktree(): boolean {

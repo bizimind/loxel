@@ -74,9 +74,10 @@ export interface LspClientOptions {
   languageId: string | readonly string[];
   /**
    * Runs for each connection's transport, which translates the URIs of what it sends and receives
-   * (see `lspUriTranslation`); what it returns is disposed with the connection.
+   * (see `lspUriTranslation`), with the server it reaches, whose models alone it may report on;
+   * what it returns is disposed with the connection.
    */
-  onConnected?: (transport: LspTransport) => IDisposable;
+  onConnected?: (transport: LspTransport, server: ServerId) => IDisposable;
   /**
    * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
    * distinct message once while Loxel runs, for a server whose messages are meant for the user
@@ -168,7 +169,7 @@ export function createLspClient({
     }
     connectedClients.set(client, wt);
     const endVirtualDocuments = virtualDocumentScheme?.connected(client);
-    const extension = onConnected?.(transport);
+    const extension = onConnected?.(transport, server);
     return {
       closed,
       // The client first, so its `textDocument/didClose` notifications still go out over a live

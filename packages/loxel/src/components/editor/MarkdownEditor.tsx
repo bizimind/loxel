@@ -58,7 +58,7 @@ import { openPath } from "@/lib/open-path";
 import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
-import { useEditorStateStore } from "@/store/editor-state";
+import { type EditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
@@ -68,31 +68,31 @@ import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 import "@/styles/milkdown-theme.css";
 
 /**
- * In-memory content cache keyed by absolute path (project root + filePath).
- * Secondary cache — disk is source of truth.
+ * In-memory content cache keyed by the file's tab key (`fileEditorKey`: its server and absolute
+ * path). Secondary cache — disk is source of truth.
  * Preserves editor content across brief layout swap unmount/remount cycles.
  */
-export const editorContentCache = new Map<string, string>();
+export const editorContentCache = new Map<EditorKey, string>();
 
 /** Persists caret position across unmount/remount cycles (e.g. tab switches). */
-const editorSelectionCache = new Map<string, number>();
+const editorSelectionCache = new Map<EditorKey, number>();
 
-/** Pre-seed the content cache so a new editor opens with the given markdown. */
-export function setEditorContent(key: string, content: string): void {
+/** Pre-seed the content cache so a new editor of the file `key` opens with the given markdown. */
+export function setEditorContent(key: EditorKey, content: string): void {
   editorContentCache.set(key, content);
 }
 
-/** Migrate a cache entry when a file is moved (e.g., draft → project). */
-export function renameEditorCacheKey(oldPath: string, newPath: string): void {
-  const content = editorContentCache.get(oldPath);
+/** Migrate a cache entry when a file is moved (e.g., draft → project), by tab key. */
+export function renameEditorCacheKey(oldKey: EditorKey, newKey: EditorKey): void {
+  const content = editorContentCache.get(oldKey);
   if (content !== undefined) {
-    editorContentCache.set(newPath, content);
-    editorContentCache.delete(oldPath);
+    editorContentCache.set(newKey, content);
+    editorContentCache.delete(oldKey);
   }
-  const sel = editorSelectionCache.get(oldPath);
+  const sel = editorSelectionCache.get(oldKey);
   if (sel !== undefined) {
-    editorSelectionCache.set(newPath, sel);
-    editorSelectionCache.delete(oldPath);
+    editorSelectionCache.set(newKey, sel);
+    editorSelectionCache.delete(oldKey);
   }
 }
 

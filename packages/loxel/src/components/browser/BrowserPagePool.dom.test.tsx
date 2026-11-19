@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 
+import { localRef } from "@/api/local-server";
+import { layoutKeyOf } from "@/store/active-worktree";
 import { attachBrowserPage, useBrowserPages } from "@/store/browser-pages";
 import { setDockviewApi } from "@/store/tools-bar";
 import { stubElectronAPI } from "@/test/electron-api-stub";
@@ -66,7 +68,7 @@ function renderPage({ activated = false } = {}) {
   document.body.append(slot);
   act(() =>
     attachBrowserPage(panel.api.id, {
-      layoutKey: "/repo",
+      layoutKey: layoutKeyOf(localRef("/repo")),
       url: "about:blank",
       slot: { element: slot, api: panel.api },
     }),

@@ -5,6 +5,7 @@ import {
   type CSharpStatusResponse,
   csharpToolchain,
 } from "@/api/csharp-env-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick } from "@/store/command-palette";
@@ -112,11 +113,12 @@ function solutionItems(state: CSharpSolutionsResponse, wtPath: string): QuickPic
 }
 
 /**
- * Let the user choose what csharp-ls loads for worktree `wtPath`, in the command palette. The choice
+ * Let the user choose what csharp-ls loads for worktree `wt`, in the command palette. The choice
  * is saved per worktree on the server, which restarts csharp-ls with it. It widens nothing: an
  * untrusted repository still loads nothing, and the first item says so.
  */
-export async function selectCSharpSolution(wtPath: string): Promise<void> {
+export async function selectCSharpSolution(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const items = getCSharpSolutions(wtPath).then((state) => solutionItems(state, wtPath));
   const picked = await requestQuickPick({ placeholder: "Select a C# solution", items });
   if (picked === null) return;
@@ -127,7 +129,7 @@ export async function selectCSharpSolution(wtPath: string): Promise<void> {
   try {
     const solutionPath = picked === AUTOMATIC_ID ? null : picked;
     const response = await setCSharpSolution({ worktreePath: wtPath, solutionPath });
-    setToolchainStatusData(csharpToolchain, wtPath, response);
+    setToolchainStatusData(csharpToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the C# solution");
   }

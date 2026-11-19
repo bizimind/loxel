@@ -55,6 +55,7 @@ const {
   patchDiffTitle,
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
+const { layoutKeyOf } = await import("@/store/active-worktree");
 const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
 const { localServerId, localRef } = await import("@/api/local-server");
 const { toServerId } = await import("@/api/worktree-ref");
@@ -87,7 +88,7 @@ function setup() {
   const a = addFile("/repo/a.ts");
   const b = addFile("/repo/b.ts", { referencePanel: a.id, direction: "within" });
   const c = addFile("/repo/c.ts", { referencePanel: a.id, direction: "right" });
-  setCenterApi(api);
+  setCenterApi(api, layoutKeyOf(localRef("/repo")));
   return { api, a, b, c };
 }
 

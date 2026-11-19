@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+import { localServerId } from "@/api/local-server";
+import { toServerId } from "@/api/worktree-ref";
 import { type QuickPickItem, useCommandPaletteStore } from "@/store/command-palette";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
+import { fileEditorKey } from "@/store/editor-state";
 import {
   DEFAULT_EDITOR_SETTINGS,
   type IndentationInputs,
@@ -96,6 +99,7 @@ describe("describeIndentation", () => {
 
 describe("changeIndentation", () => {
   const filePath = "/repo/a.ts";
+  const key = fileEditorKey(localServerId(), filePath);
   const setFileChoice = mock<EditorIndentation["setFileChoice"]>();
   const convert = mock<EditorIndentation["convert"]>();
 
@@ -103,7 +107,7 @@ describe("changeIndentation", () => {
 
   function publish(inputs: IndentationInputs): void {
     published = { resolution: resolve(filePath, inputs), eol: "LF", setFileChoice, convert };
-    useEditorIndentationStore.getState().publish(filePath, published);
+    useEditorIndentationStore.getState().publish(key, published);
   }
 
   /** Waits for the palette to show a loaded pick list. */
@@ -124,7 +128,7 @@ describe("changeIndentation", () => {
 
   afterEach(() => {
     useCommandPaletteStore.getState().close();
-    if (published) useEditorIndentationStore.getState().remove(filePath, published);
+    if (published) useEditorIndentationStore.getState().remove(key, published);
     published = null;
     setFileChoice.mockClear();
     convert.mockClear();
@@ -132,7 +136,7 @@ describe("changeIndentation", () => {
 
   test("sets spaces at a chosen size for the file", async () => {
     publish({ language: "typescript" });
-    const done = changeIndentation(filePath);
+    const done = changeIndentation(key);
     const first = await shownPick();
     expect(first.placeholder).toBe("Spaces: 2 (default setting)");
     expect(first.items.map((i) => i.id)).toEqual(["spaces", "tabs", "toSpaces", "toTabs"]);
@@ -147,7 +151,7 @@ describe("changeIndentation", () => {
 
   test("converts the file's indentation", async () => {
     publish({ language: "typescript" });
-    const done = changeIndentation(filePath);
+    const done = changeIndentation(key);
     await shownPick();
     useCommandPaletteStore.getState().submit("toTabs");
     await done;
@@ -156,7 +160,7 @@ describe("changeIndentation", () => {
 
   test("offers a reset once a choice was made for the file", async () => {
     publish({ language: "typescript", fileChoice: { insertSpaces: false } });
-    const done = changeIndentation(filePath);
+    const done = changeIndentation(key);
     const { items } = await shownPick();
     expect(items.at(-1)?.id).toBe("reset");
     useCommandPaletteStore.getState().submit("reset");
@@ -165,7 +169,13 @@ describe("changeIndentation", () => {
   });
 
   test("does nothing without a code editor for the file", async () => {
-    await changeIndentation(filePath);
+    await changeIndentation(key);
+    expect(useCommandPaletteStore.getState().isOpen).toBe(false);
+  });
+
+  test("does nothing for the same path on another server than the tab's", async () => {
+    publish({ language: "typescript" });
+    await changeIndentation(fileEditorKey(toServerId("other-server"), filePath));
     expect(useCommandPaletteStore.getState().isOpen).toBe(false);
   });
 });

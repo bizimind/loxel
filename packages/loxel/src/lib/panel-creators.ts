@@ -26,7 +26,11 @@ import type {
 } from "@/api/panel-placement-model";
 import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
-import { getPanelServer, getPanelWorktree } from "@/components/dockview/panel-context";
+import {
+  centerLayoutServer,
+  getPanelServer,
+  getPanelWorktree,
+} from "@/components/dockview/panel-context";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { showToast } from "@/components/ui/toast";
@@ -348,7 +352,7 @@ export async function createEditor(options?: {
     const title = options?.title || name;
 
     if (options?.content) {
-      setEditorContent(filePath, options.content);
+      setEditorContent(fileEditorKey(centerLayoutServer(), filePath), options.content);
     }
 
     addPlacedPanel(dv, options?.placement, {
@@ -778,8 +782,8 @@ function replaceMovedPanel(
     return false;
   }
 
-  renameEditorCacheKey(oldPath, newPath);
-  renameDrawingCacheKey(oldPath, newPath);
+  renameEditorCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
+  renameDrawingCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
 
   // Add the new panel before closing the old one, so a group holding only the old panel
   // isn't removed from the layout in between.

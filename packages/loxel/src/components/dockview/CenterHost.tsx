@@ -15,7 +15,13 @@ import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
-import { activeLayoutKey, HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
+import {
+  activeLayoutKey,
+  HOME_LAYOUT_KEY,
+  type LayoutKey,
+  layoutKeyOf,
+  layoutWorktree,
+} from "@/store/active-worktree";
 import { closeBrowserPage } from "@/store/browser-pages";
 import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { getCenterPanelDef } from "@/store/panel-config";
@@ -49,7 +55,7 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
   const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   return (
     <CenterLayout
-      layoutKey={activeWorktree?.path ?? mountedKeyRef.current}
+      layoutKey={activeWorktree ? layoutKeyOf(activeWorktree) : mountedKeyRef.current}
       components={centerComponents}
       tabComponents={centerTabComponents}
     />
@@ -72,7 +78,7 @@ function CenterLayout({
   components,
   tabComponents,
 }: {
-  layoutKey: string;
+  layoutKey: LayoutKey;
   components: PersistedLayoutProps["components"];
   tabComponents: PersistedLayoutProps["tabComponents"];
 }) {
@@ -130,7 +136,7 @@ function CenterLayout({
       // Notify server when the last panel showing an external file closes, so its watcher can
       // be cleaned up. Only files outside the worktree are sent; a file still shown by another
       // panel (an editor tab and a compare panel can show the same one) stays watched.
-      const worktreePath = useWorktreeStore.getState().activeWorktree?.path;
+      const worktreePath = layoutWorktree(layoutKeyRef.current)?.path;
       if (worktreePath) {
         const others = api.panels.filter((p) => p.id !== event.id);
         const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));
@@ -186,7 +192,7 @@ function CenterLayout({
 }
 
 /** Rebuild the worktree's terminal bookkeeping from its layout. Home's terminals are in no tools bar. */
-function syncTerminals(api: DockviewApi, layoutKey: string): void {
+function syncTerminals(api: DockviewApi, layoutKey: LayoutKey): void {
   if (layoutKey !== HOME_LAYOUT_KEY) syncTerminalsFromLayout(api);
 }
 

@@ -708,14 +708,14 @@ export function CodeEditorPanel({
       convert: convertIndentation,
     };
     publishedIndentationRef.current = entry;
-    useEditorIndentationStore.getState().publish(filePath, entry);
-  }, [filePath, indentation, eol, convertIndentation]);
+    useEditorIndentationStore.getState().publish(editorKey, entry);
+  }, [editorKey, indentation, eol, convertIndentation]);
   useEffect(
     () => () => {
       const entry = publishedIndentationRef.current;
-      if (entry) useEditorIndentationStore.getState().remove(filePath, entry);
+      if (entry) useEditorIndentationStore.getState().remove(editorKey, entry);
     },
-    [filePath],
+    [editorKey],
   );
 
   // Apply TypeScript diagnostics as Monaco markers

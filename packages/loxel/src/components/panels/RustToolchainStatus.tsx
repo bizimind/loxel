@@ -18,7 +18,7 @@ export function RustToolchainStatus() {
 
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, status } = active;
   const { toolchain, chosen } = status;
   const chosenUnusable =
     chosen !== null && (toolchain.status !== "active" || toolchain.source !== "chosen");
@@ -35,7 +35,7 @@ export function RustToolchainStatus() {
       label={rustToolchainLabel(toolchain)}
       tooltip={tooltip}
       warning={toolchain.status !== "active" || chosenUnusable}
-      onSelect={() => void selectRustToolchain(wtPath)}
+      onSelect={() => void selectRustToolchain(wt)}
     />
   );
 }

@@ -12,9 +12,7 @@
 import type { DockviewPanelApi } from "dockview-react";
 import { create } from "zustand";
 
-import { localServerId } from "@/api/local-server";
-
-import { activeLayoutKey, layoutWorktree } from "./active-worktree";
+import { activeLayoutKey, type LayoutKey, layoutServer } from "./active-worktree";
 import { hasPanelNotification, usePanelNotificationStore } from "./panel-notifications";
 import { useSettingsStore } from "./settings-store";
 
@@ -29,8 +27,8 @@ export interface PageSlot {
 export interface BrowserPage {
   /** The browser panel's dockview id. */
   id: string;
-  /** The layout the panel is in: a worktree path, or Home's key. */
-  layoutKey: string;
+  /** The layout the panel is in: a worktree's, or Home's. */
+  layoutKey: LayoutKey;
   /** The URL the page was loaded on. */
   initialUrl: string;
   /** Where the page is shown. Null while it runs in the background. */
@@ -65,7 +63,7 @@ export const useBrowserPages = create<BrowserPagesState>()(() => ({ pages: {} })
  * The URL each panel's page is on, unloaded pages included, so a page unloaded after it navigated
  * comes back on its last URL rather than the one its layout saved when it was hidden.
  */
-const pageUrls = new Map<string, { layoutKey: string; url: string }>();
+const pageUrls = new Map<string, { layoutKey: LayoutKey; url: string }>();
 
 function setPages(update: (pages: Record<string, BrowserPage>) => void): void {
   const pages = { ...useBrowserPages.getState().pages };
@@ -79,7 +77,7 @@ function setPages(update: (pages: Record<string, BrowserPage>) => void): void {
  */
 export function attachBrowserPage(
   id: string,
-  { layoutKey, url, slot }: { layoutKey: string; url: string; slot: PageSlot },
+  { layoutKey, url, slot }: { layoutKey: LayoutKey; url: string; slot: PageSlot },
 ): void {
   const previous = useBrowserPages.getState().pages[id];
   setPages((pages) => {
@@ -191,7 +189,7 @@ export function closeBrowserPage(id: string): void {
 }
 
 /** Unload the pages of the panels in `layoutKey`'s layout for good: its worktree was removed. */
-export function closeLayoutBrowserPages(layoutKey: string): void {
+export function closeLayoutBrowserPages(layoutKey: LayoutKey): void {
   for (const [id, { layoutKey: key }] of pageUrls) {
     if (key === layoutKey) pageUrls.delete(id);
   }
@@ -218,7 +216,7 @@ function originOf(url: string): string | null {
  * notification in the notification center.
  */
 export function canNotify(page: BrowserPage): boolean {
-  const server = layoutWorktree(page.layoutKey)?.server ?? localServerId();
+  const server = layoutServer(page.layoutKey);
   if (hasPanelNotification(usePanelNotificationStore.getState(), server, page.id)) return true;
   const origin = originOf(browserPageUrl(page));
   return (

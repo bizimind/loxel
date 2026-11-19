@@ -5,7 +5,6 @@ import {
   getFileCompileDatabase,
 } from "@/api/c-cpp-compile-database-client";
 import { cCppToolchain } from "@/api/c-cpp-compile-database-model";
-import { localRef } from "@/api/local-server";
 import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import {
   compileDatabaseSummary,
@@ -28,8 +27,8 @@ export function CompileDatabaseStatusItem() {
   const active = useActiveToolchainStatus(cCppToolchain, getCompileDatabaseStatus);
   const filePath = useActiveEditorFile()?.filePath ?? null;
   const associations = useSettingsStore(selectEffectiveFileAssociations);
-  const worktreePath = active?.wtPath ?? null;
-  const wt = localRef(worktreePath);
+  const wt = active?.wt ?? null;
+  const worktreePath = wt?.path ?? null;
   const project = useProjectRef(wt);
   const { data: file } = useQuery({
     // Extends the status's key, so that its changed message refreshes this too.
@@ -50,7 +49,7 @@ export function CompileDatabaseStatusItem() {
       label={label}
       tooltip={compileDatabaseTooltip(wtPath, status, file)}
       warning={warning}
-      onSelect={() => void selectCompileDatabase(wtPath)}
+      onSelect={() => void selectCompileDatabase(active.wt)}
     />
   );
 }

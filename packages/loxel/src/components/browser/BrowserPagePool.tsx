@@ -13,7 +13,7 @@ import { isActivatedPanel } from "@/hooks/usePanelActivationFocus";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { onWebviewFocus } from "@/lib/webview-focus";
-import { activeLayoutKey, HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { activeLayoutKey, layoutWorktree } from "@/store/active-worktree";
 import { REVIEW_INTERVAL_MS, reviewBackgroundPages } from "@/store/browser-page-budget";
 import {
   type BrowserPage,
@@ -108,7 +108,7 @@ const BrowserPageHost = memo(function BrowserPageHost({ page }: { page: BrowserP
           panelId={page.id}
           panelApi={slot?.api ?? null}
           resumes={page.resumes}
-          worktreePath={page.layoutKey === HOME_LAYOUT_KEY ? null : page.layoutKey}
+          worktreePath={layoutWorktree(page.layoutKey)?.path ?? null}
         />
       </PanelErrorBoundary>
     </div>

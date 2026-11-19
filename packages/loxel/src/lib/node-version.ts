@@ -1,5 +1,6 @@
 import { getNodeEnvCandidates, setNodeOverride } from "@/api/node-env-client";
 import { type NodeEnv, type NodeInstall, nodeToolchain } from "@/api/node-env-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick } from "@/store/command-palette";
@@ -24,10 +25,11 @@ export function nodeSourceDescription(env: NodeEnv, pinFile: string | null): str
 }
 
 /**
- * Let the user choose worktree `wtPath`'s Node in the command palette: an installed version, the
+ * Let the user choose worktree `wt`'s Node in the command palette: an installed version, the
  * one on `PATH`, or automatic detection. The choice is saved per worktree on the server.
  */
-export async function selectNodeVersion(wtPath: string): Promise<void> {
+export async function selectNodeVersion(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
   const items = getNodeEnvCandidates(wtPath).then(({ candidates, automaticPath, overridePath }) => {
     const automatic = candidates.find((c) => c.nodePath === automaticPath);
@@ -56,7 +58,7 @@ export async function selectNodeVersion(wtPath: string): Promise<void> {
       worktreePath: wtPath,
       nodePath: picked === AUTOMATIC_ID ? null : picked,
     });
-    setToolchainStatusData(nodeToolchain, wtPath, response);
+    setToolchainStatusData(nodeToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Node version");
   }

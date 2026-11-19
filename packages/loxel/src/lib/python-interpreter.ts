@@ -5,6 +5,7 @@ import {
   type PythonInterpreter,
   pythonToolchain,
 } from "@/api/python-env-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
@@ -61,12 +62,13 @@ export function pythonEnvSourceDescription(source: PythonEnvSource): string {
 }
 
 /**
- * Let the user choose worktree `wtPath`'s Python interpreter in the command palette: a discovered
+ * Let the user choose worktree `wt`'s Python interpreter in the command palette: a discovered
  * environment, a path they enter, or automatic detection. The choice is saved per worktree on the
  * server, which hands it to the language server and everything else that resolves the worktree's
  * Python.
  */
-export async function selectPythonInterpreter(wtPath: string): Promise<void> {
+export async function selectPythonInterpreter(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
   const state = getPythonEnvCandidates(wtPath);
   const items = state.then(({ candidates, automaticPath, overridePath }) => {
@@ -104,7 +106,7 @@ export async function selectPythonInterpreter(wtPath: string): Promise<void> {
 
   try {
     const response = await setPythonOverride({ worktreePath: wtPath, pythonPath });
-    setToolchainStatusData(pythonToolchain, wtPath, response);
+    setToolchainStatusData(pythonToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Python interpreter");
   }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import type { EditorKey } from "@/store/editor-state";
 import type { IndentationLayer, IndentationResolution } from "@/store/settings-store";
 
 /**
@@ -16,21 +17,21 @@ export interface EditorIndentation {
 }
 
 interface EditorIndentationState {
-  /** Keyed by file path; only a file's own tab publishes. */
-  byFile: ReadonlyMap<string, EditorIndentation>;
-  publish: (filePath: string, entry: EditorIndentation) => void;
+  /** Keyed by the file's tab key (its server and path); only a file's own tab publishes. */
+  byFile: ReadonlyMap<EditorKey, EditorIndentation>;
+  publish: (key: EditorKey, entry: EditorIndentation) => void;
   /** Removes `entry`, unless another tab of the file has published since. */
-  remove: (filePath: string, entry: EditorIndentation) => void;
+  remove: (key: EditorKey, entry: EditorIndentation) => void;
 }
 
 export const useEditorIndentationStore = create<EditorIndentationState>()((set) => ({
   byFile: new Map(),
-  publish: (filePath, entry) => set((s) => ({ byFile: new Map(s.byFile).set(filePath, entry) })),
-  remove: (filePath, entry) =>
+  publish: (key, entry) => set((s) => ({ byFile: new Map(s.byFile).set(key, entry) })),
+  remove: (key, entry) =>
     set((s) => {
-      if (s.byFile.get(filePath) !== entry) return s;
+      if (s.byFile.get(key) !== entry) return s;
       const byFile = new Map(s.byFile);
-      byFile.delete(filePath);
+      byFile.delete(key);
       return { byFile };
     }),
 }));

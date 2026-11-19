@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 
 import * as monaco from "monaco-editor";
 
@@ -9,7 +10,6 @@ import {
   editorFileUri,
   isLiveEditorModel,
   markPreviewModel,
-  serverAuthority,
 } from "./live-editor-model";
 
 const SERVER = toServerId("0b9f6c1e-5b1a-4c55-9a43-2f1d8f0e7a10");
@@ -39,9 +39,13 @@ describe("editorFileUri", () => {
     }
   });
 
-  test("refuses a server id that Monaco's printing would change", () => {
-    expect(() => serverAuthority(toServerId("Upper-Case"))).toThrow("cannot be a URI authority");
-    expect(() => serverAuthority(toServerId("user@host"))).toThrow("cannot be a URI authority");
+  test("round-trips every server id the grammar accepts", () => {
+    for (const id of [randomUUID(), "a", "0.9_~-x"]) {
+      const file = { server: toServerId(id), path: PATH };
+      for (const scheme of ["file", "loxel"] as const) {
+        expect(editorFile(monaco.Uri.parse(editorFileUri(file, scheme).toString()))).toEqual(file);
+      }
+    }
   });
 });
 

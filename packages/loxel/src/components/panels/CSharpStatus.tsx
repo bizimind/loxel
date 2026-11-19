@@ -19,7 +19,7 @@ export function CSharpStatus() {
   const active = useActiveToolchainStatus(csharpToolchain, getCSharpStatus);
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, wtPath, status } = active;
   const label = csharpStatusLabel(status);
   if (!label) return null;
 
@@ -28,7 +28,7 @@ export function CSharpStatus() {
       label={label}
       tooltip={csharpStatusTooltip(status, wtPath)}
       warning={csharpStatusWarning(status)}
-      onSelect={() => void selectCSharpSolution(wtPath)}
+      onSelect={() => void selectCSharpSolution(wt)}
     />
   );
 }

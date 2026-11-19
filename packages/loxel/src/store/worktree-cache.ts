@@ -8,9 +8,10 @@
  */
 import type { SerializedDockview } from "dockview-react";
 
-import { formatWorktreeRef, type ServerId, type WorktreeRef } from "@/api/worktree-ref";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { getQueryScope } from "@/queries/use-scope";
 
+import { type LayoutKey, layoutKeyOf } from "./active-worktree";
 import { useCommentStore } from "./comments";
 
 // --- Generic per-worktree cache for component-local state ---
@@ -49,23 +50,18 @@ export function setWorktreeInnerLayout(containerId: string, layout: SerializedDo
   setWorktreeValue(containerId, layout);
 }
 
-/**
- * The window's caches of the layouts it has shown, one per layout storage prefix, keyed by layout
- * key: a worktree's bare path, as the layout is stored under on `server`, the server that holds it.
- */
-const layoutCaches = new Map<Map<string, unknown>, ServerId>();
+/** The window's caches of the layouts it has shown, one per layout storage prefix, by layout key. */
+const layoutCaches = new Set<Map<LayoutKey, unknown>>();
 
-/** Have `cache`, of layouts stored on `server`, purged with its worktrees. Returns an unregister function. */
-export function registerLayoutCache(server: ServerId, cache: Map<string, unknown>): () => void {
-  layoutCaches.set(cache, server);
+/** Have `cache` purged with its worktrees. Returns an unregister function. */
+export function registerLayoutCache(cache: Map<LayoutKey, unknown>): () => void {
+  layoutCaches.add(cache);
   return () => layoutCaches.delete(cache);
 }
 
 /** Purge cached values for a worktree (worktree removal cleanup). */
 export function purgeWorktreeCache(worktree: WorktreeRef): void {
-  for (const [cache, server] of layoutCaches) {
-    if (server === worktree.server) cache.delete(worktree.path);
-  }
+  for (const cache of layoutCaches) cache.delete(layoutKeyOf(worktree));
   worktreeCache.delete(formatWorktreeRef(worktree));
 }
 

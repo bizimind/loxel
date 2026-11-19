@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import type { CSharpStatusResponse } from "@/api/csharp-env-model";
 import { localRef } from "@/api/local-server";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 
 const RUNNING: CSharpStatusResponse = {
   server: {
@@ -22,7 +23,7 @@ const getCSharpStatus = jest.fn(async (_wtPath: string) => RUNNING);
 mock.module("@/api/csharp-env-client", () => ({ ...originalClient, getCSharpStatus }));
 
 const originalSolution = await import("@/lib/csharp-solution");
-const selectCSharpSolution = jest.fn(async (_wtPath: string) => {});
+const selectCSharpSolution = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/csharp-solution", () => ({ ...originalSolution, selectCSharpSolution }));
 
 // The outgoing center right after a worktree switch: its active panel still shows a file of
@@ -31,10 +32,13 @@ const activePanel = {
   id: "codeeditor-/wt-a/src/App.cs",
   params: { filePath: "/wt-a/src/App.cs", worktreePath: "/wt-a" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+const centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -64,7 +68,7 @@ describe("CSharpStatus", () => {
     expect(button.title).toContain(".NET SDK 10.0.403");
     expect(button.className).toContain("text-muted-foreground");
     fireEvent.click(button);
-    expect(selectCSharpSolution.mock.calls).toEqual([["/wt-a"]]);
+    expect(selectCSharpSolution.mock.calls).toEqual([[localRef("/wt-a")]]);
   });
 
   test("warns about a missing step, and gives its words on hover", async () => {

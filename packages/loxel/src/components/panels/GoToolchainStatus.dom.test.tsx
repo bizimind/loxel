@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { GoEnv, GoEnvResponse, GoToolchainChoiceRequest } from "@/api/go-env-model";
+import { localRef } from "@/api/local-server";
+import { formatWorktreeRef } from "@/api/worktree-ref";
 import { useCommandPaletteStore } from "@/store/command-palette";
 
 const ENV: GoEnv = {
@@ -51,10 +53,13 @@ let activePanel = {
   id: "codeeditor-/wt-a/main.go",
   params: { filePath: "/wt-a/main.go", worktreePath: "/wt-a" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+const centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -189,7 +194,7 @@ describe("GoToolchainStatus", () => {
   test("picking a Go or detection saves it, and restarts stopped servers", async () => {
     const { selectGoToolchain } = await import("@/lib/go-toolchain");
     const pick = async (id: string) => {
-      const done = selectGoToolchain("/wt-a");
+      const done = selectGoToolchain(localRef("/wt-a"));
       await waitFor(() => {
         const { mode } = useCommandPaletteStore.getState();
         if (mode.kind !== "pick" || !mode.items) throw new Error("still loading");
@@ -220,7 +225,7 @@ describe("GoToolchainStatus", () => {
     renderStatus();
     fireEvent.click(await screen.findByRole("button", { name: "Go not found" }));
     const { refreshGoToolchain } = await import("@/lib/go-toolchain");
-    await refreshGoToolchain("/wt-a");
+    await refreshGoToolchain(localRef("/wt-a"));
     expect(restartStoppedLanguageServers).not.toHaveBeenCalled();
   });
 

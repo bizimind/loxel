@@ -1,5 +1,6 @@
 import type { DockviewApi } from "dockview-react";
 
+import type { LayoutKey } from "./active-worktree";
 import { collapseZone, expandZone, findZoneGroup } from "./layout-actions";
 import { usePanelBadgeStore } from "./panel-badges";
 import type { PanelId, PanelZone } from "./panel-config";
@@ -51,10 +52,10 @@ let outerApi: DockviewApi | null = null;
 /** Module-level reference to the center (editor/terminal) dockview API. */
 let centerApi: DockviewApi | null = null;
 /**
- * The layout key the center API was mounted for: a worktree path, or `HOME_LAYOUT_KEY`. A worktree
+ * The layout key the center API was mounted for: a worktree's `LayoutKey`, or `HOME_LAYOUT_KEY`. A worktree
  * switch remounts the center.
  */
-let centerApiLayoutKey: string | null = null;
+let centerApiLayoutKey: LayoutKey | null = null;
 const centerApiListeners = new Set<(api: DockviewApi | null) => void>();
 
 /** Set the outer dockview API reference. Called from App.tsx onReady. */
@@ -77,10 +78,12 @@ export function getSidebarPanelElement(panelId: PanelId): HTMLElement | null {
 }
 
 /**
- * Set the center dockview API reference and the key of the layout it shows (a worktree path, or
+ * Set the center dockview API reference and the key of the layout it shows (a worktree's, or
  * Home's). Called from the center layout.
  */
-export function setCenterApi(api: DockviewApi | null, layoutKey: string | null = null): void {
+export function setCenterApi(api: DockviewApi, layoutKey: LayoutKey): void;
+export function setCenterApi(api: null): void;
+export function setCenterApi(api: DockviewApi | null, layoutKey: LayoutKey | null = null): void {
   centerApi = api;
   centerApiLayoutKey = api ? layoutKey : null;
   for (const listener of centerApiListeners) {
@@ -94,11 +97,11 @@ export function getCenterApi(): DockviewApi | null {
 }
 
 /**
- * The layout key (worktree path, or `HOME_LAYOUT_KEY`) the current center API belongs to. Right
+ * The layout key (a worktree's, or `HOME_LAYOUT_KEY`) the current center API belongs to. Right
  * after a worktree switch the outgoing center stays registered until it unmounts, so it still
  * reports the previous worktree.
  */
-export function getCenterApiLayoutKey(): string | null {
+export function getCenterApiLayoutKey(): LayoutKey | null {
   return centerApiLayoutKey;
 }
 

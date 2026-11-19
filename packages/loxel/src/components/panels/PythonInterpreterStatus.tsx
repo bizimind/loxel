@@ -18,7 +18,7 @@ export function PythonInterpreterStatus() {
 
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, wtPath, status } = active;
   const { env, overridePath } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
   const tooltip = [
@@ -37,7 +37,7 @@ export function PythonInterpreterStatus() {
       label={env ? pythonInterpreterLabel(env, wtPath) : "Select Python Interpreter"}
       tooltip={tooltip}
       warning={!env || overrideUnusable}
-      onSelect={() => void selectPythonInterpreter(wtPath)}
+      onSelect={() => void selectPythonInterpreter(wt)}
     />
   );
 }

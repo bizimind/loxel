@@ -1,5 +1,5 @@
 import { useActionHandler } from "@/hooks/useActionHandler";
-import { useActiveEditorFilePath } from "@/hooks/useActiveEditorFilePath";
+import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import { describeIndentation } from "@/lib/indentation-status";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
 
@@ -8,8 +8,8 @@ import { useEditorIndentationStore } from "@/store/editor-indentation";
  * indentation opens Change Indentation.
  */
 export function IndentationStatus() {
-  const filePath = useActiveEditorFilePath();
-  const entry = useEditorIndentationStore((s) => (filePath ? s.byFile.get(filePath) : undefined));
+  const editorKey = useActiveEditorFile()?.editorKey;
+  const entry = useEditorIndentationStore((s) => (editorKey ? s.byFile.get(editorKey) : undefined));
   const dispatch = useActionHandler();
   if (!entry) return null;
 

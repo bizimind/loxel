@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { localRef } from "@/api/local-server";
 import type { RustToolchainResponse } from "@/api/rust-toolchain-model";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 
 const ACTIVE: RustToolchainResponse = {
   toolchain: {
@@ -32,7 +33,7 @@ const getRustToolchain = jest.fn(async (_wtPath: string) => response);
 mock.module("@/api/rust-toolchain-client", () => ({ ...originalClient, getRustToolchain }));
 
 const originalLib = await import("@/lib/rust-toolchain");
-const selectRustToolchain = jest.fn(async (_wtPath: string) => {});
+const selectRustToolchain = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/rust-toolchain", () => ({ ...originalLib, selectRustToolchain }));
 
 // The outgoing center right after a worktree switch: its active panel still shows a file of
@@ -41,10 +42,13 @@ const activePanel = {
   id: "codeeditor-/wt-a/src/main.rs",
   params: { filePath: "/wt-a/src/main.rs", worktreePath: "/wt-a" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+const centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -75,7 +79,7 @@ describe("RustToolchainStatus", () => {
     expect(getRustToolchain.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
     expect(button.className).toContain("text-muted-foreground");
     fireEvent.click(button);
-    expect(selectRustToolchain.mock.calls).toEqual([["/wt-a"]]);
+    expect(selectRustToolchain.mock.calls).toEqual([[localRef("/wt-a")]]);
   });
 
   test("warns about a pinned toolchain that is not installed and says what to run", async () => {

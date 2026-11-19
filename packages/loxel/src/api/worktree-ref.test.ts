@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 
 import {
   formatWorktreeRef,
   isWorktreeRef,
   parseWorktreeRef,
+  sameOptionalWorktreeRef,
   sameWorktreeRef,
   toServerId,
   worktreeRef,
@@ -36,6 +38,14 @@ describe("WorktreeRef", () => {
     expect(sameWorktreeRef(REF, worktreeRef(SERVER, "/home/u/repo"))).toBe(false);
   });
 
+  test("is equal as an optional ref only to the same ref, or null to null", () => {
+    expect(sameOptionalWorktreeRef(null, null)).toBe(true);
+    expect(sameOptionalWorktreeRef(REF, null)).toBe(false);
+    expect(sameOptionalWorktreeRef(null, REF)).toBe(false);
+    expect(sameOptionalWorktreeRef(REF, worktreeRef(SERVER, REF.path))).toBe(true);
+    expect(sameOptionalWorktreeRef(REF, worktreeRef(toServerId("other"), REF.path))).toBe(false);
+  });
+
   test("recognizes a ref among untyped data", () => {
     expect(isWorktreeRef(JSON.parse(JSON.stringify(REF)))).toBe(true);
     expect(isWorktreeRef(REF.path)).toBe(false);
@@ -43,8 +53,17 @@ describe("WorktreeRef", () => {
     expect(isWorktreeRef(null)).toBe(false);
   });
 
-  test("refuses a server id its string form could not hold", () => {
-    expect(() => toServerId("")).toThrow();
-    expect(() => toServerId("a:b")).toThrow();
+  test("refuses a server id its string form or a URI authority could not hold", () => {
+    for (const id of ["", "a:b", "a/b", "user@host", "Upper-Case", "a b"]) {
+      expect(() => toServerId(id)).toThrow("Not a server id");
+    }
+  });
+
+  test("accepts the IDs servers generate", () => {
+    expect(toServerId(randomUUID())).toBeDefined();
+  });
+
+  test("parses a key whose server part is no server id as no ref", () => {
+    expect(parseWorktreeRef("Upper:/repo")).toBeNull();
   });
 });

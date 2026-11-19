@@ -4,7 +4,7 @@ import { useFileTabRename } from "@/hooks/useFileTabRename";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
 
-import { panelServerOf } from "./panel-context";
+import { useLayoutServer } from "./panel-context";
 import { DELETED_TAB_TITLE_CLASS, DivergedDot, FileContextMenuItems, QueuedDot, Tab } from "./tab";
 
 interface EditorTabProps {
@@ -21,7 +21,7 @@ export function EditorTab({ props, icon }: EditorTabProps) {
   const filePath = props.params.filePath;
   const filename = getDisplayFilename(filePath);
   const handleRename = useFileTabRename(filePath);
-  const key = fileEditorKey(panelServerOf(props.params.worktreePath), filePath);
+  const key = fileEditorKey(useLayoutServer(), filePath);
   const isDiverged = useEditorStateStore((s) => s.files.get(key)?.state === "diverged");
   const isDeleted = useEditorStateStore((s) => s.files.get(key)?.deleted ?? false);
   const isQueued = useEditorStateStore((s) => s.files.get(key)?.queued ?? false);

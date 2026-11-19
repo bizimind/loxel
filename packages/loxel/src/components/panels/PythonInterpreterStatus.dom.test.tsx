@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { localRef } from "@/api/local-server";
 import type { PythonEnvResponse } from "@/api/python-env-model";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 
 const ENV: PythonEnvResponse = {
   env: {
@@ -21,7 +22,7 @@ const getPythonEnv = jest.fn(async (_wtPath: string) => ENV);
 mock.module("@/api/python-env-client", () => ({ ...originalClient, getPythonEnv }));
 
 const originalInterpreter = await import("@/lib/python-interpreter");
-const selectPythonInterpreter = jest.fn(async (_wtPath: string) => {});
+const selectPythonInterpreter = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/python-interpreter", () => ({
   ...originalInterpreter,
   selectPythonInterpreter,
@@ -33,10 +34,13 @@ const activePanel = {
   id: "codeeditor-/wt-a/api/app.py",
   params: { filePath: "/wt-a/api/app.py", worktreePath: "/wt-a" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+const centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -61,6 +65,6 @@ describe("PythonInterpreterStatus", () => {
     const button = await screen.findByRole("button", { name: "Python 3.12.1 (api/.venv)" });
     expect(getPythonEnv.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
     fireEvent.click(button);
-    expect(selectPythonInterpreter.mock.calls).toEqual([["/wt-a"]]);
+    expect(selectPythonInterpreter.mock.calls).toEqual([[localRef("/wt-a")]]);
   });
 });

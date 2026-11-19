@@ -7,12 +7,18 @@ import { localServerId } from "@/api/local-server";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
-import { HOME_LAYOUT_KEY, layoutWorktreeRef } from "@/store/active-worktree";
+import {
+  type LayoutKey,
+  layoutServer,
+  layoutStorageKey,
+  layoutWorktree,
+} from "@/store/active-worktree";
 import { registerLayoutCache } from "@/store/worktree-cache";
 import { isListedWorktree } from "@/store/worktrees";
 
 import { dropUnregisteredPanels } from "./drop-unregistered-panels";
 import { layoutSnapshot } from "./layout-snapshot";
+import { LayoutServerContext } from "./panel-context";
 
 interface PersistedLayout {
   version: number;
@@ -22,8 +28,11 @@ interface PersistedLayout {
 export interface PersistedLayoutProps extends Omit<IDockviewReactProps, "onReady"> {
   /** Storage scope — typically "outer" or "center". */
   storagePrefix: string;
-  /** Per-worktree key — changing it triggers a save→clear→restore swap. */
-  layoutKey: string;
+  /**
+   * The layout shown, a worktree's or Home's: changing it, the same path on another server
+   * included, triggers a save→clear→restore swap. Stored on its server under `layoutStorageKey`.
+   */
+  layoutKey: LayoutKey;
   /** Bump to invalidate all saved layouts for this prefix. */
   layoutVersion: number;
   /** Populate dockview when no saved layout exists. */
@@ -53,12 +62,21 @@ const DEBOUNCE_MS = 500;
 // server's promote/recovery code matches exactly. Server SQLite is already
 // scoped per-environment (loxel vs loxel-dev state dirs), so STORAGE_PREFIX
 // isn't needed in the key (it's still used below to scan legacy localStorage).
-function sessionKey(prefix: string, key: string): string {
-  return layoutSessionKey(WINDOW_ID, prefix, key);
+function sessionKey(prefix: string, key: LayoutKey): string {
+  return layoutSessionKey(WINDOW_ID, prefix, layoutStorageKey(key));
 }
 
-function canonicalKey(prefix: string, key: string): string {
-  return layoutCanonicalKey(prefix, key);
+function canonicalKey(prefix: string, key: LayoutKey): string {
+  return layoutCanonicalKey(prefix, layoutStorageKey(key));
+}
+
+/**
+ * Whether `key`'s layout is stored where this window's store API reaches: on the window's server,
+ * the only one it reaches today. Another server's layout is neither read nor written, so the row
+ * of the same path on the window's server is never taken for it; it starts from the default.
+ */
+function storedOnWindowServer(key: LayoutKey): boolean {
+  return layoutServer(key) === localServerId();
 }
 
 function parseLayout(raw: string, version: number): SerializedDockview | null {
@@ -78,10 +96,10 @@ function parseLayout(raw: string, version: number): SerializedDockview | null {
  */
 async function migrateLegacyLayout(
   prefix: string,
-  key: string,
+  key: LayoutKey,
   version: number,
 ): Promise<SerializedDockview | null> {
-  const suffix = `:${prefix}:${key}`;
+  const suffix = `:${prefix}:${layoutStorageKey(key)}`;
   const legacyKeys: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -125,9 +143,10 @@ async function migrateLegacyLayout(
  */
 async function fetchLayout(
   prefix: string,
-  key: string,
+  key: LayoutKey,
   version: number,
 ): Promise<SerializedDockview | null> {
+  if (!storedOnWindowServer(key)) return null;
   try {
     const sessionRaw = await api.getStore(sessionKey(prefix, key));
     if (sessionRaw) {
@@ -169,16 +188,16 @@ let outerSwapping = false;
  * and a worktree's rows deleted with it are dropped from the cache too (`purgeWorktreeCache`, and
  * `forgetIfRemoved` for a layout left after its worktree was removed).
  */
-const sharedLayoutCaches = new Map<string, Map<string, SerializedDockview>>();
+const sharedLayoutCaches = new Map<string, Map<LayoutKey, SerializedDockview>>();
 
-function sharedLayoutCache(prefix: string): Map<string, SerializedDockview> {
+function sharedLayoutCache(prefix: string): Map<LayoutKey, SerializedDockview> {
   let cache = sharedLayoutCaches.get(prefix);
   if (!cache) {
     cache = new Map();
     sharedLayoutCaches.set(prefix, cache);
-    // Layouts are stored on the window's server, under their worktree's bare path. Registered for
-    // the window's lifetime, like the cache itself, so its entries are purged with their worktrees.
-    registerLayoutCache(localServerId(), cache);
+    // Registered for the window's lifetime, like the cache itself, so its entries are purged with
+    // their worktrees.
+    registerLayoutCache(cache);
   }
   return cache;
 }
@@ -190,8 +209,9 @@ type LayoutSource = "server" | "cache" | "default";
  * Drop a removed worktree's layout, which may have changed since its purge, so a worktree recreated
  * at its path starts fresh.
  */
-function forgetIfRemoved(cache: Map<string, SerializedDockview>, key: string): void {
-  if (key !== HOME_LAYOUT_KEY && !isListedWorktree(layoutWorktreeRef(key))) cache.delete(key);
+function forgetIfRemoved(cache: Map<LayoutKey, SerializedDockview>, key: LayoutKey): void {
+  const worktree = layoutWorktree(key);
+  if (worktree && !isListedWorktree(worktree)) cache.delete(key);
 }
 
 export function isOuterSwapping(): boolean {
@@ -230,6 +250,10 @@ export function PersistedLayoutComponent({
   const lastSavedRef = useRef<string>("");
   const swappingRef = useRef(false);
   const prevKeyRef = useRef(layoutKey);
+  // The layout dockview holds, whose server its panels get: it changes once a swap clears the
+  // outgoing layout, not on the render that brings the new key, so the outgoing panels never
+  // render as the same paths on the incoming server.
+  const [shownKey, setShownKey] = useState(layoutKey);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Pending writes waiting for the debounce to fire — keyed by full storage key
   // (a single map is fine because each PersistedLayoutComponent owns its own).
@@ -293,7 +317,8 @@ export function PersistedLayoutComponent({
   }, []);
 
   const queueSave = useCallback(
-    (key: string, snapshot: string) => {
+    (key: LayoutKey, snapshot: string) => {
+      if (!storedOnWindowServer(key)) return;
       pendingPayloadRef.current.set(sessionKey(storagePrefix, key), snapshot);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
@@ -353,12 +378,13 @@ export function PersistedLayoutComponent({
    * is such a default.
    */
   const settleAfterRestore = useCallback(
-    (dvApi: DockviewApi, key: string, source: LayoutSource) => {
+    (dvApi: DockviewApi, key: LayoutKey, source: LayoutSource) => {
       const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       lastSavedRef.current = snapshot;
       cacheRef.current.set(key, data);
-      if (source === "server" || (source === "default" && IS_FIRST_WINDOW)) {
+      const persist = source === "server" || (source === "default" && IS_FIRST_WINDOW);
+      if (persist && storedOnWindowServer(key)) {
         flushPendingSave();
         api.putStore(sessionKey(storagePrefix, key), snapshot).catch(() => {});
       }
@@ -391,7 +417,9 @@ export function PersistedLayoutComponent({
       // was removed, the server drops this write, so it cannot bring its rows back.
       if (snapshot !== lastSavedRef.current) {
         lastSavedRef.current = snapshot;
-        api.putStore(sessionKey(storagePrefix, oldKey), snapshot).catch(() => {});
+        if (storedOnWindowServer(oldKey)) {
+          api.putStore(sessionKey(storagePrefix, oldKey), snapshot).catch(() => {});
+        }
       }
     }
 
@@ -407,6 +435,7 @@ export function PersistedLayoutComponent({
     } else {
       dvApi.clear();
     }
+    setShownKey(newKey);
 
     let cancelled = false;
     let restored = false;
@@ -489,11 +518,13 @@ export function PersistedLayoutComponent({
   if (!hydrated) return null;
 
   return (
-    <DockviewReact
-      {...dockviewProps}
-      components={components}
-      tabComponents={tabComponents}
-      onReady={onReady}
-    />
+    <LayoutServerContext.Provider value={layoutServer(shownKey)}>
+      <DockviewReact
+        {...dockviewProps}
+        components={components}
+        tabComponents={tabComponents}
+        onReady={onReady}
+      />
+    </LayoutServerContext.Provider>
   );
 }

@@ -12,7 +12,7 @@ const { dispatchPendingOpen, openFile, openFromInbox, openPath, openUrl, dropInb
 const { wsClient } = await import("@/api/client");
 const { useProjectStore } = actualProjects;
 const { setCenterApi } = await import("@/store/tools-bar");
-const { HOME_LAYOUT_KEY, layoutWorktree } = await import("@/store/active-worktree");
+const { HOME_LAYOUT_KEY, layoutKeyOf } = await import("@/store/active-worktree");
 const { getWorktreeUI } = await import("@/store/worktree-ui");
 const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktrees");
 
@@ -55,18 +55,18 @@ describe("opens from outside the window", () => {
         useWorktreeStore.setState(activeWorktreeFields(wt));
       },
     });
-    setCenterApi({} as never, MAIN);
+    setCenterApi({} as never, layoutKeyOf(localRef(MAIN)));
   });
 
   afterEach(() => {
     for (const cleanup of cleanups) cleanup();
-    for (const key of [MAIN, OTHER, HOME_LAYOUT_KEY])
-      getWorktreeUI(layoutWorktree(key)).getState().takePendingOpens();
+    for (const worktree of [localRef(MAIN), localRef(OTHER), null])
+      getWorktreeUI(worktree).getState().takePendingOpens();
     setCenterApi(null);
   });
 
   const pending = (worktree: string) =>
-    getWorktreeUI(layoutWorktree(worktree)).getState().pendingOpens;
+    getWorktreeUI(worktree === HOME_LAYOUT_KEY ? null : localRef(worktree)).getState().pendingOpens;
 
   test("a page for the worktree on screen opens right away", async () => {
     await openUrl(HERE, MAIN, { url: URL_TARGET });

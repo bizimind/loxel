@@ -1,5 +1,6 @@
 import { getJavaEnvCandidates, setJavaOverride } from "@/api/java-env-client";
 import { type JavaEnvSource, type JavaRuntime, javaToolchain } from "@/api/java-env-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
@@ -42,11 +43,12 @@ export function javaEnvSourceDescription(source: JavaEnvSource): string {
 }
 
 /**
- * Let the user choose worktree `wtPath`'s JDK in the command palette: a discovered one, a path they
+ * Let the user choose worktree `wt`'s JDK in the command palette: a discovered one, a path they
  * enter, or automatic detection. The choice is saved per worktree on the server, which hands it to
  * everything that resolves the worktree's JDK.
  */
-export async function selectJavaRuntime(wtPath: string): Promise<void> {
+export async function selectJavaRuntime(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
   const state = getJavaEnvCandidates(wtPath);
   const items = state.then(({ candidates, automatic, overridePath }) => {
@@ -83,7 +85,7 @@ export async function selectJavaRuntime(wtPath: string): Promise<void> {
 
   try {
     const response = await setJavaOverride({ worktreePath: wtPath, javaHome });
-    setToolchainStatusData(javaToolchain, wtPath, response);
+    setToolchainStatusData(javaToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the JDK");
   }

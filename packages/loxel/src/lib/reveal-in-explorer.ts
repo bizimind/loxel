@@ -1,4 +1,6 @@
-import { getPanelWorktree } from "@/components/dockview/panel-context";
+import type { WorktreeRef } from "@/api/worktree-ref";
+import { getPanelServer, getPanelWorktree } from "@/components/dockview/panel-context";
+import { type EditorKey, fileEditorKey } from "@/store/editor-state";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { getCenterApi, showPanel } from "@/store/tools-bar";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
@@ -9,7 +11,10 @@ const FILE_PANEL_TYPES = new Set(["editor", "codeEditor", "excalidraw", "media"]
 /** The file an editor panel shows and the worktree the panel belongs to. */
 export interface ActiveEditorFile {
   filePath: string;
-  worktreePath: string | null;
+  /** The panel's worktree; null for Home's panels. */
+  worktree: WorktreeRef | null;
+  /** The file's tab key, on the panel's server, which keys what the tab publishes. */
+  editorKey: EditorKey;
 }
 
 /**
@@ -21,9 +26,11 @@ export function getActiveEditorFile(): ActiveEditorFile | null {
   if (!active) return null;
   const def = getCenterPanelDef(active.id);
   if (!def || !FILE_PANEL_TYPES.has(def.type)) return null;
+  const filePath = active.id.slice(def.idPrefix.length);
   return {
-    filePath: active.id.slice(def.idPrefix.length),
-    worktreePath: getPanelWorktree(active)?.path ?? null,
+    filePath,
+    worktree: getPanelWorktree(active),
+    editorKey: fileEditorKey(getPanelServer(active), filePath),
   };
 }
 

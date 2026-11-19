@@ -4,20 +4,23 @@ import {
   DOCUMENT_INDENTATION_METHOD,
   type DocumentIndentationParams,
 } from "@/api/lsp-indentation-model";
+import type { ServerId } from "@/api/worktree-ref";
 
-import { isLiveEditorModel } from "./live-editor-model";
+import { editorFile, isLiveEditorModel } from "./live-editor-model";
 import type { LspTransport } from "./lsp-uri-translation";
 
 type ModelRegistry = Pick<typeof monaco.editor, "getModels" | "onDidCreateModel">;
 
 /**
- * Send `loxel/documentIndentation` over `transport` for each live editor model of `languageIds`:
- * the models open now, each model created later, and again whenever a model's options change. The
- * model's options are its resolved indentation (see EDITOR.md), so the server bridge can make the
- * language server indent its edits for that file the same way.
+ * Send `loxel/documentIndentation` over `transport`, a connection to `server`, for each live editor
+ * model of `languageIds` showing one of that server's files: the models open now, each model
+ * created later, and again whenever a model's options change. The model's options are its resolved
+ * indentation (see EDITOR.md), so the server bridge can make the language server indent its edits
+ * for that file the same way. Another server's model, of the same path or not, is never reported.
  */
 export function reportDocumentIndentation(
   transport: Pick<LspTransport, "send">,
+  server: ServerId,
   languageIds: readonly string[],
   models: ModelRegistry,
 ): monaco.IDisposable {
@@ -25,7 +28,8 @@ export function reportDocumentIndentation(
   const watched = new Map<monaco.editor.ITextModel, monaco.IDisposable[]>();
 
   function report(model: monaco.editor.ITextModel): void {
-    if (!isLiveEditorModel(model) || !languages.has(model.getLanguageId())) return;
+    if (!isLiveEditorModel(model) || editorFile(model.uri)?.server !== server) return;
+    if (!languages.has(model.getLanguageId())) return;
     const { tabSize, indentSize, insertSpaces } = model.getOptions();
     const params: DocumentIndentationParams = {
       textDocument: { uri: model.uri.toString() },
