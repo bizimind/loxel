@@ -29,6 +29,7 @@ const systemStatus = new Map<MediaDevice, SystemStatus>();
 const askForMediaAccess = mock((_device: MediaDevice) => Promise.resolve(true));
 const openExternal = mock((_url: string) => Promise.resolve());
 void mock.module("electron", () => ({
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   ipcMain: {
     on: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler),
     handle: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler),
@@ -40,6 +41,7 @@ void mock.module("electron", () => ({
   },
 }));
 
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const {
   checkMediaPermission,
   deviceState,
@@ -77,18 +79,17 @@ function fakeEmitter() {
   };
 }
 
-const windowEvent = (sender: WebContents) => ({ sender }) as unknown as IpcMainEvent;
+const windowEvent = mainFrameEvent;
 
 /** A window renderer that records what main sends it; listening unless told not to. */
 function fakeHost({ listening = true } = {}) {
   const sent: { channel: string; payload: unknown }[] = [];
-  const host = {
+  const host = fakeWindow({
     ...fakeEmitter(),
     id: nextContentsId++,
-    getType: () => "window",
     isDestroyed: () => false,
     send: (channel: string, payload: unknown) => sent.push({ channel, payload }),
-  } as unknown as WebContents;
+  });
   if (listening) handler(BROWSER_MEDIA_LISTEN)(windowEvent(host));
   const of = (channel: string) => sent.filter((m) => m.channel === channel).map((m) => m.payload);
   return {

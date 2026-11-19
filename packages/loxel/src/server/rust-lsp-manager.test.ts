@@ -1495,7 +1495,8 @@ fi
       const started = await socket.untilFrame((message) => message.method === "test/childStarted");
       const { pid } = started.params;
       expect(isRunning(pid)).toBe(true);
-      manager?.destroySession(socket.ws);
+      // Stops it now; a socket that goes would keep it for the handover grace period first.
+      manager?.detach(socket.ws);
       await until(() => !isRunning(pid));
     });
   });

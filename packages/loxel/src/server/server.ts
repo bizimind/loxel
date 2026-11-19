@@ -1721,9 +1721,19 @@ async function serveRequest(
   return error("Not found", 404);
 }
 
+/**
+ * How long a request may go without a byte either way, in seconds. Bun's default of 10 drops a GET
+ * whose answer takes longer, which on a loaded machine includes ordinary ones; this is Bun's
+ * maximum, so idle connections still close. WebSockets have a timeout of their own. The CLI's
+ * socket keeps the default, which Bun's types do not let a Unix socket change; its requests that
+ * wait are POSTs with a body, which Bun 1.4 lets run past it.
+ */
+const HTTP_IDLE_TIMEOUT_S = 255;
+
 const server = Bun.serve<WsData>({
   port: config.port,
   hostname: "127.0.0.1",
+  idleTimeout: HTTP_IDLE_TIMEOUT_S,
   fetch: (req, server) =>
     serveRequest(req, tcpPrincipal(req.headers, sessionSecret), (upgraded, data) =>
       server.upgrade(upgraded, { data }),

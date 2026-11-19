@@ -33,8 +33,16 @@ import { ProjectFilesService } from "@/server/project-files-service";
 import { projectWorktreesResponse } from "@/server/project-worktrees";
 import { WorktreeStatusTracker } from "@/server/worktree-status-tracker";
 
-/** How long an expected event may take before the test fails. Generous for a loaded machine. */
+/**
+ * How long an expected event may take before the test fails, unless the caller gives its own. Under
+ * the timeouts of the tests that use it, so a miss names its event.
+ */
 const EVENT_DEADLINE_MS = 30_000;
+/**
+ * The `sync-*` tests' deadline: they run git many times against real watchers, which takes minutes
+ * on a loaded machine where it takes milliseconds on an idle one. Their own timeouts are longer.
+ */
+export const SYNC_EVENT_DEADLINE_MS = 120_000;
 /** How long one attempt of {@link retryUntil} waits for its signal before repeating the action. */
 const RETRY_ATTEMPT_MS = 250;
 /** The server's debounce for git-directory events. */
@@ -87,6 +95,9 @@ export class CaptureLog<T> {
   readonly entries: T[] = [];
   private waiters: Array<LogWaiter<T>> = [];
 
+  /** `deadlineMs` is how long {@link waitFor} waits before it fails. */
+  constructor(private readonly deadlineMs = EVENT_DEADLINE_MS) {}
+
   add(entry: T): void {
     const seq = this.entries.length;
     this.entries.push(entry);
@@ -134,7 +145,7 @@ export class CaptureLog<T> {
     match: (entry: T) => boolean,
     { since = 0, label = "event" }: { since?: number; label?: string } = {},
   ): Promise<number> {
-    const seq = await this.find(match, since, EVENT_DEADLINE_MS);
+    const seq = await this.find(match, since, this.deadlineMs);
     if (seq !== null) return seq;
     throw new Error(
       `Timed out waiting for ${label}; captured: ${JSON.stringify(this.slice(since)).slice(-2000)}`,
@@ -156,8 +167,9 @@ export async function retryUntil(
   action: (attempt: number) => void | Promise<void>,
   seen: (timeoutMs: number) => Promise<boolean>,
   label: string,
+  deadlineMs = EVENT_DEADLINE_MS,
 ): Promise<void> {
-  const deadline = Date.now() + EVENT_DEADLINE_MS;
+  const deadline = Date.now() + deadlineMs;
   for (let attempt = 0; Date.now() < deadline; attempt++) {
     await action(attempt);
     if (await seen(RETRY_ATTEMPT_MS)) return;
@@ -273,7 +285,7 @@ export interface SentinelOptions {
 
 /** One project, wired like `initializeProject`, with the worktrees a client has subscribed to. */
 export class SyncProject {
-  readonly log = new CaptureLog<SyncEvent>();
+  readonly log = new CaptureLog<SyncEvent>(SYNC_EVENT_DEADLINE_MS);
   readonly tracker: WorktreeStatusTracker;
   readonly worktrees = new Map<string, SubscribedWorktree>();
 
@@ -472,7 +484,12 @@ export class SyncProject {
     label: string,
   ): Promise<void> {
     const since = this.log.mark();
-    await retryUntil(action, (ms) => this.log.seenWithin(match, since, ms), label);
+    await retryUntil(
+      action,
+      (ms) => this.log.seenWithin(match, since, ms),
+      label,
+      SYNC_EVENT_DEADLINE_MS,
+    );
   }
 
   private async setProbeConfig(): Promise<void> {

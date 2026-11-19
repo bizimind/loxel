@@ -33,7 +33,11 @@ export const GO_ENV = { GOPROXY: "off", GOTOOLCHAIN: "local", GOSUMDB: "off", GO
 
 export const GO = process.platform === "win32" ? "go.exe" : "go";
 export const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
-const GO_ENV_TIMEOUT_MS = 10_000;
+/**
+ * `go version` and `go env` answer at once, but on a loaded machine a timeout leaves Go without a
+ * version or environment: a wait is better. Terminals and saves cap it themselves.
+ */
+const GO_ENV_TIMEOUT_MS = 30_000;
 const MAX_LINK_HOPS = 16;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `go.mod`; the repository decides what this file is. */

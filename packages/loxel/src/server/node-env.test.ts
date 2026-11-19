@@ -1,10 +1,13 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { NodeManager } from "@/api/node-env-model";
 import { repeatUntil } from "@/test/repeat-until";
+
+// Each test spawns git and fake nodes; on a loaded machine that takes far longer than the default.
+setDefaultTimeout(60_000);
 
 // The tests choose where versions live; the machine's own manager settings must not apply.
 for (const name of [

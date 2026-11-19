@@ -2,7 +2,7 @@
  * Invariant: the worktree list follows `wt` and plain `git worktree` commands, without any action
  * in Loxel. Each test asserts on what a client reads after the events it receives.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import path from "node:path";
 
 import {
@@ -18,7 +18,10 @@ import { createSyncRepo, git, SyncProject, type SyncRepo } from "@/test/git-sync
 
 import { PARENT_KEY, TITLE_KEY } from "./project-worktrees";
 
-const TEST_TIMEOUT_MS = 60_000;
+// Each test runs git and waits on real watchers; on a loaded machine that takes minutes. The default
+// covers the hooks, which stop watchers and delete the repository.
+const TEST_TIMEOUT_MS = 180_000;
+setDefaultTimeout(TEST_TIMEOUT_MS);
 
 const at = (worktrees: WorktreeEntry[], wtPath: string) =>
   worktrees.find((worktree) => worktree.path === wtPath);

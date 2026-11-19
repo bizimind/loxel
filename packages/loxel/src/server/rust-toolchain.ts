@@ -20,7 +20,11 @@ import { isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
-const COMMAND_TIMEOUT_MS = 10_000;
+/**
+ * rustup and the toolchain's tools answer at once, but on a loaded machine a timeout reads as no
+ * toolchain: a wait is better. Terminals and saves cap it themselves.
+ */
+const COMMAND_TIMEOUT_MS = 30_000;
 /** Quiet period after the last filesystem event before re-resolving (rustup writes in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 const TOOLCHAIN_FILES = ["rust-toolchain", "rust-toolchain.toml"];

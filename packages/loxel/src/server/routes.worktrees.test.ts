@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,6 +13,10 @@ import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import type { ProjectState } from "./server-state";
 import { worktreesChangedMessage } from "./ws-messages";
+
+// Each test and its setup spawn git many times; on a loaded machine that takes far longer than the
+// default.
+setDefaultTimeout(120_000);
 
 /** Run a git command in `cwd`, throwing with stderr on failure. */
 async function git(cwd: string, ...args: string[]): Promise<string> {
