@@ -13,6 +13,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import { SAVE_DEADLINE_MS } from "@/test/save-deadline";
 
 // Each save spawns git and fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
@@ -23,11 +24,6 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
-/**
- * A save's deadlines are seconds, for a user waiting on it; these tests check what is formatted, and
- * on a loaded machine a fake formatter can take longer than that to start.
- */
-const SAVE_DEADLINE_MS = 30_000;
 const newService = () => new FormatService(undefined, SAVE_DEADLINE_MS, SAVE_DEADLINE_MS);
 
 const REAL_ENV = { ...process.env };

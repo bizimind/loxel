@@ -213,7 +213,10 @@ const BUNDLED_CLANGD_RESTRICTION = "Uses Loxel's own clangd instead of yours.";
 const USER_CLANGD_RESTRICTION = "Asks only compilers in system folders for include paths.";
 const NO_DEVELOPER_TOOLS_MESSAGE =
   "Standard headers need Apple's developer tools: run xcode-select --install in a terminal, then Restart Language Servers";
-/** `clangd --version` answers at once, but on a loaded machine a refusal is worse than a wait. */
+/**
+ * `clangd --version` and `xcode-select -p` answer at once, but on a loaded machine a refusal is
+ * worse than a wait.
+ */
 const PROBE_TIMEOUT_MS = 30_000;
 
 /**

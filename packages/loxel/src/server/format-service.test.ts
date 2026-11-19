@@ -17,6 +17,7 @@ import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 import { writeExecutable } from "@/test/executable";
+import { SAVE_DEADLINE_MS } from "@/test/save-deadline";
 
 import type { FormatterFailure, LanguageFormatter } from "./language-formatter";
 
@@ -33,11 +34,6 @@ const { BLACK_FORMAT_RESTRICTION, BUNDLED_RUFF_FORMAT_RESTRICTION, findVenvBin }
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { bundledRuff } = await import("./ruff-lsp-manager");
 
-/**
- * A save's deadlines are seconds, for a user waiting on it; these tests check what is formatted, and
- * on a loaded machine a fake formatter can take longer than that to start.
- */
-const SAVE_DEADLINE_MS = 30_000;
 const newService = (languages?: readonly LanguageFormatter[]) =>
   new FormatService(languages, SAVE_DEADLINE_MS, SAVE_DEADLINE_MS);
 

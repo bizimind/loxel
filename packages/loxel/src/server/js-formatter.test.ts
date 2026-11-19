@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
+import { SAVE_DEADLINE_MS } from "@/test/save-deadline";
 
 // Trust lives in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "js-formatter-state-"));
@@ -23,12 +24,6 @@ const { idleTimer } = await import("./formatter-backends");
 
 // Saves spawn real processes and resolve Node, which takes a while on a busy machine.
 setDefaultTimeout(180_000);
-
-/**
- * A save's deadlines are seconds, for a user waiting on it; these tests check what is formatted, and
- * on a loaded machine a fake formatter can take longer than that to start.
- */
-const SAVE_DEADLINE_MS = 30_000;
 
 const realNode = Bun.which("node");
 const originalPath = process.env.PATH;

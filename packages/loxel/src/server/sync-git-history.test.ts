@@ -14,7 +14,7 @@ import { getBranchCommits, getRefs } from "./git-commands";
 
 // Each test runs git and waits on real watchers; on a loaded machine that takes minutes. The default
 // covers the hooks, which stop watchers and delete the repositories.
-const TEST_TIMEOUT_MS = 120_000;
+const TEST_TIMEOUT_MS = 180_000;
 setDefaultTimeout(TEST_TIMEOUT_MS);
 
 describe.each(["bare", "regular"] as const)("commit graph, %s repo", (layout) => {
