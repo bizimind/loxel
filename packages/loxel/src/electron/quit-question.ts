@@ -17,6 +17,7 @@ import {
   quitConfirmation,
 } from "../lib/quit-terminals";
 import { serverFetch } from "./app-server";
+import { isAppWindowSender } from "./app-windows";
 import {
   QUIT_ANSWER,
   QUIT_QUESTION,
@@ -120,7 +121,8 @@ function askInWindow(
   const question: QuitQuestion = { id: nextQuestionId++, confirmation };
   return new Promise((resolve) => {
     let shown = false;
-    const fromThisWindow = (event: IpcMainEvent) => event.sender === contents;
+    const fromThisWindow = (event: IpcMainEvent) =>
+      event.sender === contents && isAppWindowSender(event);
     const onShown = (event: IpcMainEvent, id: unknown) => {
       if (!fromThisWindow(event) || id !== question.id) return;
       shown = true;

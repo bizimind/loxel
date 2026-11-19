@@ -27,6 +27,7 @@ import {
 } from "electron";
 
 import { isLoopbackHost } from "../url-utils";
+import { onAppWindowMessage } from "./app-windows";
 import {
   type BrowserNotification,
   type NotificationPermissionRequest,
@@ -233,9 +234,7 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   settleDecidedRequests();
 }
 
-function setSites(event: IpcMainEvent, value: unknown): void {
-  // Only Loxel's own windows hold the settings; a page must never decide for itself.
-  if (event.sender.getType() !== "window") return;
+function setSites(_event: IpcMainEvent, value: unknown): void {
   sites = parseNotificationSites(value);
   if (!sitesLoaded) {
     sitesLoaded = true;
@@ -244,8 +243,7 @@ function setSites(event: IpcMainEvent, value: unknown): void {
   settleDecidedRequests();
 }
 
-function setMutes(event: IpcMainEvent, value: unknown): void {
-  if (event.sender.getType() !== "window") return;
+function setMutes(_event: IpcMainEvent, value: unknown): void {
   mutes = parseNotificationMutes(value);
 }
 
@@ -364,13 +362,12 @@ export function installBrowserNotifications(): void {
   ipcMain.handle(BROWSER_NOTIFICATION_REQUEST_PERMISSION, requestPermission);
   ipcMain.on(BROWSER_NOTIFICATION_SHOW, showNotification);
   ipcMain.on(BROWSER_NOTIFICATION_CLOSE, closeNotification);
-  ipcMain.on(BROWSER_NOTIFICATION_LISTEN, (event) => {
-    if (event.sender.getType() === "window") listeningHosts.add(event.sender);
-  });
-  ipcMain.on(BROWSER_NOTIFICATION_SET_SITES, setSites);
-  ipcMain.on(BROWSER_NOTIFICATION_SET_MUTES, setMutes);
-  ipcMain.on(BROWSER_NOTIFICATION_PERMISSION_RESPOND, respondToRequest);
-  ipcMain.on(BROWSER_NOTIFICATION_CLICK, clickNotification);
+  onAppWindowMessage(BROWSER_NOTIFICATION_LISTEN, (event) => listeningHosts.add(event.sender));
+  // Only Loxel's own windows hold the settings; a page must never decide for itself.
+  onAppWindowMessage(BROWSER_NOTIFICATION_SET_SITES, setSites);
+  onAppWindowMessage(BROWSER_NOTIFICATION_SET_MUTES, setMutes);
+  onAppWindowMessage(BROWSER_NOTIFICATION_PERMISSION_RESPOND, respondToRequest);
+  onAppWindowMessage(BROWSER_NOTIFICATION_CLICK, clickNotification);
 }
 
 /** Track a webview's page lifecycle for its notifications (from `web-contents-created`). */

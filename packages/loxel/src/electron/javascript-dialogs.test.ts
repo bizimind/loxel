@@ -18,9 +18,11 @@ import {
 type Handler = (event: IpcMainEvent, value?: unknown) => void;
 const ipcHandlers = new Map<string, Handler>();
 void mock.module("electron", () => ({
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   ipcMain: { on: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler) },
 }));
 
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const { configureWebviewDialogs, installJavaScriptDialogs, trackWebviewDialogs } =
   await import("./javascript-dialogs");
 installJavaScriptDialogs();
@@ -59,18 +61,13 @@ function frame(origin: string, fields: Partial<WebFrameMain> = {}): WebFrameMain
 function fakeHost({ listening = true } = {}) {
   const sent: { channel: string; payload: unknown }[] = [];
   const emitter = fakeEmitter();
-  const host = {
+  const host = fakeWindow({
     ...emitter,
     id: nextContentsId++,
-    mainFrame: frame("http://127.0.0.1:7433"),
     isDestroyed: () => false,
     send: (channel: string, payload: unknown) => sent.push({ channel, payload }),
-  } as unknown as WebContents;
-  const listen = () =>
-    ipcHandlers.get(JAVASCRIPT_DIALOG_LISTEN)!({
-      sender: host,
-      senderFrame: host.mainFrame,
-    } as unknown as IpcMainEvent);
+  });
+  const listen = () => ipcHandlers.get(JAVASCRIPT_DIALOG_LISTEN)!(mainFrameEvent(host));
   if (listening) listen();
   const requests = () =>
     sent
@@ -115,8 +112,7 @@ function respond(
   sender: WebContents,
   response: Partial<JavaScriptDialogResponse> & { id: number },
 ) {
-  const event = { sender, senderFrame: sender.mainFrame };
-  ipcHandlers.get(JAVASCRIPT_DIALOG_RESPOND)!(event as unknown as IpcMainEvent, {
+  ipcHandlers.get(JAVASCRIPT_DIALOG_RESPOND)!(mainFrameEvent(sender), {
     accepted: true,
     value: "",
     suppress: false,
