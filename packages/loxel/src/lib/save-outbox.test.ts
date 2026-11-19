@@ -552,6 +552,9 @@ describe("recovery", () => {
     ]);
     expect(stored.get("e1")?.server).toBe(TEST_SERVER);
     expect(opened).toEqual([FILE]);
+    expect(toasts).toEqual([
+      "Unsaved edits to a.ts from an earlier version of Loxel are kept for review",
+    ]);
   });
 
   test("the entries of a window still open are left to it", async () => {

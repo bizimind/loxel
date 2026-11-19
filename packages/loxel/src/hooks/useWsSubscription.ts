@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { wsClientOf } from "@/api/client";
+import { hasConnection, wsClientOf } from "@/api/client";
 import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
@@ -27,13 +27,15 @@ export function useWsSubscription(activeWorktree: WorktreeRef | null): void {
     const prev = prevWtRef.current;
     prevWtRef.current = activeWorktree;
     if (sameWorktree(prev, activeWorktree)) return;
-    if (activeWorktree) {
+    // A worktree of a server the window has no connection to (a session restored after the server's
+    // id changed) is subscribed nowhere: the project list moves the window off it.
+    if (activeWorktree && hasConnection(activeWorktree.server)) {
       wsClientOf(activeWorktree.server).subscribeWorktree(activeWorktree);
       // A toolchain's changed message reaches only subscribers, so a cached status may have gone
       // stale while this window was on another worktree.
       void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
     }
-    if (prev) {
+    if (prev && hasConnection(prev.server)) {
       onWorktreeSavesDrained(prev, () => {
         // Switched back before its saves drained: it is the shown worktree again.
         if (sameWorktree(prevWtRef.current, prev)) return;

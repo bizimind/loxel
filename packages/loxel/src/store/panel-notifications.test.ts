@@ -128,4 +128,21 @@ describe("panel notifications of two servers", () => {
       send.mockRestore();
     }
   });
+
+  test("clearing all tells every connected server, past one the window can't reach", () => {
+    const sent: WsClientMessage[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => {
+      sent.push(message);
+    });
+    try {
+      store().syncAll(THERE, [terminal("b", "/repo", 2)]);
+      store().syncAll(localServerId(), [terminal("a", "/repo", 1)]);
+
+      store().dismissAll();
+
+      expect(sent).toEqual([{ type: "notifications_clear" }]);
+    } finally {
+      send.mockRestore();
+    }
+  });
 });

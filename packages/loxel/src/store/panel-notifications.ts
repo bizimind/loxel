@@ -12,7 +12,7 @@
  */
 import { create } from "zustand";
 
-import { wsClientOf } from "@/api/client";
+import { hasConnection, wsClientOf } from "@/api/client";
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 import {
   type ServerId,
@@ -118,7 +118,10 @@ interface PanelNotificationState {
   dismiss: (notification: ClientNotification) => void;
   /** User action: dismiss all notifications of `server`'s panel `panelId` (sends to it). */
   dismissPanel: (server: ServerId, panelId: string) => void;
-  /** User action: dismiss all notifications (sends to every server the list holds some of). */
+  /**
+   * User action: dismiss all notifications (sends to every server the list holds some of that the
+   * window is connected to).
+   */
   dismissAll: () => void;
 }
 
@@ -194,7 +197,8 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set, 
 
   dismissAll: () => {
     for (const server of new Set(get().notifications.map((n) => n.server))) {
-      wsClientOf(server).send({ type: "notifications_clear" });
+      // A server the window has no connection to can't be told; the others still are.
+      if (hasConnection(server)) wsClientOf(server).send({ type: "notifications_clear" });
     }
   },
 }));

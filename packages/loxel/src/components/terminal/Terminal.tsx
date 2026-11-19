@@ -606,7 +606,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     };
   }, [terminalId]);
 
-  // The file index for bare filename matching in terminal links, read again when it mounts.
+  // The file index for bare filename matching in terminal links: the cached one, if any.
   const { data: fileIndexData } = useFileIndexQuery(panelWorktree);
   const fileIndex = useMemo(
     () => (fileIndexData ? buildFileIndex(fileIndexData.files) : null),

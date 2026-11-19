@@ -51,4 +51,17 @@ describe("useWsSubscription", () => {
       { type: "register_external_files", worktreePath: WT, filePaths: [EXTERNAL] },
     ]);
   });
+
+  test("subscribes nothing for a worktree of a server it has no connection to, and does not throw", () => {
+    const subscribe = spyOn(wsClient, "subscribeWorktree").mockImplementation(() => {});
+    subscribe.mockClear();
+    const stale = worktreeRef(toServerId("old-server-id"), WT);
+    const { rerender } = renderHook(({ wt }) => useWsSubscription(wt), {
+      initialProps: { wt: stale as typeof WT_REF | null },
+    });
+    // The project list then moves the window to a worktree of its own server.
+    rerender({ wt: WT_REF });
+
+    expect(subscribe.mock.calls).toEqual([[WT_REF]]);
+  });
 });

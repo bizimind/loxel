@@ -48,10 +48,11 @@ describe("useFileIndexQuery", () => {
     expect(client.getQueryData(queryKeys.fileIndex(here, here))).toBeDefined();
     expect(client.getQueryData(queryKeys.fileIndex(there, there))).toBeUndefined();
 
-    // The other server's worktree is read for itself, not served this one's index.
+    // The other server's worktree is never served this one's index, nor asked of this server.
     const other = renderHook(() => useFileIndexQuery(there), { wrapper });
     expect(other.result.current.data).toBeUndefined();
-    await waitFor(() => expect(requested).toEqual(["/repo", "/repo"]));
+    expect(other.result.current.fetchStatus).toBe("idle");
+    expect(requested).toEqual(["/repo"]);
   });
 
   test("asks for nothing without a worktree, or before its project is known", () => {
@@ -60,9 +61,29 @@ describe("useFileIndexQuery", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
 
-    renderHook(() => useFileIndexQuery(null), { wrapper });
-    renderHook(() => useFileIndexQuery(localRef("/repo")), { wrapper });
+    const home = renderHook(() => useFileIndexQuery(null), { wrapper });
+    const unlisted = renderHook(() => useFileIndexQuery(localRef("/repo")), { wrapper });
 
+    expect(home.result.current.fetchStatus).toBe("idle");
+    expect(unlisted.result.current.fetchStatus).toBe("idle");
     expect(requested).toEqual([]);
+  });
+
+  test("is read again for a fresh reader, and taken from the cache by the others", async () => {
+    useProjectStore.setState({ projects: [project(localServerId())] as never });
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const here = localRef("/repo");
+    const first = renderHook(() => useFileIndexQuery(here), { wrapper });
+    await waitFor(() => expect(first.result.current.data).toBeDefined());
+
+    const cached = renderHook(() => useFileIndexQuery(here), { wrapper });
+    expect(cached.result.current.fetchStatus).toBe("idle");
+    expect(requested).toEqual(["/repo"]);
+
+    renderHook(() => useFileIndexQuery(here, { fresh: true }), { wrapper });
+    await waitFor(() => expect(requested).toEqual(["/repo", "/repo"]));
   });
 });

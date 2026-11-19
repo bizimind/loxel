@@ -10,7 +10,7 @@ import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
+import { getWorktreeUI } from "@/store/worktree-ui";
 
 /**
  * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
@@ -65,7 +65,7 @@ export function useFileClipboard(
               path: clipboard.path,
               destPath: targetDir,
             });
-            getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
+            getWorktreeUI(activeWorktree).getState().setSelectedProjectFile(newPath);
           }
         } else if (clipboard.mode === "cut") {
           await moveFile({ wt: activeWorktree, srcPath: clipboard.path, destDir: targetDir });
@@ -74,7 +74,7 @@ export function useFileClipboard(
             srcPath: clipboard.path,
             destDir: targetDir,
           });
-          getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
+          getWorktreeUI(activeWorktree).getState().setSelectedProjectFile(newPath);
         }
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Paste failed");

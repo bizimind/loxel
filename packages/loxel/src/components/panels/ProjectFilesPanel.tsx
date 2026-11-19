@@ -47,7 +47,7 @@ import { getQueryScope } from "@/queries/use-scope";
 import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
+import { getCurrentWorktreeUI, getWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 // --- Main component ---
@@ -123,7 +123,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       // Forget its tree like a collapse does, so reopening it later lists its current contents.
       treeRef.current?.clearSubtree(path);
       removeDirQueries(queryClient, wt, path);
-      const ui = getCurrentWorktreeUI().getState();
+      const ui = getWorktreeUI(wt).getState();
       ui.setExpandedProjectFolders(
         new Set([...ui.expandedProjectFolders].filter((p) => !isWithin(p, path))),
       );

@@ -127,6 +127,17 @@ describe("opens from outside the window", () => {
     useProjectStore.setState({ homeDraftsDir: null });
   });
 
+  test("a link to Home's plans folder's path on another server does not open in Home", async () => {
+    useWorktreeStore.setState(activeWorktreeFields(null));
+    useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath(THERE, "/state/detached/home/Plan.md");
+
+    expect(openedFiles).toEqual([]);
+    useProjectStore.setState({ homeDraftsDir: null });
+  });
+
   test("a file link in Home to a file in no worktree opens nothing", async () => {
     useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
@@ -193,11 +204,31 @@ describe("opens from outside the window", () => {
     };
 
     await openFromInbox(HERE, "in-2", message);
-    dropInboxOpen("in-2");
+    dropInboxOpen(HERE, "in-2");
     for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
       dispatchPendingOpen(open);
     expect(created).toEqual([]);
     expect(sent).toEqual([]);
+  });
+
+  test("an inbox open is dropped only by its own server's placed notice, and answered to it", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    const message = {
+      type: "open_url" as const,
+      wtPath: OTHER,
+      data: { url: URL_TARGET, focus: false },
+    };
+
+    await openFromInbox(HERE, "in-5", message);
+    // Another server placed a request of the same id: not this one.
+    dropInboxOpen(THERE, "in-5");
+    for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
+      dispatchPendingOpen(open);
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(sent).toEqual([{ type: "inbox_open_done", inboxId: "in-5" }]);
   });
 
   test("an open from the inbox placed elsewhere while on its way is neither placed nor answered", async () => {
@@ -210,7 +241,7 @@ describe("opens from outside the window", () => {
       wtPath: MAIN,
       data: { url: URL_TARGET },
     });
-    dropInboxOpen("in-3");
+    dropInboxOpen(HERE, "in-3");
     await opening;
     expect(created).toEqual([]);
     expect(sent).toEqual([]);

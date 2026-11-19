@@ -119,6 +119,8 @@ let failedRounds = 0;
 let currentRun: Promise<void> | null = null;
 /** A retry was asked for while one ran: run another pass once it ends. */
 let runAgain = false;
+/** Entries stored before entries named their server, not shown yet (see `initSaveOutbox`). */
+const fromEarlierVersion = new Set<string>();
 /** Entries recovered from an earlier run whose outcome is not reported yet. */
 const recovered = new Set<string>();
 const recoveredSaved: string[] = [];
@@ -186,6 +188,7 @@ function removeEntry(entry: OutboxEntry): void {
   if (entries.get(entry.id) !== entry) return;
   entries.delete(entry.id);
   recovered.delete(entry.id);
+  fromEarlierVersion.delete(entry.id);
   // Only a stored entry tells that storing works again: a failing store may still delete.
   void storage?.remove(entry.id).catch(storeFailed);
   entriesChanged();
@@ -833,12 +836,13 @@ function toReview(entry: OutboxEntry, disk: string | null, refusal?: string): vo
     }
     return;
   }
-  showToast(
-    disk === null
-      ? `Unsaved edits to ${name} could not be saved`
-      : `Unsaved edits to ${name} conflict with changes on disk`,
-    "info",
-  );
+  let message = `Unsaved edits to ${name} conflict with changes on disk`;
+  if (disk === null) message = `Unsaved edits to ${name} could not be saved`;
+  // Nothing was tried for those: they wait for the user only because their server is unknown.
+  if (fromEarlierVersion.delete(entry.id)) {
+    message = `Unsaved edits to ${name} from an earlier version of Loxel are kept for review`;
+  }
+  showToast(message, "info");
   void openFile(entry.server, {
     filePath: entry.filePath,
     worktreePath: entry.worktreePath ?? undefined,
@@ -956,18 +960,20 @@ function subscribeRecoveredWorktrees(taken: readonly OutboxEntry[]): void {
 /**
  * Once the project lists are known, settle the recovered saves of worktrees no longer in them
  * (gone while Loxel was closed, so not discarded in it), as a worktree going while Loxel runs
- * settles its own. A failed fetch leaves no project listed, and a project the server could not
- * initialize (a volume not mounted yet) lists no worktree: then nothing is known to be gone.
+ * settles its own. A failed fetch leaves no project of its server listed, and a project the server
+ * could not initialize (a volume not mounted yet) lists no worktree: then nothing is known to be
+ * gone.
  * Their worktrees were subscribed already, before the one the window shows; a gone one only
  * answers with an error.
  */
 async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
-  if (projects.length === 0) return;
   for (const entry of taken) {
     const wt = entryWorktree(entry);
     if (!wt || isListedWorktree(wt)) continue;
+    // A server that listed nothing (its fetch failed) says nothing is gone.
+    if (!projects.some((project) => project.server === wt.server)) continue;
     const project = projectOf(wt, projects);
     if (project && project.worktrees.length === 0) continue;
     const key = formatWorktreeRef(wt);
@@ -1004,6 +1010,7 @@ export async function initSaveOutbox(
           const entry: OutboxEntry = { ...stored, server: stored.server ?? server };
           if (stored.server === undefined) {
             entry.status = "review";
+            fromEarlierVersion.add(entry.id);
           } else if (entry.status !== "review") {
             entry.status = "queued";
             delete entry.refusal; // carried by a save in flight when the window went
@@ -1045,6 +1052,7 @@ export function resetSaveOutboxForTests(): void {
   ownerId = crypto.randomUUID();
   confirmedSeq.clear();
   recovered.clear();
+  fromEarlierVersion.clear();
   recoveredSaved.length = 0;
   goneWorktrees.clear();
   if (retryTimer) clearTimeout(retryTimer);

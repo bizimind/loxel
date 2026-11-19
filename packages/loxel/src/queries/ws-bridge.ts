@@ -354,7 +354,7 @@ export function useWsBridge(): void {
           break;
 
         case "inbox_open_placed":
-          dropInboxOpen(message.inboxId);
+          dropInboxOpen(localServerId(), message.inboxId);
           break;
 
         // --- Project-scoped events (carry projectPath) ---

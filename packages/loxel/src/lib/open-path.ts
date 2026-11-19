@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import { type ServerId, type WorktreeRef, sameWorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type {
@@ -77,22 +78,27 @@ function sameTarget(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
   return a === b || (a !== null && b !== null && sameWorktreeRef(a, b));
 }
 
-/** The open inbox requests this window has had, by id: whether it is done with each. */
-const inboxOpens = new Map<string, boolean>();
+/**
+ * The open inbox requests this window has had, by id (a server-made UUID): the server whose inbox
+ * holds each, which is told when the window is done with it, and whether it is.
+ */
+const inboxOpens = new Map<string, { server: ServerId; done: boolean }>();
 
 function inboxOpenDone(inboxId: string): void {
+  const open = inboxOpens.get(inboxId);
   // Placed, here or in another window.
-  if (inboxOpens.get(inboxId) === true) return;
-  inboxOpens.set(inboxId, true);
-  api.wsClient.send({ type: "inbox_open_done", inboxId });
+  if (!open || open.done) return;
+  open.done = true;
+  api.wsClientOf(open.server).send({ type: "inbox_open_done", inboxId });
 }
 
 /**
- * A window placed the panel of the inbox request `inboxId`: unless this one did, the panel queued
- * for it here is not placed. Sent to every window, this one included.
+ * A window placed the panel of `server`'s inbox request `inboxId`: unless this one did, the panel
+ * queued for it here is not placed. Sent to every window, this one included.
  */
-export function dropInboxOpen(inboxId: string): void {
-  if (inboxOpens.get(inboxId) === false) inboxOpens.set(inboxId, true);
+export function dropInboxOpen(server: ServerId, inboxId: string): void {
+  const open = inboxOpens.get(inboxId);
+  if (open?.server === server) open.done = true;
 }
 
 /**
@@ -108,12 +114,12 @@ export async function openFromInbox(
   inboxId: string,
   message: InboxOpenMessage,
 ): Promise<void> {
-  const done = inboxOpens.get(inboxId);
-  if (done !== undefined) {
-    if (done) api.wsClient.send({ type: "inbox_open_done", inboxId });
+  const known = inboxOpens.get(inboxId);
+  if (known !== undefined) {
+    if (known.done) api.wsClientOf(known.server).send({ type: "inbox_open_done", inboxId });
     return;
   }
-  inboxOpens.set(inboxId, false);
+  inboxOpens.set(inboxId, { server, done: false });
   // Open here: done. A failed open leaves it to the other windows, or to its expiry.
   if ((await openRequest(server, message, inboxId)) === false) inboxOpenDone(inboxId);
 }
@@ -314,7 +320,7 @@ async function openInWorktree(target: WorktreeRef | null, open: PendingOpen): Pr
 export function dispatchPendingOpen(open: PendingOpen): void {
   if (open.inboxId) {
     // Placed already: in another window, or here from an earlier copy of the request.
-    if (inboxOpens.get(open.inboxId) !== false) return;
+    if (inboxOpens.get(open.inboxId)?.done !== false) return;
     inboxOpenDone(open.inboxId);
   }
   switch (open.kind) {
@@ -373,8 +379,9 @@ function openFileFromHome(
 ): Promise<void> {
   return inOrder(async () => {
     await whenProjectsLoaded();
+    // Home's drafts are kept on the window's server.
     const { homeDraftsDir } = useProjectStore.getState();
-    if (homeDraftsDir && path.startsWith(homeDraftsDir + "/")) {
+    if (server === localServerId() && homeDraftsDir && path.startsWith(homeDraftsDir + "/")) {
       dispatchOpenFile(path, location);
       return;
     }

@@ -30,7 +30,7 @@ export function FileSearchModal() {
   const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   const activeWorktreePath = activeWorktree?.path ?? null;
   // Read again on every open, the cached index showing meanwhile; nothing is asked while closed.
-  const index = useFileIndexQuery(isOpen ? activeWorktree : null);
+  const index = useFileIndexQuery(isOpen ? activeWorktree : null, { fresh: true });
   const files = index.data?.files;
   const truncated = index.data?.truncated ?? false;
   const loading = index.isPending && index.fetchStatus === "fetching";
