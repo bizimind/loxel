@@ -21,6 +21,7 @@ import {
   ipcMain,
 } from "electron";
 
+import { onAppWindowMessage } from "./app-windows";
 import {
   JAVASCRIPT_DIALOG_CLOSED,
   JAVASCRIPT_DIALOG_LISTEN,
@@ -181,8 +182,8 @@ function respondToDialog(event: IpcMainEvent, value: unknown): void {
 
 export function installJavaScriptDialogs(): void {
   ipcMain.on(JAVASCRIPT_DIALOG_RUN, runDialog);
-  ipcMain.on(JAVASCRIPT_DIALOG_RESPOND, respondToDialog);
-  ipcMain.on(JAVASCRIPT_DIALOG_LISTEN, (event) => listeningHosts.add(event.sender));
+  onAppWindowMessage(JAVASCRIPT_DIALOG_RESPOND, respondToDialog);
+  onAppWindowMessage(JAVASCRIPT_DIALOG_LISTEN, (event) => listeningHosts.add(event.sender));
 }
 
 /** Load the dialog preload into a webview (from `will-attach-webview`, after its own is stripped). */

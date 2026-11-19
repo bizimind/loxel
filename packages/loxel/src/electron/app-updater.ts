@@ -3,12 +3,13 @@
  * zip, and let Squirrel.Mac replace the bundle and relaunch. Main keeps the `UpdateState` and
  * sends it to every window; the renderer drives it from Settings > General.
  */
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import type { RestartsTerminals, UpdateState } from "../api/update-model";
 import type { ShutdownTerminals } from "../parent-channel-protocol";
 import { isAutoCheckEnabled } from "../server/persisted-settings";
+import { handleAppWindowInvoke, onAppWindowMessage } from "./app-windows";
 import {
   UPDATE_CHECK,
   UPDATE_DOWNLOAD,
@@ -137,10 +138,10 @@ export function installAppUpdater(): void {
     setStatus({ state: "error", message: errorMessage(err) });
   });
 
-  ipcMain.handle(UPDATE_GET_STATUS, () => status);
-  ipcMain.handle(UPDATE_CHECK, () => checkForUpdates());
-  ipcMain.handle(UPDATE_DOWNLOAD, () => downloadUpdate());
-  ipcMain.on(UPDATE_INSTALL, () => installUpdate());
+  handleAppWindowInvoke(UPDATE_GET_STATUS, () => status);
+  handleAppWindowInvoke(UPDATE_CHECK, () => checkForUpdates());
+  handleAppWindowInvoke(UPDATE_DOWNLOAD, () => downloadUpdate());
+  onAppWindowMessage(UPDATE_INSTALL, () => installUpdate());
 }
 
 /**

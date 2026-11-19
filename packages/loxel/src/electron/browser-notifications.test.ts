@@ -29,12 +29,14 @@ import {
 type Handler = (event: IpcMainEvent, value?: unknown) => unknown;
 const ipcHandlers = new Map<string, Handler>();
 void mock.module("electron", () => ({
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   ipcMain: {
     on: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler),
     handle: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler),
   },
 }));
 
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const { installBrowserNotifications, trackWebviewNotifications } =
   await import("./browser-notifications");
 installBrowserNotifications();
@@ -80,16 +82,13 @@ function frame(origin: string): WebFrameMain & { sent: unknown[][] } {
 /** A window renderer that records what main sends it; listening unless told not to. */
 function fakeHost({ listening = true } = {}) {
   const sent: { channel: string; payload: unknown }[] = [];
-  const host = {
+  const host = fakeWindow({
     ...fakeEmitter(),
     id: nextContentsId++,
-    getType: () => "window",
     isDestroyed: () => false,
     send: (channel: string, payload: unknown) => sent.push({ channel, payload }),
-  } as unknown as WebContents;
-  if (listening) {
-    handler(BROWSER_NOTIFICATION_LISTEN)({ sender: host } as unknown as IpcMainEvent);
-  }
+  });
+  if (listening) handler(BROWSER_NOTIFICATION_LISTEN)(mainFrameEvent(host));
   const of = (channel: string) => sent.filter((m) => m.channel === channel).map((m) => m.payload);
   return {
     host,
@@ -144,17 +143,14 @@ const show = (guest: WebContents, pageId: number, senderFrame?: WebFrameMain) =>
   );
 
 /** Loxel's window sending the settings' decisions. */
-const windowSender = { sender: { getType: () => "window" } } as unknown as IpcMainEvent;
+const windowSender = mainFrameEvent(fakeWindow({ id: nextContentsId++ }));
 const setSites = (sites: NotificationSites) =>
   handler(BROWSER_NOTIFICATION_SET_SITES)(windowSender, sites);
 const setMutes = (mutes: NotificationMutes) =>
   handler(BROWSER_NOTIFICATION_SET_MUTES)(windowSender, mutes);
 
 function respond(host: WebContents, id: number, decision: string) {
-  handler(BROWSER_NOTIFICATION_PERMISSION_RESPOND)({ sender: host } as unknown as IpcMainEvent, {
-    id,
-    decision,
-  });
+  handler(BROWSER_NOTIFICATION_PERMISSION_RESPOND)(mainFrameEvent(host), { id, decision });
 }
 
 /** Let the handlers' pending microtasks (their awaits) run, without waiting on time. */
@@ -220,9 +216,12 @@ describe("permission", () => {
 
   test("ignores decisions sent by anything but Loxel's windows", () => {
     const { guest } = fakeGuest(host.host);
-    handler(BROWSER_NOTIFICATION_SET_SITES)({ sender: guest } as unknown as IpcMainEvent, {
-      "http://localhost:5173": "allow",
-    });
+    const popup = fakeWindow({ id: nextContentsId++ }, { app: false });
+    for (const sender of [guest, popup]) {
+      handler(BROWSER_NOTIFICATION_SET_SITES)(mainFrameEvent(sender), {
+        "http://localhost:5173": "allow",
+      });
+    }
     expect(permission(guest)).toBe("default");
   });
 
@@ -412,17 +411,15 @@ describe("notifications", () => {
     show(guest, 7);
     const { ref } = host.opened()[0]!;
 
-    handler(BROWSER_NOTIFICATION_CLICK)({ sender: fakeHost().host } as unknown as IpcMainEvent, {
-      ref,
-    });
+    handler(BROWSER_NOTIFICATION_CLICK)(mainFrameEvent(fakeHost().host), { ref });
     expect(mainFrame.sent).toEqual([]);
-    handler(BROWSER_NOTIFICATION_CLICK)({ sender: host.host } as unknown as IpcMainEvent, { ref });
+    handler(BROWSER_NOTIFICATION_CLICK)(mainFrameEvent(host.host), { ref });
     expect(mainFrame.sent).toEqual([[BROWSER_NOTIFICATION_EVENT, 7, "click"]]);
 
     call(BROWSER_NOTIFICATION_CLOSE, guest, 7);
     // It stays in the notification center (nothing goes to the window), but has nothing to click.
     expect(host.opened()).toHaveLength(1);
-    handler(BROWSER_NOTIFICATION_CLICK)({ sender: host.host } as unknown as IpcMainEvent, { ref });
+    handler(BROWSER_NOTIFICATION_CLICK)(mainFrameEvent(host.host), { ref });
     expect(mainFrame.sent).toHaveLength(1);
   });
 
@@ -431,7 +428,7 @@ describe("notifications", () => {
     show(guest, 1);
     emit("did-navigate");
     const { ref } = host.opened()[0]!;
-    handler(BROWSER_NOTIFICATION_CLICK)({ sender: host.host } as unknown as IpcMainEvent, { ref });
+    handler(BROWSER_NOTIFICATION_CLICK)(mainFrameEvent(host.host), { ref });
     expect(mainFrame.sent).toEqual([]);
   });
 });

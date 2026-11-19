@@ -7,9 +7,10 @@
  * keystrokes typed in a webview it hosts are withheld from the page and forwarded to the
  * renderer, which resolves them like a document keydown.
  */
-import { type WebContents, ipcMain } from "electron";
+import type { WebContents } from "electron";
 
 import { inputToKeyCombo, isModifierKey } from "../store/keybindings/key-combo";
+import { onAppWindowMessage } from "./app-windows";
 import { SET_KEYSTROKE_INTERCEPTION, WEBVIEW_FOCUSED, WEBVIEW_KEYSTROKE } from "./ipc-channels";
 
 interface Interception {
@@ -29,7 +30,7 @@ function parseInterception(value: unknown): Interception | null {
 }
 
 export function installWebviewKeystrokeForwarding(): void {
-  ipcMain.on(SET_KEYSTROKE_INTERCEPTION, (event, value: unknown) => {
+  onAppWindowMessage(SET_KEYSTROKE_INTERCEPTION, (event, value: unknown) => {
     const interception = parseInterception(value);
     if (!interception) return;
     const host = event.sender;
