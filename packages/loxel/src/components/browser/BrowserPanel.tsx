@@ -48,6 +48,7 @@ import {
   type OpenBookmark,
 } from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
+import { ExclusiveAccessNotice } from "./ExclusiveAccessNotice";
 import { faviconCandidates, pickFavicon } from "./favicon-loads";
 import { JavaScriptDialog } from "./JavaScriptDialog";
 import { MediaPermissionBar, MediaSystemBlockedBar } from "./MediaPermissionBar";
@@ -633,6 +634,7 @@ export function BrowserPanel({
           />
         )}
         <PasskeyQrOverlay webContentsId={webContentsId} />
+        <ExclusiveAccessNotice webContentsId={webContentsId} webviewRef={webviewRef} />
       </div>
       {contextMenu && (
         <BrowserContextMenu

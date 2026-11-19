@@ -79,6 +79,15 @@ interface Window {
       onShow: (request: unknown) => void,
       onHide: (webContentsId: unknown) => void,
     ) => () => void;
+    /**
+     * Fullscreen and pointer lock notices for this window's browser panels: `onShow` gets an
+     * `ExclusiveAccessNotice` payload, `onHide` the webContents ID whose page left fullscreen.
+     * Returns an unsubscribe function.
+     */
+    onExclusiveAccessNotice: (
+      onShow: (notice: unknown) => void,
+      onHide: (webContentsId: unknown) => void,
+    ) => () => void;
     /** The app update's current state, kept by Electron main. */
     getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
     /** Check the release manifest for a newer version; the result arrives as a status change. */
@@ -125,9 +134,9 @@ interface Window {
     clickBrowserNotification: (ref: unknown) => void;
     /**
      * Browser panel pages' camera and microphone: a site asks to use them
-     * (`MediaPermissionRequest`, sent again with the same id when it asks for another device), such
-     * a request was withdrawn (`{ id, webContentsId }`), or an allowed site was refused because the
-     * OS has Loxel's access off (`MediaSystemBlocked`). Subscribing tells main this document asks.
+     * (`MediaPermissionRequest`), such a request was withdrawn (`{ id, webContentsId }`, also when
+     * main asks again under a new id), or an allowed site was refused because macOS has Loxel's
+     * access off (`MediaSystemBlocked`). Subscribing tells main this document asks.
      */
     onBrowserMediaPermissions: (handlers: {
       onRequest: (request: unknown) => void;

@@ -135,15 +135,9 @@ export function useBrowserMediaPermissions(
     listen();
     if (webContentsId === null) return;
     return subscribe(webContentsId, {
-      // A new guest (the webview was re-created) drops the old guest's requests. A request sent
-      // again (the page asked for another device) replaces its earlier version in place.
+      // A new guest (the webview was re-created) drops the old guest's requests.
       request: (request) =>
-        setQueue((prev) => {
-          const own = prev.filter((r) => r.webContentsId === webContentsId);
-          return own.some((r) => r.id === request.id)
-            ? own.map((r) => (r.id === request.id ? request : r))
-            : [...own, request];
-        }),
+        setQueue((prev) => [...prev.filter((r) => r.webContentsId === webContentsId), request]),
       withdraw: (id) => setQueue((prev) => prev.filter((request) => request.id !== id)),
       systemBlocked: setSystemBlocked,
     });

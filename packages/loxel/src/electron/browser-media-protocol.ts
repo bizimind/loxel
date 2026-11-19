@@ -61,7 +61,10 @@ export const mediaPermissionRequestSchema = z.object({
   id: z.number().int(),
   webContentsId: z.number().int(),
   origin: z.string(),
-  /** Grows when the page asks for another device while the prompt is up; the id stays. */
+  /**
+   * Never changes under the request's id: when the page asks for another device while the prompt
+   * is up, main withdraws this request and asks again under a new id.
+   */
   devices: z.array(mediaDeviceSchema).min(1),
 });
 export type MediaPermissionRequest = z.infer<typeof mediaPermissionRequestSchema>;

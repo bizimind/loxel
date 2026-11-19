@@ -100,6 +100,7 @@ import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
+import { noteExclusiveAccessGrant, trackWebviewExclusiveAccess } from "./exclusive-access";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
@@ -783,6 +784,7 @@ app.on("web-contents-created", (_, contents) => {
   trackWebviewNotifications(contents);
   trackWebviewMedia(contents);
   trackWebviewFocus(contents);
+  trackWebviewExclusiveAccess(contents);
 
   if (contents.getType() === "webview") {
     // New tabs and windows a browser panel's page opens become browser tabs next to it, and its
@@ -1139,10 +1141,11 @@ app.whenReady().then(async () => {
     // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    installBrowserPermissions(browserSession, {
-      check: checkMediaPermission,
-      request: requestMediaPermission,
-    });
+    installBrowserPermissions(
+      browserSession,
+      { check: checkMediaPermission, request: requestMediaPermission },
+      noteExclusiveAccessGrant,
+    );
     installBrowserFavicons(browserSession);
     installServiceWorkerNotifications(browserSession);
 
