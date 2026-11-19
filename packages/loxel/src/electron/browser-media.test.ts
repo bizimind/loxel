@@ -4,7 +4,6 @@ import type { IpcMainEvent, MediaAccessPermissionRequest, WebContents } from "el
 
 import {
   type MediaDevice,
-  type MediaPermissionAnswer,
   type MediaSites,
   mediaPermissionRequestSchema,
   mediaSystemBlockedSchema,
@@ -21,6 +20,7 @@ import {
   BROWSER_MEDIA_SET_SITES,
   BROWSER_MEDIA_SYSTEM_BLOCKED,
 } from "./ipc-channels";
+import type { SitePermissionAnswer } from "./site-permission-protocol";
 
 type Handler = (event: IpcMainEvent, value?: unknown) => unknown;
 const ipcHandlers = new Map<string, Handler>();
@@ -98,7 +98,7 @@ function fakeHost({ listening = true } = {}) {
     withdrawn: () => of(BROWSER_MEDIA_PERMISSION_WITHDRAWN),
     systemBlocked: () =>
       of(BROWSER_MEDIA_SYSTEM_BLOCKED).map((p) => mediaSystemBlockedSchema.parse(p)),
-    respond: (id: number, answer: MediaPermissionAnswer) =>
+    respond: (id: number, answer: SitePermissionAnswer) =>
       handler(BROWSER_MEDIA_PERMISSION_RESPOND)(windowEvent(host), { id, answer }),
   };
 }

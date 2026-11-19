@@ -3,66 +3,41 @@ import { MicIcon, VideoIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   MediaDevice,
-  MediaPermissionAnswer,
   MediaPermissionRequest,
   MediaSystemBlocked,
 } from "@/electron/browser-media-protocol";
+import type { SitePermissionAnswer } from "@/electron/site-permission-protocol";
 
 import { hostOf } from "./BrowserBookmarks";
+import { PANEL_BAR_CLASS, SitePermissionBar } from "./SitePermissionBar";
 
 /** "camera", "microphone", or "camera and microphone". */
 function devicesLabel(devices: readonly MediaDevice[]): string {
   return devices.toSorted().join(" and ");
 }
 
-function DeviceIcon({ devices }: { devices: readonly MediaDevice[] }) {
-  const Icon = devices.includes("camera") ? VideoIcon : MicIcon;
-  return <Icon className="text-muted-foreground size-3.5 shrink-0" />;
-}
+const deviceIcon = (devices: readonly MediaDevice[]) =>
+  devices.includes("camera") ? VideoIcon : MicIcon;
 
-const BAR_CLASS = "border-border bg-muted/40 flex shrink-0 items-center gap-2 border-b px-3 py-1";
-
-/**
- * A site asks to use the camera or microphone: a bar under the browser panel's toolbar, like the
- * notification one, so the page stays usable while the user decides. Its `getUserMedia()` waits.
- */
+/** A site asks to use the camera or microphone. Its `getUserMedia()` waits. */
 export function MediaPermissionBar({
   request,
   onAnswer,
 }: {
   request: MediaPermissionRequest;
-  onAnswer: (answer: MediaPermissionAnswer) => void;
+  onAnswer: (answer: SitePermissionAnswer) => void;
 }) {
   return (
-    <div role="alert" className={BAR_CLASS}>
-      <DeviceIcon devices={request.devices} />
-      <span className="text-foreground min-w-0 flex-1 truncate text-xs">
-        <span className="font-medium">{hostOf(request.origin)}</span> wants to use your{" "}
-        {devicesLabel(request.devices)}
-      </span>
-      <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => onAnswer("block")}>
-        Block
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 text-xs"
-        onClick={() => onAnswer("allow-once")}
-      >
-        Allow this time
-      </Button>
-      <Button size="sm" className="h-6 text-xs" onClick={() => onAnswer("allow")}>
-        Allow
-      </Button>
-      <button
-        title="Not now"
-        aria-label="Not now"
-        className="text-muted-foreground hover:text-foreground rounded p-0.5"
-        onClick={() => onAnswer("dismiss")}
-      >
-        <XIcon className="size-3" />
-      </button>
-    </div>
+    <SitePermissionBar
+      icon={deviceIcon(request.devices)}
+      onAllow={() => onAnswer("allow")}
+      onAllowOnce={() => onAnswer("allow-once")}
+      onBlock={() => onAnswer("block")}
+      onDismiss={() => onAnswer("dismiss")}
+    >
+      <span className="font-medium">{hostOf(request.origin)}</span> wants to use your{" "}
+      {devicesLabel(request.devices)}
+    </SitePermissionBar>
   );
 }
 
@@ -78,9 +53,10 @@ export function MediaSystemBlockedBar({
   onDismiss: () => void;
 }) {
   const [first] = notice.devices.toSorted();
+  const Icon = deviceIcon(notice.devices);
   return (
-    <div role="alert" className={BAR_CLASS}>
-      <DeviceIcon devices={notice.devices} />
+    <div role="alert" className={PANEL_BAR_CLASS}>
+      <Icon className="text-muted-foreground size-3.5 shrink-0" />
       <span className="text-foreground min-w-0 flex-1 truncate text-xs">
         Loxel can&apos;t use your {devicesLabel(notice.devices)}: turn on Loxel in System Settings,
         then reopen Loxel if asked

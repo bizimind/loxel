@@ -145,7 +145,7 @@ interface Window {
     }) => () => void;
     /** The per-site camera and microphone decisions from settings (payload: `MediaSites`). */
     setMediaSites: (sites: unknown) => void;
-    /** Answer a camera or microphone request (payload: `MediaPermissionResponse`). */
+    /** Answer a camera or microphone request (payload: `SitePermissionResponse`). */
     respondToMediaPermission: (response: unknown) => void;
     /** Open the OS privacy settings for `device` (`MediaDevice`), where Loxel's access is turned on. */
     openMediaSystemSettings: (device: unknown) => void;
