@@ -10,7 +10,8 @@ import { isReadableRustManifest, RUST_MANIFEST, untrustedNestedRepo } from "./ru
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";
 
-const COMMAND_TIMEOUT_MS = 10_000;
+/** The version checks answer at once, but on a loaded machine a refusal is worse than a wait. */
+const COMMAND_TIMEOUT_MS = 30_000;
 /** A manifest's check reads one file, but on a loaded machine a refusal is worse than a wait. */
 const MANIFEST_CHECK_TIMEOUT_MS = 30_000;
 

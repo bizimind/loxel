@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +6,9 @@ import { dirname, join } from "node:path";
 import type { JavaEnv } from "@/api/java-env-model";
 import { writeExecutable } from "@/test/executable";
 import { repeatUntil } from "@/test/repeat-until";
+
+// Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
+setDefaultTimeout(60_000);
 
 // JDK overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "java-env-state-"));

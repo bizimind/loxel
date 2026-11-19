@@ -88,6 +88,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
+import { installClientCertificatePicker } from "./browser-client-certificates";
 import { installBrowserDownloads } from "./browser-downloads";
 import { installBrowserFavicons } from "./browser-favicons";
 import {
@@ -1136,6 +1137,7 @@ app.whenReady().then(async () => {
     );
     installBrowserFavicons(browserSession);
     installBrowserDownloads(browserSession);
+    installClientCertificatePicker(browserSession);
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();

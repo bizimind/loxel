@@ -93,6 +93,8 @@ All browser panels share one persistent session, so cookies and logins carry acr
 
 You can also sign in with a passkey saved on your phone. When a site asks for a passkey your phone can provide, the browser panel that asked shows a QR code: scan it with your phone's camera and confirm on the phone. Bluetooth has to be on for both your Mac and your phone, because the phone checks that it is nearby, and the first time macOS asks to let Loxel use Bluetooth. **Hide QR code** only hides the code: the site still waits, so you can answer with Touch ID or a security key instead. When a site asks for a passkey that only a single device holds, such as one kept in this Mac's iCloud Keychain, no code appears and the site's other sign-in options still work.
 
+Some sites, often company intranets, sign you in with a certificate from your keychain. A site never gets one silently: Loxel asks which certificate to use, listing each one's name, issuer and expiry, or lets you choose **Don't Use a Certificate**. When a page connects to a different site that asks for a certificate, the question names both. Your answer holds for that site until you quit Loxel. If you turn down a page's questions twice, it stops asking until the page navigates.
+
 ---
 
 ## Page dialogs

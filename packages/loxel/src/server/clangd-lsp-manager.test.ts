@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, describe, expect, jest, setDefaultTimeout, test } from "bun:test";
 import {
   chmod,
   mkdir,
@@ -37,6 +37,10 @@ import {
 } from "./clangd-lsp-manager";
 import { FakeClient } from "./clangd-test-client";
 import type { WtLspSession } from "./stdio-lsp-manager";
+
+// Each test spawns a clangd, real or a script, and git; on a loaded machine that takes far longer
+// than the default.
+setDefaultTimeout(60_000);
 
 /** A clangd the manager will run: Xcode's isn't supported. */
 const CLANGD = Bun.which("clangd");

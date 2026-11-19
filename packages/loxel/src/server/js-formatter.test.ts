@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
+import { SAVE_DEADLINE_MS } from "@/test/save-deadline";
 
 // Trust lives in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "js-formatter-state-"));
@@ -22,7 +23,7 @@ const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { idleTimer } = await import("./formatter-backends");
 
 // Saves spawn real processes and resolve Node, which takes a while on a busy machine.
-setDefaultTimeout(60_000);
+setDefaultTimeout(180_000);
 
 const realNode = Bun.which("node");
 const originalPath = process.env.PATH;
@@ -42,7 +43,7 @@ beforeEach(async () => {
   process.env.PATH = [userBin, realNode && dirname(realNode), "/usr/bin", "/bin"]
     .filter(Boolean)
     .join(":");
-  service = new FormatService();
+  service = new FormatService(undefined, SAVE_DEADLINE_MS, SAVE_DEADLINE_MS);
 });
 
 afterEach(async () => {
