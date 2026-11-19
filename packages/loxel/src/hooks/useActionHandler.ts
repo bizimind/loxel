@@ -28,7 +28,7 @@ import { manageRepoTrust } from "@/lib/repo-trust-dialog";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { toolchainStatusItems } from "@/lib/toolchain-status-items";
-import { getActiveWt } from "@/store/active-worktree";
+import { requireActiveWorktree } from "@/queries/use-scope";
 import { openAddProjectWizard } from "@/store/add-project-wizard";
 import { closeCenterTab } from "@/store/closed-tabs";
 import { useCommandPaletteStore } from "@/store/command-palette";
@@ -450,7 +450,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         restartLanguageServers();
         break;
       case "worktree.manageRepoTrust":
-        void manageRepoTrust(getActiveWt());
+        void manageRepoTrust(requireActiveWorktree().path);
         break;
       case "project.add":
         openAddProjectWizard();

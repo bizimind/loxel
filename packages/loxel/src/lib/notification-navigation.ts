@@ -53,7 +53,7 @@ export function navigateToNotification(notification: ClientNotification): void {
   // Panels the inbox opened: go to the worktree (or Home) they opened in, unless they opened in
   // whatever the window showed. The notification has done its job.
   if (source.kind === "inbox") {
-    usePanelNotificationStore.getState().dismiss(notification.id);
+    usePanelNotificationStore.getState().dismiss(notification);
     if (worktree !== undefined) showPlace(worktree, () => {});
     return;
   }

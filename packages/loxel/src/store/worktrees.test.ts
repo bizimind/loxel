@@ -12,6 +12,8 @@ const WT_PATH = "/repo/.worktrees/feat-x";
 const NEW_PATH = "/repo/.worktrees/new-wt";
 const P = localRef(PROJECT);
 const PK = formatWorktreeRef(P);
+/** A second server the window is connected to, holding the same paths. */
+const THERE = toServerId("server-there");
 
 let plan: WorktreeRemovePlan;
 let removeCalls: {
@@ -38,6 +40,7 @@ const actualClient = await import("@/api/client");
 // (logging, ws client) is shared with the store under test.
 mock.module("@/api/client", () => ({
   ...actualClient,
+  hasConnection: (server: string) => server === localServerId() || server === THERE,
   planRemoveWorktree: (_projectPath: string, wtPath: string) => {
     planRemoveCalls.push(wtPath);
     return Promise.resolve(plan);
@@ -79,7 +82,7 @@ mock.module("@/components/ui/toast", () => ({
 
 const { queryClient } = await import("@/query-client");
 const { queryKeys } = await import("@/queries/query-keys");
-const { useFileSearchStore } = await import("./file-search");
+const { getRecentFiles } = await import("./file-search");
 const { registerLayoutCache } = await import("./worktree-cache");
 const { getWorktreeUI } = await import("./worktree-ui");
 const {
@@ -190,7 +193,7 @@ describe("the active worktree", () => {
     };
     useWorktreeStore.setState(activeWorktreeFields(worktreeRef(toServerId("gone"), WT_PATH)));
 
-    useWorktreeStore.getState().applyEnrichedProjects([project]);
+    useWorktreeStore.getState().applyEnrichedProjects(localServerId(), [project]);
 
     expect(useWorktreeStore.getState().activeWorktree).toEqual(P);
   });
@@ -455,8 +458,11 @@ describe("a worktree removed outside the app", () => {
       [OTHER_WT, {}],
     ]);
     const unregister = registerLayoutCache(localServerId(), layoutCache);
-    useFileSearchStore.getState().setFiles(WT_PATH, ["a.ts"], false);
-    useFileSearchStore.getState().recordOpen(WT_PATH, "a.ts");
+    queryClient.setQueryData(queryKeys.fileIndex(localRef(PROJECT), localRef(WT_PATH)), {
+      files: ["a.ts"],
+      truncated: false,
+    });
+    getRecentFiles(localRef(WT_PATH)).getState().recordOpen("a.ts");
     queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH)), {
       stale: true,
     });
@@ -484,8 +490,10 @@ describe("a worktree removed outside the app", () => {
       expect(getWorktreeUI(localRef(WT_PATH))).not.toBe(worktreeUi);
       expect(layoutCache.has(WT_PATH)).toBe(false);
       expect(layoutCache.has(OTHER_WT)).toBe(true);
-      expect(useFileSearchStore.getState().indexByWorktree.has(WT_PATH)).toBe(false);
-      expect(useFileSearchStore.getState().mruByWorktree.has(WT_PATH)).toBe(false);
+      expect(
+        queryClient.getQueryData(queryKeys.fileIndex(localRef(PROJECT), localRef(WT_PATH))),
+      ).toBeUndefined();
+      expect(getRecentFiles(localRef(WT_PATH)).getState().recent).toEqual([]);
       expect(
         queryClient.getQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH))),
       ).toBeUndefined();
@@ -498,9 +506,10 @@ describe("a worktree removed outside the app", () => {
       expect(kept).toEqual({ kept: true });
       expect(queryClient.getQueryData(elsewhereDir)).toEqual(["kept"]);
       expect(queryClient.getQueryData(elsewhereStatus)).toEqual({ kept: true });
-      expect(unsubscribe).toHaveBeenCalledWith(WT_PATH);
-      expect(isListedWorktree(WT_PATH)).toBe(false);
-      expect(isListedWorktree(OTHER_WT)).toBe(true);
+      expect(unsubscribe).toHaveBeenCalledWith(localRef(WT_PATH));
+      expect(isListedWorktree(localRef(WT_PATH))).toBe(false);
+      expect(isListedWorktree(localRef(OTHER_WT))).toBe(true);
+      expect(isListedWorktree(worktreeRef(elsewhere, OTHER_WT))).toBe(false);
     } finally {
       unsubscribe.mockRestore();
       unregister();
@@ -546,7 +555,9 @@ describe("applyEnrichedProjects", () => {
       },
     });
 
-    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [] }]);
+    useWorktreeStore
+      .getState()
+      .applyEnrichedProjects(localServerId(), [{ ...project, worktrees: [] }]);
 
     const state = useWorktreeStore.getState().byProject[PK];
     expect(state?.worktrees).toEqual([worktree]);
@@ -566,11 +577,73 @@ describe("applyEnrichedProjects", () => {
       },
     });
 
-    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
+    useWorktreeStore
+      .getState()
+      .applyEnrichedProjects(localServerId(), [{ ...project, worktrees: [worktree] }]);
 
     const state = useWorktreeStore.getState().byProject[PK];
     expect(state?.customOrder).toEqual([key(WT_PATH)]);
     expect(state?.archivedRefs).toEqual([]);
+  });
+});
+
+describe("applyEnrichedProjects with two servers", () => {
+  afterEach(() => useWorktreeStore.getState().reset());
+
+  const listed = (server: typeof THERE, path: string, worktrees: WorktreeEntry[]) => ({
+    id: `${server}${path}`,
+    server,
+    path,
+    name: "repo",
+    addedAt: "",
+    isBare: false,
+    worktreesDir: `${path}/.worktrees`,
+    worktreeMetadata: false,
+    worktrees,
+  });
+  const there = worktreeRef(THERE, PROJECT);
+  const thereKey = formatWorktreeRef(there);
+
+  test("one server's list keeps the other's projects, lists and active worktree", () => {
+    const apply = useWorktreeStore.getState().applyEnrichedProjects;
+    apply(THERE, [listed(THERE, PROJECT, [worktree])]);
+    useWorktreeStore.setState((s) => ({
+      ...activeWorktreeFields(worktreeRef(THERE, WT_PATH)),
+      byProject: {
+        ...s.byProject,
+        [thereKey]: { ...s.byProject[thereKey]!, archivedRefs: [worktreeKey(there, WT_PATH)] },
+      },
+    }));
+
+    // This server's list holds the same paths, but not the shown worktree.
+    apply(localServerId(), [listed(localServerId(), PROJECT, [])]);
+
+    const state = useWorktreeStore.getState();
+    expect(state.activeWorktree).toEqual(worktreeRef(THERE, WT_PATH));
+    expect(state.byProject[thereKey]?.worktrees).toEqual([worktree]);
+    expect(state.byProject[thereKey]?.archivedRefs).toEqual([worktreeKey(there, WT_PATH)]);
+    expect(state.byProject[PK]).toBeDefined();
+  });
+
+  test("a project a server no longer lists loses its entry; the other server's stays", () => {
+    const apply = useWorktreeStore.getState().applyEnrichedProjects;
+    apply(THERE, [listed(THERE, PROJECT, [worktree])]);
+    apply(localServerId(), [listed(localServerId(), PROJECT, [worktree])]);
+
+    apply(localServerId(), []);
+
+    const { byProject } = useWorktreeStore.getState();
+    expect(byProject[PK]).toBeUndefined();
+    expect(byProject[thereKey]?.worktrees).toEqual([worktree]);
+  });
+
+  test("moves off a worktree its own server no longer lists, to a project of that server", () => {
+    const apply = useWorktreeStore.getState().applyEnrichedProjects;
+    useWorktreeStore.setState(activeWorktreeFields(worktreeRef(THERE, WT_PATH)));
+
+    apply(THERE, [listed(THERE, "/other", [])]);
+
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(worktreeRef(THERE, "/other"));
   });
 });
 
@@ -783,11 +856,13 @@ describe("createWorktree", () => {
     await useWorktreeStore.getState().createWorktree(P, "new-wt");
     const project = useProjectStore.getState().projects[0]!;
 
-    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
+    useWorktreeStore
+      .getState()
+      .applyEnrichedProjects(localServerId(), [{ ...project, worktrees: [worktree] }]);
     expect(pendingOf(NEW_PATH)).toBe("creating");
     useWorktreeStore
       .getState()
-      .applyEnrichedProjects([{ ...project, worktrees: [worktree, created] }]);
+      .applyEnrichedProjects(localServerId(), [{ ...project, worktrees: [worktree, created] }]);
     expect(pendingOf(NEW_PATH)).toBe("creating");
   });
 

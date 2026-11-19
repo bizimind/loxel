@@ -134,7 +134,7 @@ Where to look: [GraphPanel.tsx](../src/components/graph/GraphPanel.tsx), [Commit
 
 ## Mutations
 
-[use-git-mutations.ts](../src/queries/use-git-mutations.ts) wraps each POST route in a TanStack mutation that targets the active worktree (`getActiveWt()`, except `useRevertToHeadMutation`, which takes an explicit worktree) and invalidates the affected queries on success. The WebSocket events above would refresh the same data; the invalidations make the acting window update without waiting for the watcher.
+[use-git-mutations.ts](../src/queries/use-git-mutations.ts) wraps each POST route in a TanStack mutation that targets the active worktree of the render that started it, whose project and ref also name the queries it invalidates on success (`useRevertToHeadMutation` takes an explicit worktree ref and invalidates that worktree's project's). The WebSocket events above would refresh the same data; the invalidations make the acting window update without waiting for the watcher.
 
 | Hook                                                                                    | Used by                                                                                                                                              |
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |

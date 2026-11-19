@@ -64,7 +64,7 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
     const parent = parentOf(dir);
     await ensureDir(parent);
     const { path } = await api.createProjectDir(wtPath, { dir: parent, name: pathName(dir) });
-    invalidateDirQueries(parent);
+    invalidateDirQueries(wt, parent);
     if (path !== dir) await refuseStray(path, `${dir} already exists`);
   }
 
@@ -117,7 +117,7 @@ export function createLspWorkspaceFiles(wt: WorktreeRef): WorkspaceFileSystem {
       const dir = parentOf(path);
       await ensureDir(dir);
       const created = await api.createProjectFile(wtPath, { dir, name: pathName(path) });
-      invalidateDirQueries(dir);
+      invalidateDirQueries(wt, dir);
       // The route picks a free name when the file appeared meanwhile.
       if (created.path !== path) await refuseStray(created.path, `${path} already exists`);
     },

@@ -57,6 +57,7 @@ const {
 const { setCenterApi } = await import("@/store/tools-bar");
 const { fileEditorKey, useEditorStateStore, viewEditorKey } = await import("@/store/editor-state");
 const { localServerId, localRef } = await import("@/api/local-server");
+const { toServerId } = await import("@/api/worktree-ref");
 const TEST_SERVER = localServerId();
 /** The editor key of a file's own tab. */
 const fk = (path: string) => fileEditorKey(TEST_SERVER, path);
@@ -114,7 +115,7 @@ describe("handleFileMoved", () => {
     a.api.setActive();
     expect(api.activePanel?.id).toBe("codeeditor-/repo/a.ts");
 
-    await handleFileMoved("/repo/b.ts", "/repo/renamed.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts");
 
     expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/a.ts", "codeeditor-/repo/renamed.ts"]);
     expect(api.activePanel?.id).toBe("codeeditor-/repo/a.ts");
@@ -125,7 +126,7 @@ describe("handleFileMoved", () => {
     const { api, a } = setup();
     a.api.setActive();
 
-    await handleFileMoved("/repo/a.ts", "/repo/renamed.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/a.ts", "/repo/renamed.ts");
 
     expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/renamed.ts", "codeeditor-/repo/b.ts"]);
     expect(api.activePanel?.id).toBe("codeeditor-/repo/renamed.ts");
@@ -137,7 +138,7 @@ describe("handleFileMoved", () => {
     c.api.setActive();
     expect(api.activeGroup).toBe(c.group);
 
-    await handleFileMoved("/repo/b.ts", "/repo/renamed.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts");
 
     const left = api.groups[0]!;
     expect(left.activePanel?.id).toBe("codeeditor-/repo/renamed.ts");
@@ -148,7 +149,7 @@ describe("handleFileMoved", () => {
   test("keeps a group that held only the renamed tab", async () => {
     const { api } = setup();
 
-    await handleFileMoved("/repo/c.ts", "/repo/renamed.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/c.ts", "/repo/renamed.ts");
 
     expect(api.groups).toHaveLength(2);
     expect(tabIds(api, 1)).toEqual(["codeeditor-/repo/renamed.ts"]);
@@ -158,7 +159,7 @@ describe("handleFileMoved", () => {
     const { api, a } = setup();
     a.api.setActive();
 
-    await handleFileMoved("/repo/b.ts", "/repo/c.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/c.ts");
 
     expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/a.ts"]);
     expect(tabIds(api, 1)).toEqual(["codeeditor-/repo/c.ts"]);
@@ -169,7 +170,7 @@ describe("handleFileMoved", () => {
     setup();
     useEditorStateStore.getState().openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(true);
 
     expect(useEditorStateStore.getState().files.get(fk("/repo/b.ts"))?.movedTo).toBe(
       "/repo/renamed.ts",
@@ -190,7 +191,7 @@ describe("handleFileMoved", () => {
     dirtyEditor("a\nb\n", "a\nb\nmine\n");
     diskContent["/repo/renamed.ts"] = "a\nb\n";
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(true);
     await Bun.sleep(0);
 
     expect(writes).toEqual([{ path: "/repo/renamed.ts", content: "a\nb\nmine\n" }]);
@@ -201,7 +202,7 @@ describe("handleFileMoved", () => {
     dirtyEditor("a\nb\nc\n", "a\nb\nc\nmine\n");
     diskContent["/repo/renamed.ts"] = "theirs\na\nb\nc\n";
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(true);
     await Bun.sleep(0);
 
     expect(writes).toEqual([{ path: "/repo/renamed.ts", content: "theirs\na\nb\nc\nmine\n" }]);
@@ -212,7 +213,7 @@ describe("handleFileMoved", () => {
     dirtyEditor("a\n", "mine\n");
     diskContent["/repo/renamed.ts"] = "theirs\n";
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
@@ -226,7 +227,7 @@ describe("handleFileMoved", () => {
     const { api } = setup();
     dirtyEditor("a\n", "a\nmine\n");
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/c.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/c.ts")).toBe(false);
 
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
@@ -242,7 +243,7 @@ describe("handleFileMoved", () => {
     diskContent["/repo/renamed.ts"] = "a\n";
     failWrites = true;
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
@@ -260,7 +261,7 @@ describe("handleFileMoved", () => {
     store.registerPendingEdit(fk("/repo/b.ts"), () => ({ content: "mine\n" }));
     diskContent["/repo/renamed.ts"] = "theirs\n";
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(writes).toEqual([]);
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
@@ -279,7 +280,7 @@ describe("handleFileMoved", () => {
     store.markSaving(fk("/repo/b.ts"), "n1"); // snapshot "a\nmore\n", written before the move
     diskContent["/repo/renamed.ts"] = "a\nmore\n";
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(true);
     await Bun.sleep(0);
 
     expect(writes).toEqual([{ path: "/repo/renamed.ts", content: "a\nmore\nmore again\n" }]);
@@ -291,8 +292,8 @@ describe("handleFileMoved", () => {
     diskContent["/repo/renamed.ts"] = "a\n";
 
     const results = await Promise.all([
-      handleFileMoved("/repo/b.ts", "/repo/renamed.ts"),
-      handleFileMoved("/repo/b.ts", "/repo/renamed.ts", { announce: true }),
+      handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts"),
+      handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts", { announce: true }),
     ]);
 
     expect(results).toEqual([true, false]);
@@ -304,7 +305,7 @@ describe("handleFileMoved", () => {
     setup();
     useEditorStateStore.getState().openFile(fk("/repo/b.ts"), TEST_SERVER, "/repo/b.ts");
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/c.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/c.ts")).toBe(false);
 
     expect(useEditorStateStore.getState().files.has(fk("/repo/b.ts"))).toBe(false);
   });
@@ -312,8 +313,8 @@ describe("handleFileMoved", () => {
   test("records the old path on the new tab only when the move is announced", async () => {
     const { api } = setup();
 
-    await handleFileMoved("/repo/b.ts", "/repo/renamed.ts", { announce: true });
-    await handleFileMoved("/repo/c.ts", "/repo/quiet.ts");
+    await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts", { announce: true });
+    await handleFileMoved(TEST_SERVER, "/repo/c.ts", "/repo/quiet.ts");
 
     expect(api.getPanel("codeeditor-/repo/renamed.ts")?.params?.movedFrom).toBe("/repo/b.ts");
     expect(api.getPanel("codeeditor-/repo/quiet.ts")?.params?.movedFrom).toBeUndefined();
@@ -327,7 +328,7 @@ describe("handleFileMoved", () => {
     store.handleDiskChange(fk("/repo/b.ts"), [], "theirs");
     expect(useEditorStateStore.getState().files.get(fk("/repo/b.ts"))?.state).toBe("diverged");
 
-    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
@@ -336,7 +337,7 @@ describe("handleFileMoved", () => {
 
   test("is a no-op for a path with no tab", async () => {
     setup();
-    expect(await handleFileMoved("/repo/none.ts", "/repo/renamed.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/none.ts", "/repo/renamed.ts")).toBe(false);
   });
 });
 
@@ -674,6 +675,19 @@ describe("openBrowserTab", () => {
   });
 });
 
+describe("file moves and deletions on another server", () => {
+  const THERE = toServerId("other-server");
+
+  test("leave this server's tabs at the same path", async () => {
+    const { api } = setup();
+
+    expect(await handleFileMoved(THERE, "/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+    handleFileDeleted(THERE, "/repo/a.ts");
+
+    expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/a.ts", "codeeditor-/repo/b.ts"]);
+  });
+});
+
 describe("compare panel sides of a deleted or moved file", () => {
   test("are marked deleted, while the file's own tab is closed", () => {
     setup();
@@ -682,7 +696,7 @@ describe("compare panel sides of a deleted or moved file", () => {
     store.openFile(viewEditorKey("compare-1:old"), TEST_SERVER, "/repo/a.ts");
     store.openFile(viewEditorKey("compare-1:new"), TEST_SERVER, "/repo/c.ts");
 
-    handleFileDeleted("/repo/a.ts");
+    handleFileDeleted(TEST_SERVER, "/repo/a.ts");
 
     const { files } = useEditorStateStore.getState();
     expect(files.has(fk("/repo/a.ts"))).toBe(false);
@@ -696,7 +710,7 @@ describe("compare panel sides of a deleted or moved file", () => {
       .getState()
       .openFile(viewEditorKey("compare-1:old"), TEST_SERVER, "/repo/dir/x.ts");
 
-    expect(await handleFileMoved("/repo/dir/x.ts", "/repo/y.ts")).toBe(false);
+    expect(await handleFileMoved(TEST_SERVER, "/repo/dir/x.ts", "/repo/y.ts")).toBe(false);
 
     expect(useEditorStateStore.getState().files.get(viewEditorKey("compare-1:old"))?.deleted).toBe(
       true,

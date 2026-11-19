@@ -5,9 +5,9 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import { wsClient } from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { wsClientOf } from "@/api/client";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
+import { sameWorktreeRef } from "@/api/worktree-ref";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
@@ -112,28 +112,31 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const handleRemoveFromOthers = useCallback(
     async (path: string) => {
-      const wt = getQueryScope().activeWorktree?.path;
+      const wt = getQueryScope().activeWorktree;
       if (!wt) return;
       try {
-        await api.removeExternalFolder(wt, path);
+        await api.removeExternalFolder(wt.path, path);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to remove folder");
         return;
       }
       // Forget its tree like a collapse does, so reopening it later lists its current contents.
       treeRef.current?.clearSubtree(path);
-      removeDirQueries(queryClient, path);
+      removeDirQueries(queryClient, wt, path);
       const ui = getCurrentWorktreeUI().getState();
       ui.setExpandedProjectFolders(
         new Set([...ui.expandedProjectFolders].filter((p) => !isWithin(p, path))),
       );
       // Editors still open on its files keep receiving disk changes as individual Others files.
-      const openPaths = openEditorPaths(
-        useEditorStateStore.getState().files,
-        localServerId(), // the server `wsClient` reaches
-      ).filter((p) => isWithin(p, path));
+      const openPaths = openEditorPaths(useEditorStateStore.getState().files, wt.server).filter(
+        (p) => isWithin(p, path),
+      );
       if (openPaths.length > 0) {
-        wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
+        wsClientOf(wt.server).send({
+          type: "register_external_files",
+          worktreePath: wt.path,
+          filePaths: openPaths,
+        });
       }
     },
     [queryClient],
@@ -505,13 +508,14 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const handleTreeToggle = useCallback(
     (path: string, expanded: boolean) => {
-      if (!expanded && activeWorktreePath) {
+      const wt = getQueryScope().activeWorktree;
+      if (!expanded && wt) {
         treeRef.current?.clearSubtree(path);
-        api.unwatchDir(activeWorktreePath, path);
-        removeDirQueries(queryClient, path);
+        api.unwatchDir(wt.path, path);
+        removeDirQueries(queryClient, wt, path);
       }
     },
-    [activeWorktreePath, queryClient],
+    [queryClient],
   );
 
   const handleTreeContextMenu = useCallback(
@@ -533,8 +537,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   // restart) were pushed to nobody, and a server that dropped the worktree's resources no longer
   // watches its expanded folders. Listing them again fixes both.
   useEffect(() => {
-    return onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-      if (wtPath !== getQueryScope().activeWorktree?.path) return;
+    return onLoxelEvent("loxel-worktree-files-resynced", ({ wt }) => {
+      const active = getQueryScope().activeWorktree;
+      if (!active || !sameWorktreeRef(wt, active)) return;
       treeRef.current?.reloadExpanded();
     });
   }, []);

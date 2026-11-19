@@ -71,8 +71,8 @@ export function useLoxelEventListeners(): void {
         "oldPath" in d ? openCompareFiles(d.oldPath, d.newPath) : duplicateComparison(d.placement),
       ),
       onLoxelEvent("loxel-open-localdb", () => openLocalDb()),
-      onLoxelEvent("loxel-file-moved", (d) => void handleFileMoved(d.oldPath, d.newPath)),
-      onLoxelEvent("loxel-file-deleted", (d) => handleFileDeleted(d.filePath)),
+      onLoxelEvent("loxel-file-moved", (d) => void handleFileMoved(d.server, d.oldPath, d.newPath)),
+      onLoxelEvent("loxel-file-deleted", (d) => handleFileDeleted(d.server, d.filePath)),
     ];
 
     // Listen for Electron IPC: Cmd+click on external links opens in browser panel tab.

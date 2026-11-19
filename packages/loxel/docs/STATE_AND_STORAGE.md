@@ -21,7 +21,7 @@ The renderer owns UI state in zustand stores under [src/store/](../src/store/). 
 | [worktrees.ts](../src/store/worktrees.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `worktrees`         | `byProject` (worktree lists per project ref) and `activeWorktree`; only `customOrder`/`archivedRefs`/`collapsedRefs` per project are persisted              |
 | [editor-state.ts](../src/store/editor-state.ts), [comments.ts](../src/store/comments.ts), [logs.ts](../src/store/logs.ts), [panel-badges.ts](../src/store/panel-badges.ts), [panel-notifications.ts](../src/store/panel-notifications.ts), [file-search.ts](../src/store/file-search.ts), [command-palette.ts](../src/store/command-palette.ts), [symbol-search.ts](../src/store/symbol-search.ts), [editor-indentation.ts](../src/store/editor-indentation.ts), [browser-pages.ts](../src/store/browser-pages.ts) | none                | Ephemeral runtime state                                                                                                                                     |
 
-Some global stores are keyed internally by worktree or session rather than using the per-worktree factory: `file-search.ts` keeps `Map`s keyed by worktree, dropped when the worktree is released. `browser-pages.ts` keeps the window's loaded browser pages by panel id, each with its layout's key, and closes a worktree's when it is released (see [ELECTRON.md](ELECTRON.md#browser-panels)). `panel-notifications.ts` mirrors server state (the server's in-memory `NotificationStore`) and is not a source of truth. `comments.ts` is cleared on every worktree switch by `transitionWorktreeState` in [worktree-cache.ts](../src/store/worktree-cache.ts).
+Some global stores are keyed internally by worktree or session rather than using the per-worktree factory. `browser-pages.ts` keeps the window's loaded browser pages by panel id, each with its layout's key, and closes a worktree's when it is released (see [ELECTRON.md](ELECTRON.md#browser-panels)). `panel-notifications.ts` mirrors server state (each server's `NotificationStore`, kept apart by server) and is not a source of truth. `comments.ts` is cleared on every worktree switch by `transitionWorktreeState` in [worktree-cache.ts](../src/store/worktree-cache.ts).
 
 ### Per-worktree
 
@@ -35,18 +35,20 @@ Some global stores are keyed internally by worktree or session rather than using
 
 Stores built on the factory, all in memory only:
 
-| Store                                                         | Holds                                                                                                                                           |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| [worktree-ui.ts](../src/store/worktree-ui.ts)                 | Graph search and filters, selected diff/project file, diff file kept open while edited, expanded folders, pending reveal and pending file opens |
-| [worktree-tools-bar.ts](../src/store/worktree-tools-bar.ts)   | Tool bar entries per zone, active sidebar panels, terminal instances, last sidebar sizes                                                        |
-| [worktree-repository.ts](../src/store/worktree-repository.ts) | Selected commits and diff source                                                                                                                |
-| [worktree-reviews.ts](../src/store/worktree-reviews.ts)       | Review list and selection for the review overlay (see [CODE_REVIEW.md](CODE_REVIEW.md))                                                         |
+| Store                                                            | Holds                                                                                                                                           |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| [worktree-ui.ts](../src/store/worktree-ui.ts)                    | Graph search and filters, selected diff/project file, diff file kept open while edited, expanded folders, pending reveal and pending file opens |
+| [worktree-tools-bar.ts](../src/store/worktree-tools-bar.ts)      | Tool bar entries per zone, active sidebar panels, terminal instances, last sidebar sizes                                                        |
+| [worktree-repository.ts](../src/store/worktree-repository.ts)    | Selected commits and diff source                                                                                                                |
+| [worktree-reviews.ts](../src/store/worktree-reviews.ts)          | Review list and selection for the review overlay (see [CODE_REVIEW.md](CODE_REVIEW.md))                                                         |
+| [file-search.ts](../src/store/file-search.ts) (`useRecentFiles`) | Quick Open's recently opened files; the file index itself is a query (`queryKeys.fileIndex`)                                                    |
 
 Related helpers that are not stores:
 
 - [worktree-cache.ts](../src/store/worktree-cache.ts): values per worktree (by `formatWorktreeRef`, Home's apart) and key, for component-local values that must survive a worktree switch, used for inner dockview layouts (`getWorktreeInnerLayout`). Not persisted.
 - [worktree-history.ts](../src/store/worktree-history.ts): back/forward stacks of worktree refs, in memory per window, fed by a subscription to `activeWorktree`.
-- [active-worktree.ts](../src/store/active-worktree.ts): `getActiveWt()` reads the active path or throws; used by actions that require a worktree. `HOME_LAYOUT_KEY` is the layout key of Home (no worktree active), and `activeLayoutKey()` the key of the layout the window shows. `layoutWorktree(layoutKey)` turns a layout key into the worktree whose per-worktree store instances hold that layout's closed tabs and pending opens (null, Home's own instance, for Home), and `layoutWorktreeRef(path)` turns a path a layout holds into a ref (see [Layout persistence](#layout-persistence)).
+- [use-scope.ts](../src/queries/use-scope.ts): `getQueryScope()` reads the active worktree and its project as refs, and `requireActiveWorktree()` the active worktree or throws, for actions that require one; `useShownWorktree()` is the worktree [App.tsx](../src/App.tsx) shows, which waits for the first project list after a reload so no query is keyed before its project is known.
+- [active-worktree.ts](../src/store/active-worktree.ts): `HOME_LAYOUT_KEY` is the layout key of Home (no worktree active), and `activeLayoutKey()` the key of the layout the window shows. `layoutWorktree(layoutKey)` turns a layout key into the worktree whose per-worktree store instances hold that layout's closed tabs and pending opens (null, Home's own instance, for Home), and `layoutWorktreeRef(path)` turns a path a layout holds into a ref (see [Layout persistence](#layout-persistence)).
 
 Per-worktree state survives switching within a window's lifetime but not a reload. What does survive a reload per worktree is the dockview layout (see [Layout persistence](#layout-persistence)) and the server-side state described in [SHARED_SERVER.md](SHARED_SERVER.md#state-scopes).
 
@@ -172,7 +174,7 @@ The renderer uses browser storage only where state is per window or must exist w
 - `localStorage[<prefix>-window-id]` ([window-id.ts](../src/lib/window-id.ts)): the window ID outside Electron only; Electron windows get theirs from the main process.
 - `localStorage[<prefix>-logs-last-seen-error-total]` ([panel-badges.ts](../src/store/panel-badges.ts)): logs badge bookkeeping.
 - `localStorage[loxel-dark-mode]` ([theme-cache.ts](../src/lib/theme-cache.ts)): the last resolved theme, which an inline script in `index.html` applies before first paint and `ui.ts` starts `darkMode` from, until the settings load.
-- IndexedDB `loxel-save-outbox` ([save-outbox.ts](../src/lib/save-outbox.ts)): editor saves the server has not confirmed, so they survive a server restart and the window closing; see [EDITOR.md](EDITOR.md#save-outbox).
+- IndexedDB `loxel-save-outbox` ([save-outbox.ts](../src/lib/save-outbox.ts)): editor saves the server has not confirmed, each with the server it goes to, so they survive a server restart and the window closing; see [EDITOR.md](EDITOR.md#save-outbox).
 - Legacy store and layout entries, read once for migration.
 
 ## Invariants

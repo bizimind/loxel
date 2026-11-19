@@ -1,5 +1,6 @@
 import * as api from "@/api/client";
 import type { WorktreeRef } from "@/api/worktree-ref";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getWorktreeUI } from "@/store/worktree-ui";
@@ -7,8 +8,8 @@ import { getWorktreeUI } from "@/store/worktree-ui";
 /**
  * Rename a file or directory in worktree `wt`, one of its Others folders, or its Drafts, then
  * tell the rest of the app: remap `wt`'s UI paths (not the active worktree's: a language-server
- * edit can still be finishing after a worktree switch), move any open editor tab to
- * the new path (`loxel-file-moved`) and refresh the parent directory listing.
+ * edit can still be finishing after a worktree switch), move any open editor tab of `wt`'s server
+ * to the new path (`loxel-file-moved`) and refresh `wt`'s parent directory listing.
  *
  * Returns the new absolute path. Throws when the server refuses the rename.
  */
@@ -27,8 +28,8 @@ export async function renameFile(options: {
     ({ newPath } = await api.renameProjectFile(wt.path, { path, newName }));
   }
   getWorktreeUI(wt).getState().renameProjectPaths(path, newPath);
-  window.dispatchEvent(new CustomEvent("loxel-file-moved", { detail: { oldPath: path, newPath } }));
-  invalidateDirQueries(fileParentDir(path, wt.path));
+  dispatchLoxelEvent("loxel-file-moved", { server: wt.server, oldPath: path, newPath });
+  invalidateDirQueries(wt, fileParentDir(path, wt.path));
   return newPath;
 }
 
@@ -52,10 +53,8 @@ export async function moveFile(options: {
     }
   } finally {
     getWorktreeUI(wt).getState().renameProjectPaths(srcPath, newPath);
-    window.dispatchEvent(
-      new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
-    );
-    invalidateDirQueries(fileParentDir(srcPath, wt.path), destDir || wt.path);
+    dispatchLoxelEvent("loxel-file-moved", { server: wt.server, oldPath: srcPath, newPath });
+    invalidateDirQueries(wt, fileParentDir(srcPath, wt.path), destDir || wt.path);
   }
   return newPath;
 }
@@ -73,9 +72,9 @@ export async function deleteFile(options: {
   const { wt, path, isDetached } = options;
   if (isDetached) await api.deleteDetachedFile(wt.path, path);
   else await api.deleteProjectFile(wt.path, path);
-  window.dispatchEvent(new CustomEvent("loxel-file-deleted", { detail: { filePath: path } }));
+  dispatchLoxelEvent("loxel-file-deleted", { server: wt.server, filePath: path });
   const ui = getWorktreeUI(wt).getState();
   const selected = ui.selectedProjectFile;
   if (selected === path || selected?.startsWith(path + "/")) ui.setSelectedProjectFile(null);
-  invalidateDirQueries(fileParentDir(path, wt.path));
+  invalidateDirQueries(wt, fileParentDir(path, wt.path));
 }

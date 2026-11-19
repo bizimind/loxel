@@ -149,7 +149,7 @@ function emitDirChanged(dir: string) {
 
 function emitWorktreeFilesResynced(wtPath: string) {
   for (const listener of eventListeners.get("loxel-worktree-files-resynced") ?? []) {
-    listener({ wtPath });
+    listener({ wt: localRef(wtPath) });
   }
 }
 

@@ -74,6 +74,8 @@ export const queryKeys = {
     key("detachedFiles", project, wt),
   externalFiles: (project: WorktreeRef | null, wt: WorktreeRef | null) =>
     key("externalFiles", project, wt),
+  /** Every file of `wt`, for Quick Open and terminal links (`GET /api/file-index`). */
+  fileIndex: (project: WorktreeRef | null, wt: WorktreeRef | null) => key("fileIndex", project, wt),
   toolchainStatus: (toolchainId: string, project: WorktreeRef | null, wt: WorktreeRef | null) =>
     key("toolchainStatus", project, wt, toolchainId),
   /** One file's answer from a toolchain; under its status's key, so whatever refreshes that refreshes this. */

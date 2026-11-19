@@ -6,6 +6,7 @@ import type { DirEntry } from "@/api/project-files-model";
 import { showToast } from "@/components/ui/toast";
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { moveFile } from "@/lib/file-operations";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
@@ -53,9 +54,11 @@ export function useFileClipboard(
               path: clipboard.path,
               destPath: targetDir,
             });
-            window.dispatchEvent(
-              new CustomEvent("loxel-file-moved", { detail: { oldPath: clipboard.path, newPath } }),
-            );
+            dispatchLoxelEvent("loxel-file-moved", {
+              server: activeWorktree.server,
+              oldPath: clipboard.path,
+              newPath,
+            });
           } else {
             const { newPath } = await api.copyDetachedFileToProject({
               wt,

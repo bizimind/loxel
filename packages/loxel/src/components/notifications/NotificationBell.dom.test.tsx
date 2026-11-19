@@ -43,7 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   send.mockRestore();
-  usePanelNotificationStore.getState().clearFromServer();
+  usePanelNotificationStore.getState().clearFromServer(localServerId());
 });
 
 async function openBell() {
@@ -77,7 +77,7 @@ describe("the notification bell", () => {
     await openBell();
     fireEvent.click(screen.getByRole("button", { name: /^\+1 more/ }));
 
-    act(() => usePanelNotificationStore.getState().removeFromServer("build-1"));
+    act(() => usePanelNotificationStore.getState().removeFromServer(localServerId(), "build-1"));
 
     expect(titles()).toEqual(["Build 2", "Agent needs input"]);
     expect(screen.queryByRole("group")).toBeNull();

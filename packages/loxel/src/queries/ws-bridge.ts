@@ -281,7 +281,9 @@ export function useWsBridge(): void {
           // Moves done in Loxel are also reported here so every window's tabs follow them;
           // the window that made the move has usually handled it already (a no-op then).
           // Only a move from outside Loxel is announced in the editor.
-          void handleFileMoved(oldPath, newPath, { announce: source === "external" });
+          void handleFileMoved(localServerId(), oldPath, newPath, {
+            announce: source === "external",
+          });
           break;
         }
 
@@ -318,7 +320,7 @@ export function useWsBridge(): void {
           // For what the cache does not hold: the files tree reads its listings imperatively, so
           // the invalidation above refreshes none of them, and the open files outside the
           // worktree are registered with the server again.
-          dispatchLoxelEvent("loxel-worktree-files-resynced", { wtPath: message.wtPath });
+          dispatchLoxelEvent("loxel-worktree-files-resynced", { wt });
           break;
         }
 
@@ -344,11 +346,11 @@ export function useWsBridge(): void {
         case "open_folder":
         case "open_terminal":
         case "open_url":
-          void openRequest(message);
+          void openRequest(localServerId(), message);
           break;
 
         case "open_from_inbox":
-          void openFromInbox(message.inboxId, message.message);
+          void openFromInbox(localServerId(), message.inboxId, message.message);
           break;
 
         case "inbox_open_placed":
@@ -448,13 +450,15 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().addFromServer(localServerId(), message.data);
           break;
         case "notification_dismissed":
-          usePanelNotificationStore.getState().removeFromServer(message.id);
+          usePanelNotificationStore.getState().removeFromServer(localServerId(), message.id);
           break;
         case "notification_panel_dismissed":
-          usePanelNotificationStore.getState().removePanelFromServer(message.panelId);
+          usePanelNotificationStore
+            .getState()
+            .removePanelFromServer(localServerId(), message.panelId);
           break;
         case "notifications_cleared":
-          usePanelNotificationStore.getState().clearFromServer();
+          usePanelNotificationStore.getState().clearFromServer(localServerId());
           break;
 
         case "repo_trust_changed":

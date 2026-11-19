@@ -7,7 +7,7 @@ import { localServerId } from "@/api/local-server";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
-import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import { HOME_LAYOUT_KEY, layoutWorktreeRef } from "@/store/active-worktree";
 import { registerLayoutCache } from "@/store/worktree-cache";
 import { isListedWorktree } from "@/store/worktrees";
 
@@ -191,7 +191,7 @@ type LayoutSource = "server" | "cache" | "default";
  * at its path starts fresh.
  */
 function forgetIfRemoved(cache: Map<string, SerializedDockview>, key: string): void {
-  if (key !== HOME_LAYOUT_KEY && !isListedWorktree(key)) cache.delete(key);
+  if (key !== HOME_LAYOUT_KEY && !isListedWorktree(layoutWorktreeRef(key))) cache.delete(key);
 }
 
 export function isOuterSwapping(): boolean {

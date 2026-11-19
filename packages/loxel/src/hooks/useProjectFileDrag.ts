@@ -6,6 +6,7 @@ import type { TreeNode } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
 import { moveFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir } from "@/lib/project-file-helpers";
 import { getQueryScope } from "@/queries/use-scope";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -38,16 +39,14 @@ function hasDragType(e: React.DragEvent): boolean {
 
 async function moveDetachedFile(filePath: string, destDir: string) {
   try {
-    const wt = getQueryScope().activeWorktree?.path;
+    const wt = getQueryScope().activeWorktree;
     if (!wt) return;
     const { newPath } = await api.moveDetachedFileToProject({
-      wt,
+      wt: wt.path,
       path: filePath,
       destPath: destDir,
     });
-    window.dispatchEvent(
-      new CustomEvent("loxel-file-moved", { detail: { oldPath: filePath, newPath } }),
-    );
+    dispatchLoxelEvent("loxel-file-moved", { server: wt.server, oldPath: filePath, newPath });
   } catch (err) {
     frontendLog
       .child("files")

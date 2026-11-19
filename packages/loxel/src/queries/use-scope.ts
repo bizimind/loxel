@@ -28,11 +28,29 @@ export function useProjectRef(wt: WorktreeRef | null): WorktreeRef | null {
   );
 }
 
+/**
+ * The worktree the window shows: the active one once the first project list is in, undefined until
+ * then, null for Home. A worktree restored on reload waits for that list: its panels' queries are
+ * keyed by its project, and before it they would be created, and some sent, with none.
+ */
+export function useShownWorktree(): WorktreeRef | null | undefined {
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  const projectsFetched = useProjectStore((s) => s.projectsFetched);
+  return activeWorktree !== null && !projectsFetched ? undefined : activeWorktree;
+}
+
 /** Reactive scope for query keys — re-renders when project/worktree changes. */
 export function useQueryScope(): QueryScope {
   const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   const activeProject = useProjectRef(activeWorktree);
   return { activeProject, activeWorktree };
+}
+
+/** The active worktree, for an action that needs one (outside React); throws in Home. */
+export function requireActiveWorktree(): WorktreeRef {
+  const { activeWorktree } = useWorktreeStore.getState();
+  if (!activeWorktree) throw new Error("No active worktree");
+  return activeWorktree;
 }
 
 /** Read scope synchronously (for event handlers, outside React). */

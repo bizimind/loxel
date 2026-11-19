@@ -24,7 +24,7 @@ export function NotificationSiteGroup({
   // What the user sees: one that arrives as they click stays, as a new notification would.
   const dismissAll = () => {
     const { dismiss } = usePanelNotificationStore.getState();
-    for (const n of notifications) dismiss(n.id);
+    for (const n of notifications) dismiss(n);
   };
 
   if (!expanded) {

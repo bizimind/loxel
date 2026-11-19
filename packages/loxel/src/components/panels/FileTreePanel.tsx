@@ -122,19 +122,16 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
   const handleConfirmDiscard = useCallback(async () => {
     if (!discardTarget) return;
     setDiscardTarget(null);
+    // The discarded worktree is one of the active worktree's repository, on its server.
+    const { activeWorktree } = getQueryScope();
+    if (!activeWorktree) return;
+    const worktree = worktreeRef(activeWorktree.server, discardTarget.worktree);
     try {
-      await revertMutation.mutateAsync({
-        worktree: discardTarget.worktree,
-        files: discardPaths(discardTarget.files),
-      });
+      await revertMutation.mutateAsync({ worktree, files: discardPaths(discardTarget.files) });
       // A discarded file is no longer the one being edited: once it leaves the diff, the viewer
       // moves on to another file.
-      // The discarded worktree is one of the active worktree's repository, on its server.
-      const { activeWorktree } = getQueryScope();
-      const ui = activeWorktree
-        ? getWorktreeUI(worktreeRef(activeWorktree.server, discardTarget.worktree)).getState()
-        : null;
-      if (ui && discardTarget.files.some((f) => fileDiffPath(f) === ui.editedDiffFile)) {
+      const ui = getWorktreeUI(worktree).getState();
+      if (discardTarget.files.some((f) => fileDiffPath(f) === ui.editedDiffFile)) {
         ui.setEditedDiffFile(null);
       }
     } catch (err) {

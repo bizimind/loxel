@@ -5,6 +5,7 @@
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
 import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
+import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
 import type { CreateTerminalOptions, PatchDiffParams } from "@/lib/panel-creators";
 
 /** A file to open in its panel; `placement` moves an already open tab there too. */
@@ -29,17 +30,19 @@ export interface LoxelEventMap {
   /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
   "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;
-  "loxel-file-moved": { oldPath: string; newPath: string };
-  "loxel-file-deleted": { filePath: string };
+  /** A file or folder moved on `server`, whose tabs follow it (absolute paths there). */
+  "loxel-file-moved": { server: ServerId; oldPath: string; newPath: string };
+  /** A file or folder deleted on `server`, whose tabs close (an absolute path there). */
+  "loxel-file-deleted": { server: ServerId; filePath: string };
   "loxel-dir-changed": { dir: string };
   /** The server confirmed a worktree subscription; listings shown for it may have missed changes. */
-  "loxel-worktree-files-resynced": { wtPath: string };
+  "loxel-worktree-files-resynced": { wt: WorktreeRef };
   /**
    * A worktree left this window's lists (removed or moved, anywhere, or its project removed from
    * Loxel): nothing of it is served any more. `discarded`: the user removed it, or deleted its
    * project, in Loxel, giving up what it held.
    */
-  "loxel-worktree-gone": { wtPath: string; discarded: boolean };
+  "loxel-worktree-gone": { wt: WorktreeRef; discarded: boolean };
   "loxel-reveal-in-explorer": { filePath: string };
 }
 

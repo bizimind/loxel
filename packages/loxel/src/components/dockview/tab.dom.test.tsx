@@ -14,6 +14,9 @@ import { Tab, usePanelTitle } from "./tab";
 
 type BrowserTabProps = React.ComponentProps<typeof BrowserTab>;
 
+/** The layout a tab is in, which holds no panel of its own here: its server is the window's. */
+const containerApi = { getPanel: () => undefined };
+
 /** The parts of a dockview panel API the tab uses, with a working title. */
 function fakePanelApi(initialTitle: string) {
   let title = initialTitle;
@@ -71,7 +74,7 @@ describe("BrowserTab", () => {
     const focusPage = jest.fn(() => true);
     const unregister = registerPanelFocus("panel-1", focusPage);
     const api = fakePanelApi("Example");
-    render(<BrowserTab {...({ api, params: {} } as unknown as BrowserTabProps)} />);
+    render(<BrowserTab {...({ api, containerApi, params: {} } as unknown as BrowserTabProps)} />);
     fireEvent.click(screen.getByText("Example"));
     expect(focusPage).toHaveBeenCalledTimes(1);
     unregister();
@@ -80,7 +83,7 @@ describe("BrowserTab", () => {
   test("shows the favicon of the panel's params as dockview updates them", () => {
     const api = fakePanelApi("Example");
     const tab = (params: object) => (
-      <BrowserTab {...({ api, params } as unknown as BrowserTabProps)} />
+      <BrowserTab {...({ api, containerApi, params } as unknown as BrowserTabProps)} />
     );
     const favicon = "https://example.com/favicon.ico";
     const { container, rerender } = render(
@@ -100,7 +103,7 @@ describe("BrowserTab", () => {
     const api = fakePanelApi("Example");
     const favicon = "https://example.com/favicon.ico";
     const params = { url: "https://example.com/", faviconUrl: favicon };
-    render(<BrowserTab {...({ api, params } as unknown as BrowserTabProps)} />);
+    render(<BrowserTab {...({ api, containerApi, params } as unknown as BrowserTabProps)} />);
     act(() => setBrowserPageLoading("panel-1", true));
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();

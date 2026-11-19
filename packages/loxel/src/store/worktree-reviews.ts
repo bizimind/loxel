@@ -6,8 +6,8 @@
 import * as api from "@/api/client";
 import type { Review, ReviewContext } from "@/api/review-model";
 import { frontendLog } from "@/lib/frontend-logger";
+import { getQueryScope, requireActiveWorktree } from "@/queries/use-scope";
 
-import { getActiveWt } from "./active-worktree";
 import { createWorktreeStore } from "./worktree-store";
 
 const log = frontendLog.child("ui");
@@ -39,12 +39,8 @@ export const {
   loading: false,
 
   fetchReviews: async () => {
-    let wt: string;
-    try {
-      wt = getActiveWt();
-    } catch {
-      return;
-    }
+    const wt = getQueryScope().activeWorktree?.path;
+    if (!wt) return;
     set({ loading: true });
     try {
       const reviews = await api.getReviews(wt);
@@ -56,7 +52,7 @@ export const {
   },
 
   createReview: async (name, context) => {
-    const wt = getActiveWt();
+    const wt = requireActiveWorktree().path;
     try {
       const review = await api.createReview(wt, { name, context });
       set((s) => ({
@@ -72,7 +68,7 @@ export const {
   },
 
   deleteReview: async (id) => {
-    const wt = getActiveWt();
+    const wt = requireActiveWorktree().path;
     await api.deleteReview(wt, id);
     set((s) => ({
       reviews: s.reviews.filter((r) => r.id !== id),
@@ -82,7 +78,7 @@ export const {
   },
 
   renameReview: async (id, name) => {
-    const wt = getActiveWt();
+    const wt = requireActiveWorktree().path;
     const updated = await api.updateReview(wt, id, { name });
     set((s) => ({ reviews: s.reviews.map((r) => (r.id === id ? updated : r)) }));
   },

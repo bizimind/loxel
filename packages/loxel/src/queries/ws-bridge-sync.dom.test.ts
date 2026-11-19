@@ -214,8 +214,8 @@ describe("useWsBridge file messages", () => {
   test("worktree_files_resynced tells the files tree once its listings are invalidated", () => {
     const ownDir = queryKeys.dirContents(PROJECT, `${WT_PATH}/src`);
     const seen: Array<{ wtPath: string; dirInvalidated: boolean }> = [];
-    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-      seen.push({ wtPath, dirInvalidated: matchedByPredicates([ownDir]).length === 1 });
+    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wt }) => {
+      seen.push({ wtPath: wt.path, dirInvalidated: matchedByPredicates([ownDir]).length === 1 });
     });
 
     deliver({ type: "worktree_files_resynced", wtPath: WT_PATH, projectPath: PROJECT_PATH });

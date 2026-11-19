@@ -1,6 +1,6 @@
 import * as api from "@/api/client";
-import { localRef } from "@/api/local-server";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
+import { type ServerId, type WorktreeRef, sameWorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type {
   InboxOpenMessage,
   OpenFilePanel,
@@ -11,8 +11,14 @@ import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
-import { deriveProject, projectRef, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
+import {
+  type ListedProject,
+  deriveProject,
+  projectRef,
+  useProjectStore,
+  whenProjectsLoaded,
+} from "@/store/projects";
 import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
@@ -43,6 +49,34 @@ function inOrder<T>(open: () => Promise<T>): Promise<T | undefined> {
   return run;
 }
 
+/**
+ * The projects `server` lists. A path an open names is on the server it came from, so only its
+ * projects can hold it: another server may hold the same path.
+ */
+function projectsOf(server: ServerId): ListedProject[] {
+  return useProjectStore.getState().projects.filter((project) => project.server === server);
+}
+
+/** The worktree of `server` holding `path`, if one in this window's lists does. */
+function owningWorktree(server: ServerId, path: string): WorktreeRef | null {
+  const owner = deriveOwningWorktree(
+    path,
+    projectsOf(server),
+    useWorktreeStore.getState().byProject,
+  );
+  return owner === null ? null : worktreeRef(server, owner);
+}
+
+/** The active worktree if it is on `server`, the one whose Others an outside path opens in. */
+function activeWorktreeOn(server: ServerId): WorktreeRef | null {
+  const { activeWorktree } = useWorktreeStore.getState();
+  return activeWorktree?.server === server ? activeWorktree : null;
+}
+
+function sameTarget(a: WorktreeRef | null, b: WorktreeRef | null): boolean {
+  return a === b || (a !== null && b !== null && sameWorktreeRef(a, b));
+}
+
 /** The open inbox requests this window has had, by id: whether it is done with each. */
 const inboxOpens = new Map<string, boolean>();
 
@@ -67,9 +101,13 @@ export function dropInboxOpen(inboxId: string): void {
  * worktree not shown is when the user goes there. An open that fails here is left to the other
  * windows.
  * A request this window already had (the server sends them again after a reconnect) is not opened
- * twice, but done with again, in case the server missed that.
+ * twice, but done with again, in case the server missed that. `server` sent it.
  */
-export async function openFromInbox(inboxId: string, message: InboxOpenMessage): Promise<void> {
+export async function openFromInbox(
+  server: ServerId,
+  inboxId: string,
+  message: InboxOpenMessage,
+): Promise<void> {
   const done = inboxOpens.get(inboxId);
   if (done !== undefined) {
     if (done) api.wsClient.send({ type: "inbox_open_done", inboxId });
@@ -77,26 +115,27 @@ export async function openFromInbox(inboxId: string, message: InboxOpenMessage):
   }
   inboxOpens.set(inboxId, false);
   // Open here: done. A failed open leaves it to the other windows, or to its expiry.
-  if ((await openRequest(message, inboxId)) === false) inboxOpenDone(inboxId);
+  if ((await openRequest(server, message, inboxId)) === false) inboxOpenDone(inboxId);
 }
 
 /**
- * Open what `POST /api/open` sent; resolves to true when its panel is queued for later, false
- * when it is open, and undefined when it could not be opened.
+ * Open what `POST /api/open` on `server` sent; resolves to true when its panel is queued for
+ * later, false when it is open, and undefined when it could not be opened.
  */
 export function openRequest(
+  server: ServerId,
   message: OpenRequestMessage,
   inboxId?: string,
 ): Promise<boolean | undefined> {
   switch (message.type) {
     case "open_file":
-      return openFile(message.data, inboxId);
+      return openFile(server, message.data, inboxId);
     case "open_folder":
-      return openFolder(message.data.path);
+      return openFolder(server, message.data.path);
     case "open_terminal":
-      return openTerminal(message.data, inboxId);
+      return openTerminal(server, message.data, inboxId);
     case "open_url":
-      return openUrl(message.wtPath, message.data, inboxId);
+      return openUrl(server, message.wtPath, message.data, inboxId);
     default: {
       const _exhaustive: never = message;
       throw new Error(`Unknown open request: ${String(_exhaustive)}`);
@@ -105,28 +144,27 @@ export function openRequest(
 }
 
 /**
- * Show a folder in the project files panel. A folder inside a worktree is revealed in that
- * worktree, switching to it if needed; any other folder is opened in the active worktree's Others
- * section.
+ * Show a folder of `server` in the project files panel. A folder inside a worktree is revealed in
+ * that worktree, switching to it if needed; any other folder is opened in the active worktree's
+ * Others section, if that worktree is on `server`.
  */
-export async function openFolder(rawPath: string): Promise<false> {
-  await inOrder(() => revealFolder(rawPath));
+export async function openFolder(server: ServerId, rawPath: string): Promise<false> {
+  await inOrder(() => revealFolder(server, rawPath));
   return false;
 }
 
-async function revealFolder(rawPath: string): Promise<void> {
+async function revealFolder(server: ServerId, rawPath: string): Promise<void> {
   await whenProjectsLoaded();
   const path = rawPath.replace(/(.)\/+$/, "$1");
-  const { projects } = useProjectStore.getState();
-  const { switchWorktree, byProject } = useWorktreeStore.getState();
-  const { activeProject, activeWorktree } = getQueryScope();
+  const { switchWorktree } = useWorktreeStore.getState();
+  const activeWorktree = activeWorktreeOn(server);
 
-  const owner = deriveOwningWorktree(path, projects, byProject);
+  const owner = owningWorktree(server, path);
   if (owner) {
-    if (owner === activeWorktree?.path) {
+    if (sameTarget(owner, activeWorktree)) {
       showPanel("projectFiles");
     } else {
-      await switchWorktree(localRef(owner));
+      await switchWorktree(owner);
       showPanelAfterLayoutRestore("projectFiles");
     }
     // The switch sets the active worktree synchronously, so this targets the owner's store.
@@ -134,7 +172,7 @@ async function revealFolder(rawPath: string): Promise<void> {
     return;
   }
 
-  const project = deriveProject(path, projects);
+  const project = deriveProject(path, projectsOf(server));
   if (project) {
     showToast(`${path} is inside ${project.name} but not in any of its worktrees`);
     return;
@@ -143,6 +181,7 @@ async function revealFolder(rawPath: string): Promise<void> {
     showToast("Open a project before opening other folders");
     return;
   }
+  const { activeProject } = getQueryScope();
 
   try {
     await api.addExternalFolder(activeWorktree.path, path);
@@ -159,23 +198,24 @@ async function revealFolder(rawPath: string): Promise<void> {
 }
 
 /**
- * Open a file sent from outside the window (`loxel <file>`, Finder), in the worktree named by
- * `worktreePath` if any. Otherwise a file inside a worktree opens in that worktree, switching to it
- * if needed, and any other file in the active worktree's Others section. `placement` is resolved in
- * that worktree's layout once it is mounted.
+ * Open a file of `server` sent from outside the window (`loxel <file>`, Finder), in the worktree
+ * named by `worktreePath` if any. Otherwise a file inside a worktree of `server` opens in that
+ * worktree, switching to it if needed, and any other file in the active worktree's Others section
+ * if that is on `server`. `placement` is resolved in that worktree's layout once it is mounted.
  */
 export function openFile(
+  server: ServerId,
   { filePath: path, worktreePath, ...options }: OpenFilePanel,
   inboxId?: string,
 ): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    if (worktreePath) await refreshIfUnlisted(worktreePath);
-    const { projects } = useProjectStore.getState();
-    const { activeWorktree, byProject } = useWorktreeStore.getState();
+    if (worktreePath) await refreshIfUnlisted(server, worktreePath);
 
     const target =
-      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktree?.path;
+      (worktreePath ? worktreeRef(server, worktreePath) : null) ??
+      owningWorktree(server, path) ??
+      activeWorktreeOn(server);
     if (!target) {
       showToast("Open a project before opening other files");
       return undefined;
@@ -187,34 +227,40 @@ export function openFile(
 
 /**
  * Open a terminal sent from outside the window (`loxel terminal`, the quickstart's command field).
- * The server has already started its shell and picked its worktree, or Home (null); the panel goes
+ * `server` has already started its shell and picked its worktree, or Home (null); the panel goes
  * there, switching to the worktree if the open has focus.
  */
 export function openTerminal(
+  server: ServerId,
   terminal: OpenTerminalPanel,
   inboxId?: string,
 ): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    if (terminal.worktreePath) await refreshIfUnlisted(terminal.worktreePath);
-    return openInWorktree(terminal.worktreePath, { kind: "terminal", terminal, inboxId });
+    const { worktreePath } = terminal;
+    if (worktreePath) await refreshIfUnlisted(server, worktreePath);
+    const target = worktreePath ? worktreeRef(server, worktreePath) : null;
+    return openInWorktree(target, { kind: "terminal", terminal, inboxId });
   });
 }
 
 /**
- * Open a page sent from outside the window in a browser panel: of `worktreePath` (`loxel <url>`),
- * switching to it if the open has focus, or, for a link opened with Loxel as the browser (no
- * worktree), of the active worktree, else of Home.
+ * Open a page sent from outside the window in a browser panel: of `server`'s `worktreePath`
+ * (`loxel <url>`), switching to it if the open has focus, or, for a link opened with Loxel as the
+ * browser (no worktree), of the active worktree, else of Home.
  */
 export function openUrl(
+  server: ServerId,
   worktreePath: string | null,
   { url, ...options }: { url: string } & PanelOpenOptions,
   inboxId?: string,
 ): Promise<boolean | undefined> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    if (worktreePath) await refreshIfUnlisted(worktreePath);
-    const target = worktreePath ?? useWorktreeStore.getState().activeWorktree?.path ?? null;
+    if (worktreePath) await refreshIfUnlisted(server, worktreePath);
+    const target = worktreePath
+      ? worktreeRef(server, worktreePath)
+      : useWorktreeStore.getState().activeWorktree;
     return openInWorktree(target, { kind: "url", url, ...options, inboxId });
   });
 }
@@ -224,11 +270,10 @@ export function openUrl(
  * shell) may not be listed yet, so its project's worktrees are refreshed. The server vouched for
  * the worktree, so a failed refresh does not stop the open.
  */
-async function refreshIfUnlisted(worktreePath: string): Promise<void> {
-  const { projects } = useProjectStore.getState();
-  const { byProject, refreshProjectWorktrees } = useWorktreeStore.getState();
-  if (deriveOwningWorktree(worktreePath, projects, byProject) === worktreePath) return;
-  const project = deriveProject(worktreePath, projects);
+async function refreshIfUnlisted(server: ServerId, worktreePath: string): Promise<void> {
+  const { refreshProjectWorktrees } = useWorktreeStore.getState();
+  if (owningWorktree(server, worktreePath)?.path === worktreePath) return;
+  const project = deriveProject(worktreePath, projectsOf(server));
   if (!project) return;
   await refreshProjectWorktrees(projectRef(project)).catch((err: unknown) => {
     log.warn("Could not refresh a project's worktrees", {
@@ -245,20 +290,18 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * A null target is Home, which is only targeted while it is the layout shown. Resolves to true when
  * the panel was queued.
  */
-async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
+async function openInWorktree(target: WorktreeRef | null, open: PendingOpen): Promise<boolean> {
   const { activeWorktree, switchWorktree } = useWorktreeStore.getState();
-  const activeWorktreePath = activeWorktree?.path ?? null;
-  const layoutKey = target ?? HOME_LAYOUT_KEY;
-  const ui = getWorktreeUI(layoutWorktree(layoutKey)).getState();
-  const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
+  const isActive = sameTarget(target, activeWorktree);
+  const ui = getWorktreeUI(target).getState();
+  const centerReady = isActive && getCenterApiLayoutKey() === (target?.path ?? HOME_LAYOUT_KEY);
   if (centerReady && ui.pendingOpens.length === 0) {
     dispatchPendingOpen(open);
     return false;
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
-  if (focus && target !== null && target !== activeWorktreePath)
-    await switchWorktree(localRef(target));
+  if (focus && target !== null && !isActive) await switchWorktree(target);
   return true;
 }
 
@@ -296,19 +339,24 @@ export function dispatchPendingOpen(open: PendingOpen): void {
 }
 
 /**
- * Open a path whose type is unknown (e.g. a terminal link): folders go to {@link openFolder},
- * files to their editor. Missing paths still open an editor, which reports the error. In Home,
- * which shows no worktree's files, a file opens in the worktree holding it, switching there.
+ * Open a path of `server` whose type is unknown (e.g. a terminal link): folders go to
+ * {@link openFolder}, files to their editor. Missing paths still open an editor, which reports the
+ * error. In Home, which shows no worktree's files, a file opens in the worktree holding it,
+ * switching there.
  */
-export async function openPath(path: string, location?: FileLocation): Promise<void> {
+export async function openPath(
+  server: ServerId,
+  path: string,
+  location?: FileLocation,
+): Promise<void> {
   const info = await api.getPathInfo(path).catch(() => null);
   if (info?.isDir) {
-    await openFolder(info.path);
+    await openFolder(server, info.path);
     return;
   }
   const filePath = info?.path ?? path;
   if (useWorktreeStore.getState().activeWorktree === null) {
-    await openFileFromHome(filePath, location);
+    await openFileFromHome(server, filePath, location);
     return;
   }
   dispatchOpenFile(filePath, location);
@@ -318,15 +366,20 @@ export async function openPath(path: string, location?: FileLocation): Promise<v
  * A file link followed in Home: one of Home's own drafts opens there; any other file opens in the
  * worktree holding it, switching there, since Home shows no worktree's files.
  */
-function openFileFromHome(path: string, location: FileLocation | undefined): Promise<void> {
+function openFileFromHome(
+  server: ServerId,
+  path: string,
+  location: FileLocation | undefined,
+): Promise<void> {
   return inOrder(async () => {
     await whenProjectsLoaded();
-    const { projects, homeDraftsDir } = useProjectStore.getState();
+    const { homeDraftsDir } = useProjectStore.getState();
     if (homeDraftsDir && path.startsWith(homeDraftsDir + "/")) {
       dispatchOpenFile(path, location);
       return;
     }
-    const owner = deriveOwningWorktree(path, projects, useWorktreeStore.getState().byProject);
+    const projects = projectsOf(server);
+    const owner = owningWorktree(server, path);
     if (owner) {
       await openInWorktree(owner, { kind: "file", path, ...(location ? { location } : {}) });
       return;

@@ -18,14 +18,13 @@ import type { AgentOrigin } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
 import { HOME_KEY } from "@/api/home-model";
-import { localServerId } from "@/api/local-server";
 import type {
   PanelOpenOptions,
   PanelPlacement,
   PlacementTab,
   SplitDirection,
 } from "@/api/panel-placement-model";
-import type { ServerId } from "@/api/worktree-ref";
+import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import { getPanelServer, getPanelWorktree } from "@/components/dockview/panel-context";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
@@ -46,7 +45,12 @@ import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { activeLayoutKey, layoutWorktree } from "@/store/active-worktree";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
-import { fileEditorKey, isFileTabKey, useEditorStateStore } from "@/store/editor-state";
+import {
+  type EditorKey,
+  fileEditorKey,
+  isFileTabKey,
+  useEditorStateStore,
+} from "@/store/editor-state";
 import {
   getCenterPanelDef,
   getCenterPanelDefByType,
@@ -635,8 +639,16 @@ function getPanelFilePath(params: unknown): string | undefined {
   return typeof filePath === "string" ? filePath : undefined;
 }
 
-/** Old paths whose move is being applied; a second report of the same move is ignored. */
-const movesInProgress = new Set<string>();
+/** Whether `panel` is the file tab of `server`'s `path`. */
+function isFilePanelOf(panel: IDockviewPanel, server: ServerId, path: string): boolean {
+  return getPanelFilePath(panel.params) === path && getPanelServer(panel) === server;
+}
+
+/**
+ * Old paths whose move is being applied, by server (`fileEditorKey`); a second report of the same
+ * move is ignored.
+ */
+const movesInProgress = new Set<EditorKey>();
 
 /**
  * Handle file-moved events: migrate caches and replace the old panel with one for the new path
@@ -648,21 +660,22 @@ const movesInProgress = new Set<string>();
  * what is now on disk there, the tab is not moved and shows its old path as deleted.
  *
  * `announce` (a move made outside Loxel) records the old path in the new tab's `movedFrom`
- * parameter, which its editor shows until dismissed. Resolves to whether the tab was replaced.
+ * parameter, which its editor shows until dismissed. Only tabs of `server`, where the file moved,
+ * follow it. Resolves to whether the tab was replaced.
  */
 export async function handleFileMoved(
+  server: ServerId,
   oldPath: string,
   newPath: string,
   options?: { announce?: boolean },
 ): Promise<boolean> {
   const dv = getCenterApi();
-  if (!dv || movesInProgress.has(oldPath)) return false;
-  markOtherViewsDeleted(oldPath);
-
-  const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
-  if (!oldPanel) return false;
-  const server = getPanelServer(oldPanel);
   const oldKey = fileEditorKey(server, oldPath);
+  if (!dv || movesInProgress.has(oldKey)) return false;
+  markOtherViewsDeleted(server, oldPath);
+
+  const oldPanel = dv.panels.find((p) => isFilePanelOf(p, server, oldPath));
+  if (!oldPanel) return false;
 
   // An editor in conflict holds edits that may not overwrite the disk version, so it cannot be
   // carried over by saving; it stays on the old path, which then shows as deleted.
@@ -672,7 +685,7 @@ export async function handleFileMoved(
   // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
   // state. A clean old tab is just dropped; one with unsaved edits stays on its old path, shown
   // as deleted, since there is no tab to carry the edits into.
-  if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
+  if (dv.panels.some((p) => isFilePanelOf(p, server, newPath))) {
     const oldState = store.files.get(oldKey)?.state;
     if (oldState === "dirty" || oldState === "saving") {
       store.setDeleted(oldKey, true);
@@ -683,14 +696,13 @@ export async function handleFileMoved(
     return false;
   }
 
-  movesInProgress.add(oldPath);
+  movesInProgress.add(oldKey);
   try {
     // From here on the old path's autosave and disk events no longer apply.
     store.setMovedTo(oldKey, newPath);
     const state = store.files.get(oldKey)?.state;
     if (state === "dirty" || state === "saving") {
-      const worktreePath = getPanelWorktree(oldPanel)?.path ?? null;
-      const carried = await carryPendingEdit(server, oldPath, newPath, worktreePath);
+      const carried = await carryPendingEdit(server, oldPath, newPath, getPanelWorktree(oldPanel));
       if (!carried) {
         const current = useEditorStateStore.getState();
         current.setMovedTo(oldKey, null);
@@ -698,9 +710,9 @@ export async function handleFileMoved(
         return false;
       }
     }
-    return replaceMovedPanel(dv, oldPath, newPath, options?.announce ?? false);
+    return replaceMovedPanel(dv, server, oldPath, newPath, options?.announce ?? false);
   } finally {
-    movesInProgress.delete(oldPath);
+    movesInProgress.delete(oldKey);
   }
 }
 
@@ -715,11 +727,11 @@ async function carryPendingEdit(
   server: ServerId,
   oldPath: string,
   newPath: string,
-  worktreePath: string | null,
+  worktree: WorktreeRef | null,
 ): Promise<boolean> {
   let onDisk: string;
   try {
-    ({ content: onDisk } = await api.getFileContentByPath(newPath, worktreePath));
+    ({ content: onDisk } = await api.getFileContentByPath(newPath, worktree?.path));
   } catch (error: unknown) {
     filesLog.warn("Could not read a moved file; leaving its tab in place", { error, newPath });
     return false;
@@ -744,7 +756,7 @@ async function carryPendingEdit(
   return saveEditorContent(
     newPath,
     content,
-    worktreePath,
+    worktree,
     pending.options,
     fileEditorKey(server, newPath),
   );
@@ -753,14 +765,15 @@ async function carryPendingEdit(
 /** Open the moved file's tab in the old tab's place and close the old one. */
 function replaceMovedPanel(
   dv: DockviewApi,
+  server: ServerId,
   oldPath: string,
   newPath: string,
   announce: boolean,
 ): boolean {
   // The old tab may have closed, or the new path opened, while the moved file was read.
-  const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
+  const oldPanel = dv.panels.find((p) => isFilePanelOf(p, server, oldPath));
   if (!oldPanel) return false;
-  if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
+  if (dv.panels.some((p) => isFilePanelOf(p, server, newPath))) {
     oldPanel.api.close();
     return false;
   }
@@ -795,8 +808,7 @@ function replaceMovedPanel(
  * or moved away. Mark them deleted right away, before their content query notices, so a pending
  * autosave cannot re-create the file.
  */
-function markOtherViewsDeleted(path: string): void {
-  const server = centerServer();
+function markOtherViewsDeleted(server: ServerId, path: string): void {
   const store = useEditorStateStore.getState();
   for (const [key, entry] of store.files) {
     if (entry.server !== server || isFileTabKey(key, entry)) continue;
@@ -804,25 +816,22 @@ function markOtherViewsDeleted(path: string): void {
   }
 }
 
-/** The server holding the center layout's files: its worktree's, or the window's in Home. */
-function centerServer(): ServerId {
-  const layoutKey = getCenterApiLayoutKey();
-  const worktree = layoutKey === null ? null : layoutWorktree(layoutKey);
-  return worktree?.server ?? localServerId();
-}
-
-/** Handle file-deleted events: close any open panel for the deleted file/directory. */
-export function handleFileDeleted(filePath: string): void {
+/**
+ * Handle file-deleted events: close any open panel for the deleted file/directory of `server`,
+ * where it was deleted.
+ */
+export function handleFileDeleted(server: ServerId, filePath: string): void {
   // Edits of a deleted file still waiting to be saved would otherwise re-create it.
-  forgetOutboxPath(filePath);
+  forgetOutboxPath(server, filePath);
   const dv = getCenterApi();
   if (!dv) return;
-  markOtherViewsDeleted(filePath);
+  markOtherViewsDeleted(server, filePath);
 
   for (const panel of dv.panels) {
     const panelPath = getPanelFilePath(panel.params);
-    if (panelPath === filePath || panelPath?.startsWith(filePath + "/")) {
-      useEditorStateStore.getState().closeFile(fileEditorKey(getPanelServer(panel), panelPath));
+    if (panelPath === undefined || getPanelServer(panel) !== server) continue;
+    if (panelPath === filePath || panelPath.startsWith(filePath + "/")) {
+      useEditorStateStore.getState().closeFile(fileEditorKey(server, panelPath));
       panel.api.close();
     }
   }
