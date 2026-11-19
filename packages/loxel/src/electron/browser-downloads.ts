@@ -44,49 +44,64 @@ export async function quarantineFile(path: string): Promise<void> {
 }
 
 /**
- * The inode of the file at `path` if it can be a download that started at `startedMs`: a regular
- * file (not a link) created since. Null for anything else, including nothing there.
+ * How much older than its download a file must look to be the user's own. File systems store
+ * creation times coarsely (whole seconds on HFS+, two on FAT) or from another clock (SMB servers).
  */
-export async function downloadedFileInode(path: string, startedMs: number): Promise<bigint | null> {
+const PREDATES_SLACK_MS = 60_000;
+
+/**
+ * Whether a file created at `birthtimeMs` provably was there before a download that started at
+ * `startedMs`. A file system that records no creation time reports 0, which proves nothing.
+ */
+export function predatesDownload(birthtimeMs: number, startedMs: number): boolean {
+  return birthtimeMs > 0 && birthtimeMs < startedMs - PREDATES_SLACK_MS;
+}
+
+/** The inode of the regular file (not a link) at `path`, with its creation time; null if none. */
+async function regularFile(path: string): Promise<{ inode: bigint; birthtimeMs: number } | null> {
   const stats = await lstat(path, { bigint: true }).catch(() => null);
   if (!stats?.isFile()) return null;
-  // In microseconds: whole milliseconds (`birthtimeMs` of bigint stats) can't tell apart a file the
-  // user had from a download that started in the same millisecond.
-  if (Number(stats.birthtimeNs / 1000n) < startedMs * 1000) return null;
-  return stats.ino;
+  return { inode: stats.ino, birthtimeMs: Number(stats.birthtimeMs) };
 }
 
 /**
  * Keep `item`'s file quarantined from the moment it is at its save path. Electron has Chromium
  * write a download straight to the path the user picked, so marking it only once complete would
  * leave an unmarked file there for as long as the download runs, or for good if it stalls.
+ * Progress can be reported before Chromium first moves its file there, so the path is checked
+ * again on every report until a new file (inode) is there.
  *
- * Only the download's own file is marked: a regular file created after the download started. When
- * the user chose to replace a file, Chromium downloads beside it (`name (1).ext`) and moves the
- * download onto the path only once complete, so the user's file, or a link there, is left alone
- * and the download is marked when it arrives. Progress can be reported before Chromium's first
- * move too, so the path is checked again on every report until a new file (inode) is there.
+ * A file at the path while the download runs may be the user's own: when they chose to replace
+ * one, Chromium downloads beside it (`name (1).ext`) and moves the download onto the path only once
+ * complete. So until then, a file that is provably older than the download is left alone; marking
+ * is the default when that can't be told. Once complete, the regular file at the path is the
+ * download, whatever its creation time says. A link at the path is never followed.
  */
-function trackQuarantine(item: DownloadItem, quarantine: (path: string) => Promise<void>) {
+export function trackQuarantine(item: DownloadItem, quarantine: (path: string) => Promise<void>) {
   const startedMs = item.getStartTime() * 1000;
+  let complete = false;
   let markedInode: bigint | null = null;
   let running: Promise<void> | null = null;
   let again = false;
 
   const markIfNew = async (path: string) => {
-    const inode = await downloadedFileInode(path, startedMs);
-    if (inode === null || inode === markedInode) return;
+    const file = await regularFile(path);
+    if (!file || file.inode === markedInode) return;
+    if (!complete && predatesDownload(file.birthtimeMs, startedMs)) return;
     await quarantine(path);
-    markedInode = inode;
+    markedInode = file.inode;
   };
 
-  /** Mark the file at the save path unless it is marked already; one check at a time. */
-  const update = (): void => {
+  /**
+   * Mark the file at the save path unless it is marked already. One check runs at a time; the
+   * promise settles when this one (or the one running, which checks again after it) is done.
+   */
+  const update = (): Promise<void> => {
     const path = item.getSavePath();
-    if (!path) return;
+    if (!path) return Promise.resolve();
     if (running) {
       again = true;
-      return;
+      return running;
     }
     running = markIfNew(path)
       .catch((err: unknown) => console.warn("[electron] Could not quarantine a download:", err))
@@ -94,11 +109,19 @@ function trackQuarantine(item: DownloadItem, quarantine: (path: string) => Promi
         running = null;
         if (again) {
           again = false;
-          update();
+          void update();
         }
       });
+    return running;
   };
-  return update;
+  return {
+    update,
+    /** Mark the completed download at the save path. */
+    completed: () => {
+      complete = true;
+      return update();
+    },
+  };
 }
 
 /**
@@ -124,18 +147,18 @@ export function installBrowserDownloads(
     const answered = () => {
       if (contents && asking.get(contents) === item) asking.delete(contents);
     };
-    const updateQuarantine = trackQuarantine(item, quarantine);
+    const tracked = trackQuarantine(item, quarantine);
     // Progress arrives while the dialog is open too; a save path means it was answered.
     const onUpdated = () => {
       if (!item.getSavePath()) return;
       answered();
-      updateQuarantine();
+      void tracked.update();
     };
     item.on("updated", onUpdated);
     item.once("done", (_event, state) => {
       item.off("updated", onUpdated);
       answered();
-      if (state === "completed") updateQuarantine();
+      if (state === "completed") void tracked.completed();
     });
   });
 }

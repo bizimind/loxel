@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,10 +8,11 @@ import { $ } from "bun";
 import type { DownloadItem, Session, WebContents } from "electron";
 
 import {
-  downloadedFileInode,
   installBrowserDownloads,
+  predatesDownload,
   quarantineFile,
   quarantineValue,
+  trackQuarantine,
 } from "./browser-downloads";
 
 describe("quarantineValue", () => {
@@ -110,23 +111,68 @@ async function withDir(run: (dir: string) => Promise<void>) {
   }
 }
 
-describe("downloadedFileInode", () => {
-  test("is a regular file made since the download started", () =>
-    withDir(async (dir) => {
-      const download = join(dir, "download.sh");
-      await writeFile(download, "#!/bin/sh\n");
-      const link = join(dir, "link.sh");
-      await symlink(download, link);
-      const before = Date.now() - 60_000;
+describe("predatesDownload", () => {
+  const started = Date.UTC(2026, 10, 19, 12);
+  test("only a file created well before the download started", () => {
+    expect(predatesDownload(started - 2 * 60_000, started)).toBe(true);
+    // Within a minute: coarse or skewed creation times can't tell.
+    expect(predatesDownload(started - 30_000, started)).toBe(false);
+    expect(predatesDownload(started + 1, started)).toBe(false);
+    // No creation time recorded.
+    expect(predatesDownload(0, started)).toBe(false);
+  });
+});
 
-      expect(await downloadedFileInode(download, before)).toBe(
-        (await stat(download, { bigint: true })).ino,
-      );
-      // A file that was there before the download started, such as one the user chose to replace.
-      expect(await downloadedFileInode(download, Date.now() + 60_000)).toBeNull();
-      expect(await downloadedFileInode(link, before)).toBeNull();
-      expect(await downloadedFileInode(dir, before)).toBeNull();
-      expect(await downloadedFileInode(join(dir, "missing"), before)).toBeNull();
+describe("trackQuarantine", () => {
+  const ago = (ms: number) => (Date.now() - ms) / 1000;
+
+  test("leaves an older file alone while the download runs, and marks it once complete", () =>
+    withDir(async (dir) => {
+      const { calls, quarantine } = fakeQuarantine();
+      const file = join(dir, "tool.sh");
+      await writeFile(file, "the user's own file");
+      const item = new FakeDownload();
+      // Started well after the file was made.
+      item.startTime = ago(-5 * 60_000);
+      item.savePath = file;
+      const tracked = trackQuarantine(item as unknown as DownloadItem, quarantine);
+      await tracked.update();
+      expect(calls).toEqual([]);
+      // Once complete, the file at the path is the download, whatever its creation time.
+      await tracked.completed();
+      expect(calls).toEqual([file]);
+    }));
+
+  test("marks a new file at the path once, and a different one again", () =>
+    withDir(async (dir) => {
+      const { calls, quarantine } = fakeQuarantine();
+      const file = join(dir, "tool.sh");
+      await writeFile(file, "#!/bin/sh\n");
+      const item = new FakeDownload();
+      item.savePath = file;
+      const tracked = trackQuarantine(item as unknown as DownloadItem, quarantine);
+      await tracked.update();
+      await tracked.update();
+      expect(calls).toEqual([file]);
+      await rm(file);
+      await writeFile(file, "#!/bin/sh\n");
+      await tracked.completed();
+      expect(calls).toEqual([file, file]);
+    }));
+
+  test("never marks a link, or what it points to", () =>
+    withDir(async (dir) => {
+      const { calls, quarantine } = fakeQuarantine();
+      const target = join(dir, "elsewhere.sh");
+      await writeFile(target, "#!/bin/sh\n");
+      const link = join(dir, "tool.sh");
+      await symlink(target, link);
+      const item = new FakeDownload();
+      item.savePath = link;
+      const tracked = trackQuarantine(item as unknown as DownloadItem, quarantine);
+      await tracked.update();
+      await tracked.completed();
+      expect(calls).toEqual([]);
     }));
 });
 
