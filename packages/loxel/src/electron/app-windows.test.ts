@@ -85,6 +85,7 @@ describe("app-only channels", () => {
  * checked with `isAppWindowSender`. Every other channel is app-only and goes through the helpers.
  */
 const RAW_IPC_CHANNELS = new Set([
+  "BROWSER_MEDIA_PERMISSION",
   "BROWSER_NOTIFICATION_CLOSE",
   "BROWSER_NOTIFICATION_PERMISSION",
   "BROWSER_NOTIFICATION_REQUEST_PERMISSION",
