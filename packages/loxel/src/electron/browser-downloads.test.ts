@@ -113,22 +113,20 @@ async function withDir(run: (dir: string) => Promise<void>) {
 describe("downloadedFileInode", () => {
   test("is a regular file made since the download started", () =>
     withDir(async (dir) => {
-      const before = join(dir, "before.sh");
-      await writeFile(before, "the user's own file");
-      const startedMs =
-        Number((await stat(before, { bigint: true })).birthtimeNs / 1000n) / 1000 + 0.001;
       const download = join(dir, "download.sh");
       await writeFile(download, "#!/bin/sh\n");
       const link = join(dir, "link.sh");
       await symlink(download, link);
+      const before = Date.now() - 60_000;
 
-      expect(await downloadedFileInode(download, startedMs)).toBe(
+      expect(await downloadedFileInode(download, before)).toBe(
         (await stat(download, { bigint: true })).ino,
       );
-      expect(await downloadedFileInode(before, startedMs)).toBeNull();
-      expect(await downloadedFileInode(link, startedMs)).toBeNull();
-      expect(await downloadedFileInode(dir, startedMs)).toBeNull();
-      expect(await downloadedFileInode(join(dir, "missing"), startedMs)).toBeNull();
+      // A file that was there before the download started, such as one the user chose to replace.
+      expect(await downloadedFileInode(download, Date.now() + 60_000)).toBeNull();
+      expect(await downloadedFileInode(link, before)).toBeNull();
+      expect(await downloadedFileInode(dir, before)).toBeNull();
+      expect(await downloadedFileInode(join(dir, "missing"), before)).toBeNull();
     }));
 });
 
