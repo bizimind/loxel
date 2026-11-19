@@ -89,18 +89,15 @@ export const notificationPermissionRequestSchema = z.object({
 });
 export type NotificationPermissionRequest = z.infer<typeof notificationPermissionRequestSchema>;
 
-/** Window renderer → main: the user's answer; `dismiss` decides nothing, so the page may ask again. */
+/**
+ * Window renderer → main: the user's answer; `dismiss` decides nothing, so the page may ask again.
+ * Withdrawals are the shared ones of `site-permission-protocol.ts`.
+ */
 export const notificationPermissionResponseSchema = z.object({
   id: z.number().int(),
   decision: z.union([notificationSiteDecisionSchema, z.literal("dismiss")]),
 });
 export type NotificationPermissionResponse = z.infer<typeof notificationPermissionResponseSchema>;
-
-/** Main → window renderer: a request was withdrawn (answered elsewhere, or the page went away). */
-export const notificationPermissionWithdrawnSchema = z.object({
-  id: z.number().int(),
-  webContentsId: z.number().int(),
-});
 
 /**
  * Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.showNotification()`.

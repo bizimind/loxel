@@ -14,6 +14,9 @@ type RequestHandler = Parameters<Session["setPermissionRequestHandler"]>[0];
 /** What the camera and microphone module was handed, standing in for `browser-media.ts`. */
 const mediaCheck = mock((..._args: unknown[]) => true);
 const mediaRequest = mock((..._args: unknown[]) => {});
+/** What the module for links to other apps was handed, standing in for `browser-external-apps.ts`. */
+const openExternal = mock((..._args: unknown[]) => {});
+const askers = { media: { check: mediaCheck, request: mediaRequest }, openExternal };
 
 /** The handlers `installBrowserPermissions` gives a session. */
 function installedHandlers(): {
@@ -31,7 +34,7 @@ function installedHandlers(): {
         request = handler;
       },
     },
-    { check: mediaCheck, request: mediaRequest },
+    askers,
   );
   if (!check || !request) throw new Error("installBrowserPermissions set no handler");
   return { check, request };
@@ -45,7 +48,6 @@ const MAIN_FRAME: Record<BrowserPermission, boolean> = {
   "clipboard-sanitized-write": true,
   fileSystem: true,
   fullscreen: true,
-  openExternal: true,
   pointerLock: true,
   "screen-wake-lock": true,
 
@@ -73,6 +75,7 @@ const MAIN_FRAME: Record<BrowserPermission, boolean> = {
   midiSysex: false,
   nfc: false,
   notifications: false,
+  openExternal: false,
   "payment-handler": false,
   "periodic-background-sync": false,
   "persistent-storage": false,
@@ -105,10 +108,8 @@ describe("browserPermissionGranted", () => {
     expect(decisions(true)).toEqual(PERMISSIONS.map((p) => [p, MAIN_FRAME[p]]));
   });
 
-  test("embedded frames get the same, except links to other apps", () => {
-    expect(decisions(false)).toEqual(
-      PERMISSIONS.map((p) => [p, p === "openExternal" ? false : MAIN_FRAME[p]]),
-    );
+  test("embedded frames get the same", () => {
+    expect(decisions(false)).toEqual(PERMISSIONS.map((p) => [p, MAIN_FRAME[p]]));
   });
 
   test("popup windows get neither fullscreen nor pointer lock, having no panel to name the site", () => {
@@ -141,13 +142,45 @@ describe("installBrowserPermissions", () => {
   test("requests are answered with the policy, for the frame that asked", () => {
     const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
     const page = { isMainFrame: true, requestingUrl: "https://example.com/" };
-    const ad = { isMainFrame: false, requestingUrl: "https://ads.example/" };
     const callback = mock((_granted: boolean) => {});
     request(webContents, "geolocation", callback, page);
     request(webContents, "clipboard-sanitized-write", callback, page);
-    request(webContents, "openExternal", callback, page);
-    request(webContents, "openExternal", callback, ad);
-    expect(callback.mock.calls).toEqual([[false], [true], [true], [false]]);
+    expect(callback.mock.calls).toEqual([[false], [true]]);
+  });
+
+  test("links to other apps are decided by their module, and their grants reported first", () => {
+    const events: string[] = [];
+    let handler: RequestHandler = null;
+    installBrowserPermissions(
+      {
+        setPermissionCheckHandler: () => {},
+        setPermissionRequestHandler: (installed) => {
+          handler = installed;
+        },
+      },
+      askers,
+      (_webContents, permission) => events.push(`granted ${permission}`),
+    );
+    if (!handler) throw new Error("installBrowserPermissions set no request handler");
+    const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
+    const link = {
+      isMainFrame: true,
+      requestingUrl: "https://zoom.example/",
+      externalURL: "zoommtg://zoom.example/join",
+    };
+    (handler as NonNullable<RequestHandler>)(
+      webContents,
+      "openExternal",
+      (granted) => {
+        events.push(`answered ${granted}`);
+      },
+      link,
+    );
+    expect(openExternal).toHaveBeenCalledWith(webContents, link, expect.any(Function));
+    expect(events).toEqual([]);
+    const answer = openExternal.mock.calls.at(-1)![2] as (granted: boolean) => void;
+    answer(true);
+    expect(events).toEqual(["granted openExternal", "answered true"]);
   });
 
   test("the camera and microphone are decided by the media module", () => {
@@ -176,7 +209,7 @@ describe("installBrowserPermissions", () => {
           request = handler;
         },
       },
-      { check: mediaCheck, request: mediaRequest },
+      askers,
       (_webContents, permission, requestingUrl) => events.push(`${permission} ${requestingUrl}`),
     );
     if (!request) throw new Error("installBrowserPermissions set no request handler");

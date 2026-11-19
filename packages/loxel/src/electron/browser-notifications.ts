@@ -57,6 +57,8 @@ import {
   BROWSER_NOTIFICATION_SHOW,
 } from "./ipc-channels";
 import { createListeningRenderers } from "./listening-renderers";
+import { createPermissionPrompts, createSettingsMirror } from "./permission-prompts";
+import { webviewSenderFrame } from "./webview-sender";
 
 /** Longer texts are cut: the notification center shows two lines of body. */
 const MAX_TITLE = 500;
@@ -68,15 +70,9 @@ const RATE_WINDOW_MS = 10_000;
 /** Notification objects a guest's page keeps clickable; older ones only go to the panel. */
 const MAX_REFS_PER_GUEST = 100;
 
-let sites: NotificationSites = {};
+const sites = createSettingsMirror<NotificationSites>({});
 /** Sites muted or snoozed from the notification center: allowed, but nothing is shown. */
 let mutes: NotificationMutes = {};
-/** Whether a renderer has sent the settings' decisions yet; requests wait for them. */
-let sitesLoaded = false;
-let resolveSitesLoaded: () => void = () => {};
-const sitesLoadedPromise = new Promise<void>((resolve) => {
-  resolveSitesLoaded = resolve;
-});
 
 const listeningHosts = createListeningRenderers();
 
@@ -88,8 +84,17 @@ interface PendingRequest {
   answer: Promise<NotificationPermissionState>;
   resolve: (state: NotificationPermissionState) => void;
 }
-const pendingRequests = new Map<number, PendingRequest>();
-let nextRequestId = 1;
+const prompts = createPermissionPrompts<PendingRequest>(
+  {
+    request: BROWSER_NOTIFICATION_PERMISSION_REQUEST,
+    withdrawn: BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN,
+  },
+  (id, pending): NotificationPermissionRequest => ({
+    id,
+    webContentsId: pending.guestId,
+    origin: pending.origin,
+  }),
+);
 /** Guests whose page closed its prompt with "Not now": no new prompt until it navigates. */
 const dismissedGuests = new Set<number>();
 
@@ -137,10 +142,9 @@ export function isSecureWebOrigin(origin: string): boolean {
 
 /** The site deciding for the calling frame, or null when the frame gets no notifications. */
 export function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
-  const guest = event.sender;
-  const frame = event.senderFrame;
-  if (guest.getType() !== "webview" || !frame || frame.detached) return null;
-  const top = guest.mainFrame.origin;
+  const frame = webviewSenderFrame(event);
+  if (!frame) return null;
+  const top = event.sender.mainFrame.origin;
   // Cross-origin frames get no notifications, like in browsers: the user decides for the page.
   if (frame.origin !== top || !isSecureWebOrigin(top)) return null;
   return top;
@@ -154,7 +158,7 @@ export function listeningHost(guest: WebContents): WebContents | null {
 }
 
 export function permissionFor(site: string): NotificationPermissionState {
-  const decision = sites[site];
+  const decision = sites.get()[site];
   if (decision === "allow") return "granted";
   if (decision === "block") return "denied";
   return "default";
@@ -166,39 +170,30 @@ function pagePermission(event: IpcMainEvent | IpcMainInvokeEvent): NotificationP
   return permissionFor(site);
 }
 
-function withdraw(id: number, pending: PendingRequest, state: NotificationPermissionState): void {
-  pendingRequests.delete(id);
-  pending.resolve(state);
-  if (pending.host.isDestroyed()) return;
-  pending.host.send(BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN, {
-    id,
-    webContentsId: pending.guestId,
-  });
+function withdraw(id: number, state: NotificationPermissionState): void {
+  prompts.withdraw(id)?.resolve(state);
 }
 
 /** Resolve the requests of sites that now have a decision, and take down their prompts. */
 function settleDecidedRequests(): void {
-  for (const [id, pending] of pendingRequests) {
+  for (const [id, pending] of prompts.entries()) {
     const state = permissionFor(pending.origin);
-    if (state !== "default") withdraw(id, pending, state);
+    if (state !== "default") withdraw(id, state);
   }
 }
 
 /** The guest's open request for `site`, or a new one shown in `host`. */
 function pendingRequestFor(guestId: number, host: WebContents, site: string): PendingRequest {
   // A page asking again while its prompt is up waits for the same answer.
-  for (const pending of pendingRequests.values()) {
+  for (const [, pending] of prompts.entries()) {
     if (pending.guestId === guestId && pending.origin === site) return pending;
   }
   let resolve: (state: NotificationPermissionState) => void = () => {};
   const answer = new Promise<NotificationPermissionState>((r) => {
     resolve = r;
   });
-  const id = nextRequestId++;
   const pending: PendingRequest = { guestId, host, origin: site, answer, resolve };
-  pendingRequests.set(id, pending);
-  const request: NotificationPermissionRequest = { id, webContentsId: guestId, origin: site };
-  host.send(BROWSER_NOTIFICATION_PERMISSION_REQUEST, request);
+  prompts.show(pending);
   return pending;
 }
 
@@ -207,7 +202,7 @@ async function requestPermission(event: IpcMainInvokeEvent): Promise<Notificatio
   const site = siteOf(event);
   const guest = event.sender;
   if (!site) return "denied";
-  await sitesLoadedPromise;
+  await sites.loaded;
   // The guest may have gone during the wait; its accessors throw once it has.
   const host = guest.isDestroyed() ? null : listeningHost(guest);
   if (!host || guest.mainFrame.origin !== site) return "denied";
@@ -220,26 +215,22 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   const parsed = notificationPermissionResponseSchema.safeParse(value);
   if (!parsed.success) return;
   const { id, decision } = parsed.data;
-  const pending = pendingRequests.get(id);
-  if (!pending || pending.host !== event.sender) return;
+  const pending = prompts.answered(event, id);
+  if (!pending) return;
   if (decision === "dismiss") {
     // Like browsers, a page told "not now" can't put the prompt straight back up.
     dismissedGuests.add(pending.guestId);
-    withdraw(id, pending, "default");
+    withdraw(id, "default");
     return;
   }
   // The renderer also saves the decision in settings, which sends it back here; applying it now
   // answers the page without waiting for that round trip.
-  sites = { ...sites, [pending.origin]: decision };
+  sites.apply({ ...sites.get(), [pending.origin]: decision });
   settleDecidedRequests();
 }
 
 function setSites(_event: IpcMainEvent, value: unknown): void {
-  sites = parseNotificationSites(value);
-  if (!sitesLoaded) {
-    sitesLoaded = true;
-    resolveSitesLoaded();
-  }
+  sites.receive(parseNotificationSites(value));
   settleDecidedRequests();
 }
 
@@ -338,8 +329,8 @@ function clickNotification(event: IpcMainEvent, value: unknown): void {
 
 /** Withdraw the guest's open prompts: its page is going away. */
 function withdrawRequests(guestId: number): void {
-  for (const [id, pending] of pendingRequests) {
-    if (pending.guestId === guestId) withdraw(id, pending, "default");
+  for (const [id, pending] of prompts.entries()) {
+    if (pending.guestId === guestId) withdraw(id, "default");
   }
 }
 
@@ -353,7 +344,7 @@ function forgetNotifications(guestId: number): void {
 export function installBrowserNotifications(): void {
   ipcMain.on(BROWSER_NOTIFICATION_PERMISSION, (event) => {
     try {
-      event.returnValue = sitesLoaded ? pagePermission(event) : "default";
+      event.returnValue = sites.isLoaded() ? pagePermission(event) : "default";
     } catch {
       // The page is blocked until a value is set.
       event.returnValue = "denied";

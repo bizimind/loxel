@@ -28,7 +28,7 @@ contextBridge.executeInMainWorld({
   // Serialized into the worker's world: it can only use its arguments and the worker's globals.
   func: (bridge) => {
     // How long after a click the worker's focus() is let through, as main lets openWindow() through
-    // (USER_ACTIVATION_MS in webview-new-tabs.ts).
+    // (USER_ACTIVATION_MS in user-activation.ts).
     const WINDOW_INTERACTION_MS = 5000;
     let windowInteractionUntil = 0;
     const text = (value) => (value === undefined ? "" : `${value}`);

@@ -52,8 +52,9 @@ interface Window {
     setBrowserPageFrozen: (webContentsId: number, frozen: boolean) => Promise<boolean>;
     /**
      * A browser page's favicon as a `data:` URL, or null if it is no image or can't be loaded.
-     * It loads through the browser panels' session, with cookies only if it has the origin of
-     * `pageUrl`, the page it is shown for. A `blob:` favicon is read in the page of webview
+     * It loads through the browser panels' session as `pageUrl`, the page it is shown for, would:
+     * with cookies only if it has that page's origin, and reaching this machine or the local
+     * network only as far as that page may. A `blob:` favicon is read in the page of webview
      * `webContentsId`, which must be one of this window's.
      */
     loadFavicon: (
@@ -145,10 +146,23 @@ interface Window {
     }) => () => void;
     /** The per-site camera and microphone decisions from settings (payload: `MediaSites`). */
     setMediaSites: (sites: unknown) => void;
-    /** Answer a camera or microphone request (payload: `MediaPermissionResponse`). */
+    /** Answer a camera or microphone request (payload: `SitePermissionResponse`). */
     respondToMediaPermission: (response: unknown) => void;
     /** Open the OS privacy settings for `device` (`MediaDevice`), where Loxel's access is turned on. */
     openMediaSystemSettings: (device: unknown) => void;
+    /**
+     * Browser panel pages asking to open a link in another app or to reach this machine and the
+     * local network (`SiteAccessRequest`), or such a request was withdrawn (`{ id, webContentsId }`).
+     * Subscribing tells main this document asks.
+     */
+    onSiteAccess: (handlers: {
+      onRequest: (request: unknown) => void;
+      onWithdrawn: (withdrawn: unknown) => void;
+    }) => () => void;
+    /** The per-site decisions for other apps and the local network (payload: `SiteAccessSites`). */
+    setSiteAccessSites: (sites: unknown) => void;
+    /** Answer a site access request (payload: `SitePermissionResponse`). */
+    respondToSiteAccess: (response: unknown) => void;
     /** Quit, ending the terminals, without asking. */
     quitEndingTerminals: () => void;
     /** Tell main the "When quitting Loxel" setting, which Quit Loxel and the app menu follow. */

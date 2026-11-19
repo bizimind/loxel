@@ -18,12 +18,10 @@ import {
   type WebContents,
 } from "electron";
 
-import { inputToKeyCombo, isModifierKey } from "../store/keybindings/key-combo";
+import { inputToKeyCombo } from "../store/keybindings/key-combo";
 import { isHttpUrl } from "../url-utils";
 import { OPEN_IN_NEW_BROWSER_TAB } from "./ipc-channels";
-
-/** How long a click or key press lets the page open a tab: Chromium's transient user activation. */
-export const USER_ACTIVATION_MS = 5000;
+import { trackUserActivation } from "./user-activation";
 
 /**
  * A `window.open` call that asked for a popup window rather than a tab. Chromium reports both a
@@ -53,23 +51,14 @@ export function handleWebviewWindowOpens(contents: WebContents, now = Date.now):
  * webview or a popup it opened, directly or through other popups; tabs go next to `webview`.
  */
 function handleWindowOpens(contents: WebContents, webview: WebContents, now: () => number): void {
-  let lastActivation = Number.NEGATIVE_INFINITY;
-  contents.on("before-mouse-event", (_, input) => {
-    if (input.type === "mouseDown") lastActivation = now();
-  });
-  contents.on("before-input-event", (_, input) => {
-    if (input.type === "keyDown" && !input.isAutoRepeat && !isModifierKey(input.key)) {
-      lastActivation = now();
-    }
-  });
+  const activation = trackUserActivation(contents, now);
   contents.setWindowOpenHandler((details) => {
     const host = webview.isDestroyed() ? null : webview.hostWebContents;
-    const userActivated = now() - lastActivation < USER_ACTIVATION_MS;
-    if (!isHttpUrl(details.url) || !userActivated || !host || host.isDestroyed()) {
+    if (!isHttpUrl(details.url) || !activation.isActive() || !host || host.isDestroyed()) {
       return { action: "deny" };
     }
     // Consume the activation so one click cannot open a flood of tabs.
-    lastActivation = Number.NEGATIVE_INFINITY;
+    activation.consume();
     if (isPopup(details)) {
       const parent = BrowserWindow.fromWebContents(contents === webview ? host : contents);
       return {

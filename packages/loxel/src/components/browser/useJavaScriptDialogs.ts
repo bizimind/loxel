@@ -3,7 +3,7 @@
  * process sends to the window (see `src/electron/javascript-dialogs.ts`), to the panel whose
  * `<webview>` the page is in.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect } from "react";
 
 import {
   type JavaScriptDialogRequest,
@@ -13,6 +13,8 @@ import {
 } from "@/electron/javascript-dialog-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 
+import { createWebviewRouter, useWebviewRequests } from "./webview-messages";
+
 const log = frontendLog.child("ui");
 
 interface DialogListener {
@@ -20,13 +22,10 @@ interface DialogListener {
   close: (id: number) => void;
 }
 
-/** Browser panels by the guest webContents id of their webview. */
-const listeners = new Map<number, DialogListener>();
-/**
- * Requests for a webview whose panel hasn't subscribed yet (a page can open one while loading,
- * before the panel knows its webContents id). Main withdraws them if the page goes away.
- */
-const unclaimed = new Map<number, JavaScriptDialogRequest[]>();
+/** Main withdraws dialogs held for a webview no panel claims if the page goes away. */
+const router = createWebviewRouter<DialogListener, JavaScriptDialogRequest>((listener, request) =>
+  listener.open(request),
+);
 let listening = false;
 
 export type JavaScriptDialogAnswer = Omit<JavaScriptDialogResponse, "id">;
@@ -37,23 +36,14 @@ function handleOpen(value: unknown): void {
     log.warn("Ignoring malformed JavaScript dialog request", { error: parsed.error.message });
     return;
   }
-  const request = parsed.data;
-  const listener = listeners.get(request.webContentsId);
-  if (listener) {
-    listener.open(request);
-    return;
-  }
-  unclaimed.set(request.webContentsId, [...(unclaimed.get(request.webContentsId) ?? []), request]);
+  router.deliver(parsed.data.webContentsId, parsed.data);
 }
 
 function handleClosed(value: unknown): void {
   const parsed = javaScriptDialogClosedSchema.safeParse(value);
   if (!parsed.success) return;
   const { id, webContentsId } = parsed.data;
-  listeners.get(webContentsId)?.close(id);
-  const waiting = unclaimed.get(webContentsId)?.filter((request) => request.id !== id);
-  if (waiting?.length) unclaimed.set(webContentsId, waiting);
-  else unclaimed.delete(webContentsId);
+  router.withdraw(webContentsId, (request) => request.id === id)?.close(id);
 }
 
 /**
@@ -64,15 +54,6 @@ function listen(): void {
   if (listening) return;
   listening = true;
   window.electronAPI?.onJavaScriptDialog(handleOpen, handleClosed);
-}
-
-function subscribe(webContentsId: number, listener: DialogListener): () => void {
-  listeners.set(webContentsId, listener);
-  for (const request of unclaimed.get(webContentsId) ?? []) listener.open(request);
-  unclaimed.delete(webContentsId);
-  return () => {
-    if (listeners.get(webContentsId) === listener) listeners.delete(webContentsId);
-  };
 }
 
 const dismissed: JavaScriptDialogAnswer = { accepted: false, value: "", suppress: false };
@@ -87,38 +68,30 @@ export function useJavaScriptDialogs(webContentsId: number | null): {
   answer: (answer: JavaScriptDialogAnswer) => void;
   dismissAll: () => void;
 } {
-  const [queue, setQueue] = useState<JavaScriptDialogRequest[]>([]);
+  const { requests, add, remove, clear } =
+    useWebviewRequests<JavaScriptDialogRequest>(webContentsId);
 
   useEffect(() => {
     listen();
     if (webContentsId === null) return;
-    return subscribe(webContentsId, {
-      // A new guest (the webview was re-created) drops the old guest's dialogs.
-      open: (request) =>
-        setQueue((prev) => [...prev.filter((r) => r.webContentsId === webContentsId), request]),
-      close: (id) => setQueue((prev) => prev.filter((request) => request.id !== id)),
-    });
-  }, [webContentsId]);
+    return router.subscribe(webContentsId, { open: add, close: remove });
+  }, [webContentsId, add, remove]);
 
-  const current = useMemo(
-    () => queue.filter((request) => request.webContentsId === webContentsId),
-    [queue, webContentsId],
-  );
-  const dialog = current[0] ?? null;
+  const dialog = requests[0] ?? null;
   const answer = useCallback(
     (reply: JavaScriptDialogAnswer) => {
       if (!dialog) return;
       window.electronAPI?.respondToJavaScriptDialog({ id: dialog.id, ...reply });
-      setQueue((prev) => prev.filter((request) => request.id !== dialog.id));
+      remove(dialog.id);
     },
-    [dialog],
+    [dialog, remove],
   );
   const dismissAll = useCallback(() => {
-    for (const request of current) {
+    for (const request of requests) {
       window.electronAPI?.respondToJavaScriptDialog({ id: request.id, ...dismissed });
     }
-    if (current.length > 0) setQueue([]);
-  }, [current]);
+    if (requests.length > 0) clear();
+  }, [requests, clear]);
 
   return { dialog, answer, dismissAll };
 }

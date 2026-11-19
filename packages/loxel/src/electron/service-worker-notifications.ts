@@ -60,7 +60,7 @@ import {
   REGISTRATION_NOTIFICATION_OPEN_WINDOW,
   REGISTRATION_NOTIFICATION_SHOW,
 } from "./ipc-channels";
-import { USER_ACTIVATION_MS } from "./webview-new-tabs";
+import { USER_ACTIVATION_MS } from "./user-activation";
 
 /**
  * Largest `data` a notification keeps, structured-cloned. Smaller than Chromium's 1 MB: main holds

@@ -48,6 +48,11 @@ const BROWSER_MEDIA_PERMISSION_RESPOND = "browser-media:permission-respond";
 const BROWSER_MEDIA_PERMISSION_WITHDRAWN = "browser-media:permission-withdrawn";
 const BROWSER_MEDIA_SYSTEM_BLOCKED = "browser-media:system-blocked";
 const BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS = "browser-media:open-system-settings";
+const SITE_ACCESS_LISTEN = "site-access:listen";
+const SITE_ACCESS_SET_SITES = "site-access:set-sites";
+const SITE_ACCESS_REQUEST = "site-access:request";
+const SITE_ACCESS_RESPOND = "site-access:respond";
+const SITE_ACCESS_WITHDRAWN = "site-access:withdrawn";
 const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
 const SET_WHEN_QUITTING = "quit:set-when-quitting";
 const QUIT_QUESTION = "quit:question";
@@ -196,6 +201,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   respondToMediaPermission: (response) =>
     ipcRenderer.send(BROWSER_MEDIA_PERMISSION_RESPOND, response),
   openMediaSystemSettings: (device) => ipcRenderer.send(BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS, device),
+  onSiteAccess: (handlers) => {
+    const subscriptions = [
+      [SITE_ACCESS_REQUEST, (_event, request) => handlers.onRequest(request)],
+      [SITE_ACCESS_WITHDRAWN, (_event, withdrawn) => handlers.onWithdrawn(withdrawn)],
+    ];
+    for (const [channel, handler] of subscriptions) ipcRenderer.on(channel, handler);
+    ipcRenderer.send(SITE_ACCESS_LISTEN);
+    return () => {
+      for (const [channel, handler] of subscriptions) ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  setSiteAccessSites: (sites) => ipcRenderer.send(SITE_ACCESS_SET_SITES, sites),
+  respondToSiteAccess: (response) => ipcRenderer.send(SITE_ACCESS_RESPOND, response),
   quitEndingTerminals: () => ipcRenderer.send(APP_QUIT_ENDING_TERMINALS),
   setWhenQuitting: (setting) => ipcRenderer.send(SET_WHEN_QUITTING, setting),
   onQuitQuestion: (callback) => {

@@ -28,6 +28,7 @@ import {
   systemPreferences,
 } from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import { onAppWindowMessage } from "./app-windows";
 import {
   MEDIA_DEVICES,
@@ -37,7 +38,6 @@ import {
   type MediaSites,
   type MediaSystemBlocked,
   mediaDeviceSchema,
-  mediaPermissionResponseSchema,
   parseMediaSites,
   withMediaDecision,
 } from "./browser-media-protocol";
@@ -53,6 +53,9 @@ import {
   BROWSER_MEDIA_SYSTEM_BLOCKED,
 } from "./ipc-channels";
 import { createListeningRenderers } from "./listening-renderers";
+import { createPermissionPrompts, createSettingsMirror } from "./permission-prompts";
+import { sitePermissionResponseSchema } from "./site-permission-protocol";
+import { webviewSenderFrame } from "./webview-sender";
 
 /** A device's state for a page: decided for its site, or still to ask. */
 type DeviceState = "allow" | "block" | "ask";
@@ -92,23 +95,7 @@ export function devicesOf(mediaTypes: readonly ("video" | "audio")[]): MediaDevi
   return [...devices];
 }
 
-/** An origin as Electron's handlers give it (`https://example.com/`), as pages name it. */
-export function normalizeOrigin(origin: string): string | null {
-  try {
-    const { origin: normalized } = new URL(origin);
-    return normalized === "null" ? null : normalized;
-  } catch {
-    return null;
-  }
-}
-
-let sites: MediaSites = {};
-/** Whether a renderer has sent the settings' decisions yet; requests wait for them. */
-let sitesLoaded = false;
-let resolveSitesLoaded: () => void = () => {};
-const sitesLoadedPromise = new Promise<void>((resolve) => {
-  resolveSitesLoaded = resolve;
-});
+const sites = createSettingsMirror<MediaSites>({});
 
 const listeningHosts = createListeningRenderers();
 
@@ -120,14 +107,21 @@ interface PendingRequest {
   /** Each `getUserMedia()` waiting on this prompt, told whether its devices may be used. */
   waiters: { devices: readonly MediaDevice[]; resolve: (allowed: boolean) => void }[];
 }
-const pendingRequests = new Map<number, PendingRequest>();
-let nextRequestId = 1;
+const prompts = createPermissionPrompts<PendingRequest>(
+  { request: BROWSER_MEDIA_PERMISSION_REQUEST, withdrawn: BROWSER_MEDIA_PERMISSION_WITHDRAWN },
+  (id, pending): MediaPermissionRequest => ({
+    id,
+    webContentsId: pending.guestId,
+    origin: pending.origin,
+    devices: pending.devices,
+  }),
+);
 
 /** "Allow this time" grants by guest webContents id, dropped when the panel leaves the site. */
 const onceGrants = new Map<number, OnceGrant>();
 
 function stateFor(guestId: number, origin: string, device: MediaDevice): DeviceState {
-  return deviceState(sites, onceGrants.get(guestId), origin, device);
+  return deviceState(sites.get(), onceGrants.get(guestId), origin, device);
 }
 
 function statesFor(guestId: number, origin: string, devices: readonly MediaDevice[]) {
@@ -166,15 +160,8 @@ export function checkMediaPermission(
 }
 
 /** Take down a prompt, answering what waits on it with `allowed`. */
-function withdraw(id: number, pending: PendingRequest, allowed: boolean): void {
-  pendingRequests.delete(id);
-  for (const waiter of pending.waiters) waiter.resolve(allowed);
-  sendWithdrawn(id, pending);
-}
-
-function sendWithdrawn(id: number, pending: PendingRequest): void {
-  if (pending.host.isDestroyed()) return;
-  pending.host.send(BROWSER_MEDIA_PERMISSION_WITHDRAWN, { id, webContentsId: pending.guestId });
+function withdraw(id: number, allowed: boolean): void {
+  for (const waiter of prompts.withdraw(id)?.waiters ?? []) waiter.resolve(allowed);
 }
 
 /** The devices of `waiters` the site has no decision for: what their prompt asks about. */
@@ -186,41 +173,26 @@ function undecided(pending: Pick<PendingRequest, "guestId" | "origin" | "waiters
 }
 
 /**
- * Show `pending`'s prompt under a new id, replacing the one `id` showed. A prompt's devices never
- * change under its id, so an answer only ever covers the devices the user saw.
- */
-function reprompt(id: number | null, pending: PendingRequest): void {
-  if (id !== null) {
-    pendingRequests.delete(id);
-    sendWithdrawn(id, pending);
-  }
-  const newId = nextRequestId++;
-  pendingRequests.set(newId, pending);
-  sendRequest(newId, pending);
-}
-
-/**
  * Answer what waits on prompts whose devices now have a decision: a request with every device
  * allowed gets them, one with any blocked is refused. A prompt with requests still waiting asks
  * again, for the devices left undecided.
  */
 function settleDecidedRequests(): void {
-  for (const [id, pending] of [...pendingRequests]) {
+  for (const [id, pending] of prompts.entries()) {
     const waiting = pending.waiters.filter((waiter) => {
       const state = requestState(statesFor(pending.guestId, pending.origin, waiter.devices));
       if (state !== "ask") waiter.resolve(state === "allow");
       return state === "ask";
     });
     if (waiting.length === 0) {
-      pendingRequests.delete(id);
-      sendWithdrawn(id, pending);
+      prompts.withdraw(id);
       continue;
     }
     pending.waiters = waiting;
     const devices = undecided(pending);
     if (devices.join() === pending.devices.join()) continue;
     pending.devices = devices;
-    reprompt(id, pending);
+    prompts.reprompt(id, pending);
   }
 }
 
@@ -238,29 +210,19 @@ function ask(
     const waiter = { devices, resolve };
     // A page asking again while its prompt is up (Meet asks for each device on its own) joins
     // the same prompt, which asks again under a new id if that adds a device.
-    for (const [id, pending] of pendingRequests) {
+    for (const [id, pending] of prompts.entries()) {
       if (pending.guestId !== guestId || pending.origin !== site) continue;
       pending.waiters.push(waiter);
       const asked = undecided(pending);
       if (asked.join() === pending.devices.join()) return;
       pending.devices = asked;
-      reprompt(id, pending);
+      prompts.reprompt(id, pending);
       return;
     }
     const pending: PendingRequest = { guestId, host, origin: site, devices: [], waiters: [waiter] };
     pending.devices = undecided(pending);
-    reprompt(null, pending);
+    prompts.show(pending);
   });
-}
-
-function sendRequest(id: number, pending: PendingRequest): void {
-  const request: MediaPermissionRequest = {
-    id,
-    webContentsId: pending.guestId,
-    origin: pending.origin,
-    devices: pending.devices,
-  };
-  pending.host.send(BROWSER_MEDIA_PERMISSION_REQUEST, request);
 }
 
 /** System prompts in flight, so pages asking at once share one. */
@@ -315,7 +277,7 @@ async function decideRequest(
   // next document meanwhile; that document's site must not decide for the one that asked.
   const asker = normalizeOrigin(details.securityOrigin ?? details.requestingUrl);
   if (details.isMainFrame && asker !== site) return false;
-  await sitesLoadedPromise;
+  await sites.loaded;
   if (siteOfGuest(guest) !== site) return false;
   const host = listeningHost(guest);
   if (!host) return false;
@@ -341,13 +303,13 @@ export function requestMediaPermission(
 }
 
 function respondToRequest(event: IpcMainEvent, value: unknown): void {
-  const parsed = mediaPermissionResponseSchema.safeParse(value);
+  const parsed = sitePermissionResponseSchema.safeParse(value);
   if (!parsed.success) return;
   const { id, answer } = parsed.data;
-  const pending = pendingRequests.get(id);
-  if (!pending || pending.host !== event.sender) return;
+  const pending = prompts.answered(event, id);
+  if (!pending) return;
   if (answer === "dismiss") {
-    withdraw(id, pending, false);
+    withdraw(id, false);
     return;
   }
   if (answer === "allow-once") {
@@ -360,28 +322,24 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   } else {
     // The renderer also saves the decision in settings, which sends it back here; applying it now
     // answers the page without waiting for that round trip.
-    sites = withMediaDecision(sites, pending.origin, pending.devices, answer);
+    sites.apply(withMediaDecision(sites.get(), pending.origin, pending.devices, answer));
   }
   settleDecidedRequests();
 }
 
 function setSites(_event: IpcMainEvent, value: unknown): void {
-  sites = parseMediaSites(value);
-  if (!sitesLoaded) {
-    sitesLoaded = true;
-    resolveSitesLoaded();
-  }
+  sites.receive(parseMediaSites(value));
   settleDecidedRequests();
 }
 
 /** `navigator.permissions.query()` for the calling frame, or null to leave Chromium's answer. */
 function pageStates(event: IpcMainEvent): MediaPermissionStates | null {
   const guest = event.sender;
-  const frame = event.senderFrame;
+  const frame = webviewSenderFrame(event);
   const site = siteOfGuest(guest);
-  if (!site || !frame || frame.detached || frame.origin !== site) return null;
+  if (!site || !frame || frame.origin !== site) return null;
   const states: MediaPermissionStates = { camera: "prompt", microphone: "prompt" };
-  if (!sitesLoaded) return states;
+  if (!sites.isLoaded()) return states;
   // With no window to ask in, a request for an undecided device is refused without asking.
   const undecidedState = listeningHost(guest) ? "prompt" : "denied";
   for (const device of MEDIA_DEVICES) {
@@ -421,8 +379,8 @@ export function installBrowserMedia(): void {
 
 /** Withdraw the guest's open prompts, refusing what waits on them: its page is going away. */
 function withdrawRequests(guestId: number): void {
-  for (const [id, pending] of [...pendingRequests]) {
-    if (pending.guestId === guestId) withdraw(id, pending, false);
+  for (const [id, pending] of prompts.entries()) {
+    if (pending.guestId === guestId) withdraw(id, false);
   }
 }
 
@@ -439,8 +397,8 @@ export function trackWebviewMedia(contents: WebContents): void {
   contents.on("did-navigate", () => {
     const origin = contents.mainFrame.origin;
     if (onceGrants.get(guestId)?.origin !== origin) onceGrants.delete(guestId);
-    for (const [id, pending] of [...pendingRequests]) {
-      if (pending.guestId === guestId && pending.origin !== origin) withdraw(id, pending, false);
+    for (const [id, pending] of prompts.entries()) {
+      if (pending.guestId === guestId && pending.origin !== origin) withdraw(id, false);
     }
   });
   contents.on("render-process-gone", () => withdrawRequests(guestId));

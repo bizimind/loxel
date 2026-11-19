@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { IpcMainEvent, MediaAccessPermissionRequest, WebContents } from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import {
   type MediaDevice,
-  type MediaPermissionAnswer,
   type MediaSites,
   mediaPermissionRequestSchema,
   mediaSystemBlockedSchema,
@@ -21,6 +21,7 @@ import {
   BROWSER_MEDIA_SET_SITES,
   BROWSER_MEDIA_SYSTEM_BLOCKED,
 } from "./ipc-channels";
+import type { SitePermissionAnswer } from "./site-permission-protocol";
 
 type Handler = (event: IpcMainEvent, value?: unknown) => unknown;
 const ipcHandlers = new Map<string, Handler>();
@@ -47,7 +48,6 @@ const {
   deviceState,
   devicesOf,
   installBrowserMedia,
-  normalizeOrigin,
   requestMediaPermission,
   requestState,
   trackWebviewMedia,
@@ -99,7 +99,7 @@ function fakeHost({ listening = true } = {}) {
     withdrawn: () => of(BROWSER_MEDIA_PERMISSION_WITHDRAWN),
     systemBlocked: () =>
       of(BROWSER_MEDIA_SYSTEM_BLOCKED).map((p) => mediaSystemBlockedSchema.parse(p)),
-    respond: (id: number, answer: MediaPermissionAnswer) =>
+    respond: (id: number, answer: SitePermissionAnswer) =>
       handler(BROWSER_MEDIA_PERMISSION_RESPOND)(windowEvent(host), { id, answer }),
   };
 }

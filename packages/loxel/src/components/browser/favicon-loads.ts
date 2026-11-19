@@ -2,7 +2,9 @@
  * The window's favicon loads. Web favicons are loaded by the main process through the browser
  * panels' session (see `electron/browser-favicons.ts`): Loxel's window has none of a site's
  * cookies, and some sites refuse to be loaded from another site. Cookies go only with a favicon of
- * the page's own origin, so a load is keyed by its URL and whether it carries them.
+ * the page's own origin, and a favicon on this machine or the local network loads only as far as
+ * the page itself may reach it, so a load is keyed by its URL, whether it carries cookies, and the
+ * page's origin.
  *
  * Loads are shared by everything showing the same favicon, at most `MAX_RUNNING` run at once, and
  * queued ones nothing wants any more by their turn (a page cycling through favicons) are dropped.
@@ -16,12 +18,11 @@ export function loadsThroughMain(url: string): boolean {
   return window.electronAPI !== undefined && isHttpUrl(url);
 }
 
-/** The page URL a load of `url` for page `pageUrl` passes to main: set only to send cookies. */
-const cookiePage = (url: string, pageUrl: string | undefined) =>
-  pageUrl !== undefined && isSameOrigin(url, pageUrl) ? pageUrl : undefined;
-
-const loadKey = (url: string, pageUrl: string | undefined) =>
-  `${cookiePage(url, pageUrl) === undefined ? "none" : "cookies"} ${url}`;
+const loadKey = (url: string, pageUrl: string | undefined) => {
+  const cookies = pageUrl !== undefined && isSameOrigin(url, pageUrl) ? "cookies" : "none";
+  const page = pageUrl !== undefined && URL.canParse(pageUrl) ? new URL(pageUrl).origin : "";
+  return `${cookies} ${page} ${url}`;
+};
 
 /** Loaded favicons as `data:` URLs by load key, least recently used first. */
 const loaded = new Map<string, string>();
@@ -96,7 +97,7 @@ export function requestFavicon(url: string, pageUrl: string | undefined): Favico
     const { promise, resolve } = Promise.withResolvers<string | null>();
     const start = () => {
       const api = window.electronAPI;
-      void (api ? api.loadFavicon(url, cookiePage(url, pageUrl)) : Promise.resolve(null))
+      void (api ? api.loadFavicon(url, pageUrl) : Promise.resolve(null))
         .catch(() => null)
         .then((result) => {
           running--;

@@ -549,10 +549,14 @@ describe("withValidSettings: terminal bidirectional text", () => {
 describe("browser notification mutes", () => {
   const site = "https://chat.example";
   const backgroundTabs = DEFAULT_BACKGROUND_TABS;
-  const reset = () =>
-    useSettingsStore.setState({
-      browser: { notificationSites: {}, notificationMutes: {}, mediaSites: {}, backgroundTabs },
-    });
+  const noSiteAccess = { externalAppSites: {}, localNetworkSites: {} };
+  const emptySites = {
+    notificationSites: {},
+    notificationMutes: {},
+    mediaSites: {},
+    ...noSiteAccess,
+  };
+  const reset = () => useSettingsStore.setState({ browser: { ...emptySites, backgroundTabs } });
   const browser = () => useSettingsStore.getState().browser;
 
   test("muting keeps the site's decision, and unmuting removes the mute", () => {
@@ -564,6 +568,7 @@ describe("browser notification mutes", () => {
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: {} },
       mediaSites: {},
+      ...noSiteAccess,
       backgroundTabs,
     });
     store.setNotificationMute(site, null);
@@ -583,6 +588,7 @@ describe("browser notification mutes", () => {
       notificationSites: {},
       notificationMutes: {},
       mediaSites: {},
+      ...noSiteAccess,
       backgroundTabs,
     });
     reset();
@@ -601,6 +607,7 @@ describe("browser notification mutes", () => {
         notificationSites: { [site]: "allow" },
         notificationMutes: { "https://old.example": { until: 1 } },
         mediaSites: {},
+        ...noSiteAccess,
         backgroundTabs,
       },
     });
@@ -620,14 +627,47 @@ describe("browser notification mutes", () => {
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: { until: 5 } },
       mediaSites: {},
+      ...noSiteAccess,
       backgroundTabs,
     });
     expect(merge({ browser: { notificationSites: {} } }, current).browser).toEqual({
       notificationSites: {},
       notificationMutes: {},
       mediaSites: {},
+      ...noSiteAccess,
       backgroundTabs,
     });
+  });
+
+  test("site access decisions are checked on load, keeping only valid ones", () => {
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    const current = useSettingsStore.getState();
+    const stored = {
+      notificationSites: {},
+      externalAppSites: { "https://zoom.example": { zoommtg: "allow", vscode: "maybe" }, x: 1 },
+      localNetworkSites: { "https://router.example": "block", "https://bad.example": true },
+    };
+    expect(merge({ browser: stored }, current).browser).toMatchObject({
+      externalAppSites: { "https://zoom.example": { zoommtg: "allow" } },
+      localNetworkSites: { "https://router.example": "block" },
+    });
+  });
+
+  test("a site's app and local network decisions are saved and forgotten", () => {
+    reset();
+    const store = useSettingsStore.getState();
+    store.setExternalAppSite(site, "zoommtg", "allow");
+    store.setExternalAppSite(site, "mailto", "block");
+    store.setLocalNetworkSite(site, "allow");
+    expect(browser()).toMatchObject({
+      externalAppSites: { [site]: { zoommtg: "allow", mailto: "block" } },
+      localNetworkSites: { [site]: "allow" },
+    });
+    store.setExternalAppSite(site, "zoommtg", null);
+    store.setExternalAppSite(site, "mailto", null);
+    store.setLocalNetworkSite(site, null);
+    expect(browser()).toMatchObject(noSiteAccess);
+    reset();
   });
 
   test("the background tabs mode falls back to Balanced, replacing the count it succeeded", () => {

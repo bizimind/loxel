@@ -2,7 +2,8 @@
  * Messages that carry browser panel pages' camera and microphone permission (`getUserMedia()`)
  * between the Electron main process, which decides it (see `browser-media.ts`), the window
  * renderer that asks the user, and the webview preload that reports it to
- * `navigator.permissions.query()`.
+ * `navigator.permissions.query()`. Answers and withdrawals are the shared ones of
+ * `site-permission-protocol.ts`: Allow this time lasts while the panel stays on the site.
  */
 import { z } from "zod";
 
@@ -68,26 +69,6 @@ export const mediaPermissionRequestSchema = z.object({
   devices: z.array(mediaDeviceSchema).min(1),
 });
 export type MediaPermissionRequest = z.infer<typeof mediaPermissionRequestSchema>;
-
-/**
- * The user's answer: `allow` and `block` are saved for the site, `allow-once` lasts while the
- * panel stays on the site, and `dismiss` refuses this request only, so the page may ask again.
- */
-export const mediaPermissionAnswerSchema = z.enum(["allow", "allow-once", "block", "dismiss"]);
-export type MediaPermissionAnswer = z.infer<typeof mediaPermissionAnswerSchema>;
-
-/** Window renderer → main: the user's answer to a request. */
-export const mediaPermissionResponseSchema = z.object({
-  id: z.number().int(),
-  answer: mediaPermissionAnswerSchema,
-});
-export type MediaPermissionResponse = z.infer<typeof mediaPermissionResponseSchema>;
-
-/** Main → window renderer: a request was withdrawn (decided elsewhere, or the page went away). */
-export const mediaPermissionWithdrawnSchema = z.object({
-  id: z.number().int(),
-  webContentsId: z.number().int(),
-});
 
 /**
  * Main → window renderer: the site was allowed, but macOS has Loxel's access to `devices` turned

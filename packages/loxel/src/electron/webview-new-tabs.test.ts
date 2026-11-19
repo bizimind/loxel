@@ -59,8 +59,8 @@ class FakeBrowserWindow {
 
 void mock.module("electron", () => ({ BrowserWindow: FakeBrowserWindow }));
 
-const { POPUP_MIN_SIZE, USER_ACTIVATION_MS, handleWebviewWindowOpens } =
-  await import("./webview-new-tabs");
+const { POPUP_MIN_SIZE, handleWebviewWindowOpens } = await import("./webview-new-tabs");
+const { USER_ACTIVATION_MS } = await import("./user-activation");
 
 type OpenHandler = (details: HandlerDetails) => WindowOpenHandlerResponse;
 
