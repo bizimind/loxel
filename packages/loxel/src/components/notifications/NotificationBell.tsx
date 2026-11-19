@@ -56,7 +56,7 @@ export function NotificationBell() {
             {entries.map((entry) =>
               entry.kind === "single" ? (
                 <NotificationItem
-                  key={entry.notification.id}
+                  key={entry.key}
                   notification={entry.notification}
                   onNavigate={closeMenu}
                 />

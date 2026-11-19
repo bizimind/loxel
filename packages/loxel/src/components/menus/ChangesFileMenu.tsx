@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { getPathInfo } from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { usePanelServer } from "@/components/dockview/panel-context";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -55,9 +55,11 @@ export function ChangesFileMenu({
   onRevealInExplorer,
   onDiscard,
 }: ChangesFileMenuProps) {
+  // On the server of the panel the menu is in, which holds the worktree its diff is of.
+  const server = usePanelServer();
   // Checked afresh each time the menu opens: discards and agents add and remove files.
   const { data: onDisk = false } = useQuery({
-    queryKey: queryKeys.pathExists(localServerId(), absolutePath),
+    queryKey: queryKeys.pathExists(server, absolutePath),
     queryFn: () =>
       getPathInfo(absolutePath).then(
         () => true,

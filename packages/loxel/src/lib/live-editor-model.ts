@@ -42,9 +42,10 @@ export function editorFileUri(file: EditorFile, scheme: EditorUriScheme): monaco
 export function editorFile(uri: ModelUri): EditorFile | null {
   if (uri.query || uri.fragment || !uri.authority) return null;
   if (uri.scheme !== "file" && uri.scheme !== "loxel") return null;
-  // Only what `serverAuthority` writes: no port, user info or uppercase. `head` is the authority
-  // the servers' own `loxel:` URIs use, which names no server.
-  if (!isServerId(uri.authority) || uri.authority === "head") return null;
+  // Only what `serverAuthority` writes: no port, user info or uppercase, and none of the reserved
+  // authorities (`head` of the servers' own `loxel:` URIs, `compare` of compare panels), which
+  // name no server.
+  if (!isServerId(uri.authority)) return null;
   return { server: toServerId(uri.authority), path: uri.path };
 }
 

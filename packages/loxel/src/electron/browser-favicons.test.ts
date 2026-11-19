@@ -1,20 +1,19 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import type { BrowserWindow, IpcMainInvokeEvent, Session, WebContents } from "electron";
+import type { IpcMainInvokeEvent, Session, WebContents } from "electron";
 
-import { registerAppWindow } from "./app-windows";
 import { BROWSER_FAVICON_LOAD } from "./ipc-channels";
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<string | null>;
 const ipcHandlers = new Map<string, Handler>();
-const windows = new Map<WebContents, BrowserWindow>();
 const guests = new Map<number, WebContents>();
 void mock.module("electron", () => ({
   ipcMain: { handle: (channel: string, handler: Handler) => ipcHandlers.set(channel, handler) },
-  BrowserWindow: { fromWebContents: (contents: WebContents) => windows.get(contents) ?? null },
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   webContents: { fromId: (id: number) => guests.get(id) },
 }));
 
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const { imageDataUrl, installBrowserFavicons, MAX_FAVICON_BYTES } =
   await import("./browser-favicons");
 
@@ -43,14 +42,7 @@ describe("imageDataUrl", () => {
   });
 });
 
-/** One of Loxel's windows, or (`app: false`) a window that isn't, such as a page's popup. */
-function fakeWindow({ app = true } = {}): WebContents {
-  const contents = { getType: () => "window" } as unknown as WebContents;
-  const win = { webContents: contents, on: () => win } as unknown as BrowserWindow;
-  windows.set(contents, win);
-  if (app) registerAppWindow(win);
-  return contents;
-}
+const appWindow = () => fakeWindow({});
 
 let nextGuestId = 1;
 function fakeGuest(host: WebContents, url: string, pageResult: unknown) {
@@ -71,17 +63,12 @@ const fetchFavicon = mock(
 );
 installBrowserFavicons({ fetch: fetchFavicon } as unknown as Session);
 const load = (sender: WebContents, url: unknown, pageUrl?: unknown, webContentsId?: unknown) =>
-  ipcHandlers.get(BROWSER_FAVICON_LOAD)!(
-    { sender } as IpcMainInvokeEvent,
-    url,
-    pageUrl,
-    webContentsId,
-  );
+  ipcHandlers.get(BROWSER_FAVICON_LOAD)!(mainFrameEvent(sender), url, pageUrl, webContentsId);
 
 describe("loading a favicon", () => {
   test("loads a favicon of the page's own origin with its cookies, and never along a redirect", async () => {
     const result = await load(
-      fakeWindow(),
+      appWindow(),
       "https://example.com/favicon.png",
       "https://example.com/a",
     );
@@ -93,12 +80,12 @@ describe("loading a favicon", () => {
   });
 
   test("loads another site's favicon without cookies", async () => {
-    await load(fakeWindow(), "https://victim.example/logout", "https://evil.example/");
+    await load(appWindow(), "https://victim.example/logout", "https://evil.example/");
     expect(fetchFavicon.mock.lastCall?.[1]).toMatchObject({
       credentials: "omit",
       redirect: "follow",
     });
-    await load(fakeWindow(), "https://example.com/favicon.png");
+    await load(appWindow(), "https://example.com/favicon.png");
     expect(fetchFavicon.mock.lastCall?.[1]).toMatchObject({ credentials: "omit" });
   });
 
@@ -106,7 +93,7 @@ describe("loading a favicon", () => {
     fetchFavicon.mockClear();
     fetchFavicon.mockRejectedValueOnce(new TypeError("fetch failed: redirect"));
     const result = await load(
-      fakeWindow(),
+      appWindow(),
       "https://example.com/favicon.ico",
       "https://example.com/",
     );
@@ -119,12 +106,13 @@ describe("loading a favicon", () => {
 
   test("answers only Loxel's own windows", async () => {
     fetchFavicon.mockClear();
-    expect(await load(fakeWindow({ app: false }), "https://example.com/favicon.png")).toBeNull();
+    const popup = fakeWindow({}, { app: false });
+    await expect(load(popup, "https://example.com/favicon.png")).rejects.toThrow();
     expect(fetchFavicon).not.toHaveBeenCalled();
   });
 
   test("gives nothing for a page served in place of the favicon, or a failed load", async () => {
-    const window = fakeWindow();
+    const window = appWindow();
     fetchFavicon.mockResolvedValueOnce(
       new Response("<html>Sign in</html>", { headers: { "content-type": "text/html" } }),
     );
@@ -141,12 +129,12 @@ describe("loading a favicon", () => {
         headers: { "content-type": "image/png" },
       }),
     );
-    expect(await load(fakeWindow(), "https://example.com/huge.png")).toBeNull();
+    expect(await load(appWindow(), "https://example.com/huge.png")).toBeNull();
   });
 
   test("loads no other scheme", async () => {
-    expect(await load(fakeWindow(), "file:///etc/passwd")).toBeNull();
-    expect(await load(fakeWindow(), 42)).toBeNull();
+    expect(await load(appWindow(), "file:///etc/passwd")).toBeNull();
+    expect(await load(appWindow(), 42)).toBeNull();
   });
 });
 
@@ -155,15 +143,15 @@ describe("a blob: favicon", () => {
   const pageResult = `data:image/svg+xml;base64,${base64(svg)}`;
 
   test("is read in the page of one of the window's webviews, apart from the page's scripts", async () => {
-    const window = fakeWindow();
+    const window = appWindow();
     const guest = fakeGuest(window, "https://example.com/app", pageResult);
     expect(await load(window, "blob:https://example.com/1", undefined, guest.id)).toBe(pageResult);
     expect(guest.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(1);
   });
 
   test("is not read in another window's webview, or for another site", async () => {
-    const window = fakeWindow();
-    const other = fakeGuest(fakeWindow(), "https://example.com/app", pageResult);
+    const window = appWindow();
+    const other = fakeGuest(appWindow(), "https://example.com/app", pageResult);
     expect(await load(window, "blob:https://example.com/1", undefined, other.id)).toBeNull();
     expect(other.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
 
@@ -173,7 +161,7 @@ describe("a blob: favicon", () => {
   });
 
   test("must read as an image", async () => {
-    const window = fakeWindow();
+    const window = appWindow();
     const guest = fakeGuest(window, "https://example.com/app", "data:text/html;base64,PGh0bWw+");
     expect(await load(window, "blob:https://example.com/1", undefined, guest.id)).toBeNull();
   });

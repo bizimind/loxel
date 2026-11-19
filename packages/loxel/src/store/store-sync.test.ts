@@ -1,5 +1,9 @@
 import { describe, expect, jest, test } from "bun:test";
 
+import { localServerId } from "@/api/local-server";
+import { toServerId } from "@/api/worktree-ref";
+
+import { useProjectStore } from "./projects";
 import { useSettingsStore } from "./settings-store";
 import { applyStoreUpdate } from "./store-sync";
 import { useUIStore } from "./ui";
@@ -42,6 +46,20 @@ describe("applyStoreUpdate", () => {
       theme: "light",
     });
     expect(useSettingsStore.getState().themes).toBe(themes);
+  });
+
+  test("projects: another tab's expanded projects keep this window's other servers' ones", () => {
+    const listed = (id: string, server: ReturnType<typeof localServerId>) =>
+      ({ id, path: `/${id}`, server }) as never;
+    useProjectStore.setState({
+      projects: [listed("here", localServerId()), listed("there", toServerId("other-server"))],
+      expandedProjectIds: ["there"],
+    });
+
+    applyStoreUpdate("projects", { expandedProjectIds: ["here"] });
+
+    expect(useProjectStore.getState().expandedProjectIds).toEqual(["here", "there"]);
+    useProjectStore.setState({ projects: [], expandedProjectIds: [] });
   });
 
   test("ui: darkMode from an older window is ignored", () => {

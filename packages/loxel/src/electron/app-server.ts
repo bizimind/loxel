@@ -9,7 +9,7 @@ import { DEFAULT_SERVER_PORT } from "../app-ports";
 import { bearer, newSessionSecret, readSessionToken } from "../app-session";
 import { demoPort } from "../demo-instance";
 import { stateDirFor } from "../state-dir";
-import { DEMO_INSTANCE, IS_DEMO, IS_DEV } from "./env";
+import { DEMO_INSTANCE, DEV_RENDERER_URL, IS_DEMO, IS_DEV } from "./env";
 
 export const SERVER_PORT = IS_DEMO
   ? demoPort(DEMO_INSTANCE)
@@ -17,6 +17,9 @@ export const SERVER_PORT = IS_DEMO
     ? DEFAULT_SERVER_PORT.dev
     : DEFAULT_SERVER_PORT.production;
 export const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
+
+/** The origin Loxel's windows load the app from: the Vite dev server in dev, the server otherwise. */
+export const APP_ORIGIN = new URL(DEV_RENDERER_URL ?? SERVER_URL).origin;
 
 /** The secret this run of the app gives the servers it starts. */
 export const APP_SESSION_SECRET = newSessionSecret();

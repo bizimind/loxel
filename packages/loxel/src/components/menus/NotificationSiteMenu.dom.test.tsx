@@ -44,6 +44,7 @@ beforeEach(() => {
     browser: {
       notificationSites: { [site]: "allow" },
       notificationMutes: {},
+      mediaSites: {},
       backgroundTabs: DEFAULT_BACKGROUND_TABS,
     },
   });

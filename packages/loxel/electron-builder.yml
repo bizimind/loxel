@@ -48,7 +48,11 @@ mac:
   # (and Settings > General > Default Browser in Loxel). Declaring them never changes the default:
   # macOS keeps the user's browser until they pick another, so Loxel opens links only once chosen.
   # Alternate rank, as for the documents above, ranks it below any browser that claims more.
+  # The camera and microphone usage texts are what macOS shows when it first asks for them, which
+  # it does when a site the user allowed in a browser panel uses one (src/electron/browser-media.ts).
   extendInfo:
+    NSCameraUsageDescription: Sites you allow in Loxel's browser can use your camera, such as for video calls.
+    NSMicrophoneUsageDescription: Sites you allow in Loxel's browser can use your microphone, such as for video calls.
     CFBundleURLTypes:
       - CFBundleURLName: Web site URL
         CFBundleTypeRole: Viewer

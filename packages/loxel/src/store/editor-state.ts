@@ -120,9 +120,14 @@ interface EditorStateStore {
   setSaveRefused: (key: EditorKey, reason: string | null) => void;
   /**
    * Take over an outbox save in a freshly mounted editor that shows its content: `dirty` on
-   * `base`, or `diverged` from `disk` when the save conflicted with the file on disk.
+   * `base`, or `diverged` from `disk` when the save conflicted with the file on disk. `conflict`:
+   * `diverged` even before its disk version is known (`disk` null), for a save that must not be
+   * written without the user.
    */
-  adoptQueuedEdit: (key: EditorKey, edit: { base: string | null; disk: string | null }) => void;
+  adoptQueuedEdit: (
+    key: EditorKey,
+    edit: { base: string | null; disk: string | null; conflict?: boolean },
+  ) => void;
   /** Core state machine: handle an external disk change notification. */
   handleDiskChange: (key: EditorKey, nonces: string[], diskContent: string) => void;
   acceptDiskVersion: (key: EditorKey) => void;
@@ -264,14 +269,14 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 
-  adoptQueuedEdit: (key, { base, disk }) => {
+  adoptQueuedEdit: (key, { base, disk, conflict = false }) => {
     set((s) => {
       const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
       files.set(key, {
         ...entry,
-        state: disk === null ? "dirty" : "diverged",
+        state: disk === null && !conflict ? "dirty" : "diverged",
         baseContent: base,
         diskContent: disk,
         mergedDiskContent: null,

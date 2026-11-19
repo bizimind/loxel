@@ -4,11 +4,11 @@
  * renderer reports each change of the setting (`SET_THEME_SOURCE`); before any window exists,
  * main reads the persisted setting so the first window already opens in it.
  */
-import { ipcMain, nativeTheme } from "electron";
+import { nativeTheme } from "electron";
 
 import { asThemePreference } from "../lib/theme-preference";
 import { persistedTheme } from "../server/persisted-settings";
-import { appWindowList } from "./app-windows";
+import { appWindowList, onAppWindowMessage } from "./app-windows";
 import { SET_THEME_SOURCE } from "./ipc-channels";
 
 /** The renderer's `--background` in each theme (`src/index.css`); keep the two in step. */
@@ -21,7 +21,7 @@ export function windowBackgroundColor(): string {
 
 /** Apply each theme setting a window's renderer reports, and repaint window backgrounds. */
 export function installNativeTheme(): void {
-  ipcMain.on(SET_THEME_SOURCE, (_event, theme: unknown) => {
+  onAppWindowMessage(SET_THEME_SOURCE, (_event, theme: unknown) => {
     const source = asThemePreference(theme);
     if (source) nativeTheme.themeSource = source;
   });
