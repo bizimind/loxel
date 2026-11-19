@@ -352,6 +352,22 @@ describe("installClientCertificatePicker", () => {
     expect(shownBoxes.at(-1)!.options.message).toStartWith("next.test asks");
   });
 
+  test("names the page again once a navigation stops without committing", async () => {
+    const page = fakePage({ session: browserSession, url: "https://page.test/" });
+    created({}, page.contents);
+    page.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "https://stopped.test/",
+    });
+    page.emit("did-stop-loading");
+    boxResponse = 1;
+    await emit(page.contents, "stopped.test:443", [ALICE]).answer;
+    expect(shownBoxes.at(-1)!.options.message).toStartWith(
+      "A page on page.test connects to stopped.test,",
+    );
+  });
+
   test("sends none when the user declines", async () => {
     const popup = fakePage({ session: browserSession });
     created({}, popup.contents);

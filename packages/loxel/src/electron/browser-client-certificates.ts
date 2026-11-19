@@ -198,6 +198,9 @@ function trackNavigations(
   contents.on("did-fail-load", (_event, _code, _description, _url, isMainFrame) => {
     if (isMainFrame) navigating.delete(contents);
   });
+  // Navigations that don't commit (stopped, downloads, 204) emit neither event above. The page
+  // counts as loading until a pending navigation is decided, so this never ends one early.
+  contents.on("did-stop-loading", () => navigating.delete(contents));
 }
 
 /** Decide every client certificate request: ask for browser panel pages, refuse the rest. */
