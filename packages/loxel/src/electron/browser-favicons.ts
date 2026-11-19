@@ -18,6 +18,7 @@ import type { IpcMainInvokeEvent, Session, WebContents } from "electron";
 
 import { isHttpUrl, isSameOrigin } from "../url-utils";
 import { handleAppWindowInvoke } from "./app-windows";
+import { fetchForPage } from "./browser-local-network";
 import { hostedWebview } from "./hosted-webview";
 import { BROWSER_FAVICON_LOAD } from "./ipc-channels";
 
@@ -76,14 +77,28 @@ async function readCapped(response: Response): Promise<Uint8Array | null> {
   return Buffer.concat(chunks);
 }
 
-/** Fetch `url` without a referrer, with the session's cookies or none. */
-function fetchFavicon(browserSession: Session, url: string, withCookies: boolean) {
-  return browserSession.fetch(url, {
-    credentials: withCookies ? "include" : "omit",
-    // With cookies, a redirect fails rather than take them elsewhere.
-    redirect: withCookies ? "error" : "follow",
-    signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
-  });
+/**
+ * Fetch `url` without a referrer, with the session's cookies or none, as the page at `pageUrl`
+ * would: its requests to this machine or the local network follow the page's site's decision, so
+ * a favicon can't reach what the page itself may not.
+ */
+async function fetchFavicon(
+  browserSession: Session,
+  url: string,
+  pageUrl: string | undefined,
+  withCookies: boolean,
+) {
+  const done = fetchForPage(url, pageUrl);
+  try {
+    return await browserSession.fetch(url, {
+      credentials: withCookies ? "include" : "omit",
+      // With cookies, a redirect fails rather than take them elsewhere.
+      redirect: withCookies ? "error" : "follow",
+      signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
+    });
+  } finally {
+    done();
+  }
 }
 
 async function loadWebFavicon(
@@ -94,10 +109,10 @@ async function loadWebFavicon(
   const withCookies = pageUrl !== undefined && isSameOrigin(url, pageUrl);
   const response = withCookies
     ? // A favicon that redirects (to a CDN, say) loads again without cookies.
-      await fetchFavicon(browserSession, url, true).catch(() =>
-        fetchFavicon(browserSession, url, false),
+      await fetchFavicon(browserSession, url, pageUrl, true).catch(() =>
+        fetchFavicon(browserSession, url, pageUrl, false),
       )
-    : await fetchFavicon(browserSession, url, false);
+    : await fetchFavicon(browserSession, url, pageUrl, false);
   if (!response.ok) return null;
   const bytes = await readCapped(response);
   return bytes && imageDataUrl(response.headers.get("content-type"), bytes);

@@ -90,6 +90,7 @@ import {
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
 import { requestExternalApp } from "./browser-external-apps";
 import { installBrowserFavicons } from "./browser-favicons";
+import { installLocalNetworkAccess } from "./browser-local-network";
 import {
   checkMediaPermission,
   installBrowserMedia,
@@ -1141,6 +1142,7 @@ app.whenReady().then(async () => {
       noteExclusiveAccessGrant,
     );
     installBrowserFavicons(browserSession);
+    installLocalNetworkAccess(browserSession);
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();
