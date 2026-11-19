@@ -4,9 +4,10 @@
  * it is and offers to make it so, which macOS confirms with its own prompt. Links then arrive as
  * `open-url` events (`main.ts`).
  */
-import { app, ipcMain } from "electron";
+import { app } from "electron";
 
 import type { DefaultBrowserStatus } from "../api/default-browser-model";
+import { handleAppWindowInvoke } from "./app-windows";
 import { DEFAULT_BROWSER_GET, DEFAULT_BROWSER_SET } from "./ipc-channels";
 
 const WEB_SCHEMES = ["http", "https"] as const;
@@ -20,10 +21,10 @@ function defaultBrowserStatus(): DefaultBrowserStatus {
 }
 
 export function installDefaultBrowser(): void {
-  ipcMain.handle(DEFAULT_BROWSER_GET, () => defaultBrowserStatus());
+  handleAppWindowInvoke(DEFAULT_BROWSER_GET, () => defaultBrowserStatus());
   // macOS asks the user to confirm and answers later, so the status returned may not show it yet;
   // the renderer reads it again when its window is focused after the prompt.
-  ipcMain.handle(DEFAULT_BROWSER_SET, () => {
+  handleAppWindowInvoke(DEFAULT_BROWSER_SET, () => {
     if (defaultBrowserStatus().canSet) {
       for (const scheme of WEB_SCHEMES) app.setAsDefaultProtocolClient(scheme);
     }

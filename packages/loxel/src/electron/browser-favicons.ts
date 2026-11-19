@@ -14,16 +14,10 @@
  * favicon loads without cookies, so a page can't make Loxel send another site a request carrying
  * that site's cookies.
  */
-import {
-  BrowserWindow,
-  ipcMain,
-  type IpcMainInvokeEvent,
-  type Session,
-  type WebContents,
-} from "electron";
+import type { IpcMainInvokeEvent, Session, WebContents } from "electron";
 
 import { isHttpUrl, isSameOrigin } from "../url-utils";
-import { isAppWindow } from "./app-windows";
+import { handleAppWindowInvoke } from "./app-windows";
 import { hostedWebview } from "./hosted-webview";
 import { BROWSER_FAVICON_LOAD } from "./ipc-channels";
 
@@ -140,12 +134,6 @@ async function loadBlobFavicon(guest: WebContents, url: string): Promise<string 
   return parsed && imageDataUrl(parsed.type, parsed.bytes);
 }
 
-/** Whether `sender` is one of Loxel's windows: not a page, nor a browser panel's popup. */
-function isAppWindowContents(sender: WebContents): boolean {
-  const win = BrowserWindow.fromWebContents(sender);
-  return win !== null && win.webContents === sender && isAppWindow(win);
-}
-
 async function loadFavicon(
   browserSession: Session,
   event: IpcMainInvokeEvent,
@@ -153,7 +141,7 @@ async function loadFavicon(
   pageUrl: unknown,
   webContentsId: unknown,
 ): Promise<string | null> {
-  if (typeof url !== "string" || !isAppWindowContents(event.sender)) return null;
+  if (typeof url !== "string") return null;
   if (isHttpUrl(url)) {
     return loadWebFavicon(browserSession, url, typeof pageUrl === "string" ? pageUrl : undefined);
   }
@@ -164,7 +152,7 @@ async function loadFavicon(
 
 /** Answer `BROWSER_FAVICON_LOAD` from Loxel's windows. */
 export function installBrowserFavicons(browserSession: Session): void {
-  ipcMain.handle(
+  handleAppWindowInvoke(
     BROWSER_FAVICON_LOAD,
     (event, url: unknown, pageUrl: unknown, webContentsId: unknown) =>
       loadFavicon(browserSession, event, url, pageUrl, webContentsId).catch(() => null),

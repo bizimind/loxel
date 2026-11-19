@@ -3,8 +3,9 @@
  * pages to freeze or unload (`store/browser-page-budget.ts`); this module measures pages and
  * freezes them, only for webviews the asking window hosts.
  */
-import { app, ipcMain, type WebContents, webContents } from "electron";
+import { app, type WebContents, webContents } from "electron";
 
+import { handleAppWindowInvoke } from "./app-windows";
 import type { BrowserPagesUsage } from "./browser-page-protocol";
 import { hostedWebview } from "./hosted-webview";
 import { BROWSER_PAGE_SET_FROZEN, BROWSER_PAGE_USAGE } from "./ipc-channels";
@@ -91,10 +92,10 @@ async function setFrozen(guest: WebContents, frozen: boolean): Promise<boolean> 
 }
 
 export function installBrowserPageLifecycle(): void {
-  ipcMain.handle(BROWSER_PAGE_USAGE, (event, ids: unknown): BrowserPagesUsage => {
+  handleAppWindowInvoke(BROWSER_PAGE_USAGE, (event, ids: unknown): BrowserPagesUsage => {
     return measure(event.sender, Array.isArray(ids) ? ids : []);
   });
-  ipcMain.handle(BROWSER_PAGE_SET_FROZEN, (event, id: unknown, frozen: unknown) => {
+  handleAppWindowInvoke(BROWSER_PAGE_SET_FROZEN, (event, id: unknown, frozen: unknown) => {
     const guest = hostedWebview(event.sender, id);
     if (!guest || typeof frozen !== "boolean") return false;
     const change = (lastChange.get(guest) ?? Promise.resolve(true))
