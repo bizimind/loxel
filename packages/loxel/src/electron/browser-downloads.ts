@@ -7,7 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import type { DownloadItem, Session, WebContents } from "electron";
@@ -33,7 +33,9 @@ export function quarantineValue(now: Date, eventId: string = randomUUID().toUppe
 /** Mark `path` as downloaded, so Gatekeeper checks it when it is opened (macOS only). */
 export async function quarantineFile(path: string): Promise<void> {
   if (process.platform !== "darwin") return;
+  // `-s`: a symbolic link itself, never the file it points to.
   await execFileAsync("/usr/bin/xattr", [
+    "-s",
     "-w",
     QUARANTINE_ATTRIBUTE,
     quarantineValue(new Date()),
@@ -42,23 +44,37 @@ export async function quarantineFile(path: string): Promise<void> {
 }
 
 /**
+ * The inode of the file at `path` if it can be a download that started at `startedMs`: a regular
+ * file (not a link) created since. Null for anything else, including nothing there.
+ */
+export async function downloadedFileInode(path: string, startedMs: number): Promise<bigint | null> {
+  const stats = await lstat(path, { bigint: true }).catch(() => null);
+  if (!stats?.isFile()) return null;
+  // In microseconds: whole milliseconds (`birthtimeMs` of bigint stats) can't tell apart a file the
+  // user had from a download that started in the same millisecond.
+  if (Number(stats.birthtimeNs / 1000n) < startedMs * 1000) return null;
+  return stats.ino;
+}
+
+/**
  * Keep `item`'s file quarantined from the moment it is at its save path. Electron has Chromium
  * write a download straight to the path the user picked, so marking it only once complete would
  * leave an unmarked file there for as long as the download runs, or for good if it stalls.
- * Chromium moves its temporary file to that path after the dialog (replacing a file the user chose
- * to overwrite, and its attribute with it), and progress can be reported before the move, so the
- * file there is marked again whenever it is a different file (inode) from the one last marked.
+ *
+ * Only the download's own file is marked: a regular file created after the download started. When
+ * the user chose to replace a file, Chromium downloads beside it (`name (1).ext`) and moves the
+ * download onto the path only once complete, so the user's file, or a link there, is left alone
+ * and the download is marked when it arrives. Progress can be reported before Chromium's first
+ * move too, so the path is checked again on every report until a new file (inode) is there.
  */
 function trackQuarantine(item: DownloadItem, quarantine: (path: string) => Promise<void>) {
+  const startedMs = item.getStartTime() * 1000;
   let markedInode: bigint | null = null;
   let running: Promise<void> | null = null;
   let again = false;
 
   const markIfNew = async (path: string) => {
-    const inode = await stat(path, { bigint: true }).then(
-      (stats) => stats.ino,
-      () => null,
-    );
+    const inode = await downloadedFileInode(path, startedMs);
     if (inode === null || inode === markedInode) return;
     await quarantine(path);
     markedInode = inode;

@@ -1,13 +1,18 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { $ } from "bun";
 import type { DownloadItem, Session, WebContents } from "electron";
 
-import { installBrowserDownloads, quarantineFile, quarantineValue } from "./browser-downloads";
+import {
+  downloadedFileInode,
+  installBrowserDownloads,
+  quarantineFile,
+  quarantineValue,
+} from "./browser-downloads";
 
 describe("quarantineValue", () => {
   test("is macOS's format: flags, hex seconds, agent, event id", () => {
@@ -36,6 +41,8 @@ describe.if(process.platform === "darwin")("quarantineFile", () => {
 /** A download whose Save dialog is open until `answer` or `finish`. */
 class FakeDownload extends EventEmitter {
   savePath = "";
+  /** Seconds since the epoch, as Electron reports it; files made in these tests are newer. */
+  startTime = (Date.now() - 60_000) / 1000;
   answer(path: string) {
     this.savePath = path;
     this.progress();
@@ -48,6 +55,9 @@ class FakeDownload extends EventEmitter {
   }
   getSavePath() {
     return this.savePath;
+  }
+  getStartTime() {
+    return this.startTime;
   }
 }
 
@@ -78,8 +88,9 @@ function setup() {
   const fake = fakeQuarantine();
   installBrowserDownloads(session as unknown as Session, fake.quarantine);
   /** Start a download in `page`; whether it went ahead (was not cancelled). */
-  const download = (page: WebContents | null) => {
+  const download = (page: WebContents | null, startTime?: number) => {
     const item = new FakeDownload();
+    if (startTime !== undefined) item.startTime = startTime;
     let prevented = false;
     const event = { preventDefault: () => (prevented = true) };
     session.emit("will-download", event, item as unknown as DownloadItem, page);
@@ -99,6 +110,28 @@ async function withDir(run: (dir: string) => Promise<void>) {
   }
 }
 
+describe("downloadedFileInode", () => {
+  test("is a regular file made since the download started", () =>
+    withDir(async (dir) => {
+      const before = join(dir, "before.sh");
+      await writeFile(before, "the user's own file");
+      const startedMs =
+        Number((await stat(before, { bigint: true })).birthtimeNs / 1000n) / 1000 + 0.001;
+      const download = join(dir, "download.sh");
+      await writeFile(download, "#!/bin/sh\n");
+      const link = join(dir, "link.sh");
+      await symlink(download, link);
+
+      expect(await downloadedFileInode(download, startedMs)).toBe(
+        (await stat(download, { bigint: true })).ino,
+      );
+      expect(await downloadedFileInode(before, startedMs)).toBeNull();
+      expect(await downloadedFileInode(link, startedMs)).toBeNull();
+      expect(await downloadedFileInode(dir, startedMs)).toBeNull();
+      expect(await downloadedFileInode(join(dir, "missing"), startedMs)).toBeNull();
+    }));
+});
+
 describe("installBrowserDownloads", () => {
   test("marks the file as soon as it is at its save path", () =>
     withDir(async (dir) => {
@@ -112,22 +145,6 @@ describe("installBrowserDownloads", () => {
       await untilCalls(1);
       item.finish("completed");
       expect(calls).toEqual([file]);
-    }));
-
-  test("marks it again when another file replaces it", () =>
-    withDir(async (dir) => {
-      const { download, calls, untilCalls } = setup();
-      const file = join(dir, "tool.sh");
-      await writeFile(file, "a file the user chose to overwrite");
-      const { item } = download(page());
-      item.answer(file);
-      await untilCalls(1);
-      item.progress();
-      await writeFile(join(dir, "tmp"), "#!/bin/sh\n");
-      await rename(join(dir, "tmp"), file);
-      item.progress();
-      await untilCalls(2);
-      expect(calls).toEqual([file, file]);
     }));
 
   test("retries a mark that failed", () =>
