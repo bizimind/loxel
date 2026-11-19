@@ -22,10 +22,10 @@ export async function renameFile(options: {
   const { wt, path, newName, isDetached } = options;
   let newPath: string;
   if (isDetached) {
-    await api.renameDetachedFile(wt.path, path, newName);
+    await api.renameDetachedFile(wt, path, newName);
     newPath = path.slice(0, path.lastIndexOf("/") + 1) + newName;
   } else {
-    ({ newPath } = await api.renameProjectFile(wt.path, { path, newName }));
+    ({ newPath } = await api.renameProjectFile(wt, { path, newName }));
   }
   getWorktreeUI(wt).getState().renameProjectPaths(path, newPath);
   dispatchLoxelEvent("loxel-file-moved", { server: wt.server, oldPath: path, newPath });
@@ -46,10 +46,10 @@ export async function moveFile(options: {
   newName?: string;
 }): Promise<string> {
   const { wt, srcPath, destDir, newName } = options;
-  let { newPath } = await api.moveProjectFile(wt.path, { srcPath, destDir });
+  let { newPath } = await api.moveProjectFile(wt, { srcPath, destDir });
   try {
     if (newName && pathName(newPath) !== newName) {
-      ({ newPath } = await api.renameProjectFile(wt.path, { path: newPath, newName }));
+      ({ newPath } = await api.renameProjectFile(wt, { path: newPath, newName }));
     }
   } finally {
     getWorktreeUI(wt).getState().renameProjectPaths(srcPath, newPath);
@@ -70,8 +70,8 @@ export async function deleteFile(options: {
   isDetached: boolean;
 }): Promise<void> {
   const { wt, path, isDetached } = options;
-  if (isDetached) await api.deleteDetachedFile(wt.path, path);
-  else await api.deleteProjectFile(wt.path, path);
+  if (isDetached) await api.deleteDetachedFile(wt, path);
+  else await api.deleteProjectFile(wt, path);
   dispatchLoxelEvent("loxel-file-deleted", { server: wt.server, filePath: path });
   const ui = getWorktreeUI(wt).getState();
   const selected = ui.selectedProjectFile;

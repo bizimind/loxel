@@ -14,6 +14,7 @@ import type React from "react";
 import { useState } from "react";
 
 import {
+  localDbApiUrl,
   makeRestAdapter,
   DataTable,
   RecordForm,
@@ -103,7 +104,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
   const { activeProject } = useQueryScope();
   const activeProjectPath = activeProject?.path ?? null;
   const queryClient = useQueryClient();
-  const adapter = makeRestAdapter("/api/localdb", activeProject);
+  const adapter = makeRestAdapter(localDbApiUrl(activeProject), activeProject);
   const [configOpen, setConfigOpen] = useState(false);
   const [pendingTable, setPendingTable] = useState(table);
   const [pendingView, setPendingView] = useState(view || "table");

@@ -17,7 +17,7 @@ const missingPaths = new Set<string>();
 const originalClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...originalClient,
-  getPathInfo: async (path: string) => {
+  getPathInfo: async (_server: string, path: string) => {
     if (missingPaths.has(path)) throw new Error("Path not found");
     return { path, isDir: false };
   },

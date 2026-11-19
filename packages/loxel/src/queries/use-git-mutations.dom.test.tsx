@@ -5,20 +5,20 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { localRef, localServerId } from "@/api/local-server";
-import { toServerId, worktreeRef } from "@/api/worktree-ref";
+import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 
-const reverted: string[] = [];
-const committed: string[] = [];
+const reverted: WorktreeRef[] = [];
+const committed: WorktreeRef[] = [];
 let commitGate = Promise.resolve();
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
-  createCommit: async (wt: string) => {
+  createCommit: async (wt: WorktreeRef) => {
     committed.push(wt);
     await commitGate;
     return { success: true };
   },
-  revertToHead: async (wt: string) => {
+  revertToHead: async (wt: WorktreeRef) => {
     reverted.push(wt);
     return { success: true };
   },
@@ -58,7 +58,7 @@ describe("useRevertToHeadMutation", () => {
 
     await act(() => result.current.mutateAsync({ worktree: here, files: ["a.ts"] }));
 
-    expect(reverted).toEqual(["/repo"]);
+    expect(reverted).toEqual([here]);
     expect(client.getQueryState(ownStatus)?.isInvalidated).toBe(true);
     expect(client.getQueryState(otherStatus)?.isInvalidated).toBe(false);
   });
@@ -94,7 +94,7 @@ describe("a mutation of the active worktree", () => {
       await committing;
     });
 
-    expect(committed).toEqual(["/repo"]);
+    expect(committed).toEqual([here]);
     expect(client.getQueryState(ownStatus)?.isInvalidated).toBe(true);
     expect(client.getQueryState(otherStatus)?.isInvalidated).toBe(false);
   });

@@ -17,25 +17,38 @@ function required(activeWorktree: WorktreeRef | null): WorktreeRef {
   return activeWorktree;
 }
 
+/** A git mutation's variables with the scope it runs in. */
+interface Scoped<TVariables> {
+  scope: MutationScope;
+  variables: TVariables;
+}
+
 /**
- * A git mutation of the active worktree. Its worktree and project are those of the render that
- * started it: the request goes out right after `onMutate`, before any re-render, and the scope
- * `onMutate` returns is kept with the mutation, so its success refreshes that worktree's queries
- * even if the window switched meanwhile (a re-render hands a pending mutation the new render's
- * callbacks, but not a new context).
+ * A git mutation of the active worktree. Its worktree and project are those of the render whose
+ * `mutateAsync` started it, carried in the mutation's variables: a re-render hands a pending
+ * mutation the new render's callbacks, so neither its request nor the refresh of that worktree's
+ * queries on success may read the scope from them, or a switch meanwhile sends the request to the
+ * worktree shown now.
  */
 function useWorktreeMutation<TVariables, TData>(
-  run: (wtPath: string, variables: TVariables) => Promise<TData>,
+  run: (wt: WorktreeRef, variables: TVariables) => Promise<TData>,
   invalidate: (queryClient: QueryClient, scope: MutationScope) => void,
 ) {
   const queryClient = useQueryClient();
   const { activeProject, activeWorktree } = useQueryScope();
 
-  return useMutation({
-    onMutate: (): MutationScope => ({ project: activeProject, wt: required(activeWorktree) }),
-    mutationFn: (variables: TVariables) => run(required(activeWorktree).path, variables),
-    onSuccess: (_data, _variables, scope) => invalidate(queryClient, scope),
+  const mutation = useMutation({
+    mutationFn: ({ scope, variables }: Scoped<TVariables>) => run(scope.wt, variables),
+    onSuccess: (_data, { scope }) => invalidate(queryClient, scope),
   });
+  return {
+    ...mutation,
+    mutateAsync: (variables: TVariables): Promise<TData> =>
+      mutation.mutateAsync({
+        scope: { project: activeProject, wt: required(activeWorktree) },
+        variables,
+      }),
+  };
 }
 
 const refreshStatus = (qc: QueryClient, { project, wt }: MutationScope) =>
@@ -86,7 +99,7 @@ export function useRevertToHeadMutation() {
 
   return useMutation({
     mutationFn: ({ worktree, files }: { worktree: WorktreeRef; files: string[] }) =>
-      api.revertToHead(worktree.path, files),
+      api.revertToHead(worktree, files),
     onSuccess: (_data, { worktree }) => {
       // The worktree's own project, not the active one's: they differ if the window switched.
       const project = projectRefOf(worktree);

@@ -1,17 +1,30 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
-import { localRef } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
 import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import type { LspStopReason } from "@/lib/lsp-connection";
 
+import { dispatchLoxelEvent } from "./loxel-events";
 import { createToolchainServerRecovery } from "./toolchain-server-recovery";
 
 const CHANGED = { type: "java_env_changed", wtPath: "/wt" } as const satisfies WsMessage;
+const OTHER = toServerId("other-server");
+
+let stop: () => void = () => {};
+afterEach(() => stop());
+
+/** What ws-bridge does with a toolchain's changed message that `server`'s socket delivered. */
+function deliver(message: { type: string; wtPath: string }, server = localServerId()): void {
+  dispatchLoxelEvent("loxel-toolchain-changed", {
+    wt: worktreeRef(server, message.wtPath),
+    changedMessage: message.type,
+  });
+}
 
 function setup(reason: LspStopReason | null, activeWt: WorktreeRef | null = localRef("/wt")) {
   const calls: string[] = [];
-  const handle = createToolchainServerRecovery({
+  stop = createToolchainServerRecovery({
     changedMessage: CHANGED.type,
     client: {
       connect: (wt) => calls.push(`connect ${wt?.server}:${wt?.path}`),
@@ -20,7 +33,7 @@ function setup(reason: LspStopReason | null, activeWt: WorktreeRef | null = loca
     stoppedServer: () => (reason ? { name: "Java", reason, detail: "" } : undefined),
     activeWorktree: () => activeWt,
   });
-  return { calls, handle };
+  return { calls, handle: deliver };
 }
 
 describe("createToolchainServerRecovery", () => {
@@ -49,9 +62,15 @@ describe("createToolchainServerRecovery", () => {
   });
 
   test("ignores a change of the same path while a worktree of another server is active", () => {
-    const { calls, handle } = setup("start-failed", worktreeRef(toServerId("other-server"), "/wt"));
+    const { calls, handle } = setup("start-failed", worktreeRef(OTHER, "/wt"));
     handle(CHANGED);
     expect(calls).toEqual([]);
+  });
+
+  test("starts the server of another server's worktree on that server's change", () => {
+    const { calls, handle } = setup("start-failed", worktreeRef(OTHER, "/wt"));
+    handle(CHANGED, OTHER);
+    expect(calls).toEqual(["disconnect", "connect other-server:/wt"]);
   });
 
   test("ignores other toolchains", () => {

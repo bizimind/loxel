@@ -32,7 +32,7 @@ mock.module("@/api/client", () => ({
   ...originalClient,
   getDirContents: jest.fn(),
   moveDetachedFileToProject: jest.fn(async () => ({ newPath: "/repo/src/Draft.md" })),
-  moveProjectFile: jest.fn(async (_wt: string, options: { srcPath: string; destDir: string }) => ({
+  moveProjectFile: jest.fn(async (_wt: unknown, options: { srcPath: string; destDir: string }) => ({
     newPath: `${options.destDir}/${options.srcPath.split("/").pop()}`,
   })),
   putStore: jest.fn(async () => ({ success: true })),
@@ -230,7 +230,7 @@ describe("ProjectFilesPanel", () => {
     ]);
 
     (api.getDirContents as ReturnType<typeof jest.fn>).mockImplementation(
-      async (_wt: string, dir: string) => {
+      async (_wt: unknown, dir: string) => {
         return entriesByDir.get(dir) ?? [];
       },
     );
@@ -385,8 +385,8 @@ describe("ProjectFilesPanel", () => {
 
     const target = await screen.findByRole("button", { name: /Button\.tsx/ });
     await waitFor(() => {
-      expect(api.getDirContents).toHaveBeenCalledWith("/repo", "/repo/src");
-      expect(api.getDirContents).toHaveBeenCalledWith("/repo", "/repo/src/components");
+      expect(api.getDirContents).toHaveBeenCalledWith(localRef("/repo"), "/repo/src");
+      expect(api.getDirContents).toHaveBeenCalledWith(localRef("/repo"), "/repo/src/components");
       expect(getCurrentWorktreeUI().getState().selectedProjectFile).toBe(
         "/repo/src/components/Button.tsx",
       );
@@ -420,7 +420,7 @@ describe("ProjectFilesPanel", () => {
     // The server has not created the worktree's resources yet.
     let ready = false;
     (api.getDirContents as ReturnType<typeof jest.fn>).mockImplementation(
-      async (_wt: string, dir: string) => {
+      async (_wt: unknown, dir: string) => {
         if (!ready && dir === "/repo/src") throw new Error("Directory not in any active worktree");
         return entriesByDir.get(dir) ?? [];
       },

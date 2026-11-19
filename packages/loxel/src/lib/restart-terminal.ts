@@ -25,7 +25,7 @@ export async function confirmRestartTerminal(
 ): Promise<void> {
   let program: string | null | undefined;
   try {
-    const running = await api.getRunningTerminals({ programs: true });
+    const running = await api.getRunningTerminals(server, { programs: true });
     program = running.find((terminal) => terminal.id === terminalId)?.program;
   } catch (err) {
     uiLog.warn("Could not read the terminal's foreground program", { error: err });
@@ -52,7 +52,7 @@ export function restartTerminal(
   server: ServerId,
 ): void {
   const nextId = crypto.randomUUID();
-  api.wsClient.send({ type: "terminal_destroy", id: terminalId });
+  api.sendTo(server, { type: "terminal_destroy", id: terminalId });
   usePanelNotificationStore.getState().unregisterPanel(server, terminalId);
   const toolsBar = getCurrentWorktreeToolsBar().getState();
   toolsBar.removeTerminal(panel.id);

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { IWatermarkPanelProps } from "dockview-react";
 
-import { localRef } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
 import type { OpenRequest } from "@/open-request";
 import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
@@ -14,7 +14,7 @@ const openRequests: OpenRequest[] = [];
 const actualClient = await import("@/api/client");
 void mock.module("@/api/client", () => ({
   ...actualClient,
-  postOpenRequest: async (request: OpenRequest) => {
+  postOpenRequest: async (_server: string, request: OpenRequest) => {
     openRequests.push(request);
     return {};
   },
@@ -23,11 +23,18 @@ void mock.module("@/api/client", () => ({
 const { onLoxelEvent } = await import("@/lib/loxel-events");
 const { WINDOW_ID } = await import("@/lib/window-id");
 const { CenterWatermark } = await import("./center-watermark");
+const { LayoutServerContext } = await import("./panel-context");
 
 const WT = "/repo";
 // The page reads none of dockview's watermark props.
 const watermarkProps = {} as IWatermarkPanelProps;
-const watermark = () => render(<CenterWatermark {...watermarkProps} />);
+// Dockview renders it inside the center layout, which names its server.
+const inLayout = () => (
+  <LayoutServerContext.Provider value={localServerId()}>
+    <CenterWatermark {...watermarkProps} />
+  </LayoutServerContext.Provider>
+);
+const watermark = () => render(inLayout());
 
 let browsers: Array<string | undefined>;
 let stopListening: () => void;
@@ -86,7 +93,7 @@ describe("quickstart page", () => {
     expect(addProject().className).not.toContain("bg-button-primary");
 
     useProjectStore.setState({ projectsFetched: true });
-    rerender(<CenterWatermark {...watermarkProps} />);
+    rerender(inLayout());
     expect(addProject().className).toContain("bg-button-primary");
     useProjectStore.setState({ projectsFetched: false });
   });

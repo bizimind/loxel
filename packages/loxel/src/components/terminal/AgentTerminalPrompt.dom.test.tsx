@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { type AgentTerminalAsk, EMPTY_AGENT_TERMINALS_STATE } from "@/api/agent-terminal-model";
+import { localServerId } from "@/api/local-server";
 import { WINDOW_ID } from "@/lib/window-id";
 
 const answers: unknown[][] = [];
@@ -10,7 +11,8 @@ const answers: unknown[][] = [];
 const originalClient = await import("@/api/client");
 await mock.module("@/api/client", () => ({
   ...originalClient,
-  answerAgentTerminal: async (...args: unknown[]) => {
+  answerAgentTerminal: async (server: string, ...args: unknown[]) => {
+    expect(server).toBe(localServerId());
     answers.push(args);
   },
 }));

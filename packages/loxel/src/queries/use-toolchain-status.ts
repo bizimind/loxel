@@ -12,11 +12,11 @@ import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/setti
 /**
  * The toolchain status of the active editor's worktree (the panel's own, which is not always the
  * active worktree), while that editor holds a file of one of the toolchain's languages; null
- * otherwise and until it loads. `wtPath` is the worktree's path, which the API and labels take.
+ * otherwise and until it loads. `wtPath` is the worktree's path, which labels show.
  */
 export function useActiveToolchainStatus<Status>(
   toolchain: ToolchainStatusDescriptor,
-  fetchStatus: (wtPath: string) => Promise<Status>,
+  fetchStatus: (wt: WorktreeRef) => Promise<Status>,
 ): { wt: WorktreeRef; wtPath: string; status: Status } | null {
   const active = useActiveEditorFile();
   const associations = useSettingsStore(selectEffectiveFileAssociations);
@@ -26,7 +26,7 @@ export function useActiveToolchainStatus<Status>(
   const project = useProjectRef(wt);
   const { data } = useQuery({
     queryKey: queryKeys.toolchainStatus(toolchain.id, project, wt),
-    queryFn: wt ? () => fetchStatus(wt.path) : skipToken,
+    queryFn: wt ? () => fetchStatus(wt) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on the toolchain's changed message
   });
   return wt && data ? { wt, wtPath: wt.path, status: data } : null;

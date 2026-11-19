@@ -12,7 +12,7 @@ mock.module("@/api/client", () => ({
   ...originalClient,
   getVersion: jest.fn(async () => ({ version: "1.0.0", isDev: false })),
   putStore: jest.fn(async () => ({ success: true })),
-  getRunningTerminals: jest.fn(async ({ programs }: { programs: boolean }) =>
+  getRunningTerminals: jest.fn(async (_server: string, { programs }: { programs: boolean }) =>
     running.map((terminal) => (programs ? terminal : { ...terminal, program: undefined })),
   ),
 }));

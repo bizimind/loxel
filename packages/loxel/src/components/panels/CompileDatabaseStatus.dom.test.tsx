@@ -67,8 +67,7 @@ describe("CompileDatabaseStatusItem", () => {
   test("names the file's database and opens the picker for its worktree", async () => {
     renderItem();
     const button = await screen.findByRole("button", { name: "C++ (cmake-build-debug)" });
-    expect(getFileCompileDatabase).toHaveBeenCalledWith({
-      worktreePath: "/wt",
+    expect(getFileCompileDatabase).toHaveBeenCalledWith(localRef("/wt"), {
       filePath: "/wt/src/a.cpp",
     });
     fireEvent.click(button);

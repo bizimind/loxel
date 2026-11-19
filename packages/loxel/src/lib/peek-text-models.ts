@@ -5,7 +5,7 @@ import { StandaloneServices } from "monaco-editor/editor/standalone/browser/stan
 import { IInstantiationService } from "monaco-editor/platform/instantiation/common/instantiation.js";
 
 import * as api from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { hasConnection } from "@/api/server-connection";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -117,16 +117,17 @@ export function keepPreviewModelsReadOnly(editor: monaco.editor.ICodeEditor): vo
 }
 
 /**
- * Files are read for the active worktree, whose language servers answer the peek, from the
- * window's server, the only one they are reached on.
+ * Files are read from their own server's connection, for the active worktree when it is on that
+ * server, as its language servers answer the peek.
  */
 const previewSource: PreviewSource = {
   async readFile(file) {
-    if (file.server !== localServerId()) {
+    if (!hasConnection(file.server)) {
       throw new Error(`${file.path} is on server ${file.server}, which this window cannot read`);
     }
-    const worktree = useWorktreeStore.getState().activeWorktree?.path;
-    return (await api.getFilePreviewContent(file.path, worktree)).content;
+    const active = useWorktreeStore.getState().activeWorktree;
+    const worktree = active?.server === file.server ? active : null;
+    return (await api.getFilePreviewContent(file.server, file.path, worktree)).content;
   },
   languageOf(path, content) {
     const associations = selectEffectiveFileAssociations(useSettingsStore.getState());

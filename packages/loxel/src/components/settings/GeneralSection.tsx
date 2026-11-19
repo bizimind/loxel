@@ -41,9 +41,10 @@ export function GeneralSection() {
   const autoReveal = useSettingsStore((s) => s.autoRevealInExplorer);
   const setAutoReveal = useSettingsStore((s) => s.setAutoRevealInExplorer);
 
+  // The version of the app's own server, which an update replaces.
   const { data: versionData } = useQuery({
     queryKey: queryKeys.version(localServerId()),
-    queryFn: api.getVersion,
+    queryFn: () => api.getVersion(localServerId()),
     staleTime: Infinity,
   });
 
@@ -238,7 +239,8 @@ async function installWithConfirmation(
     let running: readonly RunningTerminal[];
     setListing(true);
     try {
-      running = await api.getRunningTerminals({ programs: true });
+      // An update restarts the app's own server, and with it that server's terminals.
+      running = await api.getRunningTerminals(localServerId(), { programs: true });
     } catch (err) {
       updateLog.warn("Could not list the running terminals; counting the last known ones", {
         error: err,

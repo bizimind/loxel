@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import { MigrationReview, makeRestAdapter } from "@/components/localdb/ui";
+import { localDbApiUrl, MigrationReview, makeRestAdapter } from "@/components/localdb/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/queries/query-keys";
@@ -15,7 +15,7 @@ import { SchemaBuilder } from "./SchemaBuilder";
 /** Adapter scoped to the active project via ?project= query param. */
 function useLocalDbAdapter() {
   const { activeProject } = useQueryScope();
-  return makeRestAdapter("/api/localdb", activeProject);
+  return makeRestAdapter(localDbApiUrl(activeProject), activeProject);
 }
 
 export function LocalDbPanel() {
@@ -43,7 +43,7 @@ export function LocalDbPanel() {
   const createTableMutation = useMutation({
     mutationFn: async (form: { name: string; label: string }) => {
       const res = await fetch(
-        `/api/localdb/tables?project=${encodeURIComponent(activeProjectPath ?? "")}`,
+        `${localDbApiUrl(activeProject)}/tables?project=${encodeURIComponent(activeProjectPath ?? "")}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -194,7 +194,7 @@ export function LocalDbPanel() {
                     onApply={async () => {
                       const { columnName, newDef } = pendingPlan;
                       const res = await fetch(
-                        `/api/localdb/tables/${selectedTable}/columns/${columnName}/apply-migration?project=${encodeURIComponent(activeProjectPath)}`,
+                        `${localDbApiUrl(activeProject)}/tables/${selectedTable}/columns/${columnName}/apply-migration?project=${encodeURIComponent(activeProjectPath)}`,
                         {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },

@@ -6,8 +6,8 @@
  */
 import type { IDockviewPanel } from "dockview-react";
 
-import { hasConnection } from "@/api/client";
 import { type PanelNotificationSource, isPanelSource } from "@/api/notification-model";
+import { hasConnection } from "@/api/server-connection";
 import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
 import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
 import {

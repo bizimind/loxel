@@ -10,9 +10,10 @@
  * - Worktree sidebar items show a badge dot when the worktree is not active
  * - The notification center overlay shows a scrollable list
  */
+
 import { create } from "zustand";
 
-import { hasConnection, wsClientOf } from "@/api/client";
+import { sendTo } from "@/api/client";
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 import {
   type ServerId,
@@ -150,7 +151,7 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set, 
   worktreeIndex: new Set(),
 
   unregisterPanel: (server, panelId) => {
-    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
+    sendTo(server, { type: "notification_dismiss_panel", panelId });
   },
 
   // --- Server sync ---
@@ -188,17 +189,17 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set, 
   // --- User actions (sent to the server; removed when its broadcast arrives) ---
 
   dismiss: ({ server, id }) => {
-    wsClientOf(server).send({ type: "notification_dismiss", id });
+    sendTo(server, { type: "notification_dismiss", id });
   },
 
   dismissPanel: (server, panelId) => {
-    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
+    sendTo(server, { type: "notification_dismiss_panel", panelId });
   },
 
   dismissAll: () => {
     for (const server of new Set(get().notifications.map((n) => n.server))) {
-      // A server the window has no connection to can't be told; the others still are.
-      if (hasConnection(server)) wsClientOf(server).send({ type: "notifications_clear" });
+      // A server the window has no connection to can't be told (`sendTo` drops it); the others are.
+      sendTo(server, { type: "notifications_clear" });
     }
   },
 }));

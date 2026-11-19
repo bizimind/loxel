@@ -2,6 +2,7 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
 import type { IDisposable } from "monaco-editor";
 
 import { localServerId } from "@/api/local-server";
+import { connectionOf, hasConnection } from "@/api/server-connection";
 import { sameWorktreeRef, type ServerId, type WorktreeRef } from "@/api/worktree-ref";
 import { LSP_FRESH_SERVER_PARAM } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
@@ -138,10 +139,9 @@ export function createLspClient({
     freshServer: boolean,
   ): Promise<LspLink> {
     const server = connectionServer(wt);
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const fresh = freshServer ? `&${LSP_FRESH_SERVER_PARAM}=1` : "";
     const query = wt === null ? "" : `?wt=${encodeURIComponent(wt.path)}${fresh}`;
-    const address = `${proto}//${location.host}/${route}${query}`;
+    const address = connectionOf(server).socketUrl(`${route}${query}`);
     const { socket, closed } = await openSocket(address, signal);
     // Superseded while the open settled (the abort closed the socket): start no client on it.
     signal.throwIfAborted();
@@ -221,14 +221,14 @@ export function createLspClient({
 export type LspClient = ReturnType<typeof createLspClient>;
 
 /**
- * The server a connection to `wt` reaches (YAML's, scoped to no worktree, is the window's). Sockets
- * go to the window's server, the only one language servers are reached on, so a worktree on
- * another server is refused rather than served by the wrong one.
+ * The server a connection to `wt` reaches: the worktree's own, through its connection (YAML's,
+ * scoped to no worktree, is the window's). A worktree of a server the window has no connection to
+ * is refused, like any request to it, rather than served by another server.
  */
 function connectionServer(wt: WorktreeRef | null): ServerId {
-  const server = localServerId();
-  if (wt !== null && wt.server !== server) {
-    throw new Error(`Language servers of ${wt.path} on server ${wt.server} cannot be reached`);
+  const server = wt?.server ?? localServerId();
+  if (!hasConnection(server)) {
+    throw new Error(`Language servers of ${wt?.path} on server ${server} cannot be reached`);
   }
   return server;
 }

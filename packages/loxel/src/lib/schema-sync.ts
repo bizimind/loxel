@@ -9,6 +9,8 @@
 import * as monaco from "monaco-editor";
 
 import * as api from "@/api/client";
+import { localServerId, whenLocalServerKnown } from "@/api/local-server";
+import type { ServerId } from "@/api/worktree-ref";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 import {
   selectEffectiveSchemas,
@@ -33,6 +35,14 @@ let mappings: SchemaMapping[] = [];
 const jsonSchemas = new Map<string, unknown>();
 /** URLs already reported, so an edit does not retry a failed download. */
 const reportedUrls = new Set<string>();
+
+/**
+ * The server that downloads and serves schemas: the window's own, which keeps the window's
+ * settings and the schema cache its language servers read.
+ */
+function schemaServer(): ServerId {
+  return localServerId();
+}
 
 function applyJsonSchemas(): void {
   setConfiguredSchemas(
@@ -75,7 +85,7 @@ export function requestSchemasForOpenFiles(): void {
   const unreported = [...remoteUrls].filter((url) => !reportedUrls.has(url));
   if (unreported.length === 0) return;
   for (const url of unreported) reportedUrls.add(url);
-  api.ensureSchemas(unreported).catch((err: unknown) => {
+  api.ensureSchemas(schemaServer(), unreported).catch((err: unknown) => {
     log.error("Schema request failed", { error: err instanceof Error ? err : undefined });
   });
 }
@@ -84,7 +94,7 @@ async function resolveJsonSchemas(urls: readonly string[]): Promise<void> {
   for (const url of urls) jsonSchemas.set(url, null);
   await Promise.all(
     urls.map(async (url) => {
-      jsonSchemas.set(url, await api.resolveSchema(url));
+      jsonSchemas.set(url, await api.resolveSchema(schemaServer(), url));
     }),
   );
   applyJsonSchemas();
@@ -102,7 +112,10 @@ export async function syncSchemas(): Promise<void> {
     const schemas = selectEffectiveSchemas(useSettingsStore.getState());
     const enabled = schemas.filter((s) => s.enabled);
 
-    await api.syncSchemas(enabled.map((s) => ({ glob: s.glob, exclude: s.exclude, url: s.url })));
+    await api.syncSchemas(
+      schemaServer(),
+      enabled.map((s) => ({ glob: s.glob, exclude: s.exclude, url: s.url })),
+    );
 
     mappings = enabled;
     // A save retries what failed to download.
@@ -129,12 +142,11 @@ export function initSchemaSync(): void {
     requestSchemasForOpenFiles();
   });
 
-  // Wait for settings store to hydrate from localStorage, then sync
+  // Wait for the settings store to hydrate, and for the window's server (`schemaServer`), then sync
+  const syncOnceKnown = () => void whenLocalServerKnown().then(syncSchemas);
   if (useSettingsStore.persist.hasHydrated()) {
-    syncSchemas();
+    syncOnceKnown();
   } else {
-    useSettingsStore.persist.onFinishHydration(() => {
-      syncSchemas();
-    });
+    useSettingsStore.persist.onFinishHydration(syncOnceKnown);
   }
 }

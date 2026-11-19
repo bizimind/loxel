@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getPathInfo, wsClient } from "@/api/client";
+import { getPathInfo, wsClientOf } from "@/api/client";
+import { connectionOf, hasConnection } from "@/api/server-connection";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktree } from "@/components/dockview/panel-context";
@@ -87,7 +88,6 @@ const FRAME_STEP = 1 / 30; // ~1 frame at 30fps
 
 export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) {
   const worktree = usePanelWorktree();
-  const worktreePath = worktree?.path ?? null;
   const mediaType = getMediaType(filePath);
   const isVideo = mediaType === "video";
   // SVGs are inlined into the frame and may carry their own scripts, so they stay in an opaque
@@ -122,9 +122,13 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   mediaBoxRef.current = mediaBox;
 
   // --- URL ---
-  const iframeSrc = worktreePath
-    ? `/api/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktreePath)}&v=${version}`
-    : "";
+  // Nothing to show for a worktree of a server the window has no connection to.
+  const iframeSrc =
+    worktree && hasConnection(worktree.server)
+      ? connectionOf(worktree.server).apiUrl(
+          `/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktree.path)}&v=${version}`,
+        )
+      : "";
 
   // --- Send command to iframe video ---
   const sendCommand = useCallback((command: string, value?: number) => {
@@ -190,14 +194,16 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   }, [viewportRef, viewRef, wheel]);
 
   // --- Live reload on disk change ---
+  // The file's server's socket reports its changes; nothing comes for one without a connection.
+  const fileServer = worktree?.server ?? null;
   useEffect(() => {
-    const unsub = wsClient.subscribe((msg: WsMessage) => {
+    if (fileServer === null || !hasConnection(fileServer)) return;
+    return wsClientOf(fileServer).subscribe((msg: WsMessage) => {
       if (msg.type === "file_content_changed" && msg.data.path === filePath) {
         setVersion((v) => v + 1);
       }
     });
-    return unsub;
-  }, [filePath]);
+  }, [fileServer, filePath]);
 
   // --- Reload after a resync, if the file changed while no push could reach this window ---
   // Every switch back to the worktree resyncs it too, so the file's size and modification time,
@@ -207,7 +213,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     if (!worktree) return;
     const absolutePath = filePath.startsWith("/") ? filePath : `${worktree.path}/${filePath}`;
     const readStamp = () =>
-      getPathInfo(absolutePath).then(
+      getPathInfo(worktree.server, absolutePath).then(
         ({ size, mtimeMs }) => `${size}:${mtimeMs}`,
         () => null,
       );

@@ -39,7 +39,7 @@ export const {
   loading: false,
 
   fetchReviews: async () => {
-    const wt = getQueryScope().activeWorktree?.path;
+    const wt = getQueryScope().activeWorktree;
     if (!wt) return;
     set({ loading: true });
     try {
@@ -52,7 +52,7 @@ export const {
   },
 
   createReview: async (name, context) => {
-    const wt = requireActiveWorktree().path;
+    const wt = requireActiveWorktree();
     try {
       const review = await api.createReview(wt, { name, context });
       set((s) => ({
@@ -68,7 +68,7 @@ export const {
   },
 
   deleteReview: async (id) => {
-    const wt = requireActiveWorktree().path;
+    const wt = requireActiveWorktree();
     await api.deleteReview(wt, id);
     set((s) => ({
       reviews: s.reviews.filter((r) => r.id !== id),
@@ -78,7 +78,7 @@ export const {
   },
 
   renameReview: async (id, name) => {
-    const wt = requireActiveWorktree().path;
+    const wt = requireActiveWorktree();
     const updated = await api.updateReview(wt, id, { name });
     set((s) => ({ reviews: s.reviews.map((r) => (r.id === id ? updated : r)) }));
   },

@@ -79,16 +79,17 @@ export function EditorSection() {
   }, [addFormatterOverride]);
 
   // Fetch detected formatters for the active worktree
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  const activeWorktreePath = activeWorktree?.path ?? null;
   const [detectedFormatters, setDetectedFormatters] = useState<DetectedFormatter[]>([]);
   useEffect(() => {
-    if (!activeWorktreePath || !formatting.autoDetect) {
+    if (!activeWorktree || !formatting.autoDetect) {
       setDetectedFormatters([]);
       return;
     }
     let cancelled = false;
     api
-      .getDetectedFormatters(activeWorktreePath)
+      .getDetectedFormatters(activeWorktree)
       .then((result) => {
         if (!cancelled) setDetectedFormatters(result);
       })
@@ -99,7 +100,7 @@ export function EditorSection() {
     return () => {
       cancelled = true;
     };
-  }, [activeWorktreePath, formatting.autoDetect]);
+  }, [activeWorktree, formatting.autoDetect]);
 
   return (
     <div className="space-y-5">

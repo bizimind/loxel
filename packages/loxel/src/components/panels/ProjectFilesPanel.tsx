@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import { wsClientOf } from "@/api/client";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
@@ -115,7 +114,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       const wt = getQueryScope().activeWorktree;
       if (!wt) return;
       try {
-        await api.removeExternalFolder(wt.path, path);
+        await api.removeExternalFolder(wt, path);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Failed to remove folder");
         return;
@@ -132,7 +131,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         (p) => isWithin(p, path),
       );
       if (openPaths.length > 0) {
-        wsClientOf(wt.server).send({
+        api.sendTo(wt.server, {
           type: "register_external_files",
           worktreePath: wt.path,
           filePaths: openPaths,
@@ -210,7 +209,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   // --- Reveal in explorer ---
   const revealFileInTree = useCallback(
     async (filePath: string) => {
-      const wt = getQueryScope().activeWorktree?.path;
+      const wt = getQueryScope().activeWorktree;
       if (!wt) return;
       // Load every ancestor below the root of the tree that shows the path.
       const root = getTreeRoot(filePath);
@@ -367,14 +366,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     async (path: string): Promise<TreeNode[]> => {
       const { activeProject, activeWorktree } = getQueryScope();
       if (!activeWorktree) return [];
-      const wt = activeWorktree.path;
-      const absDir = toAbsoluteDir(path, wt);
+      const absDir = toAbsoluteDir(path, activeWorktree.path);
       const entries = await queryClient.fetchQuery({
         queryKey: queryKeys.dirContents(activeProject, absDir),
-        queryFn: () => api.getDirContents(wt, path),
+        queryFn: () => api.getDirContents(activeWorktree, path),
         // An Others folder may have changed while no worktree listing it was active, so its
         // directories are re-read instead of served from a cache last pushed to another worktree.
-        staleTime: getTreeRoot(absDir) === wt ? Infinity : 0,
+        staleTime: getTreeRoot(absDir) === activeWorktree.path ? Infinity : 0,
       });
       return entries.map((e) => ({ path: e.path, name: e.name, isDir: e.isDir }));
     },
@@ -511,7 +509,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       const wt = getQueryScope().activeWorktree;
       if (!expanded && wt) {
         treeRef.current?.clearSubtree(path);
-        api.unwatchDir(wt.path, path);
+        api.unwatchDir(wt, path);
         removeDirQueries(queryClient, wt, path);
       }
     },

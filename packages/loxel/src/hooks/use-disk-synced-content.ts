@@ -12,6 +12,7 @@ import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { isFileMissingError } from "@/api/server-connection";
 import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { showToast } from "@/components/ui/toast";
@@ -140,7 +141,6 @@ export function useDiskSyncedContent<T>(
   // --- Scope ---
   const { activeProject } = useQueryScope();
   const panelWorktree = usePanelWorktree();
-  const panelWorktreePath = panelWorktree?.path ?? null;
   const server = usePanelServer();
   const tabKey = fileEditorKey(server, filePath);
   const editorKey = options.editorKey ?? tabKey;
@@ -155,6 +155,7 @@ export function useDiskSyncedContent<T>(
   const editorKeyRef = useRef(editorKey);
   const cacheKeyRef = useRef(cacheKey);
   const panelWorktreeRef = useRef(panelWorktree);
+  const serverRef = useRef(server);
   const deserializeRef = useRef(deserialize);
   const contentCacheRef = useRef(contentCache);
 
@@ -178,6 +179,7 @@ export function useDiskSyncedContent<T>(
       const content = fn("auto");
       if (content !== null) {
         saveEditorContent(
+          serverRef.current,
           filePathRef.current,
           content,
           panelWorktreeRef.current,
@@ -193,6 +195,7 @@ export function useDiskSyncedContent<T>(
   editorKeyRef.current = editorKey;
   cacheKeyRef.current = cacheKey;
   panelWorktreeRef.current = panelWorktree;
+  serverRef.current = server;
   deserializeRef.current = deserialize;
   contentCacheRef.current = contentCache;
 
@@ -238,6 +241,7 @@ export function useDiskSyncedContent<T>(
             // A moved file's flush goes to its new path, whose tab is keyed by that path.
             const key = target === filePath ? editorKey : fileEditorKey(server, target);
             saveEditorContent(
+              serverRef.current,
               target,
               content,
               panelWorktreeRef.current,
@@ -283,14 +287,14 @@ export function useDiskSyncedContent<T>(
   // --- Query ---
   const { data, dataUpdatedAt, isError, error, refetch } = useQuery({
     queryKey: queryKeys.fileContent(activeProject, filePath, undefined, panelWorktree ?? undefined),
-    queryFn: ({ signal }) => api.getFileContentByPath(filePath, panelWorktreePath, signal),
+    queryFn: ({ signal }) => api.getFileContentByPath(server, filePath, panelWorktree, signal),
     // Force a background refetch on every mount so editors pick up external changes
     // that occurred while the worktree was unsubscribed (e.g. switched to another tab).
     // With staleTime: Infinity, the default `true` never refetches — "always" overrides that.
     refetchOnMount: "always",
     // A confirmed-missing file will not appear by retrying; anything else (including a 404 for a
     // worktree the server has not finished subscribing) keeps the default single retry.
-    retry: (failureCount, err) => !api.isFileMissingError(err) && failureCount < 1,
+    retry: (failureCount, err) => !isFileMissingError(err) && failureCount < 1,
     // The server is local, so the browser's online state says nothing about reaching it. A query
     // paused on it would leave the editor waiting with no failure to show or retry.
     networkMode: "always",
@@ -303,7 +307,7 @@ export function useDiskSyncedContent<T>(
   // bridge also sets the flag itself (dirty editors, parent-directory events). Any successful
   // fetch clears it: keyed on `dataUpdatedAt`, because a restore with identical content keeps
   // the same `data` object (structural sharing) and would otherwise change nothing here.
-  const isMissingOnDisk = isError && api.isFileMissingError(error);
+  const isMissingOnDisk = isError && isFileMissingError(error);
   useEffect(() => {
     if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(editorKey, true);
     else if (dataUpdatedAt > 0) useEditorStateStore.getState().setDeleted(editorKey, false);
@@ -356,6 +360,7 @@ export function useDiskSyncedContent<T>(
     const content = fn("auto");
     if (content === null) return;
     await saveEditorContent(
+      serverRef.current,
       filePathRef.current,
       content,
       panelWorktreeRef.current,
@@ -382,6 +387,7 @@ export function useDiskSyncedContent<T>(
     const content = fn("explicit");
     if (content === null) return;
     await saveEditorContent(
+      serverRef.current,
       filePathRef.current,
       content,
       panelWorktreeRef.current,
@@ -446,7 +452,11 @@ export function useDiskSyncedContent<T>(
     const path = filePathRef.current;
     let content: string;
     try {
-      ({ content } = await api.getFileContentByPath(path, panelWorktreeRef.current?.path));
+      ({ content } = await api.getFileContentByPath(
+        serverRef.current,
+        path,
+        panelWorktreeRef.current,
+      ));
     } catch (error) {
       log.error("Failed to read a file to discard its edits", { path, error });
       showToast(`Could not read ${getDisplayFilename(path)} to discard the changes`);

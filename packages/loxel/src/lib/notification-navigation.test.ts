@@ -13,9 +13,9 @@ import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 const ELSEWHERE = toServerId("elsewhere");
 /** The servers the window has a connection to, besides its own. */
 let connected = new Set<string>();
-const actualClient = await import("@/api/client");
-mock.module("@/api/client", () => ({
-  ...actualClient,
+const actualConnections = await import("@/api/server-connection");
+mock.module("@/api/server-connection", () => ({
+  ...actualConnections,
   hasConnection: (server: string) => server === localServerId() || connected.has(server),
 }));
 

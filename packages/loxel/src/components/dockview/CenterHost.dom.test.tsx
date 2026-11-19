@@ -17,9 +17,7 @@ mock.module("@/api/client", () => ({
   ...originalClient,
   getStore: async () => null,
   putStore: async () => {},
-  wsClientOf: (server: ServerId) => ({
-    send: (message: WsClientMessage) => sent.push({ server, message }),
-  }),
+  sendTo: (server: ServerId, message: WsClientMessage) => sent.push({ server, message }),
 }));
 
 // Panels that render nothing: only their removal is under test.

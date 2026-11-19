@@ -11,7 +11,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { wsClient } from "@/api/client";
+import { type WsClient, wsClientOf } from "@/api/client";
 import type { TerminalState } from "@/api/terminal-stream";
 import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
@@ -112,24 +112,24 @@ function isOnScreen(panelApi: DockviewPanelApi): boolean {
  * Send the xterm's size, which makes this view the terminal's active one when other windows show
  * it too: the PTY takes the size, and only this view's input is written.
  */
-function sendResize(terminalId: string, terminal: XTerm) {
-  wsClient.send({
-    type: "terminal_resize",
-    id: terminalId,
-    cols: terminal.cols,
-    rows: terminal.rows,
-  });
+function sendResize(ws: WsClient, terminalId: string, terminal: XTerm) {
+  ws.send({ type: "terminal_resize", id: terminalId, cols: terminal.cols, rows: terminal.rows });
 }
 
 /**
  * Fit the terminal to its container and sync changed dimensions to the PTY. Returns whether they
  * changed, and so were sent.
  */
-function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon): boolean {
+function fitAndSendResize(
+  ws: WsClient,
+  terminalId: string,
+  terminal: XTerm,
+  fitAddon: FitAddon,
+): boolean {
   const { cols, rows } = terminal;
   fitAddon.fit();
   if (terminal.cols === cols && terminal.rows === rows) return false;
-  sendResize(terminalId, terminal);
+  sendResize(ws, terminalId, terminal);
   return true;
 }
 
@@ -149,12 +149,13 @@ const ACK_BYTES = 64 * 1024;
  * fresh xterm, which gets a snapshot.
  */
 function sendAttach(
+  ws: WsClient,
   terminalId: string,
   terminal: XTerm,
   { cwd, worktreePath }: TerminalPaths,
   since?: { epoch: string; offset: number },
 ) {
-  wsClient.send({
+  ws.send({
     type: "terminal_attach",
     id: terminalId,
     cols: terminal.cols,
@@ -198,6 +199,7 @@ class OutputStream {
   private unackedBytes = 0;
 
   constructor(
+    private readonly ws: WsClient,
     private readonly terminalId: string,
     private readonly terminal: XTerm,
   ) {}
@@ -248,7 +250,7 @@ class OutputStream {
       if (syncOffset !== this.syncOffset) return;
       this.unackedBytes += data.byteLength;
       if (this.unackedBytes < ACK_BYTES) return;
-      wsClient.send({
+      this.ws.send({
         type: "terminal_ack",
         id: this.terminalId,
         syncOffset,
@@ -274,6 +276,10 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
   const server = usePanelServer();
   const serverRef = useRef(server);
   serverRef.current = server;
+  // The terminal runs on the panel's server, whose socket carries its input and output.
+  const ws = wsClientOf(server);
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
   const darkMode = useUIStore((s) => s.darkMode);
   // A built-in or stored theme object, so the reference only changes when the colors do.
   const colorTheme = useSettingsStore((s) => resolveTheme(s.themes, darkMode));
@@ -392,9 +398,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       ) {
         if (event.type === "keydown") {
           if (event.shiftKey) {
-            wsClient.sendTerminalInput(terminalId, "\x1b\r");
+            wsRef.current.sendTerminalInput(terminalId, "\x1b\r");
           } else {
-            wsClient.sendTerminalInput(terminalId, "\x1b[13;5u");
+            wsRef.current.sendTerminalInput(terminalId, "\x1b[13;5u");
           }
         }
         return false;
@@ -412,15 +418,15 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         return false;
       }
       if (event.metaKey && event.key === "l") {
-        wsClient.sendTerminalInput(terminalId, "\x0c");
+        wsRef.current.sendTerminalInput(terminalId, "\x0c");
         return false;
       }
       if (event.metaKey && event.key === "Backspace") {
-        wsClient.sendTerminalInput(terminalId, "\x15");
+        wsRef.current.sendTerminalInput(terminalId, "\x15");
         return false;
       }
       if (event.metaKey && event.key === "Delete") {
-        wsClient.sendTerminalInput(terminalId, "\x0b");
+        wsRef.current.sendTerminalInput(terminalId, "\x0b");
         return false;
       }
       if (event.metaKey && event.key === "ArrowUp") {
@@ -432,22 +438,22 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         return false;
       }
       if (event.metaKey && event.key === "ArrowLeft") {
-        wsClient.sendTerminalInput(terminalId, "\x01");
+        wsRef.current.sendTerminalInput(terminalId, "\x01");
         return false;
       }
       if (event.metaKey && event.key === "ArrowRight") {
-        wsClient.sendTerminalInput(terminalId, "\x05");
+        wsRef.current.sendTerminalInput(terminalId, "\x05");
         return false;
       }
 
       // --- Alt+arrow: word navigation (broader compat than CSI modified arrows) ---
 
       if (event.altKey && event.key === "ArrowLeft") {
-        wsClient.sendTerminalInput(terminalId, "\x1bb");
+        wsRef.current.sendTerminalInput(terminalId, "\x1bb");
         return false;
       }
       if (event.altKey && event.key === "ArrowRight") {
-        wsClient.sendTerminalInput(terminalId, "\x1bf");
+        wsRef.current.sendTerminalInput(terminalId, "\x1bf");
         return false;
       }
 
@@ -458,7 +464,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
       if (attachedRef.current && activeRef.current && isOnScreen(panelApi)) {
-        fitAndSendResize(terminalId, terminal, fitAddon);
+        fitAndSendResize(wsRef.current, terminalId, terminal, fitAddon);
       }
     });
     webglRenderer.setBidiText(useSettingsStore.getState().terminal.bidiText);
@@ -475,7 +481,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       });
     });
 
-    const output = new OutputStream(terminalId, terminal);
+    const output = new OutputStream(wsRef.current, terminalId, terminal);
 
     // Open once the font is ready, then fit and attach to the server session
     const container = containerRef.current;
@@ -491,7 +497,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         fitAddon.fit();
         if (spawnTargetRef.current) {
           output.expectState();
-          sendAttach(terminalId, terminal, spawnTargetRef.current);
+          sendAttach(wsRef.current, terminalId, terminal, spawnTargetRef.current);
           attachedRef.current = true;
           activeRef.current = true;
         }
@@ -507,7 +513,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       if (event instanceof KeyboardEvent && MODIFIER_KEYS.has(event.key)) return;
       if (isOnScreen(panelApi)) fitAddon.fit();
       activeRef.current = true;
-      sendResize(terminalId, terminal);
+      sendResize(wsRef.current, terminalId, terminal);
     };
     for (const type of CLAIM_EVENTS) container.addEventListener(type, claim, true);
 
@@ -520,17 +526,17 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // Send user input (and xterm's replies to terminal queries) as binary frames
     const inputDisposable = terminal.onData((data) => {
       if (!exitedRef.current) {
-        wsClient.sendTerminalInput(terminalId, data);
+        wsRef.current.sendTerminalInput(terminalId, data);
       }
     });
 
     // Receive raw PTY output as offset-tagged binary frames
-    const unsubOutput = wsClient.onTerminalOutput(terminalId, (offset, data) => {
+    const unsubOutput = wsRef.current.onTerminalOutput(terminalId, (offset, data) => {
       output.receive(offset, data);
     });
 
     // Terminal state (attach replies, resyncs) and exit
-    const unsubscribe = wsClient.subscribe((msg) => {
+    const unsubscribe = wsRef.current.subscribe((msg) => {
       if (msg.type === "terminal_state" && msg.id === terminalId) {
         output.applyState(msg);
         termLog.info("Terminal state applied", {
@@ -541,7 +547,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         });
         // A fit may have changed the xterm between the attach request and this state.
         if (activeRef.current && (msg.cols !== terminal.cols || msg.rows !== terminal.rows)) {
-          sendResize(terminalId, terminal);
+          sendResize(wsRef.current, terminalId, terminal);
         }
         return;
       }
@@ -568,7 +574,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
 
     // On WebSocket reconnect, re-attach. The xterm keeps its content: the server resumes from the
     // offset it is current to, or answers with a snapshot (which resets it) if that is gone.
-    const unsubReconnect = wsClient.onReconnect(() => {
+    const unsubReconnect = wsRef.current.onReconnect(() => {
       // Before the initial attach, the pending open sends terminal_attach itself.
       if (exitedRef.current || !attachedRef.current || !spawnTargetRef.current) return;
       // Alone, the attach makes this view the active one, at its own size; joining another view, it
@@ -577,7 +583,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       // to attach claims, and a passive one must not reflow the window in use.
       if (activeRef.current && isOnScreen(panelApi)) fitAddon.fit();
       output.expectState();
-      sendAttach(terminalId, terminal, spawnTargetRef.current, output.since);
+      sendAttach(wsRef.current, terminalId, terminal, spawnTargetRef.current, output.since);
       activeRef.current = true;
       termLog.info("Terminal reconnected", { terminalId });
     });
@@ -588,7 +594,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       for (const type of CLAIM_EVENTS) container.removeEventListener(type, claim, true);
       if (attachedRef.current && !exitedRef.current) {
-        wsClient.send({ type: "terminal_detach", id: terminalId });
+        wsRef.current.send({ type: "terminal_detach", id: terminalId });
       }
       inputDisposable.dispose();
       searchResults.dispose();
@@ -630,7 +636,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         // must keep its dimensions. Showing the group resizes the container, which refits. A view
         // another window's use sized keeps that size: only its user's input claims the terminal.
         if (!isOnScreen(panelApi) || !activeRef.current) return;
-        fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
+        fitAndSendResize(wsRef.current, terminalId, xtermRef.current, fitAddonRef.current);
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
     };
@@ -684,7 +690,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // A view another window's use sized keeps that size.
     if (!fitAddonRef.current || !attachedRef.current || !activeRef.current) return;
     if (!isOnScreen(panelApi)) return;
-    fitAndSendResize(terminalId, terminal, fitAddonRef.current);
+    fitAndSendResize(wsRef.current, terminalId, terminal, fitAddonRef.current);
   }, [font, terminalId, panelApi]);
 
   // Focus terminal on click

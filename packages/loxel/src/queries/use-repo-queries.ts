@@ -38,7 +38,7 @@ function getRecentDays(preset: BranchFilterPreset): number | null {
   }
 }
 
-async function fetchCommits(wt: string, preset: BranchFilterPreset, limit = 200) {
+async function fetchCommits(wt: WorktreeRef, preset: BranchFilterPreset, limit = 200) {
   const recentDays = getRecentDays(preset);
 
   let branches: string[] | undefined;
@@ -56,7 +56,7 @@ async function fetchCommits(wt: string, preset: BranchFilterPreset, limit = 200)
   });
 }
 
-async function fetchDiff(wt: string, source: DiffSource | null): Promise<DiffInfo> {
+async function fetchDiff(wt: WorktreeRef, source: DiffSource | null): Promise<DiffInfo> {
   if (!source) return { files: [], baseRef: null };
 
   if (source.type === "uncommitted" && source.worktree) {
@@ -89,14 +89,14 @@ export type DiffQueryData = DiffInfo;
 
 function useScopedQuery<TData>(opts: {
   queryKey: (project: WorktreeRef | null, wt: WorktreeRef | null) => LoxelQueryKey;
-  queryFn: (wt: string, signal: AbortSignal) => Promise<TData>;
+  queryFn: (wt: WorktreeRef, signal: AbortSignal) => Promise<TData>;
   extraEnabled?: boolean;
   staleTime?: number;
 }): UseQueryResult<TData> {
   const { activeProject, activeWorktree } = useQueryScope();
   return useQuery({
     queryKey: opts.queryKey(activeProject, activeWorktree),
-    queryFn: ({ signal }) => opts.queryFn(activeWorktree!.path, signal),
+    queryFn: ({ signal }) => opts.queryFn(activeWorktree!, signal),
     enabled: activeProject !== null && (opts.extraEnabled ?? true),
     ...(opts.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });

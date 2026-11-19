@@ -17,7 +17,12 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
-import { formatWorktreeRef, sameWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
+import {
+  formatWorktreeRef,
+  sameWorktreeRef,
+  type WorktreeRef,
+  worktreeRef,
+} from "@/api/worktree-ref";
 import type { NestedRemoval } from "@/api/worktree-removal-model";
 import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { Button } from "@/components/ui/button";
@@ -309,7 +314,7 @@ function RemoveWorktreeDialog({
   // Once trusted, planning again clears the notice, and the removal runs clean.wt.sh.
   const trustForCleanHook = async () => {
     try {
-      const trusted = await askToTrustRepo(plan.wtPath, {
+      const trusted = await askToTrustRepo(worktreeRef(plan.project.server, plan.wtPath), {
         title: "Trust this repository and run clean.wt.sh?",
         reason: "Removing the worktree runs the repository's clean.wt.sh once it is trusted.",
         confirmLabel: "Trust Repository",

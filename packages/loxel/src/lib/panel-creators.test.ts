@@ -21,19 +21,20 @@ let diskContent: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
 let failWrites = false;
 const actualClient = await import("@/api/client");
+const { ApiError } = await import("@/api/server-connection");
 const createdDrafts: string[] = [];
 mock.module("@/api/client", () => ({
   ...actualClient,
-  createDetachedFile: async (options: { wt: string; prefix: string; ext: string }) => {
-    createdDrafts.push(options.wt);
-    return { name: "Note 1.md", path: `/drafts/${options.wt}/Note 1.md` };
+  createDetachedFile: async (wt: { path: string }) => {
+    createdDrafts.push(wt.path);
+    return { name: "Note 1.md", path: `/drafts/${wt.path}/Note 1.md` };
   },
-  getFileContentByPath: async (path: string) => {
+  getFileContentByPath: async (_server: string, path: string) => {
     const content = diskContent[path];
-    if (content === undefined) throw new actualClient.ApiError("File not found", 404, "ENOENT");
+    if (content === undefined) throw new ApiError("File not found", 404, "ENOENT");
     return { content };
   },
-  writeFileContent: async (options: { path: string; content: string }) => {
+  writeFileContent: async (_server: string, options: { path: string; content: string }) => {
     if (failWrites) throw new Error("write failed");
     writes.push({ path: options.path, content: options.content });
     return { success: true };

@@ -119,16 +119,16 @@ function solutionItems(state: CSharpSolutionsResponse, wtPath: string): QuickPic
  */
 export async function selectCSharpSolution(wt: WorktreeRef): Promise<void> {
   const wtPath = wt.path;
-  const items = getCSharpSolutions(wtPath).then((state) => solutionItems(state, wtPath));
+  const items = getCSharpSolutions(wt).then((state) => solutionItems(state, wtPath));
   const picked = await requestQuickPick({ placeholder: "Select a C# solution", items });
   if (picked === null) return;
   if (picked === TRUST_ID) {
-    await manageRepoTrust(wtPath);
+    await manageRepoTrust(wt);
     return;
   }
   try {
     const solutionPath = picked === AUTOMATIC_ID ? null : picked;
-    const response = await setCSharpSolution({ worktreePath: wtPath, solutionPath });
+    const response = await setCSharpSolution(wt, { solutionPath });
     setToolchainStatusData(csharpToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the C# solution");

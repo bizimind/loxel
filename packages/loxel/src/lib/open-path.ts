@@ -90,7 +90,7 @@ function inboxOpenDone(inboxId: string): void {
   // Placed, here or in another window.
   if (!open || open.done) return;
   open.done = true;
-  api.wsClientOf(open.server).send({ type: "inbox_open_done", inboxId });
+  api.sendTo(open.server, { type: "inbox_open_done", inboxId });
 }
 
 /**
@@ -117,7 +117,7 @@ export async function openFromInbox(
 ): Promise<void> {
   const known = inboxOpens.get(inboxId);
   if (known !== undefined) {
-    if (known.done) api.wsClientOf(known.server).send({ type: "inbox_open_done", inboxId });
+    if (known.done) api.sendTo(known.server, { type: "inbox_open_done", inboxId });
     return;
   }
   inboxOpens.set(inboxId, { server, done: false });
@@ -191,7 +191,7 @@ async function revealFolder(server: ServerId, rawPath: string): Promise<void> {
   const { activeProject } = getQueryScope();
 
   try {
-    await api.addExternalFolder(activeWorktree.path, path);
+    await api.addExternalFolder(activeWorktree, path);
   } catch (err) {
     log.error("Failed to open folder", { error: err instanceof Error ? err : undefined, path });
     showToast(err instanceof Error ? err.message : "Failed to open folder");
@@ -357,7 +357,7 @@ export async function openPath(
   path: string,
   location?: FileLocation,
 ): Promise<void> {
-  const info = await api.getPathInfo(path).catch(() => null);
+  const info = await api.getPathInfo(server, path).catch(() => null);
   if (info?.isDir) {
     await openFolder(server, info.path);
     return;

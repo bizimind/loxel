@@ -19,7 +19,7 @@ const RUNNING: CSharpStatusResponse = {
 };
 
 const originalClient = await import("@/api/csharp-env-client");
-const getCSharpStatus = jest.fn(async (_wtPath: string) => RUNNING);
+const getCSharpStatus = jest.fn(async (_wt: WorktreeRef) => RUNNING);
 mock.module("@/api/csharp-env-client", () => ({ ...originalClient, getCSharpStatus }));
 
 const originalSolution = await import("@/lib/csharp-solution");
@@ -64,7 +64,7 @@ describe("CSharpStatus", () => {
     useWorktreeStore.setState(activeWorktreeFields(localRef("/wt-b")));
     renderStatus();
     const button = await screen.findByRole("button", { name: "C#: All.slnx" });
-    expect(getCSharpStatus.mock.calls.map(([wtPath]) => wtPath)).toEqual(["/wt-a"]);
+    expect(getCSharpStatus.mock.calls.map(([wt]) => wt)).toEqual([localRef("/wt-a")]);
     expect(button.title).toContain(".NET SDK 10.0.403");
     expect(button.className).toContain("text-muted-foreground");
     fireEvent.click(button);

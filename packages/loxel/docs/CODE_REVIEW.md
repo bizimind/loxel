@@ -57,7 +57,7 @@ Request body schemas (`CreateThreadRequestSchema`, `CreateReviewRequestSchema`, 
 | `DELETE /api/comments/threads/:id`        | Delete thread; comments cascade                 |
 | `POST /api/comments/threads/:id/comments` | Add reply                                       |
 
-Client wrappers are in [client.ts](../src/api/client.ts) (`getReviews`, `postPlacedThreads`, `createCommentThread`, ...); all take the active worktree path and send it as `wt`.
+Client wrappers are in [client.ts](../src/api/client.ts) (`getReviews`, `postPlacedThreads`, `createCommentThread`, ...); all take the active worktree's ref, go to its server and send its path as `wt`.
 
 ## Anchoring and placement
 

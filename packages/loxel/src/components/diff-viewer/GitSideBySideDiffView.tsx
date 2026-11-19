@@ -6,7 +6,7 @@ import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
-import { type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import { type ServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import {
   computeFileDiff,
   splitGitLines,
@@ -121,8 +121,17 @@ export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
 }
 
 /**
- * The ref of the diff's worktree. A diff source names a worktree of the active worktree's
- * repository by path, so it is on the active worktree's server.
+ * The server a diff's files are read from. The diff source lives in the active worktree's
+ * repository store and names a worktree of that repository by path, so the diff is the active
+ * worktree's server's; a diff view without one has no files to read.
+ */
+function diffServer(activeWorktree: WorktreeRef | null): ServerId {
+  if (!activeWorktree) throw new Error("A git diff is read from the active worktree's server");
+  return activeWorktree.server;
+}
+
+/**
+ * The ref of the diff's worktree, on the diff's server (see `diffServer`).
  */
 function useDiffWorktree(worktreePath: string | undefined): WorktreeRef | undefined {
   const server = useQueryScope().activeWorktree?.server;
@@ -151,12 +160,17 @@ function ReadOnlyGitDiffView({
   const { data: newFile, isLoading: loadingNew } = useQuery({
     queryKey: queryKeys.fileContent(activeProject, filePath, newRef, worktree),
     queryFn: () => {
+      const server = diffServer(activeWorktree);
       // When viewing uncommitted changes, read new side from disk
       if (worktreePath && !newRef) {
-        return api.getFileContent({ path: filePath, worktree: worktreePath });
+        return api.getFileContent(server, { path: filePath, worktree: worktreePath });
       }
       return newRef
-        ? api.getFileContent({ path: filePath, ref: newRef, wt: activeWorktreePath ?? undefined })
+        ? api.getFileContent(server, {
+            path: filePath,
+            ref: newRef,
+            wt: activeWorktreePath ?? undefined,
+          })
         : Promise.resolve({ lines: [] });
     },
     enabled: file.status !== "deleted",
@@ -356,7 +370,11 @@ function useOldSideLines(file: FileDiff, oldRef: string | undefined, worktreePat
     queryKey: queryKeys.fileContent(activeProject, oldPath, oldRef, worktree),
     queryFn: () =>
       oldRef
-        ? api.getFileContent({ path: oldPath, ref: oldRef, wt: activeWorktreePath ?? undefined })
+        ? api.getFileContent(diffServer(activeWorktree), {
+            path: oldPath,
+            ref: oldRef,
+            wt: activeWorktreePath ?? undefined,
+          })
         : Promise.resolve({ lines: [] }),
     enabled: file.status !== "added",
   });
@@ -379,18 +397,18 @@ function useGitDiffDiagnostics(
   const { data: oldDiagData } = useQuery({
     queryKey: queryKeys.diagnostics(activeProject, oldRef, undefined),
     queryFn: () =>
-      oldRef && activeWorktreePath
-        ? api.getDiagnostics(activeWorktreePath, oldRef)
+      oldRef && activeWorktree
+        ? api.getDiagnostics(activeWorktree, oldRef)
         : Promise.resolve({ diagnostics: [] }),
     enabled: !!oldRef && !!activeWorktreePath && hasTypeScriptDiagnostics(oldPath),
   });
   const { data: newDiagData } = useQuery({
     queryKey: queryKeys.diagnostics(activeProject, newRef, worktree),
     queryFn: () => {
-      if (!activeWorktreePath) return Promise.resolve({ diagnostics: [] });
+      if (!activeWorktree) return Promise.resolve({ diagnostics: [] });
       if (worktreePath && !newRef)
-        return api.getDiagnostics(activeWorktreePath, undefined, worktreePath);
-      if (newRef) return api.getDiagnostics(activeWorktreePath, newRef);
+        return api.getDiagnostics(activeWorktree, undefined, worktreePath);
+      if (newRef) return api.getDiagnostics(activeWorktree, newRef);
       return Promise.resolve({ diagnostics: [] });
     },
     enabled: (!!newRef || !!worktreePath) && hasTypeScriptDiagnostics(filePath),

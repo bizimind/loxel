@@ -7,15 +7,17 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } f
 import type { Query } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
-import { wsClient } from "@/api/client";
+import { WsClient, wsClient } from "@/api/client";
 import type { StatusInfo, WorktreeStatusInfo } from "@/api/git-models";
 import { localRef, localServerId } from "@/api/local-server";
 import type { DirEntry } from "@/api/project-files-model";
+import { registerConnection, ServerConnection } from "@/api/server-connection";
 import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { queryClient } from "@/query-client";
 import { type ListedProject, useProjectStore } from "@/store/projects";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { queryKeys } from "./query-keys";
@@ -35,6 +37,11 @@ const refreshProjectWorktrees = mock(async () => {});
 const fetchProjects = mock(async () => {});
 let deliver: (message: WsMessage) => void = () => {};
 let reconnect: () => void = () => {};
+let deliverElsewhere: (message: WsMessage) => void = () => {};
+const elsewhereWs = new WsClient();
+const unregisterElsewhere = registerConnection(
+  new ServerConnection({ server: ELSEWHERE, baseUrl: "/peers/other-server", ws: elsewhereWs }),
+);
 // The stores are shared with other test files in the process; put their actions back after.
 const originalFetchProjects = useProjectStore.getState().fetchProjects;
 const originalRefreshProjectWorktrees = useWorktreeStore.getState().refreshProjectWorktrees;
@@ -43,7 +50,15 @@ beforeAll(() => {
   spyOn(wsClient, "connect").mockImplementation(() => {});
   spyOn(wsClient, "disconnect").mockImplementation(() => {});
   spyOn(wsClient, "subscribe").mockImplementation((handler) => {
-    deliver = handler;
+    deliver = (message) => handler(message, localServerId());
+    return () => {};
+  });
+  // A second connection, to a server holding the same paths, which the bridge listens to too.
+  spyOn(elsewhereWs, "connect").mockImplementation(() => {});
+  spyOn(elsewhereWs, "disconnect").mockImplementation(() => {});
+  spyOn(elsewhereWs, "onReconnect").mockImplementation(() => () => {});
+  spyOn(elsewhereWs, "subscribe").mockImplementation((handler) => {
+    deliverElsewhere = (message) => handler(message, ELSEWHERE);
     return () => {};
   });
   spyOn(wsClient, "onReconnect").mockImplementation((handler) => {
@@ -67,6 +82,7 @@ afterEach(() => {
 
 afterAll(() => {
   cleanup();
+  unregisterElsewhere();
   useProjectStore.setState({ fetchProjects: originalFetchProjects });
   useWorktreeStore.setState({ refreshProjectWorktrees: originalRefreshProjectWorktrees });
 });
@@ -102,6 +118,40 @@ const DIFF_KEYS = [
   OTHER_SERVER_DIFF,
 ];
 const WORKING_TREE_DIFFS = [STAGED_DIFF, UNSTAGED_DIFF, UNCOMMITTED_DIFF];
+
+describe("useWsBridge connections", () => {
+  test("a message names the paths of the server whose socket delivered it", () => {
+    const data = { branch: "main" } as StatusInfo;
+
+    deliverElsewhere({ type: "status_changed", wtPath: WT_PATH, data });
+
+    // That server's project is not listed here, so its status has no project part.
+    expect(setQueryData.mock.calls).toEqual([
+      [queryKeys.status(null, worktreeRef(ELSEWHERE, WT_PATH)), data],
+    ]);
+  });
+
+  test("an .editorconfig change refreshes only its own server's editor settings", () => {
+    deliverElsewhere({
+      type: "file_content_changed",
+      wtPath: WT_PATH,
+      data: { path: `${WT_PATH}/.editorconfig`, nonces: [] },
+    });
+
+    const here = queryKeys.editorConfig(localServerId(), `${WT_PATH}/a.ts`, WT);
+    const there = queryKeys.editorConfig(ELSEWHERE, `${WT_PATH}/a.ts`);
+    expect(matchedByPredicates([here, there])).toEqual([there]);
+  });
+
+  test("the window's own state is taken only from its own server", () => {
+    deliverElsewhere({ type: "store_updated", key: "settings", state: {} });
+    deliverElsewhere({
+      type: "schema_consent_changed",
+      data: { pending: ["https://x"], trusted: [], denied: [], neverFetch: false },
+    } as WsMessage);
+    expect(useSchemaConsentStore.getState().pending).not.toContain("https://x");
+  });
+});
 
 describe("useWsBridge git messages", () => {
   test.each([

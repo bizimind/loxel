@@ -5,15 +5,15 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { localRef, localServerId } from "@/api/local-server";
-import { toServerId, worktreeRef } from "@/api/worktree-ref";
+import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 
-const requested: string[] = [];
+const requested: WorktreeRef[] = [];
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
-  getFileIndex: async (wt: string) => {
+  getFileIndex: async (wt: WorktreeRef) => {
     requested.push(wt);
-    return { files: [`${wt}/index.ts`], truncated: false };
+    return { files: [`${wt.path}/index.ts`], truncated: false };
   },
 }));
 
@@ -52,7 +52,7 @@ describe("useFileIndexQuery", () => {
     const other = renderHook(() => useFileIndexQuery(there), { wrapper });
     expect(other.result.current.data).toBeUndefined();
     expect(other.result.current.fetchStatus).toBe("idle");
-    expect(requested).toEqual(["/repo"]);
+    expect(requested).toEqual([localRef("/repo")]);
   });
 
   test("asks for nothing without a worktree, or before its project is known", () => {
@@ -81,9 +81,9 @@ describe("useFileIndexQuery", () => {
 
     const cached = renderHook(() => useFileIndexQuery(here), { wrapper });
     expect(cached.result.current.fetchStatus).toBe("idle");
-    expect(requested).toEqual(["/repo"]);
+    expect(requested).toEqual([localRef("/repo")]);
 
     renderHook(() => useFileIndexQuery(here, { fresh: true }), { wrapper });
-    await waitFor(() => expect(requested).toEqual(["/repo", "/repo"]));
+    await waitFor(() => expect(requested).toEqual([localRef("/repo"), localRef("/repo")]));
   });
 });

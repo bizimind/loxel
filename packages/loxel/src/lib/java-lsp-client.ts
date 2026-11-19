@@ -1,4 +1,3 @@
-import { wsClient } from "@/api/client";
 import { javaToolchain } from "@/api/java-env-model";
 import { getQueryScope } from "@/queries/use-scope";
 import { useLspStatusStore } from "@/store/lsp-status";
@@ -15,13 +14,11 @@ const javaLspClient = createLspClient({
   virtualDocuments: { scheme: "jdt" },
 });
 
-wsClient.subscribe(
-  createToolchainServerRecovery({
-    changedMessage: javaToolchain.changedMessage,
-    client: javaLspClient,
-    stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/java-lsp"),
-    activeWorktree: () => getQueryScope().activeWorktree,
-  }),
-);
+createToolchainServerRecovery({
+  changedMessage: javaToolchain.changedMessage,
+  client: javaLspClient,
+  stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/java-lsp"),
+  activeWorktree: () => getQueryScope().activeWorktree,
+});
 
 export default javaLspClient;

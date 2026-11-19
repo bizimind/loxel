@@ -2,6 +2,7 @@ import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +54,8 @@ export function WorkspaceConfigStep({
 
   useEffect(() => {
     if (!scanPath) return;
-    api.scanSuggestions(scanPath).then((result) => {
+    // The Add Project wizard's path, on the window's own server where it adds projects.
+    api.scanSuggestions(localServerId(), scanPath).then((result) => {
       if (result.files.length > 0 || result.commands.length > 0) {
         onChangeRef.current({
           copyFiles: [...new Set(result.files)],
