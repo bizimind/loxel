@@ -8,7 +8,7 @@ import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 import type { Highlighter } from "shiki";
 
-import { wsClient } from "@/api/client";
+import { connections } from "@/api/server-connection";
 import { type WorktreeRef, worktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { getQueryScope, projectRefOf } from "@/queries/use-scope";
 import { useUIStore } from "@/store/ui";
@@ -194,8 +194,8 @@ function createLazyLspConnector(opts: LspClient): void {
 
 /**
  * Connect the language servers: YAML at once, TypeScript to the active worktree, the lazy ones as
- * their files open. Their worktrees are refs on the window's server, so `main.tsx` calls this once
- * that server is known, before the first render.
+ * their files open, each on its worktree's server's connection, so `main.tsx` calls this once the
+ * window's connection is made, before the first render.
  */
 export function startLanguageServers(): void {
   // Connect to yaml-language-server — LSP features register async when capabilities arrive
@@ -203,7 +203,7 @@ export function startLanguageServers(): void {
 
   // A restarted Loxel server dropped every language-server socket: reconnect the clients now
   // instead of waiting out their backoff, and those that gave up meanwhile.
-  wsClient.onReconnect(resumeLanguageServers);
+  for (const { ws } of connections()) ws.onReconnect(resumeLanguageServers);
 
   // Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
   // the worktree path so project-level features (cross-file refs, module

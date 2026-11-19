@@ -873,7 +873,8 @@ function releaseWorktree(wt: WorktreeRef, discarded = false): void {
   queryClient.removeQueries({
     predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, wt, homeServer),
   });
-  wsClientOf(wt.server).unsubscribeWorktree(wt);
+  // A server without a connection holds no subscription of this window: nothing to end there.
+  if (hasConnection(wt.server)) wsClientOf(wt.server).unsubscribeWorktree(wt);
   dispatchLoxelEvent("loxel-worktree-gone", { wt, discarded });
 }
 

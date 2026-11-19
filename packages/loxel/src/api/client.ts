@@ -15,7 +15,7 @@ import type {
   StatusInfo,
   WorktreeStatusInfo,
 } from "./git-models";
-import { localConnection, localRef, localServerId, setLocalServerId } from "./local-server";
+import { localConnection, localServerId, setLocalServerId } from "./local-server";
 import type { LogEntry } from "./log-entry-model";
 import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
@@ -54,6 +54,7 @@ import {
   registerConnection,
   scopedConnection,
   ServerConnection,
+  socketUrl,
 } from "./server-connection";
 import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./terminal-stream";
 import {
@@ -61,6 +62,7 @@ import {
   type WorktreeRef,
   type WorktreeRefKey,
   formatWorktreeRef,
+  worktreeRef,
 } from "./worktree-ref";
 import type {
   NestedRemoval,
@@ -1049,13 +1051,41 @@ type TerminalOutputHandler = (offset: number, data: Uint8Array) => void;
 
 type ServerHello = Extract<WsMessage, { type: "server_hello" }>;
 
+/** A handler of a server's JSON messages, given the server that sent it. */
+export type WsMessageHandler = (msg: WsMessage, server: ServerId) => void;
+
 /**
- * The app's WebSocket to the server, as a singleton that survives disconnects. It retries with
- * backoff, and on every connection waits for the server's hello before sending anything: a new
- * version or a different server reloads the page; otherwise it re-subscribes the worktrees, runs
- * the reconnect listeners, then sends what was queued meanwhile (see `sentAfterReconnect`).
+ * A connection's WebSocket to its server, which survives disconnects. It retries with backoff,
+ * and on every connection waits for the server's hello before sending anything: a new version, or
+ * a server other than its connection's, reloads the page; otherwise it re-subscribes the
+ * worktrees, runs the reconnect listeners, then sends what was queued meanwhile (see
+ * `sentAfterReconnect`). What it receives is its connection's server's, and handlers are told so.
  */
 export class WsClient {
+  /** The server and base URL of this socket's connection, which names them when it is made. */
+  private target: { server: ServerId; baseUrl: string } | null = null;
+
+  /**
+   * Bind this socket to its connection's server, at its base URL, once: the window's own socket
+   * exists from the start, before that server's id is known.
+   */
+  attach(server: ServerId, baseUrl: string): void {
+    if (this.target !== null && this.target.server !== server) {
+      throw new Error(`This socket is server ${this.target.server}'s, not ${server}'s`);
+    }
+    this.target = { server, baseUrl };
+  }
+
+  /** This socket's connection's; a socket is used only once its connection exists. */
+  private connectionTarget(): { server: ServerId; baseUrl: string } {
+    if (this.target === null) throw new Error("This socket has no connection yet");
+    return this.target;
+  }
+
+  private connectionServer(): ServerId {
+    return this.connectionTarget().server;
+  }
+
   private ws: WebSocket | null = null;
   private closed = false;
   private state: ConnectionState = "connecting";
@@ -1064,7 +1094,7 @@ export class WsClient {
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeListenersAdded = false;
-  private listeners = new Set<(msg: WsMessage) => void>();
+  private listeners = new Set<WsMessageHandler>();
   private reconnectListeners = new Set<() => void>();
   private stateListeners = new Set<() => void>();
   private terminalOutputHandlers = new Map<string, TerminalOutputHandler>();
@@ -1087,8 +1117,8 @@ export class WsClient {
 
   private doConnect(): void {
     this.retryTimer = null;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    const { baseUrl } = this.connectionTarget();
+    const ws = new WebSocket(socketUrl(baseUrl, "ws"));
     ws.binaryType = "arraybuffer";
     /** Whether the server's hello came on this socket. */
     let greeted = false;
@@ -1123,8 +1153,9 @@ export class WsClient {
           if (message.type === "error" && message.wtPath !== undefined) {
             this.confirmWorktree(message.wtPath);
           }
+          const server = this.connectionServer();
           for (const listener of this.listeners) {
-            listener(message);
+            listener(message, server);
           }
         } catch (err) {
           postLogEntry({
@@ -1158,7 +1189,7 @@ export class WsClient {
       }
       // A refused upgrade does not say why: ask whether the server still accepts this window's
       // session, or is only not there.
-      void sessionRefused().then((refused) => {
+      void sessionRefused(baseUrl).then((refused) => {
         // Unless something else has moved on meanwhile (disconnect, a new connect).
         if (this.closed || this.ws !== null || this.retryTimer !== null) return;
         if (refused) this.expireSession();
@@ -1228,7 +1259,7 @@ export class WsClient {
    */
   private handleHello(hello: ServerHello): void {
     const previous = this.server;
-    const sameServer = hello.serverId === localServerId();
+    const sameServer = hello.serverId === this.connectionServer();
     if (!sameServer || (previous && hello.version !== previous.version)) {
       postLogEntry({
         level: "info",
@@ -1331,7 +1362,7 @@ export class WsClient {
   }
 
   /** Subscribe to JSON messages (git notifications + terminal control). */
-  subscribe(handler: (msg: WsMessage) => void): () => void {
+  subscribe(handler: WsMessageHandler): () => void {
     this.listeners.add(handler);
     return () => this.listeners.delete(handler);
   }
@@ -1357,7 +1388,7 @@ export class WsClient {
    * mistake: its subscription would go to the wrong server.
    */
   private worktreeKey(wt: WorktreeRef): WorktreeRefKey {
-    if (!hasConnection(wt.server)) {
+    if (wt.server !== this.connectionServer()) {
       throw new Error(`Not a worktree of this connection's server: ${formatWorktreeRef(wt)}`);
     }
     return formatWorktreeRef(wt);
@@ -1365,7 +1396,7 @@ export class WsClient {
 
   /** The server confirmed (or refused) the subscription of `wtPath`, a worktree it holds. */
   private confirmWorktree(wtPath: string): void {
-    const key = formatWorktreeRef(localRef(wtPath));
+    const key = formatWorktreeRef(worktreeRef(this.connectionServer(), wtPath));
     this.confirmedWorktrees.add(key);
     this.releaseWaiters(key);
   }
@@ -1435,6 +1466,11 @@ export class WsClient {
   }
 }
 
+/**
+ * The window's own server's socket, made as this module loads so that modules can listen to it
+ * from the start; `connectLocalServer` makes it its connection's. Only what belongs to the window
+ * uses it directly: anything about what a server holds goes through `wsClientOf(server)`.
+ */
 export const wsClient = new WsClient();
 
 /**
@@ -1458,13 +1494,30 @@ export function wsClientOf(server: ServerId): WsClient {
 }
 
 /**
+ * Send a fire-and-forget message to `server`, such as a dismissal or a closed panel's teardown.
+ * Without a connection to it there is nothing on it to tell (state can outlive its connection: a
+ * restored session, a persisted notification), so the message is dropped and logged, not thrown.
+ */
+export function sendTo(server: ServerId, msg: WsClientMessage): void {
+  if (!hasConnection(server)) {
+    postLogEntry({
+      level: "info",
+      cat: "server",
+      msg: "Dropped a message to a server without a connection",
+      ctx: { server, type: msg.type },
+    });
+    return;
+  }
+  connectionOf(server).ws.send(msg);
+}
+
+/**
  * Whether the server refuses this window's session secret, which `GET /api/session` answers with
  * `401`. False when no server answers either: then it is down, and retrying is right.
  */
-async function sessionRefused(): Promise<boolean> {
+async function sessionRefused(baseUrl: string): Promise<boolean> {
   try {
-    // This socket is the window's own server's (`localConnection`).
-    return (await fetch(localConnection().apiUrl("/session"))).status === 401;
+    return (await fetch(`${baseUrl}/api/session`)).status === 401;
   } catch {
     return false;
   }

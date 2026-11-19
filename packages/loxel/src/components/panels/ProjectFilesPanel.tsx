@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import { wsClientOf } from "@/api/client";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
@@ -132,7 +131,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         (p) => isWithin(p, path),
       );
       if (openPaths.length > 0) {
-        wsClientOf(wt.server).send({
+        api.sendTo(wt.server, {
           type: "register_external_files",
           worktreePath: wt.path,
           filePaths: openPaths,

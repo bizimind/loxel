@@ -285,7 +285,7 @@ export function CodeEditorPanel({
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
-    queryKey: queryKeys.editorConfig(filePath, panelWorktree ?? undefined),
+    queryKey: queryKeys.editorConfig(panelServer, filePath, panelWorktree ?? undefined),
     queryFn: ({ signal }) => api.getEditorConfig(panelServer, filePath, panelWorktree, signal),
   });
   const { data: editorConfigData } = editorConfigQuery;

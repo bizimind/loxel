@@ -9,7 +9,7 @@
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
-import { wsClientOf } from "@/api/client";
+import { sendTo } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
@@ -19,7 +19,6 @@ import {
   activeLayoutKey,
   HOME_LAYOUT_KEY,
   type LayoutKey,
-  layoutKeyOf,
   layoutServer,
   layoutWorktree,
 } from "@/store/active-worktree";
@@ -30,7 +29,6 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { getCenterApi, setCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { getWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
 
 import { CenterWatermark } from "./center-watermark";
 import { syncTerminalsFromLayout } from "./default-layout";
@@ -46,16 +44,17 @@ const CENTER_LAYOUT_VERSION = 1;
 const uiLog = frontendLog.child("ui");
 
 /**
- * The active worktree's editor area, in the outer dockview's `centerHost` panel. A worktree switch
- * remounts it (the outer swap removes its panel). Leaving for Home unmounts the outer dockview, so
- * a null active worktree keeps the key it has until then.
+ * The active worktree's editor area, in the outer dockview's `centerHost` panel, keyed by the
+ * worktree it mounted for. A worktree switch remounts it (the outer swap removes its panel), so it
+ * keeps that key: following the new active worktree would swap the outgoing center to the new
+ * worktree's layout while the outer swap removes it, and the center API would name that layout
+ * meanwhile. Leaving for Home unmounts the outer dockview.
  */
 export function CenterHostComponent(_props: IDockviewPanelProps) {
   const mountedKeyRef = useRef(activeLayoutKey());
-  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
   return (
     <CenterLayout
-      layoutKey={activeWorktree ? layoutKeyOf(activeWorktree) : mountedKeyRef.current}
+      layoutKey={mountedKeyRef.current}
       components={centerComponents}
       tabComponents={centerTabComponents}
     />
@@ -122,7 +121,7 @@ function CenterLayout({
       if (removedDef?.type === "terminal") {
         const terminalId = (event.params as { terminalId?: string })?.terminalId;
         if (terminalId) {
-          wsClientOf(server).send({ type: "terminal_destroy", id: terminalId });
+          sendTo(server, { type: "terminal_destroy", id: terminalId });
           usePanelNotificationStore.getState().unregisterPanel(server, terminalId);
         }
         if (layoutKeyRef.current !== HOME_LAYOUT_KEY) {
@@ -144,7 +143,7 @@ function CenterLayout({
         const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));
         for (const filePath of panelFilePaths(event.params)) {
           if (filePath.startsWith(worktreePath + "/") || stillShown.has(filePath)) continue;
-          wsClientOf(server).send({ type: "close_external_file", worktreePath, filePath });
+          sendTo(server, { type: "close_external_file", worktreePath, filePath });
         }
       }
     });

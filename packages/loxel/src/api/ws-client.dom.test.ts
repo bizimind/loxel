@@ -87,6 +87,7 @@ beforeEach(() => {
 /** A client connected to its first server, with its socket. */
 function connected(): { client: WsClient; socket: FakeSocket } {
   const client = new WsClient();
+  client.attach(localServerId(), "");
   client.connect();
   const socket = lastSocket();
   socket.open();
@@ -106,6 +107,7 @@ function dropAndReopen(client: WsClient): FakeSocket {
 describe("WsClient", () => {
   test("sends nothing before the server's hello, then the worktrees and what was queued", () => {
     const client = new WsClient();
+    client.attach(localServerId(), "");
     client.subscribeWorktree(localRef("/wt"));
     client.send({ type: "window_hello", windowId: "w1" });
     client.connect();
@@ -197,6 +199,7 @@ describe("WsClient", () => {
     const reload = mock(() => {});
     spyOn(window.location, "reload").mockImplementation(reload);
     const client = new WsClient();
+    client.attach(localServerId(), "");
     client.connect();
     lastSocket().open();
 
@@ -208,6 +211,7 @@ describe("WsClient", () => {
   test("ignores a socket it already replaced", () => {
     // React's StrictMode runs the bridge's effect twice: connect, disconnect, connect.
     const client = new WsClient();
+    client.attach(localServerId(), "");
     client.connect();
     const stale = lastSocket();
     client.disconnect();
@@ -228,6 +232,7 @@ describe("WsClient", () => {
 
   test("a socket that never got a hello is retried while the server accepts the window", async () => {
     const client = new WsClient();
+    client.attach(localServerId(), "");
     client.connect();
     lastSocket().close();
 

@@ -55,6 +55,12 @@ export class ServerConnection {
     this.server = server;
     this.baseUrl = baseUrl;
     this.ws = ws;
+    ws.attach(server, baseUrl);
+  }
+
+  /** The WebSocket URL of the server's route `route` (`ws/ts-lsp?wt=…`, say). */
+  socketUrl(route: string): string {
+    return socketUrl(this.baseUrl, route);
   }
 
   /** The URL of the server's API endpoint `path` (`/status`, say), for a fetch or an `<img>`. */
@@ -70,6 +76,15 @@ export class ServerConnection {
 
 /** The base URL of the window's own server, the origin it was loaded from. */
 export const LOCAL_BASE_URL = "";
+
+/**
+ * The WebSocket URL of `route` under `baseUrl`, on the window's origin: the one place a socket
+ * address is built, so every socket stays same-origin as every request does.
+ */
+export function socketUrl(baseUrl: string, route: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${baseUrl}/${route}`;
+}
 
 /**
  * Request `path` of the API under `baseUrl` and parse its JSON answer; throws {@link ApiError} on
@@ -99,27 +114,32 @@ export async function fetchApiJson<T>(
 }
 
 /** The window's connections, by the server each reaches. Today only the window's own server's. */
-const connections = new Map<ServerId, ServerConnection>();
+const registry = new Map<ServerId, ServerConnection>();
 
 /**
  * Add the connection to its server; returns its removal. A server has one connection: registering
  * a second one for it is a mistake.
  */
 export function registerConnection(connection: ServerConnection): () => void {
-  if (connections.has(connection.server)) {
+  if (registry.has(connection.server)) {
     throw new Error(`Server ${connection.server} already has a connection`);
   }
-  connections.set(connection.server, connection);
+  registry.set(connection.server, connection);
   return () => {
-    if (connections.get(connection.server) === connection) connections.delete(connection.server);
+    if (registry.get(connection.server) === connection) registry.delete(connection.server);
   };
+}
+
+/** Every connection of the window, today only its own server's. */
+export function connections(): ServerConnection[] {
+  return [...registry.values()];
 }
 
 /**
  * Whether the window is connected to `server`, so requests about what it holds can be sent.
  */
 export function hasConnection(server: ServerId): boolean {
-  return connections.has(server);
+  return registry.has(server);
 }
 
 /**
@@ -127,7 +147,7 @@ export function hasConnection(server: ServerId): boolean {
  * file, a project on it). One the window is not connected to is a caller's mistake.
  */
 export function connectionOf(server: ServerId): ServerConnection {
-  const connection = connections.get(server);
+  const connection = registry.get(server);
   if (!connection) throw new Error(`No connection to server ${server}`);
   return connection;
 }

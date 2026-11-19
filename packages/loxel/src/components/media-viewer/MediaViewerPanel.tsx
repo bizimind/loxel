@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getPathInfo, wsClient } from "@/api/client";
+import { getPathInfo, wsClientOf } from "@/api/client";
 import { connectionOf, hasConnection } from "@/api/server-connection";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
@@ -194,14 +194,16 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   }, [viewportRef, viewRef, wheel]);
 
   // --- Live reload on disk change ---
+  // The file's server's socket reports its changes; nothing comes for one without a connection.
+  const fileServer = worktree?.server ?? null;
   useEffect(() => {
-    const unsub = wsClient.subscribe((msg: WsMessage) => {
+    if (fileServer === null || !hasConnection(fileServer)) return;
+    return wsClientOf(fileServer).subscribe((msg: WsMessage) => {
       if (msg.type === "file_content_changed" && msg.data.path === filePath) {
         setVersion((v) => v + 1);
       }
     });
-    return unsub;
-  }, [filePath]);
+  }, [fileServer, filePath]);
 
   // --- Reload after a resync, if the file changed while no push could reach this window ---
   // Every switch back to the worktree resyncs it too, so the file's size and modification time,

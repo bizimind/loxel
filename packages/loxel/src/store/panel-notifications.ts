@@ -13,9 +13,8 @@
 
 import { create } from "zustand";
 
-import { wsClientOf } from "@/api/client";
+import { sendTo } from "@/api/client";
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
-import { hasConnection } from "@/api/server-connection";
 import {
   type ServerId,
   type WorktreeRef,
@@ -152,7 +151,7 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set, 
   worktreeIndex: new Set(),
 
   unregisterPanel: (server, panelId) => {
-    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
+    sendTo(server, { type: "notification_dismiss_panel", panelId });
   },
 
   // --- Server sync ---
@@ -190,17 +189,17 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set, 
   // --- User actions (sent to the server; removed when its broadcast arrives) ---
 
   dismiss: ({ server, id }) => {
-    wsClientOf(server).send({ type: "notification_dismiss", id });
+    sendTo(server, { type: "notification_dismiss", id });
   },
 
   dismissPanel: (server, panelId) => {
-    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
+    sendTo(server, { type: "notification_dismiss_panel", panelId });
   },
 
   dismissAll: () => {
     for (const server of new Set(get().notifications.map((n) => n.server))) {
-      // A server the window has no connection to can't be told; the others still are.
-      if (hasConnection(server)) wsClientOf(server).send({ type: "notifications_clear" });
+      // A server the window has no connection to can't be told (`sendTo` drops it); the others are.
+      sendTo(server, { type: "notifications_clear" });
     }
   },
 }));

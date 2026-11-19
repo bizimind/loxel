@@ -52,7 +52,7 @@ export function restartTerminal(
   server: ServerId,
 ): void {
   const nextId = crypto.randomUUID();
-  api.wsClient.send({ type: "terminal_destroy", id: terminalId });
+  api.sendTo(server, { type: "terminal_destroy", id: terminalId });
   usePanelNotificationStore.getState().unregisterPanel(server, terminalId);
   const toolsBar = getCurrentWorktreeToolsBar().getState();
   toolsBar.removeTerminal(panel.id);

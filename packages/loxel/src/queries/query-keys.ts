@@ -60,10 +60,14 @@ export const queryKeys = {
   /** Prefix key for invalidating all fileContent queries for a given file, regardless of ref/worktree. */
   fileContentPrefix: (project: WorktreeRef | null, path: string) =>
     key("fileContent", project, path),
-  /** `.editorconfig` properties of an open file; invalidated when an `.editorconfig` changes. */
-  editorConfig: (path: string, wt?: WorktreeRef) => key("editorConfig", path, wt),
-  /** Prefix key matching a file's `editorConfig` queries for every worktree. */
-  editorConfigPrefix: (path: string) => key("editorConfig", path),
+  /**
+   * `.editorconfig` properties of an open file on `server`; invalidated when an `.editorconfig`
+   * changes there.
+   */
+  editorConfig: (server: ServerId, path: string, wt?: WorktreeRef) =>
+    key("editorConfig", { server }, path, wt),
+  /** Prefix key matching a file's `editorConfig` queries for every worktree of its server. */
+  editorConfigPrefix: (server: ServerId, path: string) => key("editorConfig", { server }, path),
   diagnostics: (
     project: WorktreeRef | null,
     ref: string | undefined,
@@ -158,10 +162,20 @@ export function isDirContentsKeyBelow(
   return typeof listed === "string" && isWithin(listed, dir);
 }
 
-/** Whether a query key is the `.editorconfig` properties of a file under `dir` (ending in `/`; "" for all). */
-export function isEditorConfigKeyBelow(queryKey: readonly unknown[], dir: string): boolean {
+/**
+ * Whether a query key is the `.editorconfig` properties of a file of `server` under `dir` (ending
+ * in `/`; "" for all of that server's).
+ */
+export function isEditorConfigKeyBelow(
+  queryKey: readonly unknown[],
+  server: ServerId,
+  dir: string,
+): boolean {
   return (
-    queryKey[0] === "editorConfig" && typeof queryKey[1] === "string" && queryKey[1].startsWith(dir)
+    queryKey[0] === "editorConfig" &&
+    keyServer(queryKey) === server &&
+    typeof queryKey[2] === "string" &&
+    queryKey[2].startsWith(dir)
   );
 }
 
