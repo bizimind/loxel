@@ -103,7 +103,7 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ## Site permissions
 
-Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. Links meant for other apps, such as `mailto:` links, open in that app. A site that wants your camera or microphone, or to send notifications, asks you first (see [Camera and microphone](#camera-and-microphone) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
+Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. A site that wants your camera or microphone, to send notifications, to open a link in another app, or to reach your dev servers and devices on your network asks you first (see [Camera and microphone](#camera-and-microphone), [Other apps](#other-apps), [Local network](#local-network) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
 
 When a page goes full screen or hides your pointer, Loxel names the site at the top of the page for a few seconds, every time, and again when you come back to a full screen page after a while away, so a page can't pass itself off as Loxel or as your Mac asking for a password. Press Esc to leave full screen or get your pointer back. Popup windows that sites open can't go full screen or hide your pointer.
 
@@ -114,6 +114,20 @@ Video calls such as Google Meet work in a browser panel as they do in a browser.
 The first time a site you allowed uses one, macOS asks whether Loxel may use your camera or microphone. If Loxel's access is turned off in **System Settings > Privacy & Security**, the bar says so and opens the right pane; macOS may ask you to quit and reopen Loxel before the change applies.
 
 Change a site's choice for each device, or remove it so the site asks again, in **Settings > Browser > Camera and Microphone**. A change applies the next time the site asks, such as when you join a call or reload the page.
+
+### Other apps
+
+Links meant for another app, such as a meeting link that opens Zoom or a `mailto:` link, ask before they open it: a bar under the address bar names the site and the app. **Allow** opens that site's links of that kind from then on, **Allow this time** opens just this one, and **Block** turns them down for good. Close the bar to turn down just this link. A link only opens another app right after you click or type in the page, even on a site you allowed, so no page can open an app as it loads. Ads and other frames embedded in a page can't open other apps, and popup windows only open links their site was allowed.
+
+Change or remove a site's choices in **Settings > Browser > Other Apps**.
+
+### Local network
+
+Your dev servers stay private to your Mac: a site on the internet asks before it connects to apps on your Mac, such as a dev server or a local API, or to devices on your network, such as your router or printer. A page on your local network asks before it connects to apps on your Mac. Pages on your Mac itself, such as `http://localhost:3000` or `http://127.0.0.1:5173`, never ask, so a dev server's page reaches its API, live reload and other local ports as before.
+
+While the bar asks, the site's requests wait. **Allow** lets them through and lets the site connect from then on, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good, which fails those requests. Close the bar to fail them for now: the site doesn't ask again until you reload or leave the page. Frames embedded in a page follow the page's choice, and a site's background workers ask in a tab showing the site.
+
+Change or remove a site's choice in **Settings > Browser > Local Network**.
 
 ---
 
