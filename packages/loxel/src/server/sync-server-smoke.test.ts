@@ -32,6 +32,7 @@ import {
   git,
   PROBE_FILE,
   retryUntil,
+  SYNC_EVENT_DEADLINE_MS,
   type SyncRepo,
 } from "@/test/git-sync-harness";
 import { until } from "@/test/until";
@@ -57,7 +58,7 @@ function freePort(): number {
 }
 
 describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => {
-  const log = new CaptureLog<WsMessage>();
+  const log = new CaptureLog<WsMessage>(SYNC_EVENT_DEADLINE_MS);
   let repo: SyncRepo;
   let stateDir: string;
   let server: ReturnType<typeof Bun.spawn>;
@@ -145,6 +146,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         return false;
       },
       "the server to listen",
+      SYNC_EVENT_DEADLINE_MS,
     );
     auth = sessionAuthorization(stateDir);
     const { projects } = await readJson<{ projects: Array<{ id: string; path: string }> }>(
@@ -172,6 +174,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       (timeoutMs) =>
         log.seenWithin((message) => message.type === "worktrees_changed", 0, timeoutMs),
       "the project watcher to arm",
+      SYNC_EVENT_DEADLINE_MS,
     );
     const probe = path.join(repo.primary, PROBE_FILE);
     await retryUntil(
@@ -183,6 +186,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
           timeoutMs,
         ),
       "the file watcher to arm",
+      SYNC_EVENT_DEADLINE_MS,
     );
     rmSync(probe);
     // Linked worktrees have a status watcher of their own, and a regular root the project's.
@@ -197,6 +201,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       (timeoutMs) =>
         log.seenWithin((message) => message.type === "status_changed", beforeLock, timeoutMs),
       "the status watcher to arm",
+      SYNC_EVENT_DEADLINE_MS,
     );
   }, TEST_TIMEOUT_MS);
 
@@ -525,7 +530,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     "two windows subscribing to a worktree at once share one set of its resources",
     async () => {
       const { path: wtPath } = await executeAdd({ name: "smoke-twice", repoPath: repo.root });
-      const otherLog = new CaptureLog<WsMessage>();
+      const otherLog = new CaptureLog<WsMessage>(SYNC_EVENT_DEADLINE_MS);
       const other = bunWebSocket(socket.url, auth);
       other.addEventListener("message", (event) => {
         otherLog.add(JSON.parse(String(event.data)) as WsMessage);
@@ -563,6 +568,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
           (await log.seenWithin(statusOf, beforeLock, timeoutMs)) &&
           (await otherLog.seenWithin(statusOf, otherBeforeLock, timeoutMs)),
         "both windows to get the worktree's status",
+        SYNC_EVENT_DEADLINE_MS,
       );
 
       other.close();
@@ -612,6 +618,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
           return false;
         },
         "the worktree's resources to be torn down",
+        SYNC_EVENT_DEADLINE_MS,
       );
     },
     TEST_TIMEOUT_MS,
@@ -653,6 +660,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
             return false;
           },
           "the worktree's resources to be torn down",
+          SYNC_EVENT_DEADLINE_MS,
         );
       };
 
