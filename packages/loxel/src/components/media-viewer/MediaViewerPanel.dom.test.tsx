@@ -4,7 +4,8 @@ import { act, cleanup, render } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
 import * as api from "@/api/client";
-import { PanelWorktreeProvider } from "@/components/dockview/panel-context";
+import { localServerId } from "@/api/local-server";
+import { LayoutServerContext, PanelWorktreeProvider } from "@/components/dockview/panel-context";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 
 import { MediaViewerPanel } from "./MediaViewerPanel";
@@ -36,9 +37,11 @@ afterEach(() => {
 
 function renderPanel() {
   const view = render(
-    <PanelWorktreeProvider worktreePath={WT}>
-      <MediaViewerPanel filePath={FILE} panelApi={panelApi} />
-    </PanelWorktreeProvider>,
+    <LayoutServerContext.Provider value={localServerId()}>
+      <PanelWorktreeProvider worktreePath={WT}>
+        <MediaViewerPanel filePath={FILE} panelApi={panelApi} />
+      </PanelWorktreeProvider>
+    </LayoutServerContext.Provider>,
   );
   return () => view.container.querySelector("iframe")!.getAttribute("src");
 }

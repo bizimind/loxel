@@ -132,7 +132,7 @@ mock.module("@/components/code-editor/caret-row", () => ({
 }));
 
 const { CodeEditorPanel } = await import("./CodeEditorPanel");
-const { PanelContext } = await import("@/components/dockview/panel-context");
+const { LayoutServerContext, PanelContext } = await import("@/components/dockview/panel-context");
 const { outboxEntriesForTests, resetSaveOutboxForTests } = await import("@/lib/save-outbox");
 const { fileEditorKey, useEditorStateStore } = await import("@/store/editor-state");
 
@@ -157,9 +157,11 @@ function renderPanel(worktree: WorktreeRef | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
   return render(
     <QueryClientProvider client={client}>
-      <PanelContext.Provider value={{ worktree }}>
-        <CodeEditorPanel filePath={FILE} onClose={() => {}} panelApi={panelApi} />
-      </PanelContext.Provider>
+      <LayoutServerContext.Provider value={localServerId()}>
+        <PanelContext.Provider value={{ worktree }}>
+          <CodeEditorPanel filePath={FILE} onClose={() => {}} panelApi={panelApi} />
+        </PanelContext.Provider>
+      </LayoutServerContext.Provider>
     </QueryClientProvider>,
   );
 }

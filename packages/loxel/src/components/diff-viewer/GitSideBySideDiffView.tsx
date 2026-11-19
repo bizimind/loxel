@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import * as monaco from "monaco-editor";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
@@ -24,6 +24,7 @@ import { PanelContext } from "@/components/dockview/panel-context";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { detectLanguage } from "@/lib/highlighter";
+import { serverAuthority } from "@/lib/live-editor-model";
 import { toMonacoLanguage } from "@/lib/monaco-theme";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
@@ -44,29 +45,36 @@ interface GitSideBySideDiffViewProps {
   onWorkingTreeFileChange?: () => void;
 }
 
-/**
- * Read-only model of a file at a git ref (HEAD for the working tree) on one side of a diff.
- * The fragment keeps the two sides apart when they show the same file and ref.
- */
-function gitDiffModelUri(path: string, ref: string | undefined, side: "old" | "new") {
-  return monaco.Uri.from({
-    scheme: "loxel",
-    authority: ref ?? "HEAD",
-    path: `/${path}`,
-    fragment: side,
-  });
+/** Where one side of a git diff view comes from, and the view that shows it. */
+export interface GitDiffSide {
+  /** The diff's worktree (its repository's, for a diff of commits); null while none is known. */
+  worktree: WorktreeRef | null;
+  /** The file's path in the repository. */
+  path: string;
+  /**
+   * The git ref it is read at (`HEAD` when none is given), or `working-tree` for the editable
+   * working-tree file.
+   */
+  ref: string | undefined;
+  side: "old" | "new";
+  /** The mounted view showing it (its `useId`), which creates and disposes the model. */
+  viewId: string;
 }
 
 /**
- * Model of the editable working-tree side of an uncommitted diff, by absolute path. Its fragment
- * keeps it from being taken for an editor tab's live model of the file (see `editorFile`).
+ * Model URI of one side of a git diff view:
+ * `loxel://<serverId><worktree path>/<path>?<ref>#<view>-<side>`. The server and worktree keep the
+ * same file of two worktrees or servers apart, the view keeps two views of one diff from sharing a
+ * model that each disposes, and the side keeps both sides of a file apart. The query and fragment
+ * keep it from being taken for an editor tab's live model of the file (see `editorFile`).
  */
-function workingTreeModelUri(absPath: string) {
+export function gitDiffModelUri({ worktree, path, ref, side, viewId }: GitDiffSide): monaco.Uri {
   return monaco.Uri.from({
     scheme: "loxel",
-    authority: "working-tree",
-    path: absPath,
-    fragment: "new",
+    authority: worktree ? serverAuthority(worktree.server) : "",
+    path: worktree ? `${worktree.path}/${path}` : `/${path}`,
+    query: ref ?? "HEAD",
+    fragment: `${viewId}-${side}`,
   });
 }
 
@@ -75,6 +83,7 @@ function workingTreeModelUri(absPath: string) {
  * uncommitted diff the new side is the working-tree file itself, and is editable.
  */
 export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
+  const viewId = useId();
   const activeWorktreePath = useQueryScope().activeWorktree?.path ?? null;
   const { file, newRef, worktreePath } = props;
   const worktree = useDiffWorktree(worktreePath);
@@ -93,7 +102,7 @@ export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
   const editable =
     !newRef && worktreePath === activeWorktreePath && (file.status !== "deleted" || sideOpen);
   if (!worktreePath || !worktree || !absPath || !editable)
-    return <ReadOnlyGitDiffView {...props} />;
+    return <ReadOnlyGitDiffView {...props} viewId={viewId} />;
 
   return (
     // The diff viewer is a worktree's panel without a panel worktree of its own; the editable side
@@ -105,6 +114,7 @@ export function GitSideBySideDiffView(props: GitSideBySideDiffViewProps) {
         worktreePath={worktreePath}
         worktree={worktree}
         absPath={absPath}
+        viewId={viewId}
       />
     </PanelContext.Provider>
   );
@@ -123,7 +133,13 @@ function useDiffWorktree(worktreePath: string | undefined): WorktreeRef | undefi
 }
 
 /** Both sides read from git, or the new side read from the working tree, neither editable. */
-function ReadOnlyGitDiffView({ file, oldRef, newRef, worktreePath }: GitSideBySideDiffViewProps) {
+function ReadOnlyGitDiffView({
+  file,
+  oldRef,
+  newRef,
+  worktreePath,
+  viewId,
+}: GitSideBySideDiffViewProps & { viewId: string }) {
   const { activeProject, activeWorktree } = useQueryScope();
   const activeWorktreePath = activeWorktree?.path ?? null;
   const worktree = useDiffWorktree(worktreePath);
@@ -155,8 +171,16 @@ function ReadOnlyGitDiffView({ file, oldRef, newRef, worktreePath }: GitSideBySi
   );
 
   const language = useMemo(() => toMonacoLanguage(detectLanguage(filePath)), [filePath]);
-  const oldModelUri = useMemo(() => gitDiffModelUri(oldPath, oldRef, "old"), [oldPath, oldRef]);
-  const newModelUri = useMemo(() => gitDiffModelUri(filePath, newRef, "new"), [filePath, newRef]);
+  // A diff of commits names no worktree: it is of the active worktree's repository.
+  const repo = worktree ?? activeWorktree;
+  const oldModelUri = useMemo(
+    () => gitDiffModelUri({ worktree: repo, path: oldPath, ref: oldRef, side: "old", viewId }),
+    [repo, oldPath, oldRef, viewId],
+  );
+  const newModelUri = useMemo(
+    () => gitDiffModelUri({ worktree: repo, path: filePath, ref: newRef, side: "new", viewId }),
+    [repo, filePath, newRef, viewId],
+  );
 
   return (
     <SideBySideDiffView
@@ -206,8 +230,14 @@ function WorkingTreeDiffView({
   worktreePath,
   worktree,
   absPath,
+  viewId,
   onWorkingTreeFileChange,
-}: GitSideBySideDiffViewProps & { worktreePath: string; worktree: WorktreeRef; absPath: string }) {
+}: GitSideBySideDiffViewProps & {
+  worktreePath: string;
+  worktree: WorktreeRef;
+  absPath: string;
+  viewId: string;
+}) {
   const filePath = fileDiffPath(file);
   const oldPath = file.oldPath || file.newPath;
   const editorKey = workingTreeSideKey(worktree.server, absPath);
@@ -247,8 +277,14 @@ function WorkingTreeDiffView({
     worktreePath,
   );
 
-  const oldModelUri = useMemo(() => gitDiffModelUri(oldPath, oldRef, "old"), [oldPath, oldRef]);
-  const newModelUri = useMemo(() => workingTreeModelUri(absPath), [absPath]);
+  const oldModelUri = useMemo(
+    () => gitDiffModelUri({ worktree, path: oldPath, ref: oldRef, side: "old", viewId }),
+    [worktree, oldPath, oldRef, viewId],
+  );
+  const newModelUri = useMemo(
+    () => gitDiffModelUri({ worktree, path: filePath, ref: "working-tree", side: "new", viewId }),
+    [worktree, filePath, viewId],
+  );
 
   if (side.loadFailed) {
     return (

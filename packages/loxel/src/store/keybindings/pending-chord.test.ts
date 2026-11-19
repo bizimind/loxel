@@ -7,6 +7,7 @@ import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { registerFindTarget } from "@/lib/find-targets";
 import { registerTabRename } from "@/lib/tab-rename";
 
+import { HOME_LAYOUT_KEY } from "../active-worktree";
 import { applyStoreUpdate } from "../store-sync";
 import { setCenterApi } from "../tools-bar";
 import { activeWorktreeFields, useWorktreeStore } from "../worktrees";
@@ -190,7 +191,7 @@ describe("⇧⌘R, shared by Rename Tab and a browser panel's hard refresh", () 
     document.body.append(center);
 
     const panel = { id: "tab", group: { element: tabGroup } };
-    setCenterApi({ activePanel: panel } as unknown as DockviewApi);
+    setCenterApi({ activePanel: panel } as unknown as DockviewApi, HOME_LAYOUT_KEY);
     const offRename = registerTabRename(panel.id, () => {});
     const offHardRefresh = registerBrowserPanelTarget(browserRoot, {
       hardRefresh: () => {},

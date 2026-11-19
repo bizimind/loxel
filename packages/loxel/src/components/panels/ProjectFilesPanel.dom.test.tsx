@@ -93,6 +93,8 @@ mock.module("@/lib/loxel-events", () => ({
 
 mock.module("@/store/tools-bar", () => ({
   getCenterApi: () => centerApiState.api,
+  // Home's layout, on the window's server.
+  getCenterApiLayoutKey: () => (centerApiState.api ? "home" : null),
   showPanel: () => {},
   subscribeCenterApi: (
     listener: (

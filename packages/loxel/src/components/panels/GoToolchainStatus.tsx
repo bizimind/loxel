@@ -61,7 +61,7 @@ export function GoToolchainStatus() {
 
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, status } = active;
   const { env, chosen } = status;
   const chosenUnusable = chosen !== null && env?.source !== "chosen";
 
@@ -70,7 +70,7 @@ export function GoToolchainStatus() {
       label={goLabel(env)}
       tooltip={goTooltip(status)}
       warning={!env?.version || env.newerGoNeeded !== null || chosenUnusable}
-      onSelect={() => void selectGoToolchain(wtPath)}
+      onSelect={() => void selectGoToolchain(wt)}
     />
   );
 }

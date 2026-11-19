@@ -7,6 +7,8 @@ import type {
   CompileDatabaseFileResponse,
   CompileDatabaseStatus,
 } from "@/api/c-cpp-compile-database-model";
+import { localRef } from "@/api/local-server";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 
 const STATUS: CompileDatabaseStatus = {
   chosen: null,
@@ -32,17 +34,20 @@ mock.module("@/api/c-cpp-compile-database-client", () => ({
 }));
 
 const originalPicker = await import("@/lib/c-cpp-compile-database");
-const selectCompileDatabase = jest.fn(async (_wtPath: string) => {});
+const selectCompileDatabase = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/c-cpp-compile-database", () => ({ ...originalPicker, selectCompileDatabase }));
 
 let activePanel = {
   id: "codeeditor-/wt/src/a.cpp",
   params: { filePath: "/wt/src/a.cpp", worktreePath: "/wt" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+const centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -67,7 +72,7 @@ describe("CompileDatabaseStatusItem", () => {
       filePath: "/wt/src/a.cpp",
     });
     fireEvent.click(button);
-    expect(selectCompileDatabase).toHaveBeenCalledWith("/wt");
+    expect(selectCompileDatabase).toHaveBeenCalledWith(localRef("/wt"));
   });
 
   test("shows nothing for a file of another language", () => {

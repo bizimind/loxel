@@ -10,5 +10,6 @@ export const { connect: connectTsLsp, disconnect: disconnectTsLsp } = createLspC
   name: "TypeScript",
   languageId: TS_LANGUAGE_IDS,
   // TypeScript indents the code of its quick fixes and completions by each file's indentation.
-  onConnected: (transport) => reportDocumentIndentation(transport, TS_LANGUAGE_IDS, monaco.editor),
+  onConnected: (transport, server) =>
+    reportDocumentIndentation(transport, server, TS_LANGUAGE_IDS, monaco.editor),
 });

@@ -1,6 +1,7 @@
-import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { getActiveEditorFile } from "@/lib/reveal-in-explorer";
 import { type QuickPickItem, requestQuickPick } from "@/store/command-palette";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
+import type { EditorKey } from "@/store/editor-state";
 import type {
   IndentationResolution,
   IndentationSource,
@@ -82,10 +83,10 @@ const SIZES = [1, 2, 3, 4, 5, 6, 7, 8];
  * size, or convert the file's indentation. The choice lasts while the file's tab is open.
  */
 export async function changeIndentation(
-  filePath: string | null = getActiveEditorFilePath(),
+  editorKey: EditorKey | null = getActiveEditorFile()?.editorKey ?? null,
 ): Promise<void> {
-  const entry = filePath ? useEditorIndentationStore.getState().byFile.get(filePath) : undefined;
-  if (!filePath || !entry) return;
+  const entry = editorKey ? useEditorIndentationStore.getState().byFile.get(editorKey) : undefined;
+  if (!editorKey || !entry) return;
   const { indentation, sources } = entry.resolution;
   const { label, source } = describeIndentation(entry.resolution);
 
@@ -108,7 +109,7 @@ export async function changeIndentation(
   });
   // The tab may have closed, or republished, while the palette was open.
   const current = (): EditorIndentation | undefined =>
-    useEditorIndentationStore.getState().byFile.get(filePath);
+    useEditorIndentationStore.getState().byFile.get(editorKey);
 
   if (picked === "spaces" || picked === "tabs") {
     const insertSpaces = picked === "spaces";

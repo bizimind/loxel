@@ -59,6 +59,7 @@ mock.module("@excalidraw/excalidraw", () => ({ ...excalidraw, Excalidraw: Observ
 mock.module("@excalidraw/excalidraw/index.css", () => ({}));
 
 const { ExcalidrawEditor } = await import("./ExcalidrawEditor");
+const { LayoutServerContext } = await import("@/components/dockview/panel-context");
 
 const FILE = "/repo/unindexed.excalidraw";
 
@@ -102,7 +103,9 @@ function renderEditor() {
   const client = new QueryClient();
   const result = render(
     <QueryClientProvider client={client}>
-      <ExcalidrawEditor filePath={FILE} panelApi={panelApi} />
+      <LayoutServerContext.Provider value={localServerId()}>
+        <ExcalidrawEditor filePath={FILE} panelApi={panelApi} />
+      </LayoutServerContext.Provider>
     </QueryClientProvider>,
   );
   return { ...result, client };

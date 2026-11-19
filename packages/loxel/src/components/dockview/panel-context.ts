@@ -1,9 +1,9 @@
 import type { IDockviewPanel } from "dockview-react";
 import { createContext, createElement, type ReactNode, useContext, useMemo } from "react";
 
-import { localServerId } from "@/api/local-server";
-import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
-import { layoutWorktreeRef } from "@/store/active-worktree";
+import { type ServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import { layoutServer } from "@/store/active-worktree";
+import { getCenterApiLayoutKey } from "@/store/tools-bar";
 
 interface PanelContextValue {
   /** The worktree the panel was created for; null for Home's panels. */
@@ -13,12 +13,32 @@ interface PanelContextValue {
 /** Provides panel-scoped metadata (the panel's worktree) to child components and hooks. */
 export const PanelContext = createContext<PanelContextValue>({ worktree: null });
 
-/** The worktree of a panel's persisted `worktreePath` param (see `layoutWorktreeRef`). */
-export function panelWorktreeRef(worktreePath: string | null | undefined): WorktreeRef | null {
-  return worktreePath ? layoutWorktreeRef(worktreePath) : null;
+/**
+ * The server of the layout a panel is in (see `layoutServer`), which `PersistedLayoutComponent`
+ * provides to its panels and tabs: a layout is stored on that server, and its panels' bare
+ * `worktreePath` params name worktrees there.
+ */
+export const LayoutServerContext = createContext<ServerId | null>(null);
+
+/**
+ * The server of the layout the calling panel or tab is in, which holds the files of all its panels:
+ * a tab header is outside its panel's context, but in its layout.
+ */
+export function useLayoutServer(): ServerId {
+  const server = useContext(LayoutServerContext);
+  if (server === null) throw new Error("Panels render inside a layout, which names their server");
+  return server;
 }
 
-/** Provide a panel's worktree from its persisted `worktreePath` param (see `panelWorktreeRef`). */
+/** The worktree of a panel's persisted `worktreePath` param, on the server of its layout. */
+function panelWorktreeRef(
+  server: ServerId,
+  worktreePath: string | null | undefined,
+): WorktreeRef | null {
+  return worktreePath ? worktreeRef(server, worktreePath) : null;
+}
+
+/** Provide a panel's worktree from its persisted `worktreePath` param, on its layout's server. */
 export function PanelWorktreeProvider({
   worktreePath,
   children,
@@ -26,7 +46,11 @@ export function PanelWorktreeProvider({
   worktreePath: string | null | undefined;
   children: ReactNode;
 }) {
-  const value = useMemo(() => ({ worktree: panelWorktreeRef(worktreePath) }), [worktreePath]);
+  const server = useLayoutServer();
+  const value = useMemo(
+    () => ({ worktree: panelWorktreeRef(server, worktreePath) }),
+    [server, worktreePath],
+  );
   return createElement(PanelContext.Provider, { value }, children);
 }
 
@@ -40,28 +64,33 @@ export function usePanelWorktreePath(): string | null {
   return usePanelWorktree()?.path ?? null;
 }
 
-/** The server holding the panel's files: its worktree's, or the window's for Home's panels. */
+/** The server holding the panel's files: its worktree's, or its layout's for Home's panels. */
 export function usePanelServer(): ServerId {
-  return usePanelWorktree()?.server ?? localServerId();
+  const worktree = usePanelWorktree();
+  const layout = useContext(LayoutServerContext);
+  const server = worktree?.server ?? layout;
+  if (server === null) throw new Error("Panels render inside a layout, which names their server");
+  return server;
 }
 
-/** The worktree a panel was created for (its `worktreePath` param), outside React. */
+/** The server of the center layout, the only one whose panels code outside React looks up. */
+function centerLayoutServer(): ServerId {
+  const layoutKey = getCenterApiLayoutKey();
+  if (layoutKey === null) throw new Error("No center layout is mounted");
+  return layoutServer(layoutKey);
+}
+
+/** The worktree a panel of the center layout was created for (its `worktreePath` param), outside React. */
 export function getPanelWorktree(panel: IDockviewPanel): WorktreeRef | null {
   const params: unknown = panel.params;
   if (typeof params !== "object" || params === null || !("worktreePath" in params)) return null;
   const { worktreePath } = params as Record<string, unknown>;
-  return typeof worktreePath === "string" ? panelWorktreeRef(worktreePath) : null;
+  return typeof worktreePath === "string"
+    ? panelWorktreeRef(centerLayoutServer(), worktreePath)
+    : null;
 }
 
-/**
- * The server holding the files of a panel whose `worktreePath` param is `worktreePath` (see
- * `usePanelServer`), for a tab header, which is outside the panel's context.
- */
-export function panelServerOf(worktreePath: string | null | undefined): ServerId {
-  return panelWorktreeRef(worktreePath)?.server ?? localServerId();
-}
-
-/** The server holding a panel's files (see `usePanelServer`), outside React. */
+/** The server holding the files of a panel of the center layout (see `usePanelServer`), outside React. */
 export function getPanelServer(panel: IDockviewPanel): ServerId {
-  return getPanelWorktree(panel)?.server ?? localServerId();
+  return getPanelWorktree(panel)?.server ?? centerLayoutServer();
 }

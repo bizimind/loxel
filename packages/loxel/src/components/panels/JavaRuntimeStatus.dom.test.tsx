@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { JavaEnvResponse } from "@/api/java-env-model";
 import { localRef } from "@/api/local-server";
+import { formatWorktreeRef, toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 
 const JDK: NonNullable<JavaEnvResponse["env"]> = {
   source: "java-home",
@@ -25,7 +26,7 @@ const reloadJavaProjects = jest.fn(async (_request: { worktreePath: string }) =>
 mock.module("@/api/java-env-client", () => ({ ...originalClient, getJavaEnv, reloadJavaProjects }));
 
 const originalRuntime = await import("@/lib/java-runtime");
-const selectJavaRuntime = jest.fn(async (_wtPath: string) => {});
+const selectJavaRuntime = jest.fn(async (_wt: WorktreeRef) => {});
 mock.module("@/lib/java-runtime", () => ({ ...originalRuntime, selectJavaRuntime }));
 
 // The outgoing center right after a worktree switch: its active panel still shows a file of
@@ -34,10 +35,13 @@ const activePanel = {
   id: "codeeditor-/wt-a/src/App.java",
   params: { filePath: "/wt-a/src/App.java", worktreePath: "/wt-a" },
 };
+/** The layout the center shows, whose server holds its panels' worktrees. */
+let centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
 const originalToolsBar = await import("@/store/tools-bar");
 mock.module("@/store/tools-bar", () => ({
   ...originalToolsBar,
   getCenterApi: () => ({ activePanel, onDidActivePanelChange: () => ({ dispose: () => {} }) }),
+  getCenterApiLayoutKey: () => centerLayoutKey,
   subscribeCenterApi: () => () => {},
 }));
 
@@ -118,7 +122,19 @@ describe("JavaRuntimeStatus", () => {
     expect(button.title).toContain("Detected from JAVA_HOME");
     expect(button.className).toContain("text-muted-foreground");
     fireEvent.click(button);
-    expect(selectJavaRuntime.mock.calls).toEqual([["/wt-a"]]);
+    expect(selectJavaRuntime.mock.calls).toEqual([[localRef("/wt-a")]]);
+  });
+
+  test("selects the JDK of the panel's worktree on its layout's server, not the window's", async () => {
+    const elsewhere = worktreeRef(toServerId("other-server"), "/wt-a");
+    centerLayoutKey = formatWorktreeRef(elsewhere);
+    try {
+      renderStatus();
+      fireEvent.click(await screen.findByRole("button", { name: "Java 21.0.5 (Temurin)" }));
+      expect(selectJavaRuntime.mock.calls).toEqual([[elsewhere]]);
+    } finally {
+      centerLayoutKey = formatWorktreeRef(localRef("/wt-a"));
+    }
   });
 
   test("says when JAVA_HOME was ignored", async () => {

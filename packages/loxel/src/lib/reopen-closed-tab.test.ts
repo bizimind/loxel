@@ -18,6 +18,7 @@ const { handleFileDeleted, handleFileMoved, openLocalDb, reopenClosedTab } =
   await import("./panel-creators");
 const { closeCenterTab, forgetClosedTabGroup, registerClosedTabParams } =
   await import("@/store/closed-tabs");
+const { layoutKeyOf } = await import("@/store/active-worktree");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { getCurrentWorktreeToolsBar } = await import("@/store/worktree-tools-bar");
 const { purgeWorktreeStores } = await import("@/store/worktree-store");
@@ -37,7 +38,7 @@ function createCenter(worktreePath = WT): DockviewApi {
   });
   dockview.layout(800, 600);
   const api = new DockviewApi(dockview);
-  setCenterApi(api, worktreePath);
+  setCenterApi(api, layoutKeyOf(localRef(worktreePath)));
   useWorktreeStore.setState(activeWorktreeFields(localRef(worktreePath)));
   return api;
 }
@@ -225,7 +226,7 @@ describe("reopenClosedTab", () => {
     reopenClosedTab();
     expect(other.panels).toHaveLength(0);
 
-    setCenterApi(api, WT);
+    setCenterApi(api, layoutKeyOf(localRef(WT)));
     useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
     reopenClosedTab();
     expect(api.getPanel(a.id)).toBeDefined();

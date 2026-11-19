@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DockviewComponent, type DockviewApi, type IDockviewPanel } from "dockview-react";
 
 import { layoutSnapshot } from "@/components/dockview/layout-snapshot";
+import { HOME_LAYOUT_KEY } from "@/store/active-worktree";
 import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import { setCenterApi } from "@/store/tools-bar";
 
@@ -27,7 +28,7 @@ beforeEach(() => {
   });
   dockview.layout(1000, 500);
   api = dockview.api;
-  setCenterApi(api);
+  setCenterApi(api, HOME_LAYOUT_KEY);
   restoreLayoutWhenAnotherGroupActivates(api);
 });
 

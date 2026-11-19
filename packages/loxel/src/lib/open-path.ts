@@ -11,7 +11,7 @@ import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
-import { HOME_LAYOUT_KEY, layoutWorktree } from "@/store/active-worktree";
+import { activeLayoutKey, layoutKeyOf } from "@/store/active-worktree";
 import { deriveProject, projectRef, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { getCenterApiLayoutKey, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
@@ -246,19 +246,19 @@ async function refreshIfUnlisted(worktreePath: string): Promise<void> {
  * the panel was queued.
  */
 async function openInWorktree(target: string | null, open: PendingOpen): Promise<boolean> {
-  const { activeWorktree, switchWorktree } = useWorktreeStore.getState();
-  const activeWorktreePath = activeWorktree?.path ?? null;
-  const layoutKey = target ?? HOME_LAYOUT_KEY;
-  const ui = getWorktreeUI(layoutWorktree(layoutKey)).getState();
-  const centerReady = target === activeWorktreePath && getCenterApiLayoutKey() === layoutKey;
+  const { switchWorktree } = useWorktreeStore.getState();
+  // Opens from outside the window come from its own server.
+  const worktree = localRef(target);
+  const layoutKey = layoutKeyOf(worktree);
+  const ui = getWorktreeUI(worktree).getState();
+  const centerReady = activeLayoutKey() === layoutKey && getCenterApiLayoutKey() === layoutKey;
   if (centerReady && ui.pendingOpens.length === 0) {
     dispatchPendingOpen(open);
     return false;
   }
   ui.queueOpen(open);
   const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
-  if (focus && target !== null && target !== activeWorktreePath)
-    await switchWorktree(localRef(target));
+  if (focus && worktree !== null && activeLayoutKey() !== layoutKey) await switchWorktree(worktree);
   return true;
 }
 

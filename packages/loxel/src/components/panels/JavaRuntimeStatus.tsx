@@ -22,7 +22,7 @@ export function JavaRuntimeStatus() {
 
   if (!active) return null;
 
-  const { wtPath, status } = active;
+  const { wt, wtPath, status } = active;
   const { env, overridePath, ignoredJavaHome, projectIssue } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
   const tooltip = [
@@ -51,7 +51,7 @@ export function JavaRuntimeStatus() {
         label={env ? javaRuntimeLabel(env) : "No JDK found"}
         tooltip={tooltip}
         warning={!env || overrideUnusable}
-        onSelect={() => void selectJavaRuntime(wtPath)}
+        onSelect={() => void selectJavaRuntime(wt)}
       />
     </>
   );

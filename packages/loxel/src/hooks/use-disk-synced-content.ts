@@ -60,8 +60,10 @@ export interface UseDiskSyncedContentOptions<T> {
   editorKey?: EditorKey;
   /** Parse raw file content string into typed content T. */
   deserialize: (raw: string) => T;
-  /** External content cache (Map<cacheKey, T>). null = no cache (e.g. CodeEditor). */
-  contentCache: Map<string, T> | null;
+  /**
+   * External content cache, by the file's tab key (`cacheKey`). null = no cache (e.g. CodeEditor).
+   */
+  contentCache: Map<EditorKey, T> | null;
   /** Merge callbacks for 3-way auto-merge. null = no merge support (e.g. Excalidraw). */
   mergeCallbacks?: MergeCallbacks | null;
 }
@@ -77,8 +79,11 @@ export interface DiskSyncedContent<T> {
   isDeleted: boolean;
   /** Why the server refused this editor's last save, or null; its edits are kept meanwhile. */
   saveRefused: string | null;
-  /** Cache key (absolute file path). */
-  cacheKey: string;
+  /**
+   * Cache key: the file's tab key (`fileEditorKey`), its server and absolute path, so the same
+   * path on two servers has two entries.
+   */
+  cacheKey: EditorKey;
   /** This editor's key in `useEditorStateStore`. */
   editorKey: EditorKey;
   /** Whether the active query errored. */
@@ -140,8 +145,8 @@ export function useDiskSyncedContent<T>(
   const tabKey = fileEditorKey(server, filePath);
   const editorKey = options.editorKey ?? tabKey;
 
-  // Absolute file path IS the cache key — no scoping needed
-  const cacheKey = filePath;
+  // The file's server and absolute path: every view of the file shares its cached content.
+  const cacheKey = tabKey;
 
   // --- Refs for stable closures ---
   // Declared before the scope-change flush so the flush can read old values,
@@ -159,7 +164,7 @@ export function useDiskSyncedContent<T>(
   const getSerializedContentRef = useRef<((reason: SaveReason) => string | null) | null>(null);
 
   // --- Flush pending save on scope change ---
-  // With absolute paths, cacheKey only changes if filePath changes (e.g. file rename).
+  // cacheKey only changes if the file does (e.g. file rename).
   // The panel is destroyed/recreated on worktree switch, so this is a safety net.
   if (cacheKeyRef.current !== cacheKey && autosaveTimerRef.current) {
     clearTimeout(autosaveTimerRef.current);

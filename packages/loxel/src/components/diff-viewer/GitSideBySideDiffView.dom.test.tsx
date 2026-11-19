@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 import type { FileDiff } from "@/api/diff-model";
-import { localRef } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { DiffSide } from "@/components/diff/SideBySideDiffView";
 import { useEditorStateStore } from "@/store/editor-state";
 import { getWorktreeUI } from "@/store/worktree-ui";
@@ -45,7 +46,7 @@ mock.module("@/api/client", () => ({
   getDiagnostics: async () => ({ diagnostics: [] }),
 }));
 
-const { GitSideBySideDiffView } = await import("./GitSideBySideDiffView");
+const { GitSideBySideDiffView, gitDiffModelUri } = await import("./GitSideBySideDiffView");
 
 const FILE: FileDiff = {
   oldPath: "src/a.ts",
@@ -117,6 +118,29 @@ describe("GitSideBySideDiffView", () => {
 
     act(() => rendered?.newSide.editable?.onContentChange("one\ntwo\nthree\nfour\n"));
     await waitFor(() => expect(diffLines()).toEqual([" one", " two", " three", "+four", " "]));
+  });
+
+  test("gives each mounted view of a file models of its own, which it alone disposes", async () => {
+    renderView();
+    await waitFor(() => expect(rendered).not.toBeNull());
+    const first = rendered;
+    renderView();
+    await waitFor(() => expect(rendered).not.toBe(first));
+    expect(rendered?.newSide.modelUri).not.toEqual(first?.newSide.modelUri);
+    expect(rendered?.oldSide.modelUri).not.toEqual(first?.oldSide.modelUri);
+  });
+
+  test("names a side's model by its worktree's server and path, never the window's alone", () => {
+    const side = { path: "src/a.ts", ref: "abc1234", side: "old", viewId: "v" } as const;
+    const here = gitDiffModelUri({ ...side, worktree: localRef(WT) });
+    const there = gitDiffModelUri({
+      ...side,
+      worktree: worktreeRef(toServerId("other-server"), WT),
+    });
+    const otherWorktree = gitDiffModelUri({ ...side, worktree: localRef("/repo-2") });
+    expect(here).toMatchObject({ authority: localServerId(), path: "/repo/src/a.ts" });
+    expect(there).toMatchObject({ authority: "other-server", path: "/repo/src/a.ts" });
+    expect(otherWorktree).toMatchObject({ path: "/repo-2/src/a.ts" });
   });
 
   test("keeps a CRLF file's line endings in its lines, as comment placement reads them", async () => {

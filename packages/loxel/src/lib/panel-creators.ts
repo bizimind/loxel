@@ -344,7 +344,7 @@ export async function createEditor(options?: {
     const title = options?.title || name;
 
     if (options?.content) {
-      setEditorContent(filePath, options.content);
+      setEditorContent(fileEditorKey(centerServer(), filePath), options.content);
     }
 
     addPlacedPanel(dv, options?.placement, {
@@ -765,8 +765,9 @@ function replaceMovedPanel(
     return false;
   }
 
-  renameEditorCacheKey(oldPath, newPath);
-  renameDrawingCacheKey(oldPath, newPath);
+  const server = getPanelServer(oldPanel);
+  renameEditorCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
+  renameDrawingCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
 
   // Add the new panel before closing the old one, so a group holding only the old panel
   // isn't removed from the layout in between.

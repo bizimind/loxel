@@ -5,6 +5,7 @@ import type { DockviewApi } from "dockview-react";
 import { localRef, localServerId } from "@/api/local-server";
 import type { NotificationSource } from "@/api/notification-model";
 import { toServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import { layoutKeyOf } from "@/store/active-worktree";
 import type { ClientNotification } from "@/store/panel-notifications";
 import { setCenterApi } from "@/store/tools-bar";
 import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
@@ -81,7 +82,10 @@ describe("navigateToNotification", () => {
     // A panel whose id happens to be the terminal id must not be taken for its tab.
     const decoy = panel("terminal-1", {});
     const tab = panel("terminal-terminal-1", { terminalId: "terminal-1" });
-    setCenterApi({ panels: [decoy, tab] } as unknown as DockviewApi);
+    setCenterApi(
+      { panels: [decoy, tab] } as unknown as DockviewApi,
+      layoutKeyOf(localRef("/repo")),
+    );
 
     navigateToNotification(notification(terminalIn("/repo")));
 

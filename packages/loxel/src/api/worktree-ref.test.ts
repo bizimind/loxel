@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 
 import {
   formatWorktreeRef,
@@ -43,8 +44,17 @@ describe("WorktreeRef", () => {
     expect(isWorktreeRef(null)).toBe(false);
   });
 
-  test("refuses a server id its string form could not hold", () => {
-    expect(() => toServerId("")).toThrow();
-    expect(() => toServerId("a:b")).toThrow();
+  test("refuses a server id its string form or a URI authority could not hold", () => {
+    for (const id of ["", "a:b", "a/b", "user@host", "Upper-Case", "a b"]) {
+      expect(() => toServerId(id)).toThrow("Not a server id");
+    }
+  });
+
+  test("accepts the IDs servers generate", () => {
+    expect(toServerId(randomUUID())).toBeDefined();
+  });
+
+  test("parses a key whose server part is no server id as no ref", () => {
+    expect(parseWorktreeRef("Upper:/repo")).toBeNull();
   });
 });

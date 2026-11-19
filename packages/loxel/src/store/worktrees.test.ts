@@ -6,6 +6,7 @@ import { localRef, localServerId } from "@/api/local-server";
 import { formatWorktreeRef, toServerId, worktreeRef } from "@/api/worktree-ref";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
 import { STORAGE_PREFIX } from "@/lib/env";
+import type { LayoutKey } from "@/store/active-worktree";
 
 const PROJECT = "/repo";
 const WT_PATH = "/repo/.worktrees/feat-x";
@@ -80,6 +81,7 @@ mock.module("@/components/ui/toast", () => ({
 const { queryClient } = await import("@/query-client");
 const { queryKeys } = await import("@/queries/query-keys");
 const { useFileSearchStore } = await import("./file-search");
+const { layoutKeyOf } = await import("./active-worktree");
 const { registerLayoutCache } = await import("./worktree-cache");
 const { getWorktreeUI } = await import("./worktree-ui");
 const {
@@ -450,11 +452,13 @@ describe("a worktree removed outside the app", () => {
   test("releases a worktree that was not the active one", async () => {
     const worktreeUi = getWorktreeUI(localRef(WT_PATH));
     worktreeUi.getState().queueOpen({ kind: "file", filePath: `${WT_PATH}/a.ts` } as never);
-    const layoutCache = new Map<string, unknown>([
-      [WT_PATH, {}],
-      [OTHER_WT, {}],
+    const elsewhere = toServerId("other-server");
+    const layoutCache = new Map<LayoutKey, unknown>([
+      [layoutKeyOf(localRef(WT_PATH)), {}],
+      [layoutKeyOf(localRef(OTHER_WT)), {}],
+      [layoutKeyOf(worktreeRef(elsewhere, WT_PATH)), {}],
     ]);
-    const unregister = registerLayoutCache(localServerId(), layoutCache);
+    const unregister = registerLayoutCache(layoutCache);
     useFileSearchStore.getState().setFiles(WT_PATH, ["a.ts"], false);
     useFileSearchStore.getState().recordOpen(WT_PATH, "a.ts");
     queryClient.setQueryData(queryKeys.status(localRef(PROJECT), localRef(WT_PATH)), {
@@ -465,7 +469,6 @@ describe("a worktree removed outside the app", () => {
       kept: true,
     });
     // The same paths on another server are that server's worktree, not this one.
-    const elsewhere = toServerId("other-server");
     const elsewhereDir = queryKeys.dirContents(worktreeRef(elsewhere, PROJECT), `${WT_PATH}/src`);
     const elsewhereStatus = queryKeys.status(
       worktreeRef(elsewhere, PROJECT),
@@ -482,8 +485,10 @@ describe("a worktree removed outside the app", () => {
 
       expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef(OTHER_WT));
       expect(getWorktreeUI(localRef(WT_PATH))).not.toBe(worktreeUi);
-      expect(layoutCache.has(WT_PATH)).toBe(false);
-      expect(layoutCache.has(OTHER_WT)).toBe(true);
+      expect([...layoutCache.keys()]).toEqual([
+        layoutKeyOf(localRef(OTHER_WT)),
+        layoutKeyOf(worktreeRef(elsewhere, WT_PATH)),
+      ]);
       expect(useFileSearchStore.getState().indexByWorktree.has(WT_PATH)).toBe(false);
       expect(useFileSearchStore.getState().mruByWorktree.has(WT_PATH)).toBe(false);
       expect(
@@ -499,8 +504,9 @@ describe("a worktree removed outside the app", () => {
       expect(queryClient.getQueryData(elsewhereDir)).toEqual(["kept"]);
       expect(queryClient.getQueryData(elsewhereStatus)).toEqual({ kept: true });
       expect(unsubscribe).toHaveBeenCalledWith(WT_PATH);
-      expect(isListedWorktree(WT_PATH)).toBe(false);
-      expect(isListedWorktree(OTHER_WT)).toBe(true);
+      expect(isListedWorktree(localRef(WT_PATH))).toBe(false);
+      expect(isListedWorktree(localRef(OTHER_WT))).toBe(true);
+      expect(isListedWorktree(worktreeRef(elsewhere, OTHER_WT))).toBe(false);
     } finally {
       unsubscribe.mockRestore();
       unregister();

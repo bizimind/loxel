@@ -35,6 +35,7 @@ import {
 import { isKeyWithinWorktree } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 
+import { layoutKeyOf } from "./active-worktree";
 import { closeLayoutBrowserPages } from "./browser-pages";
 import { useFileSearchStore } from "./file-search";
 import { type ListedProject, projectOf, projectRef, useProjectStore } from "./projects";
@@ -839,11 +840,11 @@ export function listedWorktrees(): ListedWorktree[] {
   });
 }
 
-/** Whether `path` is a worktree or a regular project's root checkout in this window's lists. */
-export function isListedWorktree(path: string): boolean {
+/** Whether `wt` is a worktree or a regular project's root checkout in this window's lists. */
+export function isListedWorktree(wt: WorktreeRef): boolean {
   return (
-    listedWorktrees().some(({ ref }) => ref.path === path) ||
-    useProjectStore.getState().projects.some((p) => !p.isBare && p.path === path)
+    listedWorktrees().some(({ ref }) => sameWorktreeRef(ref, wt)) ||
+    useProjectStore.getState().projects.some((p) => !p.isBare && sameWorktreeRef(projectRef(p), wt))
   );
 }
 
@@ -854,7 +855,7 @@ export function isListedWorktree(path: string): boolean {
 function releaseWorktree(wt: WorktreeRef, discarded = false): void {
   const { path } = wt;
   purgeWorktreeStores(wt);
-  closeLayoutBrowserPages(path);
+  closeLayoutBrowserPages(layoutKeyOf(wt));
   purgeWorktreeCache(wt);
   useFileSearchStore.getState().purgeWorktree(path);
   const homeServer = localServerId();

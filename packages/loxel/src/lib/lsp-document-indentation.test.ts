@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type * as monaco from "monaco-editor";
 
 import { DOCUMENT_INDENTATION_METHOD } from "@/api/lsp-indentation-model";
+import { toServerId } from "@/api/worktree-ref";
 
 import { reportDocumentIndentation } from "./lsp-document-indentation";
 
@@ -55,14 +56,19 @@ function setup(initial: FakeModel[]) {
       created.add(l);
       return { dispose: () => created.delete(l) };
     },
-  } as unknown as Parameters<typeof reportDocumentIndentation>[2];
+  } as unknown as Parameters<typeof reportDocumentIndentation>[3];
   const transport = {
     send: (message: unknown) => {
       sent.push(message);
       return Promise.resolve();
     },
   };
-  const reporter = reportDocumentIndentation(transport, ["typescript"], registry);
+  const reporter = reportDocumentIndentation(
+    transport,
+    toServerId("test-server"),
+    ["typescript"],
+    registry,
+  );
   const create = (model: FakeModel) => {
     for (const l of created) l(model);
   };
@@ -93,6 +99,12 @@ describe("reportDocumentIndentation", () => {
       notification("loxel://test-server/repo/a.ts", 8, 2, false),
       notification("loxel://test-server/repo/b.ts", 4, 4, true),
     ]);
+  });
+
+  test("reports only the models of its own server, not the same path on another", () => {
+    const { sent, create } = setup([new FakeModel("loxel://other-server/repo/a.ts", "typescript")]);
+    create(new FakeModel("loxel://other-server/repo/b.ts", "typescript"));
+    expect(sent).toEqual([]);
   });
 
   test("stops listening to disposed models and when disposed", () => {

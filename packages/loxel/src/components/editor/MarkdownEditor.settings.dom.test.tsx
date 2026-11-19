@@ -55,6 +55,7 @@ class CountingCrepe extends originalCrepe.Crepe {
 mock.module("@milkdown/crepe", () => ({ ...originalCrepe, Crepe: CountingCrepe }));
 
 const { MarkdownEditor, editorContentCache } = await import("./MarkdownEditor");
+const { LayoutServerContext } = await import("@/components/dockview/panel-context");
 
 /** The parts of the dockview panel API the editor subscribes to. */
 function fakePanelApi(): DockviewPanelApi {
@@ -82,7 +83,9 @@ function renderEditor() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MarkdownEditor filePath={FILE_PATH} panelApi={fakePanelApi()} />
+      <LayoutServerContext.Provider value={localServerId()}>
+        <MarkdownEditor filePath={FILE_PATH} panelApi={fakePanelApi()} />
+      </LayoutServerContext.Provider>
     </QueryClientProvider>,
   );
 }

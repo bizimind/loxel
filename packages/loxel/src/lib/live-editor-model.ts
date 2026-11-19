@@ -1,6 +1,6 @@
 import * as monaco from "monaco-editor";
 
-import { type ServerId, toServerId } from "@/api/worktree-ref";
+import { isServerId, type ServerId, toServerId } from "@/api/worktree-ref";
 
 type ModelUri = Pick<monaco.Uri, "scheme" | "authority" | "path" | "query" | "fragment">;
 
@@ -13,16 +13,11 @@ export interface EditorFile {
 /** The two schemes of editor tab models: `file` for `fileSchemeLanguages`, `loxel` for the rest. */
 export type EditorUriScheme = "file" | "loxel";
 
-const SERVER_AUTHORITY = /^[a-z0-9._~-]+$/;
-
 /**
- * A server ID as a URI authority. Monaco lowercases authorities when it prints a URI, and a server
- * hands URIs back as text, so an ID must survive both unchanged: Loxel servers use lowercase UUIDs.
+ * A server ID as a URI authority: the ID itself, whose grammar (`toServerId`) already keeps it
+ * unchanged through Monaco's printing of a URI and a server's text.
  */
 export function serverAuthority(server: ServerId): string {
-  if (!SERVER_AUTHORITY.test(server)) {
-    throw new Error(`Server id ${JSON.stringify(server)} cannot be a URI authority`);
-  }
   return server;
 }
 
@@ -39,18 +34,17 @@ export function editorFileUri(file: EditorFile, scheme: EditorUriScheme): monaco
 /**
  * The file behind an editor tab's live model URI (see `editorFileUri`), or null for any other URI.
  * Language servers' answers name the same URIs once their connection has translated them, also
- * for files no tab has open. Diff and history sides (`loxel://<ref>/<path>#<side>`, including
- * working-tree sides at `loxel://working-tree/...#new`) and compare sides
- * (`loxel://compare/...#<panel>-<side>`) carry a fragment and are not editor files, and neither is
- * a URI that names no server, such as a `file:///` link in a server's hover text or a
- * `loxel://HEAD/` one the TypeScript bridge wrote.
+ * for files no tab has open. Git diff sides (`loxel://<serverId><path>?<ref>#<view>-<side>`) and
+ * compare sides (`loxel://compare/...#<panel>-<side>`) carry a fragment and are not editor files,
+ * and neither is a URI that names no server, such as a `file:///` link in a server's hover text or
+ * a `loxel://HEAD/` one the TypeScript bridge wrote.
  */
 export function editorFile(uri: ModelUri): EditorFile | null {
   if (uri.query || uri.fragment || !uri.authority) return null;
   if (uri.scheme !== "file" && uri.scheme !== "loxel") return null;
   // Only what `serverAuthority` writes: no port, user info or uppercase. `head` is the authority
   // the servers' own `loxel:` URIs use, which names no server.
-  if (!SERVER_AUTHORITY.test(uri.authority) || uri.authority === "head") return null;
+  if (!isServerId(uri.authority) || uri.authority === "head") return null;
   return { server: toServerId(uri.authority), path: uri.path };
 }
 

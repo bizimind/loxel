@@ -1,5 +1,6 @@
 import { getGoToolchainCandidates, refreshGoEnv, setGoToolchainChoice } from "@/api/go-env-client";
 import { type GoEnv, type GoEnvResponse, goToolchain } from "@/api/go-env-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
@@ -12,16 +13,16 @@ import { restartStoppedLanguageServers } from "./lsp-client";
 const AUTOMATIC_ID = "#automatic";
 const ENTER_PATH_ID = "#enter-path";
 
-function showGoStatus(wtPath: string, status: GoEnvResponse): void {
-  setToolchainStatusData(goToolchain, wtPath, status);
+function showGoStatus(wt: WorktreeRef, status: GoEnvResponse): void {
+  setToolchainStatusData(goToolchain, wt, status);
   // The user asked, so a gopls that stopped for lack of Go may start again.
   if (status.env) restartStoppedLanguageServers();
 }
 
 /** Look for the worktree's Go again, for one installed in a directory new to the login-shell PATH. */
-export async function refreshGoToolchain(wtPath: string): Promise<void> {
+export async function refreshGoToolchain(wt: WorktreeRef): Promise<void> {
   try {
-    showGoStatus(wtPath, await refreshGoEnv(wtPath));
+    showGoStatus(wt, await refreshGoEnv(wt.path));
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not look for Go");
   }
@@ -34,14 +35,15 @@ function automaticDescription(env: GoEnv | null, homeDir: string | null): string
 }
 
 /**
- * Let the user choose worktree `wtPath`'s Go in the command palette: one found on the machine, a
+ * Let the user choose worktree `wt`'s Go in the command palette: one found on the machine, a
  * path they enter, or automatic detection. The choice is saved per worktree on the server, which
  * everything that runs Go follows. Opening it also looks for Go again. Installing Go is left to the
  * user's terminal.
  */
-export async function selectGoToolchain(wtPath: string): Promise<void> {
+export async function selectGoToolchain(wt: WorktreeRef): Promise<void> {
+  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const state = refreshGoToolchain(wtPath).then(() => getGoToolchainCandidates(wtPath));
+  const state = refreshGoToolchain(wt).then(() => getGoToolchainCandidates(wtPath));
   const items = state.then(({ candidates, automatic, chosen }) => {
     const list: QuickPickItem[] = [
       {
@@ -78,7 +80,7 @@ export async function selectGoToolchain(wtPath: string): Promise<void> {
   }
 
   try {
-    showGoStatus(wtPath, await setGoToolchainChoice({ worktreePath: wtPath, goPath }));
+    showGoStatus(wt, await setGoToolchainChoice({ worktreePath: wtPath, goPath }));
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Go toolchain");
   }

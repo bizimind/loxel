@@ -8,6 +8,7 @@
  */
 
 import * as api from "@/api/client";
+import { localRef } from "@/api/local-server";
 import type { ServerId } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
@@ -915,7 +916,7 @@ async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Pr
   const { projects } = useProjectStore.getState();
   if (projects.length === 0) return;
   for (const entry of taken) {
-    if (!entry.worktreePath || isListedWorktree(entry.worktreePath)) continue;
+    if (!entry.worktreePath || isListedWorktree(localRef(entry.worktreePath))) continue;
     const owner = deriveProject(entry.worktreePath, projects);
     const project = projects.find((candidate) => candidate.path === owner?.path);
     if (project && project.worktrees.length === 0) continue;

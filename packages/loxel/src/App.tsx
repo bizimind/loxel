@@ -40,6 +40,7 @@ import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
 import { useUpdateStatusBridge } from "./queries/use-update-status";
 import { useWsBridge } from "./queries/ws-bridge";
+import { layoutKeyOf } from "./store/active-worktree";
 import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
 
@@ -92,7 +93,7 @@ export default function App() {
               <PersistedLayoutComponent
                 className="dockview-theme-abyss h-full"
                 storagePrefix="outer"
-                layoutKey={activeWorktree.path}
+                layoutKey={layoutKeyOf(activeWorktree)}
                 layoutVersion={LAYOUT_VERSION}
                 createDefaultLayout={createDefaultLayout}
                 onApiReady={setupOuterDockview}

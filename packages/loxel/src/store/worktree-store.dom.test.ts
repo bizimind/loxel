@@ -5,6 +5,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { localRef, localServerId } from "@/api/local-server";
 import { toServerId, worktreeRef } from "@/api/worktree-ref";
 
+import { type LayoutKey, layoutKeyOf } from "./active-worktree";
 import {
   getWorktreeInnerLayout,
   purgeWorktreeCache,
@@ -81,14 +82,17 @@ describe("per-worktree cache", () => {
     expect(getWorktreeInnerLayout("graph")).toBeUndefined();
   });
 
-  test("purges a layout cache only for a worktree of the server its layouts are stored on", () => {
-    const cache = new Map<string, unknown>([[PATH, {}]]);
-    const unregister = registerLayoutCache(localServerId(), cache);
+  test("purges a layout cache only of the worktree's own layout, not the same path's on another server", () => {
+    const cache = new Map<LayoutKey, unknown>([
+      [layoutKeyOf(HERE), {}],
+      [layoutKeyOf(THERE), {}],
+    ]);
+    const unregister = registerLayoutCache(cache);
 
     purgeWorktreeCache(THERE);
-    expect(cache.has(PATH)).toBe(true);
+    expect([...cache.keys()]).toEqual([layoutKeyOf(HERE)]);
     purgeWorktreeCache(HERE);
-    expect(cache.has(PATH)).toBe(false);
+    expect(cache.size).toBe(0);
     unregister();
   });
 });

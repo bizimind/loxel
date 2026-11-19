@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:
 import type { DockviewPanelApi } from "dockview-react";
 
 import { localRef } from "@/api/local-server";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
+import { layoutKeyOf } from "./active-worktree";
 import {
   attachBrowserPage,
   backgroundBrowserPages,
@@ -22,11 +24,16 @@ import { usePanelNotificationStore } from "./panel-notifications";
 import { useSettingsStore } from "./settings-store";
 import { activeWorktreeFields, useWorktreeStore } from "./worktrees";
 
+const WT_A = layoutKeyOf(localRef("/wt/a"));
+const WT_B = layoutKeyOf(localRef("/wt/b"));
+/** The same path as `WT_A` on another server. */
+const WT_A_ELSEWHERE = layoutKeyOf(worktreeRef(toServerId("other-server"), "/wt/a"));
+
 const api = {} as DockviewPanelApi;
 const slots = new Map<string, HTMLElement>();
 
 /** Show panel `id` of `layoutKey`, whose `url` param is `url`. */
-function show(id: string, layoutKey = "/wt/a", url = `https://${id}.test/`): void {
+function show(id: string, layoutKey = WT_A, url = `https://${id}.test/`): void {
   const element = document.createElement("div");
   slots.set(id, element);
   attachBrowserPage(id, { layoutKey, url, slot: { element, api } });
@@ -92,9 +99,9 @@ describe("browser pages", () => {
   });
 
   test("a switch doesn't count the pages of the layout it is about to show", () => {
-    for (const id of ["b1", "b2"]) show(id, "/wt/b");
+    for (const id of ["b1", "b2"]) show(id, WT_B);
     for (const id of ["b1", "b2"]) hide(id);
-    show("a1", "/wt/a");
+    show("a1", WT_A);
     // Switching to B: A's panel unmounts before B's mount.
     useWorktreeStore.setState(activeWorktreeFields(localRef("/wt/b")));
     hide("a1");
@@ -161,26 +168,33 @@ describe("browser pages", () => {
   });
 
   test("an unloaded page comes back on the last URL it was on", () => {
-    show("p1", "/wt/a", "https://first.test/");
+    show("p1", WT_A, "https://first.test/");
     setBrowserPageUrl("p1", "https://later.test/");
     hide("p1");
     unloadBrowserPages(["p1"]);
-    show("p1", "/wt/a", "https://first.test/");
+    show("p1", WT_A, "https://first.test/");
     expect(useBrowserPages.getState().pages.p1?.initialUrl).toBe("https://later.test/");
   });
 
   test("closing a panel or removing its worktree unloads its pages for good", () => {
-    show("a1", "/wt/a", "https://a1.test/");
-    show("b1", "/wt/b", "https://b1.test/");
+    show("a1", WT_A, "https://a1.test/");
+    show("b1", WT_B, "https://b1.test/");
     setBrowserPageUrl("a1", "https://a1.test/later");
     hide("a1");
-    closeLayoutBrowserPages("/wt/a");
+    closeLayoutBrowserPages(WT_A);
     expect(loaded()).toEqual(["b1"]);
     // A panel with the same id later starts on its own URL, not the removed one's.
-    show("a1", "/wt/a", "https://a1.test/");
+    show("a1", WT_A, "https://a1.test/");
     expect(useBrowserPages.getState().pages.a1?.initialUrl).toBe("https://a1.test/");
 
     closeBrowserPage("b1");
     expect(loaded()).toEqual(["a1"]);
+  });
+
+  test("removing a worktree leaves the pages of the same path on another server", () => {
+    show("a1", WT_A);
+    show("x1", WT_A_ELSEWHERE);
+    closeLayoutBrowserPages(WT_A);
+    expect(loaded()).toEqual(["x1"]);
   });
 });
