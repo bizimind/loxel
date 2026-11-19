@@ -81,10 +81,14 @@ export function trackQuarantine(item: DownloadItem, quarantine: (path: string) =
   const startedMs = item.getStartTime() * 1000;
   let complete = false;
   let markedInode: bigint | null = null;
-  let running: Promise<void> | null = null;
-  let again = false;
+  /** The last check asked for; checks run one after another. */
+  let checks: Promise<void> = Promise.resolve();
+  /** Whether the last check asked for has yet to start, so a new request can join it. */
+  let checkWaiting = false;
 
-  const markIfNew = async (path: string) => {
+  const markIfNew = async () => {
+    const path = item.getSavePath();
+    if (!path) return;
     const file = await regularFile(path);
     if (!file || file.inode === markedInode) return;
     if (!complete && predatesDownload(file.birthtimeMs, startedMs)) return;
@@ -93,26 +97,19 @@ export function trackQuarantine(item: DownloadItem, quarantine: (path: string) =
   };
 
   /**
-   * Mark the file at the save path unless it is marked already. One check runs at a time; the
-   * promise settles when this one (or the one running, which checks again after it) is done.
+   * Mark the file at the save path unless it is marked already. Settles once a check that started
+   * after this call is done: the waiting one it joins, or a new one after the one running.
    */
   const update = (): Promise<void> => {
-    const path = item.getSavePath();
-    if (!path) return Promise.resolve();
-    if (running) {
-      again = true;
-      return running;
-    }
-    running = markIfNew(path)
-      .catch((err: unknown) => console.warn("[electron] Could not quarantine a download:", err))
-      .finally(() => {
-        running = null;
-        if (again) {
-          again = false;
-          void update();
-        }
+    if (checkWaiting) return checks;
+    checkWaiting = true;
+    checks = checks.then(() => {
+      checkWaiting = false;
+      return markIfNew().catch((err: unknown) => {
+        console.warn("[electron] Could not quarantine a download:", err);
       });
-    return running;
+    });
+    return checks;
   };
   return {
     update,

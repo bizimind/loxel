@@ -162,6 +162,40 @@ describe("trackQuarantine", () => {
       expect(calls).toEqual([file, file]);
     }));
 
+  test("a request while a check runs settles only after a check that follows it", () =>
+    withDir(async (dir) => {
+      const file = join(dir, "tool.sh");
+      await writeFile(file, "#!/bin/sh\n");
+      const calls: string[] = [];
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let firstCall = () => {};
+      const firstCalled = new Promise<void>((resolve) => {
+        firstCall = resolve;
+      });
+      const quarantine = async (path: string) => {
+        calls.push(path);
+        if (calls.length === 1) {
+          firstCall();
+          await held;
+        }
+      };
+      const item = new FakeDownload();
+      item.savePath = file;
+      const tracked = trackQuarantine(item as unknown as DownloadItem, quarantine);
+      void tracked.update();
+      await firstCalled;
+      // While the first mark is still being written, the download completes onto the path.
+      await writeFile(join(dir, "tool (1).sh"), "#!/bin/sh\n");
+      await rename(join(dir, "tool (1).sh"), file);
+      const completed = tracked.completed();
+      release();
+      await completed;
+      expect(calls).toEqual([file, file]);
+    }));
+
   test("never marks a link, or what it points to", () =>
     withDir(async (dir) => {
       const { calls, quarantine } = fakeQuarantine();
