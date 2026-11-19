@@ -711,13 +711,13 @@ export interface SettingsState {
    * be muted, so every mute shows in Settings > Browser and goes when the site is forgotten.
    */
   setNotificationMute: (origin: string, mute: NotificationMute | null) => void;
-  /** Set how much background browser pages may cost before they are frozen or unloaded. */
   /** Allow or block a site's use of `devices`, or forget it (`null`) so the site asks again. */
   setMediaSite: (
     origin: string,
     devices: readonly MediaDevice[],
     decision: MediaDecision | null,
   ) => void;
+  /** Set how much background browser pages may cost before they are frozen or unloaded. */
   setBackgroundTabs: (mode: BackgroundTabsMode) => void;
 
   // Wt config actions

@@ -125,9 +125,18 @@ function fakeGuest(host: WebContents, origin = "https://meet.example") {
 }
 
 /** The page calls `getUserMedia()`; resolves with whether main granted it. */
-function getUserMedia(guest: WebContents, mediaTypes: ("video" | "audio")[]) {
+function getUserMedia(
+  guest: WebContents,
+  mediaTypes: ("video" | "audio")[],
+  securityOrigin = `${guest.mainFrame.origin}/`,
+) {
   return new Promise<boolean>((resolve) => {
-    const details = { mediaTypes, isMainFrame: true } as unknown as MediaAccessPermissionRequest;
+    const details = {
+      mediaTypes,
+      isMainFrame: true,
+      securityOrigin,
+      requestingUrl: securityOrigin,
+    } as unknown as MediaAccessPermissionRequest;
     requestMediaPermission(guest, details, resolve);
   });
 }
@@ -220,7 +229,7 @@ describe("requests", () => {
       id: request!.id,
       webContentsId: guest.id,
       origin: "https://meet.example",
-      devices: ["microphone", "camera"],
+      devices: ["camera", "microphone"],
     });
     window.respond(request!.id, "allow");
     expect(await granted).toBe(true);
@@ -271,9 +280,64 @@ describe("requests", () => {
     const camera = getUserMedia(guest, ["video"]);
     await nextRequest(window.requests, 2);
     const [first, second] = window.requests();
-    expect(second).toEqual({ ...first!, devices: ["microphone", "camera"] });
+    // Asked again under a new id: an answer to the first prompt covers only what it showed.
+    expect(second).toEqual({ ...first!, id: second!.id, devices: ["camera", "microphone"] });
+    expect(second!.id).not.toBe(first!.id);
+    expect(window.withdrawn()).toEqual([{ id: first!.id, webContentsId: guest.id }]);
     window.respond(first!.id, "allow");
+    await Promise.resolve();
+    expect(pageStates(guest)).toEqual({ camera: "prompt", microphone: "prompt" });
+    window.respond(second!.id, "allow");
     expect([await microphone, await camera]).toEqual([true, true]);
+  });
+
+  test("a prompt asks only about undecided devices, and its answer keeps the others", async () => {
+    setSites({ "https://meet.example": { camera: "allow" } });
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    const granted = getUserMedia(guest, ["audio", "video"]);
+    await nextRequest(window.requests, 1);
+    expect(window.requests()[0]!.devices).toEqual(["microphone"]);
+    window.respond(window.requests()[0]!.id, "block");
+    expect(await granted).toBe(false);
+    expect(pageStates(guest)).toEqual({ camera: "granted", microphone: "denied" });
+  });
+
+  test("Block on one device answers only the requests that wait on it", async () => {
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    const camera = getUserMedia(guest, ["video"]);
+    await nextRequest(window.requests, 1);
+    const microphone = getUserMedia(guest, ["audio"]);
+    await nextRequest(window.requests, 2);
+    setSites({ "https://meet.example": { camera: "block" } });
+    expect(await camera).toBe(false);
+    // The microphone still waits, now on a prompt for it alone.
+    await nextRequest(window.requests, 3);
+    const last = window.requests().at(-1)!;
+    expect(last.devices).toEqual(["microphone"]);
+    window.respond(last.id, "allow");
+    expect(await microphone).toBe(true);
+  });
+
+  test("a request from the page's previous document is refused", async () => {
+    setSites({ "https://meet.example": { camera: "allow" } });
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    expect(await getUserMedia(guest, ["video"], "https://old.example/")).toBe(false);
+    expect(window.requests()).toEqual([]);
+  });
+
+  test("a prompt for another site is withdrawn once the panel's next page commits", async () => {
+    const window = fakeHost();
+    const { guest, mainFrame, emit } = fakeGuest(window.host);
+    const granted = getUserMedia(guest, ["video"]);
+    await nextRequest(window.requests, 1);
+    // Committed without a start event main saw, as when the request raced the navigation.
+    mainFrame.origin = "https://other.example";
+    emit("did-navigate");
+    expect(await granted).toBe(false);
+    expect(window.withdrawn()).toHaveLength(1);
   });
 
   test("Allow this time lasts while the panel stays on the site", async () => {
@@ -359,7 +423,9 @@ describe("macOS access", () => {
     const window = fakeHost();
     const { guest } = fakeGuest(window.host);
     expect(await getUserMedia(guest, ["audio", "video"])).toBe(false);
-    expect(window.systemBlocked()).toEqual([{ webContentsId: guest.id, devices: ["microphone"] }]);
+    expect(window.systemBlocked()).toEqual([
+      { webContentsId: guest.id, origin: "https://meet.example", devices: ["microphone"] },
+    ]);
     expect(askForMediaAccess).not.toHaveBeenCalled();
   });
 
@@ -399,6 +465,12 @@ describe("checks and page state", () => {
     expect(pageStates(guest)).toEqual({ camera: "prompt", microphone: "prompt" });
     expect(pageStates(guest, "https://embed.example")).toBeNull();
     expect(pageStates(fakeGuest(fakeHost().host, "http://meet.example").guest)).toBeNull();
+  });
+
+  test("with no window to ask in, undecided devices read denied", () => {
+    setSites({ "https://meet.example": { camera: "allow" } });
+    const { guest } = fakeGuest(fakeHost({ listening: false }).host);
+    expect(pageStates(guest)).toEqual({ camera: "granted", microphone: "denied" });
   });
 
   test("decisions come only from Loxel's windows", () => {

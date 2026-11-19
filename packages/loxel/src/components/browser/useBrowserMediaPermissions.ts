@@ -116,9 +116,13 @@ function subscribe(webContentsId: number, listener: PanelListener): () => void {
  * The camera and microphone requests of the webview with this guest webContents id (null until it
  * is ready). `request` is the oldest open one, for the panel's prompt, and `answer` replies to it:
  * Allow and Block are saved for the site. `systemBlocked` is set when an allowed site was refused
- * because macOS has Loxel's access off, until `dismissSystemBlocked`.
+ * because macOS has Loxel's access off, until `dismissSystemBlocked` or the panel's page (`pageUrl`)
+ * leaves that site.
  */
-export function useBrowserMediaPermissions(webContentsId: number | null): {
+export function useBrowserMediaPermissions(
+  webContentsId: number | null,
+  pageUrl: string,
+): {
   request: MediaPermissionRequest | null;
   answer: (answer: MediaPermissionAnswer) => void;
   systemBlocked: MediaSystemBlocked | null;
@@ -161,11 +165,11 @@ export function useBrowserMediaPermissions(webContentsId: number | null): {
     [request],
   );
   const dismissSystemBlocked = useCallback(() => setSystemBlocked(null), []);
+  const pageOrigin = URL.canParse(pageUrl) ? new URL(pageUrl).origin : null;
+  const shown =
+    systemBlocked?.webContentsId === webContentsId && systemBlocked.origin === pageOrigin
+      ? systemBlocked
+      : null;
 
-  return {
-    request,
-    answer,
-    systemBlocked: systemBlocked?.webContentsId === webContentsId ? systemBlocked : null,
-    dismissSystemBlocked,
-  };
+  return { request, answer, systemBlocked: shown, dismissSystemBlocked };
 }

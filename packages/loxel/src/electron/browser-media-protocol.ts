@@ -92,6 +92,8 @@ export const mediaPermissionWithdrawnSchema = z.object({
  */
 export const mediaSystemBlockedSchema = z.object({
   webContentsId: z.number().int(),
+  /** The site that was refused, so the notice goes once the panel leaves it. */
+  origin: z.string(),
   devices: z.array(mediaDeviceSchema).min(1),
 });
 export type MediaSystemBlocked = z.infer<typeof mediaSystemBlockedSchema>;

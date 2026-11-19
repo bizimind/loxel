@@ -164,25 +164,69 @@ export function checkMediaPermission(
   return devices ? states.every((s) => s === "allow") : states.includes("allow");
 }
 
-function withdraw(id: number, pending: PendingRequest, allowed?: boolean): void {
+/** Take down a prompt, answering what waits on it with `allowed`. */
+function withdraw(id: number, pending: PendingRequest, allowed: boolean): void {
   pendingRequests.delete(id);
-  for (const waiter of pending.waiters) {
-    const states = statesFor(pending.guestId, pending.origin, waiter.devices);
-    waiter.resolve(allowed ?? requestState(states) === "allow");
-  }
+  for (const waiter of pending.waiters) waiter.resolve(allowed);
+  sendWithdrawn(id, pending);
+}
+
+function sendWithdrawn(id: number, pending: PendingRequest): void {
   if (pending.host.isDestroyed()) return;
   pending.host.send(BROWSER_MEDIA_PERMISSION_WITHDRAWN, { id, webContentsId: pending.guestId });
 }
 
-/** Answer the requests whose devices all have a decision now, and take down their prompts. */
+/** The devices of `waiters` the site has no decision for: what their prompt asks about. */
+function undecided(pending: Pick<PendingRequest, "guestId" | "origin" | "waiters">) {
+  const devices = new Set(pending.waiters.flatMap((waiter) => waiter.devices));
+  return MEDIA_DEVICES.filter(
+    (device) => devices.has(device) && stateFor(pending.guestId, pending.origin, device) === "ask",
+  );
+}
+
+/**
+ * Show `pending`'s prompt under a new id, replacing the one `id` showed. A prompt's devices never
+ * change under its id, so an answer only ever covers the devices the user saw.
+ */
+function reprompt(id: number | null, pending: PendingRequest): void {
+  if (id !== null) {
+    pendingRequests.delete(id);
+    sendWithdrawn(id, pending);
+  }
+  const newId = nextRequestId++;
+  pendingRequests.set(newId, pending);
+  sendRequest(newId, pending);
+}
+
+/**
+ * Answer what waits on prompts whose devices now have a decision: a request with every device
+ * allowed gets them, one with any blocked is refused. A prompt with requests still waiting asks
+ * again, for the devices left undecided.
+ */
 function settleDecidedRequests(): void {
-  for (const [id, pending] of pendingRequests) {
-    const states = statesFor(pending.guestId, pending.origin, pending.devices);
-    if (requestState(states) !== "ask") withdraw(id, pending);
+  for (const [id, pending] of [...pendingRequests]) {
+    const waiting = pending.waiters.filter((waiter) => {
+      const state = requestState(statesFor(pending.guestId, pending.origin, waiter.devices));
+      if (state !== "ask") waiter.resolve(state === "allow");
+      return state === "ask";
+    });
+    if (waiting.length === 0) {
+      pendingRequests.delete(id);
+      sendWithdrawn(id, pending);
+      continue;
+    }
+    pending.waiters = waiting;
+    const devices = undecided(pending);
+    if (devices.join() === pending.devices.join()) continue;
+    pending.devices = devices;
+    reprompt(id, pending);
   }
 }
 
-/** Ask the user in `host` whether `site` may use `devices`; resolves with the answer. */
+/**
+ * Ask the user in `host` whether `site` may use the undecided ones of `devices`; resolves with
+ * whether the request may use all of them.
+ */
 function ask(
   guestId: number,
   host: WebContents,
@@ -191,27 +235,20 @@ function ask(
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const waiter = { devices, resolve };
-    // A page asking again while its prompt is up (Meet asks for each device on its own) adds
-    // to the same prompt, which then asks for every device it waits on.
+    // A page asking again while its prompt is up (Meet asks for each device on its own) joins
+    // the same prompt, which asks again under a new id if that adds a device.
     for (const [id, pending] of pendingRequests) {
       if (pending.guestId !== guestId || pending.origin !== site) continue;
       pending.waiters.push(waiter);
-      const added = devices.filter((device) => !pending.devices.includes(device));
-      if (added.length === 0) return;
-      pending.devices = [...pending.devices, ...added];
-      sendRequest(id, pending);
+      const asked = undecided(pending);
+      if (asked.join() === pending.devices.join()) return;
+      pending.devices = asked;
+      reprompt(id, pending);
       return;
     }
-    const id = nextRequestId++;
-    const pending: PendingRequest = {
-      guestId,
-      host,
-      origin: site,
-      devices: [...devices],
-      waiters: [waiter],
-    };
-    pendingRequests.set(id, pending);
-    sendRequest(id, pending);
+    const pending: PendingRequest = { guestId, host, origin: site, devices: [], waiters: [waiter] };
+    pending.devices = undecided(pending);
+    reprompt(null, pending);
   });
 }
 
@@ -250,6 +287,7 @@ async function systemAllows(device: MediaDevice): Promise<boolean> {
 async function systemAllowsAll(
   guest: WebContents,
   host: WebContents,
+  site: string,
   devices: readonly MediaDevice[],
 ): Promise<boolean> {
   const blocked: MediaDevice[] = [];
@@ -258,7 +296,7 @@ async function systemAllowsAll(
   }
   if (blocked.length === 0) return true;
   if (!host.isDestroyed() && !guest.isDestroyed()) {
-    const notice: MediaSystemBlocked = { webContentsId: guest.id, devices: blocked };
+    const notice: MediaSystemBlocked = { webContentsId: guest.id, origin: site, devices: blocked };
     host.send(BROWSER_MEDIA_SYSTEM_BLOCKED, notice);
   }
   return false;
@@ -272,6 +310,10 @@ async function decideRequest(
   // Who asked is settled now: after a wait, the guest could be on its next page.
   const site = siteOfGuest(guest);
   if (!site || devices.length === 0) return false;
+  // A main frame's request reaches main after a thread hop, so the page may have committed its
+  // next document meanwhile; that document's site must not decide for the one that asked.
+  const asker = normalizeOrigin(details.securityOrigin ?? details.requestingUrl);
+  if (details.isMainFrame && asker !== site) return false;
   await sitesLoadedPromise;
   if (siteOfGuest(guest) !== site) return false;
   const host = listeningHost(guest);
@@ -280,7 +322,9 @@ async function decideRequest(
   if (state === "block") return false;
   if (state === "ask" && !(await ask(guest.id, host, site, devices))) return false;
   if (siteOfGuest(guest) !== site) return false;
-  return systemAllowsAll(guest, host, devices);
+  if (!(await systemAllowsAll(guest, host, site, devices))) return false;
+  // macOS's prompt waits on the user too.
+  return siteOfGuest(guest) === site;
 }
 
 /** The `media` permission request: a page called `getUserMedia()` for the camera or microphone. */
@@ -339,9 +383,11 @@ function pageStates(event: IpcMainEvent): MediaPermissionStates | null {
   if (!site || !frame || frame.detached || frame.origin !== site) return null;
   const states: MediaPermissionStates = { camera: "prompt", microphone: "prompt" };
   if (!sitesLoaded) return states;
+  // With no window to ask in, a request for an undecided device is refused without asking.
+  const undecidedState = listeningHost(guest) ? "prompt" : "denied";
   for (const device of MEDIA_DEVICES) {
     const state = stateFor(guest.id, site, device);
-    states[device] = state === "allow" ? "granted" : state === "block" ? "denied" : "prompt";
+    states[device] = state === "allow" ? "granted" : state === "block" ? "denied" : undecidedState;
   }
   return states;
 }
@@ -377,7 +423,7 @@ export function installBrowserMedia(): void {
 
 /** Withdraw the guest's open prompts, refusing what waits on them: its page is going away. */
 function withdrawRequests(guestId: number): void {
-  for (const [id, pending] of pendingRequests) {
+  for (const [id, pending] of [...pendingRequests]) {
     if (pending.guestId === guestId) withdraw(id, pending, false);
   }
 }
@@ -391,8 +437,13 @@ export function trackWebviewMedia(contents: WebContents): void {
     if (isMainFrame && !isSameDocument) withdrawRequests(guestId);
   });
   // "Allow this time" stays with the site: reloads and its other pages keep it, leaving drops it.
+  // A request that arrived while the page was being left is withdrawn once the next one commits.
   contents.on("did-navigate", () => {
-    if (onceGrants.get(guestId)?.origin !== contents.mainFrame.origin) onceGrants.delete(guestId);
+    const origin = contents.mainFrame.origin;
+    if (onceGrants.get(guestId)?.origin !== origin) onceGrants.delete(guestId);
+    for (const [id, pending] of [...pendingRequests]) {
+      if (pending.guestId === guestId && pending.origin !== origin) withdraw(id, pending, false);
+    }
   });
   contents.on("render-process-gone", () => withdrawRequests(guestId));
   contents.once("destroyed", () => {

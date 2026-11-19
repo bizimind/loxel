@@ -179,7 +179,7 @@ export function BrowserPanel({
     answer: answerMediaRequest,
     systemBlocked: mediaSystemBlocked,
     dismissSystemBlocked: dismissMediaSystemBlocked,
-  } = useBrowserMediaPermissions(webContentsId);
+  } = useBrowserMediaPermissions(webContentsId, pageUrl);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
