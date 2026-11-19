@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -154,8 +154,10 @@ describe("trackQuarantine", () => {
       await tracked.update();
       await tracked.update();
       expect(calls).toEqual([file]);
-      await rm(file);
-      await writeFile(file, "#!/bin/sh\n");
+      // Chromium moves a new file onto the path, made while the old one still exists (so with
+      // another inode; one freed first can be reused at once).
+      await writeFile(join(dir, "tool (1).sh"), "#!/bin/sh\n");
+      await rename(join(dir, "tool (1).sh"), file);
       await tracked.completed();
       expect(calls).toEqual([file, file]);
     }));
