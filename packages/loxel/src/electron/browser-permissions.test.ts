@@ -38,7 +38,6 @@ const MAIN_FRAME: Record<BrowserPermission, boolean> = {
   "clipboard-sanitized-write": true,
   fileSystem: true,
   fullscreen: true,
-  keyboardLock: true,
   openExternal: true,
   pointerLock: true,
   "screen-wake-lock": true,
@@ -56,6 +55,7 @@ const MAIN_FRAME: Record<BrowserPermission, boolean> = {
   "hand-tracking": false,
   hid: false,
   "idle-detection": false,
+  keyboardLock: false,
   "local-fonts": false,
   "local-network": false,
   "local-network-access": false,
@@ -90,7 +90,7 @@ const PERMISSIONS = Object.keys(MAIN_FRAME) as BrowserPermission[];
 const decisions = (isMainFrame: boolean) =>
   PERMISSIONS.map((permission) => [
     permission,
-    browserPermissionGranted(permission, { isMainFrame }),
+    browserPermissionGranted(permission, { isMainFrame, inBrowserPanel: true }),
   ]);
 
 describe("browserPermissionGranted", () => {
@@ -104,9 +104,18 @@ describe("browserPermissionGranted", () => {
     );
   });
 
+  test("popup windows get neither fullscreen nor pointer lock, having no panel to name the site", () => {
+    const popup = { isMainFrame: true, inBrowserPanel: false };
+    expect(browserPermissionGranted("fullscreen", popup)).toBe(false);
+    expect(browserPermissionGranted("pointerLock", popup)).toBe(false);
+    expect(browserPermissionGranted("clipboard-sanitized-write", popup)).toBe(true);
+  });
+
   test("refuses a permission name a newer Electron adds", () => {
     const added = "some-new-permission" as BrowserPermission;
-    expect(browserPermissionGranted(added, { isMainFrame: true })).toBe(false);
+    expect(browserPermissionGranted(added, { isMainFrame: true, inBrowserPanel: true })).toBe(
+      false,
+    );
   });
 });
 
@@ -114,12 +123,16 @@ describe("installBrowserPermissions", () => {
   const { check, request } = installedHandlers();
 
   test("checks report the policy", () => {
-    expect(check(null, "notifications", "https://example.com/", { isMainFrame: true })).toBe(false);
-    expect(check(null, "fullscreen", "https://example.com/", { isMainFrame: false })).toBe(true);
+    const panel = { getType: () => "webview" } as Parameters<typeof check>[0];
+    expect(check(panel, "notifications", "https://example.com/", { isMainFrame: true })).toBe(
+      false,
+    );
+    expect(check(panel, "fullscreen", "https://example.com/", { isMainFrame: false })).toBe(true);
+    expect(check(null, "fullscreen", "https://example.com/", { isMainFrame: false })).toBe(false);
   });
 
   test("requests are answered with the policy, for the frame that asked", () => {
-    const webContents = {} as Parameters<typeof request>[0];
+    const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
     const page = { isMainFrame: true, requestingUrl: "https://example.com/" };
     const ad = { isMainFrame: false, requestingUrl: "https://ads.example/" };
     const callback = mock((_granted: boolean) => {});
@@ -128,5 +141,31 @@ describe("installBrowserPermissions", () => {
     request(webContents, "openExternal", callback, page);
     request(webContents, "openExternal", callback, ad);
     expect(callback.mock.calls).toEqual([[false], [true], [true], [false]]);
+  });
+
+  test("grants are reported, with the frame that asked, before they take effect", () => {
+    const events: string[] = [];
+    let request: RequestHandler = null;
+    installBrowserPermissions(
+      {
+        setPermissionCheckHandler: () => {},
+        setPermissionRequestHandler: (handler) => {
+          request = handler;
+        },
+      },
+      (_webContents, permission, requestingUrl) => events.push(`${permission} ${requestingUrl}`),
+    );
+    if (!request) throw new Error("installBrowserPermissions set no request handler");
+    const handler: NonNullable<RequestHandler> = request;
+    const webContents = { getType: () => "webview" } as Parameters<typeof handler>[0];
+    const frame = { isMainFrame: false, requestingUrl: "https://video.example/embed" };
+    const callback = (granted: boolean) => events.push(`answered ${granted}`);
+    handler(webContents, "fullscreen", callback, frame);
+    handler(webContents, "geolocation", callback, frame);
+    expect(events).toEqual([
+      "fullscreen https://video.example/embed",
+      "answered true",
+      "answered false",
+    ]);
   });
 });
