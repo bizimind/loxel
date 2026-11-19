@@ -22,6 +22,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     onJavaScriptDialog: () => () => {},
     respondToJavaScriptDialog: () => {},
     onPasskeyQrCode: () => () => {},
+    onExclusiveAccessNotice: () => () => {},
     getUpdateStatus: async () => ({ state: "idle" }),
     checkForUpdates: async () => {},
     downloadUpdate: async () => {},

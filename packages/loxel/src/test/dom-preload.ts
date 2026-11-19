@@ -4,6 +4,19 @@ GlobalRegistrator.register();
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 
+// happy-dom has no popover API. Showing one only marks it `data-popover-open`, for tests to read,
+// since happy-dom has no top layer either.
+if (!("showPopover" in HTMLElement.prototype)) {
+  Object.assign(HTMLElement.prototype, {
+    showPopover(this: HTMLElement) {
+      this.setAttribute("data-popover-open", "");
+    },
+    hidePopover(this: HTMLElement) {
+      this.removeAttribute("data-popover-open");
+    },
+  });
+}
+
 // happy-dom's Response, which replaces Bun's, has no `bytes()`; Chromium and Bun do, and shiki's
 // inlined Oniguruma WASM is decoded through it.
 if (!("bytes" in Response.prototype)) {

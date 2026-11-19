@@ -74,6 +74,10 @@ export const UPDATE_STATUS_CHANGED = "update:status-changed";
 export const PASSKEY_QR_SHOW = "passkey:qr-show";
 /** Main → renderer: the passkey request of a webview (by webContents ID) ended; hide its QR code. */
 export const PASSKEY_QR_HIDE = "passkey:qr-hide";
+/** Main → renderer: a panel's page went fullscreen or locked the pointer (`ExclusiveAccessNotice`). */
+export const EXCLUSIVE_ACCESS_SHOW = "exclusive-access:show";
+/** Main → renderer: the page of a webview (by webContents ID) left fullscreen; hide its notice. */
+export const EXCLUSIVE_ACCESS_HIDE = "exclusive-access:hide";
 /** Renderer → main (invoke): whether Loxel is the default web browser (`DefaultBrowserStatus`). */
 export const DEFAULT_BROWSER_GET = "default-browser:get";
 /** Renderer → main (invoke): ask macOS to make Loxel the default web browser. */
