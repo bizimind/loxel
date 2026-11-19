@@ -38,6 +38,7 @@ import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
+import { useShownWorktree } from "./queries/use-scope";
 import { useUpdateStatusBridge } from "./queries/use-update-status";
 import { useWsBridge } from "./queries/ws-bridge";
 import { layoutKeyOf } from "./store/active-worktree";
@@ -58,6 +59,7 @@ export default function App() {
   useFontSettingsSync();
 
   const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  const shownWorktree = useShownWorktree();
   const activeLeftPanel = useWorktreeToolsBar((s) => s.activeLeftPanel);
   const activeBottomPanel = useWorktreeToolsBar((s) => s.activeBottomPanel);
   const activeRightPanel = useWorktreeToolsBar((s) => s.activeRightPanel);
@@ -78,13 +80,16 @@ export default function App() {
   }, []);
 
   // WS subscription lifecycle
-  useWsSubscription(activeWorktree?.path ?? null);
+  useWsSubscription(activeWorktree);
   useWindowPresence();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <TopBar />
-      {activeWorktree !== null ? (
+      {shownWorktree === undefined ? (
+        // Waiting for the project list before showing a restored worktree.
+        <div className="flex-1" />
+      ) : shownWorktree !== null ? (
         <>
           <div className="flex flex-1 overflow-hidden">
             <Sidebar />
@@ -93,7 +98,7 @@ export default function App() {
               <PersistedLayoutComponent
                 className="dockview-theme-abyss h-full"
                 storagePrefix="outer"
-                layoutKey={layoutKeyOf(activeWorktree)}
+                layoutKey={layoutKeyOf(shownWorktree)}
                 layoutVersion={LAYOUT_VERSION}
                 createDefaultLayout={createDefaultLayout}
                 onApiReady={setupOuterDockview}

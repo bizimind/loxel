@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { EnrichedProject } from "@/api/project-model";
+import { toServerId } from "@/api/worktree-ref";
 
 import {
   SIDEBAR_DEFAULT_WIDTH,
@@ -8,6 +9,7 @@ import {
   SIDEBAR_MIN_WIDTH,
   clampSidebarWidth,
   deriveProject,
+  withServerProjects,
 } from "./projects";
 
 function project(path: string, worktreePaths: string[]): EnrichedProject {
@@ -56,5 +58,28 @@ describe("clampSidebarWidth", () => {
   test("falls back to the default for non-finite values", () => {
     expect(clampSidebarWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(clampSidebarWidth(Number.POSITIVE_INFINITY)).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+});
+
+describe("withServerProjects", () => {
+  const [a, b] = [toServerId("server-a"), toServerId("server-b")];
+  const on = (server: typeof a, path: string) => ({ ...project(path, []), server });
+  const names = (list: ReturnType<typeof withServerProjects>) =>
+    list.map((p) => `${p.server}:${p.path}`);
+
+  test("replaces only that server's projects, in their place, keeping the other's", () => {
+    const projects = [on(a, "/x"), on(b, "/repo"), on(b, "/y"), on(a, "/z")];
+
+    // The same path on the other server is not touched.
+    const next = withServerProjects(projects, b, [on(b, "/new")]);
+
+    expect(names(next)).toEqual(["server-a:/x", "server-b:/new", "server-a:/z"]);
+  });
+
+  test("adds a server listed for the first time after the others", () => {
+    expect(names(withServerProjects([on(a, "/repo")], b, [on(b, "/repo")]))).toEqual([
+      "server-a:/repo",
+      "server-b:/repo",
+    ]);
   });
 });

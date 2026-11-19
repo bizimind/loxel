@@ -1,7 +1,6 @@
 import { LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 
-import * as api from "@/api/client";
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { FileTypeIcon } from "@/lib/file-icons";
@@ -9,7 +8,8 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { type FuzzyResult, fuzzyMatchPath } from "@/lib/fuzzy-match";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile, parseQueryLocation } from "@/lib/open-file";
-import { useFileSearchStore } from "@/store/file-search";
+import { useFileIndexQuery } from "@/queries/use-file-index";
+import { getRecentFiles, useFileSearchStore, useRecentFiles } from "@/store/file-search";
 import { useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("search");
@@ -26,55 +26,26 @@ interface FileMatch {
 export function FileSearchModal() {
   const isOpen = useFileSearchStore((s) => s.isOpen);
   const query = useFileSearchStore((s) => s.query);
-  const loading = useFileSearchStore((s) => s.loading);
-  const error = useFileSearchStore((s) => s.error);
-  const indexByWorktree = useFileSearchStore((s) => s.indexByWorktree);
-  const mruByWorktree = useFileSearchStore((s) => s.mruByWorktree);
 
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktree?.path ?? null);
-  const entry = activeWorktreePath ? indexByWorktree.get(activeWorktreePath) : undefined;
-  const files = entry?.files;
-  const truncated = entry?.truncated ?? false;
-  const mru = activeWorktreePath ? mruByWorktree.get(activeWorktreePath) : undefined;
+  const activeWorktree = useWorktreeStore((s) => s.activeWorktree);
+  const activeWorktreePath = activeWorktree?.path ?? null;
+  // Read again on every open, the cached index showing meanwhile; nothing is asked while closed.
+  const index = useFileIndexQuery(isOpen ? activeWorktree : null, { fresh: true });
+  const files = index.data?.files;
+  const truncated = index.data?.truncated ?? false;
+  const loading = index.isPending && index.fetchStatus === "fetching";
+  const error = index.isError && index.data === undefined;
+  const mru = useRecentFiles((s) => s.recent);
+
+  useEffect(() => {
+    if (index.isError) log.warn("Failed to fetch file index", { error: index.error });
+  }, [index.isError, index.error]);
 
   // Parse go-to-line suffix from query
   const { search: searchQuery, location: queryLocation } = useMemo(
     () => parseQueryLocation(query.trim()),
     [query],
   );
-
-  // Fetch file index on open — always re-fetch in background, show cached data immediately
-  useEffect(() => {
-    if (!isOpen || !activeWorktreePath) return;
-
-    const store = useFileSearchStore.getState();
-    if (!store.indexByWorktree.has(activeWorktreePath)) {
-      store.setLoading(true);
-    }
-
-    let cancelled = false;
-    api
-      .getFileIndex(activeWorktreePath)
-      .then((res) => {
-        if (!cancelled) {
-          useFileSearchStore.getState().setFiles(activeWorktreePath, res.files, res.truncated);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          log.warn("Failed to fetch file index", { error: err });
-          const s = useFileSearchStore.getState();
-          s.setLoading(false);
-          if (!s.indexByWorktree.has(activeWorktreePath)) {
-            s.setError(true);
-          }
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, activeWorktreePath]);
 
   // Fuzzy filter results
   const filtered = useMemo((): FileMatch[] => {
@@ -115,14 +86,14 @@ export function FileSearchModal() {
 
   const openFile = useCallback(
     ({ path }: FileMatch) => {
-      if (!activeWorktreePath) return;
-      useFileSearchStore.getState().recordOpen(activeWorktreePath, path);
+      if (!activeWorktree || !activeWorktreePath) return;
+      getRecentFiles(activeWorktree).getState().recordOpen(path);
       const absPath = activeWorktreePath + "/" + path;
       dispatchOpenFile(absPath, queryLocation);
       dispatchLoxelEvent("loxel-reveal-in-explorer", { filePath: absPath });
       close();
     },
-    [activeWorktreePath, queryLocation, close],
+    [activeWorktree, activeWorktreePath, queryLocation, close],
   );
 
   return (

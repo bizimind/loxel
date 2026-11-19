@@ -28,13 +28,6 @@ export function layoutKeyOf(worktree: WorktreeRef | null): LayoutKey {
   return worktree === null ? HOME_LAYOUT_KEY : formatWorktreeRef(worktree);
 }
 
-/** Read the active worktree path synchronously. Throws if none is set. */
-export function getActiveWt(): string {
-  const wt = useWorktreeStore.getState().activeWorktree?.path;
-  if (!wt) throw new Error("No active worktree");
-  return wt;
-}
-
 /** The key of the layout the window shows: the active worktree's, or Home's. */
 export function activeLayoutKey(): LayoutKey {
   return layoutKeyOf(useWorktreeStore.getState().activeWorktree);

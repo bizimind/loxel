@@ -6,6 +6,7 @@
 import type { DockviewPanelApi } from "dockview-react";
 
 import * as api from "@/api/client";
+import type { ServerId } from "@/api/worktree-ref";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { frontendLog } from "@/lib/frontend-logger";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -20,6 +21,7 @@ const uiLog = frontendLog.child("ui");
 export async function confirmRestartTerminal(
   panel: DockviewPanelApi,
   terminalId: string,
+  server: ServerId,
 ): Promise<void> {
   let program: string | null | undefined;
   try {
@@ -37,17 +39,21 @@ export async function confirmRestartTerminal(
     confirmLabel: "Restart",
     destructive: true,
   });
-  if (confirmed) restartTerminal(panel, terminalId);
+  if (confirmed) restartTerminal(panel, terminalId, server);
 }
 
 /**
  * The new shell gets a new terminal ID, so output of the old one still on its way never reaches
  * the new xterm. The panel's other parameters, and so its spawn target, stay as they are.
  */
-export function restartTerminal(panel: DockviewPanelApi, terminalId: string): void {
+export function restartTerminal(
+  panel: DockviewPanelApi,
+  terminalId: string,
+  server: ServerId,
+): void {
   const nextId = crypto.randomUUID();
   api.wsClient.send({ type: "terminal_destroy", id: terminalId });
-  usePanelNotificationStore.getState().unregisterPanel(terminalId);
+  usePanelNotificationStore.getState().unregisterPanel(server, terminalId);
   const toolsBar = getCurrentWorktreeToolsBar().getState();
   toolsBar.removeTerminal(panel.id);
   toolsBar.addTerminal({ id: panel.id, title: panel.title ?? "Terminal", terminalId: nextId });

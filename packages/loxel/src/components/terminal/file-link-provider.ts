@@ -10,6 +10,7 @@
  */
 import type { IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
+import type { ServerId } from "@/api/worktree-ref";
 import type { FileLocation } from "@/lib/open-file";
 import { openPath } from "@/lib/open-path";
 
@@ -128,6 +129,7 @@ function createLink(
   bufferLineNumber: number,
   text: string,
   getPaths: () => TerminalPaths | null,
+  getServer: () => ServerId,
   resolvedRelative?: string,
 ): ILink {
   return {
@@ -145,7 +147,7 @@ function createLink(
         ? resolvePath(resolvedRelative, paths.worktreePath ?? paths.cwd)
         : resolvePath(filePath, paths.cwd);
       // Folders open in the files panel; everything else in its editor.
-      void openPath(resolved, location);
+      void openPath(getServer(), resolved, location);
     },
   };
 }
@@ -160,6 +162,8 @@ export function createFilePathLinkProvider(
   terminal: Terminal,
   getPaths: () => TerminalPaths | null,
   getFileIndex: () => FileIndex | null,
+  /** The server holding the terminal's files, which its links name. */
+  getServer: () => ServerId,
 ): ILinkProvider {
   return {
     provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -195,7 +199,7 @@ export function createFilePathLinkProvider(
         for (let i = match.index!; i < match.index! + matchText.length; i++) matched.add(i);
         const startCol = strippedToRawIndex(rawText, match.index!) + 1;
         const endCol = strippedToRawIndex(rawText, match.index! + matchText.length - 1) + 1;
-        links.push(createLink(startCol, endCol, bufferLineNumber, matchText, getPaths));
+        links.push(createLink(startCol, endCol, bufferLineNumber, matchText, getPaths, getServer));
       }
 
       // Pass 2: bare filenames (only if file index is available)
@@ -213,7 +217,15 @@ export function createFilePathLinkProvider(
           const startCol = strippedToRawIndex(rawText, match.index!) + 1;
           const endCol = strippedToRawIndex(rawText, match.index! + matchText.length - 1) + 1;
           links.push(
-            createLink(startCol, endCol, bufferLineNumber, matchText, getPaths, relativePath),
+            createLink(
+              startCol,
+              endCol,
+              bufferLineNumber,
+              matchText,
+              getPaths,
+              getServer,
+              relativePath,
+            ),
           );
         }
       }

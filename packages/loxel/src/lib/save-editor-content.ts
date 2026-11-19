@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { type WorktreeRef, type WorktreeRefKey, formatWorktreeRef } from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -25,35 +26,38 @@ import { diskBase, type EditorKey, useEditorStateStore } from "@/store/editor-st
 // A worktree stays subscribed while a save for it is in flight, or waits in the save outbox, so
 // the server still serves it when the save goes out: unsubscribing waits for them to drain.
 
-const heldSaves = new Map<string, number>();
-const drainCallbacks = new Map<string, () => void>();
+const heldSaves = new Map<WorktreeRefKey, number>();
+const drainCallbacks = new Map<WorktreeRefKey, () => void>();
 
-/** Register a callback to fire once no save holds `worktreePath` (at once if none does). */
-export function onWorktreeSavesDrained(worktreePath: string, callback: () => void): void {
-  const count = heldSaves.get(worktreePath) ?? 0;
+/** Register a callback to fire once no save holds `wt` (at once if none does). */
+export function onWorktreeSavesDrained(wt: WorktreeRef, callback: () => void): void {
+  const key = formatWorktreeRef(wt);
+  const count = heldSaves.get(key) ?? 0;
   if (count === 0) {
     callback();
   } else {
-    drainCallbacks.set(worktreePath, callback);
+    drainCallbacks.set(key, callback);
   }
 }
 
-/** A save for `worktreePath` is in flight or waiting: keep it subscribed until released. */
-export function holdWorktree(worktreePath: string): void {
-  heldSaves.set(worktreePath, (heldSaves.get(worktreePath) ?? 0) + 1);
+/** A save for `wt` is in flight or waiting: keep it subscribed until released. */
+export function holdWorktree(wt: WorktreeRef): void {
+  const key = formatWorktreeRef(wt);
+  heldSaves.set(key, (heldSaves.get(key) ?? 0) + 1);
 }
 
-export function releaseWorktree(worktreePath: string): void {
-  const count = (heldSaves.get(worktreePath) ?? 1) - 1;
+export function releaseWorktree(wt: WorktreeRef): void {
+  const key = formatWorktreeRef(wt);
+  const count = (heldSaves.get(key) ?? 1) - 1;
   if (count <= 0) {
-    heldSaves.delete(worktreePath);
-    const cb = drainCallbacks.get(worktreePath);
+    heldSaves.delete(key);
+    const cb = drainCallbacks.get(key);
     if (cb) {
-      drainCallbacks.delete(worktreePath);
+      drainCallbacks.delete(key);
       cb();
     }
   } else {
-    heldSaves.set(worktreePath, count);
+    heldSaves.set(key, count);
   }
 }
 
@@ -120,7 +124,7 @@ function stashContent(nonce: string, content: string, editorKey: EditorKey): voi
 export async function saveEditorContent(
   filePath: string,
   content: string,
-  worktreePath: string | null | undefined,
+  worktree: WorktreeRef | null | undefined,
   options: SaveOptions | undefined,
   editorKey: EditorKey,
 ): Promise<boolean> {
@@ -130,8 +134,9 @@ export async function saveEditorContent(
       editor,
       {
         editorKey,
+        server: editor.server,
         filePath,
-        worktreePath: worktreePath ?? null,
+        worktreePath: worktree?.path ?? null,
         base: diskBase(editor),
         content,
         options,
@@ -141,18 +146,18 @@ export async function saveEditorContent(
     ensureRetryScheduled();
     return false;
   }
-  return writeEditorContent(filePath, content, worktreePath, options, editorKey);
+  return writeEditorContent(filePath, content, worktree, options, editorKey);
 }
 
 /** `saveEditorContent` without waiting for the outbox: the disk is known to hold the base. */
 export async function writeEditorContent(
   filePath: string,
   content: string,
-  worktreePath: string | null | undefined,
+  worktree: WorktreeRef | null | undefined,
   options: SaveOptions | undefined,
   editorKey: EditorKey,
 ): Promise<boolean> {
-  const result = await postEditorContent(filePath, content, worktreePath, options, editorKey);
+  const result = await postEditorContent(filePath, content, worktree, options, editorKey);
   return result.ok;
 }
 
@@ -163,13 +168,13 @@ export async function writeEditorContent(
 export async function postEditorContent(
   filePath: string,
   content: string,
-  worktreePath: string | null | undefined,
+  worktree: WorktreeRef | null | undefined,
   options: SaveOptions | undefined,
   editorKey: EditorKey,
   expectedContent?: string,
 ): Promise<{ ok: true } | { ok: false; error: unknown }> {
   const nonce = crypto.randomUUID();
-  const wtKey = worktreePath ?? "";
+  const worktreePath = worktree?.path;
   const store = useEditorStateStore.getState();
   // A write with no editor behind it (a move carrying edits to a path with no tab yet) is not
   // kept: its caller keeps the edits if it fails.
@@ -179,6 +184,7 @@ export async function postEditorContent(
         editor,
         {
           editorKey,
+          server: editor.server,
           filePath,
           worktreePath: worktreePath ?? null,
           base: diskBase(editor),
@@ -189,7 +195,7 @@ export async function postEditorContent(
       )
     : null;
   store.markSaving(editorKey, nonce);
-  if (wtKey) holdWorktree(wtKey);
+  if (worktree) holdWorktree(worktree);
   try {
     // Stored before it is sent, so a reload or a crash while it is in flight keeps it.
     await outbox?.stored;
@@ -232,6 +238,6 @@ export async function postEditorContent(
     if (outbox) outboxSaveFailed(outbox.entry, err);
     return { ok: false, error: err };
   } finally {
-    if (wtKey) releaseWorktree(wtKey);
+    if (worktree) releaseWorktree(worktree);
   }
 }

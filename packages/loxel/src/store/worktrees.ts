@@ -3,7 +3,7 @@ import { createJSONStorage, persist, subscribeWithSelector } from "zustand/middl
 
 import type { AddWorktreePlan, CreateWorktreeOptions } from "@/api/client";
 import * as api from "@/api/client";
-import { wsClient } from "@/api/client";
+import { wsClientOf } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import { localServerId, whenLocalServerKnown } from "@/api/local-server";
 import type { EnrichedProject } from "@/api/project-model";
@@ -37,7 +37,6 @@ import { queryClient } from "@/query-client";
 
 import { layoutKeyOf } from "./active-worktree";
 import { closeLayoutBrowserPages } from "./browser-pages";
-import { useFileSearchStore } from "./file-search";
 import { type ListedProject, projectOf, projectRef, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
@@ -331,8 +330,13 @@ export interface WorktreeState {
   /** Projects whose Archive group is open in the sidebar; every Archive starts closed. */
   openArchives: WorktreeRefKey[];
 
-  /** Apply enriched project data (called by project store after fetchProjects). */
-  applyEnrichedProjects: (enriched: readonly ListedProject[]) => void;
+  /**
+   * Apply `server`'s project list (called by the project store after fetchProjects). Only that
+   * server's projects change: those it no longer lists are dropped with their persisted lists, and
+   * the active worktree moves only off a worktree of that server it no longer lists (or of a server
+   * the window has no connection to).
+   */
+  applyEnrichedProjects: (server: ServerId, enriched: readonly ListedProject[]) => void;
 
   /** Refresh worktrees for a single project (called by ws-bridge on worktrees_changed). */
   refreshProjectWorktrees: (project: WorktreeRef) => Promise<void>;
@@ -467,9 +471,14 @@ export const useWorktreeStore = create<WorktreeState>()(
         createWorktreeRequested: false,
         openArchives: [],
 
-        applyEnrichedProjects: (enriched) => {
+        applyEnrichedProjects: (server, enriched) => {
           set((s) => {
-            const byProject = { ...s.byProject };
+            const listedKeys = new Set(enriched.map((p) => formatWorktreeRef(projectRef(p))));
+            const byProject = Object.fromEntries(
+              projectEntries(s.byProject).filter(
+                ([key]) => parseWorktreeRef(key)?.server !== server || listedKeys.has(key),
+              ),
+            );
 
             for (const p of enriched) {
               const project = projectRef(p);
@@ -493,9 +502,11 @@ export const useWorktreeStore = create<WorktreeState>()(
             return { byProject };
           });
 
-          // Validate: if the hydrated active worktree no longer exists, fall back
+          // Validate: if the hydrated active worktree no longer exists, fall back. Another
+          // server's says nothing about this list, unless the window has no connection to it (a
+          // session restored after the server's id changed).
           const active = get().activeWorktree;
-          if (!active) return;
+          if (!active || (active.server !== server && api.hasConnection(active.server))) return;
           const listed = new Set(
             enriched.flatMap((p) => {
               const project = projectRef(p);
@@ -853,17 +864,15 @@ export function isListedWorktree(wt: WorktreeRef): boolean {
  * at the same path starts fresh. `discarded`: the user removed it in Loxel, giving up what it held.
  */
 function releaseWorktree(wt: WorktreeRef, discarded = false): void {
-  const { path } = wt;
   purgeWorktreeStores(wt);
   closeLayoutBrowserPages(layoutKeyOf(wt));
   purgeWorktreeCache(wt);
-  useFileSearchStore.getState().purgeWorktree(path);
   const homeServer = localServerId();
   queryClient.removeQueries({
     predicate: ({ queryKey }) => isKeyWithinWorktree(queryKey, wt, homeServer),
   });
-  wsClient.unsubscribeWorktree(path);
-  dispatchLoxelEvent("loxel-worktree-gone", { wtPath: path, discarded });
+  wsClientOf(wt.server).unsubscribeWorktree(wt);
+  dispatchLoxelEvent("loxel-worktree-gone", { wt, discarded });
 }
 
 /**

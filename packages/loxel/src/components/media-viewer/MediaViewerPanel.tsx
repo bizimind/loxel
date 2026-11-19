@@ -11,8 +11,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getPathInfo, wsClient } from "@/api/client";
+import { sameWorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
-import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { usePanelWorktree } from "@/components/dockview/panel-context";
 import {
   type ContentSize,
   type Dimensions,
@@ -85,7 +86,8 @@ const FRAME_STEP = 1 / 30; // ~1 frame at 30fps
 // ---------------------------------------------------------------------------
 
 export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) {
-  const worktreePath = usePanelWorktreePath();
+  const worktree = usePanelWorktree();
+  const worktreePath = worktree?.path ?? null;
   const mediaType = getMediaType(filePath);
   const isVideo = mediaType === "video";
   // SVGs are inlined into the frame and may carry their own scripts, so they stay in an opaque
@@ -202,8 +204,8 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   // read when it loads (again on each reload), decide: an unconditional reload would restart a
   // playing video.
   useEffect(() => {
-    if (!worktreePath) return;
-    const absolutePath = filePath.startsWith("/") ? filePath : `${worktreePath}/${filePath}`;
+    if (!worktree) return;
+    const absolutePath = filePath.startsWith("/") ? filePath : `${worktree.path}/${filePath}`;
     const readStamp = () =>
       getPathInfo(absolutePath).then(
         ({ size, mtimeMs }) => `${size}:${mtimeMs}`,
@@ -211,8 +213,8 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       );
     let disposed = false;
     const loaded = readStamp();
-    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-      if (wtPath !== worktreePath) return;
+    const unsubscribe = onLoxelEvent("loxel-worktree-files-resynced", ({ wt }) => {
+      if (!sameWorktreeRef(wt, worktree)) return;
       void Promise.all([loaded, readStamp()]).then(([before, now]) => {
         if (!disposed && now !== before) setVersion((v) => v + 1);
       });
@@ -221,7 +223,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
       disposed = true;
       unsubscribe();
     };
-  }, [filePath, worktreePath, version]);
+  }, [filePath, worktree, version]);
 
   // --- Keyboard ---
   const handleKeyDown = useCallback(

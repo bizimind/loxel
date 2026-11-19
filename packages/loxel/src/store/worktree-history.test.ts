@@ -84,7 +84,7 @@ describe("goBackWorktree / goForwardWorktree", () => {
     useProjectStore.setState({ projects: [project] });
     useWorktreeStore
       .getState()
-      .applyEnrichedProjects([
+      .applyEnrichedProjects(server, [
         { ...project, worktrees: [entry("/repo/.worktrees/a"), entry("/repo/.worktrees/b")] },
       ]);
     const root = worktreeRef(server, "/repo");
@@ -105,7 +105,7 @@ describe("goBackWorktree / goForwardWorktree", () => {
     // `b` goes away: going forward finds nothing left to go to.
     useWorktreeStore
       .getState()
-      .applyEnrichedProjects([{ ...project, worktrees: [entry("/repo/.worktrees/a")] }]);
+      .applyEnrichedProjects(server, [{ ...project, worktrees: [entry("/repo/.worktrees/a")] }]);
     goForwardWorktree();
     expect(useWorktreeStore.getState().activeWorktree).toEqual(a);
   });

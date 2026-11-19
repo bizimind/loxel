@@ -3,7 +3,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } 
 import { until } from "@/test/until";
 
 import { WsClient } from "./client";
-import { localServerId } from "./local-server";
+import { localRef, localServerId } from "./local-server";
+import { toServerId, worktreeRef } from "./worktree-ref";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 
 /** A WebSocket the test opens, feeds and closes by hand. */
@@ -105,7 +106,7 @@ function dropAndReopen(client: WsClient): FakeSocket {
 describe("WsClient", () => {
   test("sends nothing before the server's hello, then the worktrees and what was queued", () => {
     const client = new WsClient();
-    client.subscribeWorktree("/wt");
+    client.subscribeWorktree(localRef("/wt"));
     client.send({ type: "window_hello", windowId: "w1" });
     client.connect();
     const socket = lastSocket();
@@ -124,12 +125,12 @@ describe("WsClient", () => {
 
   test("after a reconnect, re-subscribes every worktree with the shown one last", () => {
     const { client } = connected();
-    client.subscribeWorktree("/a");
-    client.subscribeWorktree("/b");
+    client.subscribeWorktree(localRef("/a"));
+    client.subscribeWorktree(localRef("/b"));
     // Back to /a while /b still drains its saves: /a is shown again.
-    client.subscribeWorktree("/a");
-    client.subscribeWorktree("/c");
-    client.unsubscribeWorktree("/c");
+    client.subscribeWorktree(localRef("/a"));
+    client.subscribeWorktree(localRef("/c"));
+    client.unsubscribeWorktree(localRef("/c"));
 
     const socket = dropAndReopen(client);
     socket.receive(hello());
@@ -285,55 +286,66 @@ describe("WsClient.whenSubscribed", () => {
 
   test("waits for the server to confirm a new subscription", async () => {
     const { client, socket } = connected();
-    client.subscribeWorktree("/wt");
-    const waiting = client.whenSubscribed("/wt");
+    client.subscribeWorktree(localRef("/wt"));
+    const waiting = client.whenSubscribed(localRef("/wt"));
     expect(await settled(waiting)).toBe(false);
 
     socket.receive({ type: "worktree_files_resynced", wtPath: "/wt", projectPath: "/" });
 
     expect(await settled(waiting)).toBe(true);
-    expect(await settled(client.whenSubscribed("/wt"))).toBe(true);
+    expect(await settled(client.whenSubscribed(localRef("/wt")))).toBe(true);
   });
 
   test("waits again after a reconnect, which may be to a restarted server", async () => {
     const { client, socket } = connected();
-    client.subscribeWorktree("/wt");
+    client.subscribeWorktree(localRef("/wt"));
     socket.receive({ type: "worktree_files_resynced", wtPath: "/wt", projectPath: "/" });
 
     const reopened = dropAndReopen(client);
     reopened.receive(hello("boot-2"));
-    const waiting = client.whenSubscribed("/wt");
+    const waiting = client.whenSubscribed(localRef("/wt"));
     expect(await settled(waiting)).toBe(false);
 
     reopened.receive({ type: "worktree_files_resynced", wtPath: "/wt", projectPath: "/" });
     expect(await settled(waiting)).toBe(true);
   });
 
+  test("refuses a worktree of another server, even at a path it is subscribed to", async () => {
+    const { client, socket } = connected();
+    client.subscribeWorktree(localRef("/wt"));
+    const elsewhere = worktreeRef(toServerId("other-server"), "/wt");
+
+    expect(() => client.subscribeWorktree(elsewhere)).toThrow("Not a worktree");
+    expect(() => client.unsubscribeWorktree(elsewhere)).toThrow("Not a worktree");
+    expect(socket.sent).toEqual([{ type: "subscribe_worktree", worktreePath: "/wt" }]);
+    expect(await settled(client.whenSubscribed(localRef("/wt")))).toBe(false);
+  });
+
   test("does not wait for a worktree the window is not subscribed to", async () => {
     const { client } = connected();
-    expect(await settled(client.whenSubscribed("/other"))).toBe(true);
+    expect(await settled(client.whenSubscribed(localRef("/other")))).toBe(true);
   });
 
   test("stops waiting when the subscription ends", async () => {
     const { client } = connected();
-    client.subscribeWorktree("/left");
-    const left = client.whenSubscribed("/left");
+    client.subscribeWorktree(localRef("/left"));
+    const left = client.whenSubscribed(localRef("/left"));
 
-    client.unsubscribeWorktree("/left");
+    client.unsubscribeWorktree(localRef("/left"));
     expect(await settled(left)).toBe(true);
   });
 
   test("a refused subscription stops only its own worktree's wait", async () => {
     const { client, socket } = connected();
-    client.subscribeWorktree("/refused");
-    client.subscribeWorktree("/shown");
-    const refused = client.whenSubscribed("/refused");
-    const shown = client.whenSubscribed("/shown");
+    client.subscribeWorktree(localRef("/refused"));
+    client.subscribeWorktree(localRef("/shown"));
+    const refused = client.whenSubscribed(localRef("/refused"));
+    const shown = client.whenSubscribed(localRef("/shown"));
 
     socket.receive({ type: "error", message: "No project found", wtPath: "/refused" });
     expect(await settled(refused)).toBe(true);
     // Nothing will confirm it now: later reads go out at once, to fail as they did before.
-    expect(await settled(client.whenSubscribed("/refused"))).toBe(true);
+    expect(await settled(client.whenSubscribed(localRef("/refused")))).toBe(true);
     // The other subscription is still being answered, and an error naming no worktree is not one.
     socket.receive({ type: "error", message: "Something else" });
     expect(await settled(shown)).toBe(false);

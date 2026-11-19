@@ -24,6 +24,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { usePanelServer } from "@/components/dockview/panel-context";
 import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { codeBlockSourcePlugin, keepSourcesClosed } from "@/components/editor/code-block-source";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -283,6 +284,8 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
   const diffViewMode = useUIStore((s) => s.diffViewMode);
+  // Links name files of the server holding this one.
+  const server = usePanelServer();
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
 
@@ -846,14 +849,14 @@ export function MarkdownEditor({
       const dir = filePath.substring(0, filePath.lastIndexOf("/"));
       const resolved = new URL(href, `file://${dir}/`).pathname;
       // Folder links open in the files panel; file links in their editor.
-      void openPath(resolved);
+      void openPath(server, resolved);
     }
 
     container.addEventListener("click", handleClick, true);
     return () => container.removeEventListener("click", handleClick, true);
     // crepeKey re-attaches the listener after the container is remounted (accept disk version).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, crepeKey]);
+  }, [filePath, server, crepeKey]);
 
   // Toggle dark mode class
   useEffect(() => {

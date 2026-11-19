@@ -7,9 +7,9 @@ import type {
   DiffFileContext,
   PlacedThread,
 } from "@/api/review-model";
+import { sameWorktreeRef } from "@/api/worktree-ref";
 import { frontendLog } from "@/lib/frontend-logger";
-
-import { getActiveWt } from "./active-worktree";
+import { getQueryScope, requireActiveWorktree } from "@/queries/use-scope";
 
 interface PendingAnchor {
   side: "old" | "new";
@@ -67,13 +67,14 @@ export const useCommentStore = create<CommentState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const scopeWt = getActiveWt();
-      const placed = await api.postPlacedThreads(scopeWt, reviewIds, files);
+      const scopeWt = requireActiveWorktree();
+      const placed = await api.postPlacedThreads(scopeWt.path, reviewIds, files);
 
       // A newer fetch superseded this one, and owns the loading flag now.
       if (seq !== placedThreadsFetchSeq) return;
       // Guard against stale responses after worktree switch
-      if (getActiveWt() !== scopeWt) {
+      const activeWt = getQueryScope().activeWorktree;
+      if (!activeWt || !sameWorktreeRef(activeWt, scopeWt)) {
         set({ loading: false });
         return;
       }
@@ -106,7 +107,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   createThread: async (data) => {
-    const thread = await api.createCommentThread(getActiveWt(), data);
+    const thread = await api.createCommentThread(requireActiveWorktree().path, data);
     // Optimistically insert as a placed thread (client knows the position since it just created it)
     const placed: PlacedThread = {
       ...thread,
@@ -126,7 +127,7 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   addReply: async (threadId, body) => {
-    const comment = await api.addCommentReply(getActiveWt(), threadId, body);
+    const comment = await api.addCommentReply(requireActiveWorktree().path, threadId, body);
     set((s) => {
       const map = new Map(s.placedThreadsByFile);
       for (const [key, threads] of map) {
@@ -153,17 +154,21 @@ export const useCommentStore = create<CommentState>((set, get) => ({
   },
 
   resolveThread: async (threadId) => {
-    const updated = await api.updateCommentThread(getActiveWt(), threadId, "resolved");
+    const updated = await api.updateCommentThread(
+      requireActiveWorktree().path,
+      threadId,
+      "resolved",
+    );
     set((s) => updateThreadInState(s, updated));
   },
 
   reopenThread: async (threadId) => {
-    const updated = await api.updateCommentThread(getActiveWt(), threadId, "open");
+    const updated = await api.updateCommentThread(requireActiveWorktree().path, threadId, "open");
     set((s) => updateThreadInState(s, updated));
   },
 
   deleteThread: async (threadId) => {
-    await api.deleteCommentThread(getActiveWt(), threadId);
+    await api.deleteCommentThread(requireActiveWorktree().path, threadId);
     set((s) => {
       const map = new Map(s.placedThreadsByFile);
       for (const [key, threads] of map) {

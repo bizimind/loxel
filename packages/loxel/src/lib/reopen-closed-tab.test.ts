@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { DockviewApi, DockviewComponent } from "dockview-react";
 import type { AddPanelOptions } from "dockview-react";
 
-import { localRef } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
 
 // The editors' module-level caches pull in Milkdown and Excalidraw, which these tests don't need.
 mock.module("@/components/editor/MarkdownEditor", () => ({
@@ -330,8 +330,8 @@ describe("reopenClosedTab", () => {
     const a = addFile(api, "a.ts");
     addFile(api, "b.ts", { referencePanel: a.id, direction: "within" });
 
-    handleFileDeleted("/repo/a.ts");
-    await handleFileMoved("/repo/b.ts", "/repo/c.ts");
+    handleFileDeleted(localServerId(), "/repo/a.ts");
+    await handleFileMoved(localServerId(), "/repo/b.ts", "/repo/c.ts");
     expect(ids(api)).toEqual(["c.ts"]);
 
     reopenClosedTab();

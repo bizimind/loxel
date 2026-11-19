@@ -6,10 +6,11 @@ import type { DirEntry } from "@/api/project-files-model";
 import { showToast } from "@/components/ui/toast";
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { moveFile } from "@/lib/file-operations";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
+import { getWorktreeUI } from "@/store/worktree-ui";
 
 /**
  * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
@@ -53,16 +54,18 @@ export function useFileClipboard(
               path: clipboard.path,
               destPath: targetDir,
             });
-            window.dispatchEvent(
-              new CustomEvent("loxel-file-moved", { detail: { oldPath: clipboard.path, newPath } }),
-            );
+            dispatchLoxelEvent("loxel-file-moved", {
+              server: activeWorktree.server,
+              oldPath: clipboard.path,
+              newPath,
+            });
           } else {
             const { newPath } = await api.copyDetachedFileToProject({
               wt,
               path: clipboard.path,
               destPath: targetDir,
             });
-            getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
+            getWorktreeUI(activeWorktree).getState().setSelectedProjectFile(newPath);
           }
         } else if (clipboard.mode === "cut") {
           await moveFile({ wt: activeWorktree, srcPath: clipboard.path, destDir: targetDir });
@@ -71,7 +74,7 @@ export function useFileClipboard(
             srcPath: clipboard.path,
             destDir: targetDir,
           });
-          getCurrentWorktreeUI().getState().setSelectedProjectFile(newPath);
+          getWorktreeUI(activeWorktree).getState().setSelectedProjectFile(newPath);
         }
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Paste failed");

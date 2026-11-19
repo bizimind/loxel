@@ -14,7 +14,7 @@ import { usePanelNotificationDot } from "./use-panel-notification-dot";
 
 export function BrowserTab(props: IDockviewPanelHeaderProps<BrowserPanelParams>) {
   const title = usePanelTitle(props.api);
-  const showDot = usePanelNotificationDot(props.api, props.api.id);
+  const showDot = usePanelNotificationDot(props, props.api.id);
   const isLoading = useIsBrowserPageLoading(props.api.id);
 
   const contextMenuItems = (
