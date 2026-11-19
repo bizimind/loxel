@@ -12,9 +12,15 @@ export type ServerId = string & { readonly serverIdBrand: unique symbol };
  */
 const SERVER_ID_PATTERN = /^[a-z0-9._~-]+$/;
 
-/** Whether `id` is a usable server ID (see `SERVER_ID_PATTERN`). */
+/**
+ * Authorities model URIs use for something other than a server, which no server ID may take: the
+ * servers' own `loxel://head/` URIs, and compare panels' `loxel://compare/` ones.
+ */
+const RESERVED_AUTHORITIES: ReadonlySet<string> = new Set(["head", "compare"]);
+
+/** Whether `id` is a usable server ID (see `SERVER_ID_PATTERN` and `RESERVED_AUTHORITIES`). */
 export function isServerId(id: string): boolean {
-  return SERVER_ID_PATTERN.test(id);
+  return SERVER_ID_PATTERN.test(id) && !RESERVED_AUTHORITIES.has(id);
 }
 
 /**

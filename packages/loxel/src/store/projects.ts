@@ -183,6 +183,28 @@ interface ProjectState {
   markAutoExpanded: (projectIds: string[]) => void;
 }
 
+/**
+ * The ids in `ids` of no other server's listed project: the sidebar state is persisted on the
+ * window's server, which names only its own projects. Ids of no listed project (not loaded yet,
+ * or removed) are kept.
+ */
+export function windowServerProjectIds(
+  ids: readonly string[],
+  projects: readonly ListedProject[],
+): string[] {
+  const others = new Set(projects.filter((p) => p.server !== localServerId()).map((p) => p.id));
+  return others.size === 0 ? [...ids] : ids.filter((id) => !others.has(id));
+}
+
+/** The ids in `ids` of another server's listed project: `windowServerProjectIds` leaves them out. */
+export function otherServerProjectIds(
+  ids: readonly string[],
+  projects: readonly ListedProject[],
+): string[] {
+  const kept = new Set(windowServerProjectIds(ids, projects));
+  return ids.filter((id) => !kept.has(id));
+}
+
 export const useProjectStore = create<ProjectState>()(
   persist(
     (set, get) => ({
@@ -268,8 +290,11 @@ export const useProjectStore = create<ProjectState>()(
       partialize: (state) => ({
         sidebarExpanded: state.sidebarExpanded,
         sidebarWidth: state.sidebarWidth,
-        expandedProjectIds: state.expandedProjectIds,
-        autoExpandedProjectIds: state.autoExpandedProjectIds,
+        expandedProjectIds: windowServerProjectIds(state.expandedProjectIds, state.projects),
+        autoExpandedProjectIds: windowServerProjectIds(
+          state.autoExpandedProjectIds,
+          state.projects,
+        ),
       }),
     },
   ),

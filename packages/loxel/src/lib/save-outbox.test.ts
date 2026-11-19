@@ -132,6 +132,34 @@ async function reload(storage: OutboxStorage): Promise<void> {
   await initSaveOutbox({ storage });
 }
 
+/**
+ * Run `fn` while other windows hold the Web Locks `held`. Resolves to the locks this window asked
+ * for, in order, with their modes.
+ */
+async function withLocks(
+  held: string[],
+  fn: () => Promise<void>,
+): Promise<Array<{ name: string; mode: string }>> {
+  const requested: Array<{ name: string; mode: string }> = [];
+  const locks = {
+    query: async () => ({ held: held.map((name) => ({ name })), pending: [] }),
+    // The last argument is the callback, with or without options before it.
+    request: async (name: string, ...args: unknown[]) => {
+      const options = args.length > 1 ? (args[0] as { mode?: string }) : {};
+      requested.push({ name, mode: options.mode ?? "exclusive" });
+      const callback = args.at(-1);
+      return typeof callback === "function" ? callback() : undefined;
+    },
+  };
+  Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
+  try {
+    await fn();
+  } finally {
+    Reflect.deleteProperty(navigator, "locks");
+  }
+  return requested;
+}
+
 /** An entry a window that is gone left in storage. */
 function leftBehind(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
   return {
@@ -531,18 +559,59 @@ describe("recovery", () => {
     expect(outboxEntriesForTests().map((e) => e.status)).toEqual(["review"]);
   });
 
-  test("only the window's server's saves are taken; another server's stay stored, untouched", async () => {
+  test("another server's saves are left stored, untouched, while a window of it is open", async () => {
     const { storage, stored } = memoryStorage();
     const elsewhere = leftBehind({ id: "e2", server: THERE });
     stored.set("e1", leftBehind());
     stored.set("e2", elsewhere);
 
-    await initSaveOutbox({ storage });
+    await withLocks([`loxel-save-outbox-server:${THERE}`], () => initSaveOutbox({ storage }));
     await retryQueuedSaves();
 
     expect(writes.map((write) => write.path)).toEqual([FILE]);
     expect(outboxEntriesForTests()).toEqual([]);
     expect(stored.get("e2")).toEqual(elsewhere);
+  });
+
+  test("a window holds its server's lock from before it recovers, so others leave its saves", async () => {
+    const { storage } = memoryStorage();
+    const requested = await withLocks([], () => initSaveOutbox({ storage }));
+    const names = requested.map(({ name }) => name);
+    expect(requested).toContainEqual({
+      name: `loxel-save-outbox-server:${TEST_SERVER}`,
+      mode: "shared",
+    });
+    expect(names.indexOf(`loxel-save-outbox-server:${TEST_SERVER}`)).toBeLessThan(
+      names.indexOf("loxel-save-outbox:recovery"),
+    );
+  });
+
+  test("another server's saves are left alone while a window does not know its server yet", async () => {
+    const { storage, stored } = memoryStorage();
+    const elsewhere = leftBehind({ id: "e2", server: THERE });
+    stored.set("e2", elsewhere);
+
+    await withLocks(["loxel-save-outbox-starting:other-window"], () => initSaveOutbox({ storage }));
+
+    expect(outboxEntriesForTests()).toEqual([]);
+    expect(stored.get("e2")).toEqual(elsewhere);
+  });
+
+  test("another server's saves no open window shows are kept for review here, never written", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e2", leftBehind({ id: "e2", server: THERE }));
+
+    await initSaveOutbox({ storage });
+    await retryQueuedSaves();
+
+    expect(writes).toEqual([]);
+    expect(outboxEntriesForTests().map((e) => [e.status, e.server, e.takenFrom])).toEqual([
+      ["review", TEST_SERVER, "other-server"],
+    ]);
+    expect(opened).toEqual([FILE]);
+    expect(toasts).toEqual(["Unsaved edits to a.ts from another Loxel server are kept for review"]);
+    // Counted where they are shown, so removing the worktree there announces them.
+    expect(await unsavedFilesOf(TEST_SERVER, "/repo")).toEqual([FILE]);
   });
 
   test("a save stored before saves named their server is kept for review, never written", async () => {
@@ -564,6 +633,70 @@ describe("recovery", () => {
     ]);
   });
 
+  test("a save of unconfirmed origin whose file is gone is shown deleted, and kept when its tab closes", async () => {
+    const { storage, stored } = memoryStorage();
+    stored.set("e2", leftBehind({ id: "e2", server: THERE }));
+    delete disk[FILE];
+    await initSaveOutbox({ storage });
+
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, findAdoptableEntry(TEST_SERVER, FILE)!);
+    await until(() => editor()?.deleted === true);
+    outboxEditorClosing(KEY, editor()!, REPO);
+    useEditorStateStore.getState().closeFile(KEY);
+
+    expect(outboxEntriesForTests().map((e) => [e.status, e.takenFrom])).toEqual([
+      ["review", "other-server"],
+    ]);
+    expect([...stored.values()].map((e) => e.takenFrom)).toEqual(["other-server"]);
+  });
+
+  test("a save stored before saves named their server stays one across reloads", async () => {
+    const { storage, stored } = memoryStorage();
+    const { server: _, ...legacy } = leftBehind({ status: "queued" });
+    stored.set("e1", legacy);
+    await initSaveOutbox({ storage });
+
+    toasts = [];
+    await reload(storage);
+    await retryQueuedSaves();
+
+    expect(writes).toEqual([]);
+    expect(stored.get("e1")?.takenFrom).toBe("earlier-version");
+    expect(toasts).toEqual([
+      "Unsaved edits to a.ts from an earlier version of Loxel are kept for review",
+    ]);
+  });
+
+  test("a tab taking over a save of unconfirmed origin shows it in conflict, never to autosave", async () => {
+    const { storage, stored } = memoryStorage();
+    const { server: _, ...legacy } = leftBehind({ status: "queued" });
+    stored.set("e1", legacy);
+    disk[FILE] = "A\nb\nc\n";
+    await initSaveOutbox({ storage });
+
+    for (const round of ["first load", "after a reload"]) {
+      const entry = findAdoptableEntry(TEST_SERVER, FILE);
+      useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+      adoptOutboxEntry(KEY, entry!);
+      expect([round, editor()?.state]).toEqual([round, "diverged"]);
+      // The conflict's disk version is the file's, read afresh.
+      await until(() => editor()?.diskContent === "A\nb\nc\n");
+      expect(stored.get("e1")?.takenFrom).toBe("earlier-version");
+      await reload(storage);
+    }
+    await retryQueuedSaves();
+    expect(writes).toEqual([]);
+
+    // Only the user settles it: taking the disk version leaves nothing behind.
+    useEditorStateStore.getState().openFile(KEY, TEST_SERVER, FILE);
+    adoptOutboxEntry(KEY, findAdoptableEntry(TEST_SERVER, FILE)!);
+    await until(() => editor()?.diskContent === "A\nb\nc\n");
+    useEditorStateStore.getState().acceptDiskVersion(KEY);
+    expect(outboxEntriesForTests()).toEqual([]);
+    expect(stored.size).toBe(0);
+  });
+
   test("the entries of a window still open are left to it", async () => {
     const { storage, stored } = memoryStorage();
     stored.set("e1", leftBehind({ ownerId: "open-window" }));
@@ -577,16 +710,7 @@ describe("recovery", () => {
     );
     disk["/repo/b.ts"] = "a\nb\nc\n";
     // Each window holds a lock named after itself while it is open.
-    const locks = {
-      query: async () => ({ held: [{ name: "loxel-save-outbox:open-window" }], pending: [] }),
-      request: async (_name: string, fn: () => Promise<unknown>) => fn(),
-    };
-    Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
-    try {
-      await initSaveOutbox({ storage });
-    } finally {
-      Reflect.deleteProperty(navigator, "locks");
-    }
+    await withLocks(["loxel-save-outbox:open-window"], () => initSaveOutbox({ storage }));
 
     expect(outboxEntriesForTests().map((e) => e.id)).toEqual(["e2"]);
     expect(stored.get("e1")?.ownerId).toBe("open-window");

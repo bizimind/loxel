@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 
+import { localServerId } from "@/api/local-server";
 import { FOCUS_AREA_ATTR } from "@/lib/focus-targets";
 import { registerPanelFocus } from "@/lib/panel-focus";
 import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
@@ -11,6 +12,7 @@ import { setBrowserPageLoading } from "@/store/browser-pages";
 import { setCenterApi } from "@/store/tools-bar";
 
 import { BrowserTab } from "./browser-tab";
+import { LayoutServerContext } from "./panel-context";
 import { Tab, usePanelTitle } from "./tab";
 
 type BrowserTabProps = React.ComponentProps<typeof BrowserTab>;
@@ -70,12 +72,21 @@ afterEach(() => {
   }
 });
 
+/** A tab header renders in its layout, which names the server holding its panel. */
+function InWindowLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <LayoutServerContext.Provider value={localServerId()}>{children}</LayoutServerContext.Provider>
+  );
+}
+
 describe("BrowserTab", () => {
   test("clicking it returns focus to the panel's page", () => {
     const focusPage = jest.fn(() => true);
     const unregister = registerPanelFocus("panel-1", focusPage);
     const api = fakePanelApi("Example");
-    render(<BrowserTab {...({ api, containerApi, params: {} } as unknown as BrowserTabProps)} />);
+    render(<BrowserTab {...({ api, containerApi, params: {} } as unknown as BrowserTabProps)} />, {
+      wrapper: InWindowLayout,
+    });
     fireEvent.click(screen.getByText("Example"));
     expect(focusPage).toHaveBeenCalledTimes(1);
     unregister();
@@ -89,6 +100,7 @@ describe("BrowserTab", () => {
     const favicon = "https://example.com/favicon.ico";
     const { container, rerender } = render(
       tab({ url: "https://example.com/", faviconUrl: favicon }),
+      { wrapper: InWindowLayout },
     );
     expect(container.querySelector("img")?.getAttribute("src")).toBe(favicon);
 
@@ -104,7 +116,9 @@ describe("BrowserTab", () => {
     const api = fakePanelApi("Example");
     const favicon = "https://example.com/favicon.ico";
     const params = { url: "https://example.com/", faviconUrl: favicon };
-    render(<BrowserTab {...({ api, containerApi, params } as unknown as BrowserTabProps)} />);
+    render(<BrowserTab {...({ api, containerApi, params } as unknown as BrowserTabProps)} />, {
+      wrapper: InWindowLayout,
+    });
     act(() => setBrowserPageLoading("panel-1", true));
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();

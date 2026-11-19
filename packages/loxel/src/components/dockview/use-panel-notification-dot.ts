@@ -1,22 +1,21 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { useEffect, useState } from "react";
 
-import { localServerId } from "@/api/local-server";
 import { hasPanelNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 
-import { getPanelServer } from "./panel-context";
+import { useLayoutServer } from "./panel-context";
 
 /**
  * Whether a tab shows its panel's notification dot: the panel (`panelId`, its notification
- * source id, on the server holding the panel) has notifications and the tab is not active.
+ * source id, on the server of the panel's layout) has notifications and the tab is not active.
  * Activating the tab dismisses them.
  */
 export function usePanelNotificationDot(
-  { api, containerApi }: Pick<IDockviewPanelHeaderProps, "api" | "containerApi">,
+  { api }: Pick<IDockviewPanelHeaderProps, "api">,
   panelId: string,
 ): boolean {
-  const panel = containerApi.getPanel(api.id);
-  const server = panel ? getPanelServer(panel) : localServerId();
+  // A tab header is outside its panel's context, but in its layout, whose server holds the panel.
+  const server = useLayoutServer();
   const hasNotification = usePanelNotificationStore((s) =>
     hasPanelNotification(s, server, panelId),
   );
