@@ -1,3 +1,4 @@
+import { usePanelServer } from "@/components/dockview/panel-context";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 
 import { EditorBanner } from "./EditorBanner";
@@ -18,6 +19,7 @@ interface DeletedFileBannerProps {
  * closes the file's tabs and gives up its unsaved edits, as deleting the file in Loxel does.
  */
 export function DeletedFileBanner({ filePath, onRecreate, fileName }: DeletedFileBannerProps) {
+  const server = usePanelServer();
   return (
     <EditorBanner
       tone="danger"
@@ -28,7 +30,7 @@ export function DeletedFileBanner({ filePath, onRecreate, fileName }: DeletedFil
           ? [
               {
                 label: "Discard changes",
-                onClick: () => dispatchLoxelEvent("loxel-file-deleted", { filePath }),
+                onClick: () => dispatchLoxelEvent("loxel-file-deleted", { server, filePath }),
               },
             ]
           : []),

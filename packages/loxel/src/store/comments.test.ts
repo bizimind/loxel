@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { localRef } from "@/api/local-server";
 import type { DiffFileContext, PlacedThread } from "@/api/review-model";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
 /** Pending placed-threads requests, resolved by the test in any order */
@@ -68,6 +69,17 @@ describe("fetchPlacedThreads", () => {
     useCommentStore.getState().clearAll();
     pending[0]?.([thread("stale")]);
     await fetch;
+    expect(placedIds()).toEqual([]);
+  });
+
+  test("a switch to the same path on another server drops the answer, as any switch does", async () => {
+    const fetching = useCommentStore.getState().fetchPlacedThreads(["r1"], FILES);
+    useWorktreeStore.setState(
+      activeWorktreeFields(worktreeRef(toServerId("other-server"), "/repo")),
+    );
+    pending[0]?.([thread("stale")]);
+    await fetching;
+
     expect(placedIds()).toEqual([]);
   });
 });

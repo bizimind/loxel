@@ -12,7 +12,7 @@
  */
 import { create } from "zustand";
 
-import { wsClient } from "@/api/client";
+import { hasConnection, wsClientOf } from "@/api/client";
 import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 import {
   type ServerId,
@@ -45,15 +45,22 @@ export function notificationWorktree(n: ClientNotification): WorktreeRef | null 
   return typeof path === "string" ? worktreeRef(n.server, path) : path;
 }
 
+/** The key of panel `panelId` of `server` in the panel index: panel ids are unique per server only. */
+export type PanelNotificationKey = string & { readonly panelNotificationKeyBrand: unique symbol };
+
+export function panelNotificationKey(server: ServerId, panelId: string): PanelNotificationKey {
+  return `${server}:${panelId}` as PanelNotificationKey;
+}
+
 function buildIndexes(notifications: readonly ClientNotification[]): {
-  panelIndex: Set<string>;
+  panelIndex: Set<PanelNotificationKey>;
   worktreeIndex: Set<WorktreeRefKey>;
 } {
-  const panelIndex = new Set<string>();
+  const panelIndex = new Set<PanelNotificationKey>();
   const worktreeIndex = new Set<WorktreeRefKey>();
   for (const n of notifications) {
     const pid = extractPanelId(n);
-    if (pid) panelIndex.add(pid);
+    if (pid) panelIndex.add(panelNotificationKey(n.server, pid));
     // Only panels' notifications mark their worktree; a Home panel's (null) marks none.
     const wt = isPanelSource(n.source) ? notificationWorktree(n) : undefined;
     if (wt) worktreeIndex.add(formatWorktreeRef(wt));
@@ -61,40 +68,70 @@ function buildIndexes(notifications: readonly ClientNotification[]): {
   return { panelIndex, worktreeIndex };
 }
 
+/** The state for `notifications`, with its indexes. */
+function withIndexes(
+  notifications: ClientNotification[],
+): Pick<PanelNotificationState, "notifications" | "panelIndex" | "worktreeIndex"> {
+  return { notifications, ...buildIndexes(notifications) };
+}
+
+/**
+ * `notifications` without those of `server` that `drop` matches, or the same array when none does,
+ * so a removal that changes nothing changes no state.
+ */
+function without(
+  notifications: ClientNotification[],
+  server: ServerId,
+  drop: (n: ClientNotification) => boolean,
+): ClientNotification[] {
+  const kept = notifications.filter((n) => n.server !== server || !drop(n));
+  return kept.length === notifications.length ? notifications : kept;
+}
+
 interface PanelNotificationState {
-  /** Ordered notification list (newest first). */
+  /** Ordered notification list (newest first), of every server. */
   notifications: ClientNotification[];
 
-  /** Derived: panelIds with at least one notification. Rebuilt on every mutation. */
-  panelIndex: Set<string>;
+  /** Derived: panels with at least one notification, by server and id. Rebuilt on every mutation. */
+  panelIndex: Set<PanelNotificationKey>;
   /** Derived: worktrees with at least one panel notification. Rebuilt on every mutation. */
   worktreeIndex: Set<WorktreeRefKey>;
 
-  /** Dismiss a closed panel's notifications on the server. */
-  unregisterPanel: (panelId: string) => void;
+  /** Dismiss a closed panel's notifications on `server`, which holds the panel. */
+  unregisterPanel: (server: ServerId, panelId: string) => void;
 
-  /** Server-sync: replace all notifications (`server` sends them on connect/reconnect). */
+  /**
+   * Server-sync: replace `server`'s notifications (it sends them on connect/reconnect), keeping
+   * other servers'.
+   */
   syncAll: (server: ServerId, notifications: readonly ServerNotification[]) => void;
   /** Server-sync: add a notification `server` broadcast. */
   addFromServer: (server: ServerId, notification: ServerNotification) => void;
-  /** Server-sync: remove a notification by id. */
-  removeFromServer: (id: string) => void;
-  /** Server-sync: remove all notifications for a panel. */
-  removePanelFromServer: (panelId: string) => void;
-  /** Server-sync: clear all notifications. */
-  clearFromServer: () => void;
+  /** Server-sync: remove `server`'s notification `id`. */
+  removeFromServer: (server: ServerId, id: string) => void;
+  /** Server-sync: remove all of `server`'s notifications for its panel `panelId`. */
+  removePanelFromServer: (server: ServerId, panelId: string) => void;
+  /** Server-sync: clear all of `server`'s notifications. */
+  clearFromServer: (server: ServerId) => void;
 
-  /** User action: dismiss a single notification (sends to server). */
-  dismiss: (id: string) => void;
-  /** User action: dismiss all notifications for a panel (sends to server). */
-  dismissPanel: (panelId: string) => void;
-  /** User action: dismiss all notifications (sends to server). */
+  /** User action: dismiss a single notification (sends to the server that raised it). */
+  dismiss: (notification: ClientNotification) => void;
+  /** User action: dismiss all notifications of `server`'s panel `panelId` (sends to it). */
+  dismissPanel: (server: ServerId, panelId: string) => void;
+  /**
+   * User action: dismiss all notifications (sends to every server the list holds some of that the
+   * window is connected to).
+   */
   dismissAll: () => void;
 }
 
-/** Selector: returns true if the given panel has an unread notification. */
-export function hasPanelNotification(s: PanelNotificationState, panelId: string): boolean {
-  return s.panelIndex.has(panelId);
+/** Selector: returns true if `server`'s panel `panelId` has an unread notification. */
+export function hasPanelNotification(
+  s: Pick<PanelNotificationState, "panelIndex">,
+  server: ServerId,
+  panelId: string,
+): boolean {
+  return s.panelIndex.has(panelNotificationKey(server, panelId));
 }
 
 /** Selector: returns true if any panel in the given worktree has an unread notification. */
@@ -102,61 +139,66 @@ export function hasWorktreeNotification(s: PanelNotificationState, wt: WorktreeR
   return s.worktreeIndex.has(formatWorktreeRef(wt));
 }
 
-export const usePanelNotificationStore = create<PanelNotificationState>()((set) => ({
+/** Newest first, across servers: ids are only unique per server, so this keeps their own order. */
+function newestFirst(a: ClientNotification, b: ClientNotification): number {
+  return b.timestamp - a.timestamp;
+}
+
+export const usePanelNotificationStore = create<PanelNotificationState>()((set, get) => ({
   notifications: [],
   panelIndex: new Set(),
   worktreeIndex: new Set(),
 
-  unregisterPanel: (panelId) => {
-    wsClient.send({ type: "notification_dismiss_panel", panelId });
+  unregisterPanel: (server, panelId) => {
+    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
   },
 
   // --- Server sync ---
 
-  syncAll: (server, incoming) => {
-    const notifications = incoming.map((n) => ({ ...n, server }));
-    const { panelIndex, worktreeIndex } = buildIndexes(notifications);
-    set({ notifications, panelIndex, worktreeIndex });
-  },
+  syncAll: (server, incoming) =>
+    set((s) => {
+      const others = s.notifications.filter((n) => n.server !== server);
+      const mine = incoming.map((n) => ({ ...n, server }));
+      // Each server's list is newest first already; merging keeps that across them.
+      const notifications = others.length === 0 ? mine : [...others, ...mine].sort(newestFirst);
+      return withIndexes(notifications);
+    }),
 
   addFromServer: (server, notification) =>
+    set((s) => withIndexes([{ ...notification, server }, ...s.notifications])),
+
+  removeFromServer: (server, id) =>
     set((s) => {
-      const notifications = [{ ...notification, server }, ...s.notifications];
-      const { panelIndex, worktreeIndex } = buildIndexes(notifications);
-      return { notifications, panelIndex, worktreeIndex };
+      const notifications = without(s.notifications, server, (n) => n.id === id);
+      return notifications === s.notifications ? s : withIndexes(notifications);
     }),
 
-  removeFromServer: (id) =>
+  removePanelFromServer: (server, panelId) =>
     set((s) => {
-      const notifications = s.notifications.filter((n) => n.id !== id);
-      if (notifications.length === s.notifications.length) return s;
-      const { panelIndex, worktreeIndex } = buildIndexes(notifications);
-      return { notifications, panelIndex, worktreeIndex };
+      const notifications = without(s.notifications, server, (n) => extractPanelId(n) === panelId);
+      return notifications === s.notifications ? s : withIndexes(notifications);
     }),
 
-  removePanelFromServer: (panelId) =>
+  clearFromServer: (server) =>
     set((s) => {
-      const notifications = s.notifications.filter((n) => extractPanelId(n) !== panelId);
-      if (notifications.length === s.notifications.length) return s;
-      const { panelIndex, worktreeIndex } = buildIndexes(notifications);
-      return { notifications, panelIndex, worktreeIndex };
+      const notifications = without(s.notifications, server, () => true);
+      return notifications === s.notifications ? s : withIndexes(notifications);
     }),
 
-  clearFromServer: () =>
-    set({ notifications: [], panelIndex: new Set(), worktreeIndex: new Set() }),
+  // --- User actions (sent to the server; removed when its broadcast arrives) ---
 
-  // --- User actions (optimistic + send to server) ---
-
-  dismiss: (id) => {
-    wsClient.send({ type: "notification_dismiss", id });
-    // Optimistic removal handled by removeFromServer when broadcast arrives
+  dismiss: ({ server, id }) => {
+    wsClientOf(server).send({ type: "notification_dismiss", id });
   },
 
-  dismissPanel: (panelId) => {
-    wsClient.send({ type: "notification_dismiss_panel", panelId });
+  dismissPanel: (server, panelId) => {
+    wsClientOf(server).send({ type: "notification_dismiss_panel", panelId });
   },
 
   dismissAll: () => {
-    wsClient.send({ type: "notifications_clear" });
+    for (const server of new Set(get().notifications.map((n) => n.server))) {
+      // A server the window has no connection to can't be told; the others still are.
+      if (hasConnection(server)) wsClientOf(server).send({ type: "notifications_clear" });
+    }
   },
 }));

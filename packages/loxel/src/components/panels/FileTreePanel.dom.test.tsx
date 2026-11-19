@@ -5,11 +5,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { localRef } from "@/api/local-server";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import { getCurrentRepositoryStore } from "@/store/worktree-repository";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
-const revertToHead = jest.fn(async (_args: { worktree: string; files: string[] }) => {});
+const revertToHead = jest.fn(async (_args: { worktree: WorktreeRef; files: string[] }) => {});
 const openedFiles: string[] = [];
 const missingPaths = new Set<string>();
 
@@ -182,7 +183,7 @@ describe("FileTreePanel", () => {
 
     await waitFor(() => {
       expect(revertToHead).toHaveBeenCalledWith({
-        worktree: "/repo",
+        worktree: localRef("/repo"),
         files: ["src/a.ts", "src/b.ts", "old/c.ts", "src/c.ts", "src/copy.ts"],
       });
     });
@@ -197,7 +198,10 @@ describe("FileTreePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
 
     await waitFor(() => {
-      expect(revertToHead).toHaveBeenCalledWith({ worktree: "/repo", files: ["src/copy.ts"] });
+      expect(revertToHead).toHaveBeenCalledWith({
+        worktree: localRef("/repo"),
+        files: ["src/copy.ts"],
+      });
     });
   });
 
@@ -261,7 +265,10 @@ describe("FileTreePanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
 
     await waitFor(() => {
-      expect(revertToHead).toHaveBeenCalledWith({ worktree: "/other", files: ["src/b.ts"] });
+      expect(revertToHead).toHaveBeenCalledWith({
+        worktree: localRef("/other"),
+        files: ["src/b.ts"],
+      });
     });
   });
 });

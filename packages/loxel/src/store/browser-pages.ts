@@ -12,8 +12,10 @@
 import type { DockviewPanelApi } from "dockview-react";
 import { create } from "zustand";
 
-import { activeLayoutKey } from "./active-worktree";
-import { usePanelNotificationStore } from "./panel-notifications";
+import { localServerId } from "@/api/local-server";
+
+import { activeLayoutKey, layoutWorktree } from "./active-worktree";
+import { hasPanelNotification, usePanelNotificationStore } from "./panel-notifications";
 import { useSettingsStore } from "./settings-store";
 
 /** Where a page is shown: its browser panel, while that panel's layout is mounted. */
@@ -216,7 +218,8 @@ function originOf(url: string): string | null {
  * notification in the notification center.
  */
 export function canNotify(page: BrowserPage): boolean {
-  if (usePanelNotificationStore.getState().panelIndex.has(page.id)) return true;
+  const server = layoutWorktree(page.layoutKey)?.server ?? localServerId();
+  if (hasPanelNotification(usePanelNotificationStore.getState(), server, page.id)) return true;
   const origin = originOf(browserPageUrl(page));
   return (
     origin !== null && useSettingsStore.getState().browser.notificationSites[origin] === "allow"

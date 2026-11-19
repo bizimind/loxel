@@ -28,6 +28,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { CenterWatermark } from "./center-watermark";
 import { syncTerminalsFromLayout } from "./default-layout";
 import { MaximizedGroupActions } from "./maximized-group-actions";
+import { getPanelServer } from "./panel-context";
 import { centerComponents, centerTabComponents, homeComponents, homeTabComponents } from "./panels";
 import {
   PersistedLayoutComponent,
@@ -114,7 +115,7 @@ function CenterLayout({
         const terminalId = (event.params as { terminalId?: string })?.terminalId;
         if (terminalId) {
           wsClient.send({ type: "terminal_destroy", id: terminalId });
-          usePanelNotificationStore.getState().unregisterPanel(terminalId);
+          usePanelNotificationStore.getState().unregisterPanel(getPanelServer(event), terminalId);
         }
         if (layoutKeyRef.current !== HOME_LAYOUT_KEY) {
           getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
@@ -122,7 +123,7 @@ function CenterLayout({
       }
 
       if (removedDef?.type === "browser") {
-        usePanelNotificationStore.getState().unregisterPanel(event.id);
+        usePanelNotificationStore.getState().unregisterPanel(getPanelServer(event), event.id);
         closeBrowserPage(event.id);
       }
 

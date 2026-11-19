@@ -149,7 +149,7 @@ export function useDiskSyncedContent<T>(
   const filePathRef = useRef(filePath);
   const editorKeyRef = useRef(editorKey);
   const cacheKeyRef = useRef(cacheKey);
-  const worktreePathRef = useRef(panelWorktreePath);
+  const panelWorktreeRef = useRef(panelWorktree);
   const deserializeRef = useRef(deserialize);
   const contentCacheRef = useRef(contentCache);
 
@@ -175,7 +175,7 @@ export function useDiskSyncedContent<T>(
         saveEditorContent(
           filePathRef.current,
           content,
-          worktreePathRef.current,
+          panelWorktreeRef.current,
           undefined,
           editorKeyRef.current,
         );
@@ -187,7 +187,7 @@ export function useDiskSyncedContent<T>(
   filePathRef.current = filePath;
   editorKeyRef.current = editorKey;
   cacheKeyRef.current = cacheKey;
-  worktreePathRef.current = panelWorktreePath;
+  panelWorktreeRef.current = panelWorktree;
   deserializeRef.current = deserialize;
   contentCacheRef.current = contentCache;
 
@@ -201,7 +201,7 @@ export function useDiskSyncedContent<T>(
   // before the server took it, or the app quit) shows that save's content instead of the disk's
   // and takes the save over, until the editor is clean again.
   const [adoption, setAdoption] = useState<{ key: EditorKey; entry: OutboxEntry } | null>(() => {
-    const entry = editorKey === tabKey ? findAdoptableEntry(filePath) : null;
+    const entry = editorKey === tabKey ? findAdoptableEntry(server, filePath) : null;
     return entry ? { key: editorKey, entry } : null;
   });
   const adopted = adoption?.key === editorKey ? adoption.entry : null;
@@ -214,7 +214,7 @@ export function useDiskSyncedContent<T>(
       // Edits carried over by a move, or of a file deleted from disk, are not saved here; the
       // outbox keeps the latter for review.
       const closing = useEditorStateStore.getState().files.get(editorKey);
-      if (closing) outboxEditorClosing(editorKey, closing, worktreePathRef.current ?? null);
+      if (closing) outboxEditorClosing(editorKey, closing, panelWorktreeRef.current);
       // Flush pending save before closing — handles unmount.
       // On scope change, the render-phase flush above already clears the timer,
       // so this is a no-op in that case.
@@ -235,7 +235,7 @@ export function useDiskSyncedContent<T>(
             saveEditorContent(
               target,
               content,
-              worktreePathRef.current,
+              panelWorktreeRef.current,
               saveOptionsRef.current,
               key,
             );
@@ -353,7 +353,7 @@ export function useDiskSyncedContent<T>(
     await saveEditorContent(
       filePathRef.current,
       content,
-      worktreePathRef.current,
+      panelWorktreeRef.current,
       autoSaveOptionsRef.current,
       editorKeyRef.current,
     );
@@ -379,7 +379,7 @@ export function useDiskSyncedContent<T>(
     await saveEditorContent(
       filePathRef.current,
       content,
-      worktreePathRef.current,
+      panelWorktreeRef.current,
       saveOptionsRef.current,
       editorKeyRef.current,
     );
@@ -441,7 +441,7 @@ export function useDiskSyncedContent<T>(
     const path = filePathRef.current;
     let content: string;
     try {
-      ({ content } = await api.getFileContentByPath(path, worktreePathRef.current));
+      ({ content } = await api.getFileContentByPath(path, panelWorktreeRef.current?.path));
     } catch (error) {
       log.error("Failed to read a file to discard its edits", { path, error });
       showToast(`Could not read ${getDisplayFilename(path)} to discard the changes`);

@@ -61,6 +61,22 @@ export function projectOf<P extends ListedProject>(
   );
 }
 
+/**
+ * `projects` with `server`'s replaced by `listed`, in the place its first one had (at the end if it
+ * had none), other servers' kept as they are: one server's list says nothing about the others'.
+ */
+export function withServerProjects(
+  projects: readonly ListedProject[],
+  server: ServerId,
+  listed: readonly ListedProject[],
+): ListedProject[] {
+  const at = projects.findIndex((project) => project.server === server);
+  const others = projects.filter((project) => project.server !== server);
+  // Everything before a server's first project is another server's.
+  const index = at === -1 ? others.length : at;
+  return [...others.slice(0, index), ...listed, ...others.slice(index)];
+}
+
 /** `discarded`: the project's files are deleted, not only removed from Loxel. */
 async function removeAndSwitchProject(
   id: string,
@@ -76,25 +92,26 @@ async function removeAndSwitchProject(
     removed !== undefined &&
     activeProject !== null &&
     sameWorktreeRef(projectRef(activeProject), projectRef(removed));
-  const removedPaths = removed
+  const removedWorktrees = removed
     ? [
         ...(removed.isBare ? [] : [removed.path]),
         ...(
           wtStore.byProject[formatWorktreeRef(projectRef(removed))]?.worktrees ?? removed.worktrees
         ).map((wt) => wt.path),
-      ]
+      ].map((path) => worktreeRef(removed.server, path))
     : [];
 
   await apiCall();
-  for (const wtPath of removedPaths) {
-    dispatchLoxelEvent("loxel-worktree-gone", { wtPath, discarded });
+  for (const wt of removedWorktrees) {
+    dispatchLoxelEvent("loxel-worktree-gone", { wt, discarded });
   }
   await get().fetchProjects();
 
   if (isRemovingActive) {
     const remaining = get().projects;
-    if (remaining.length > 0) {
-      const target = remaining[0]!;
+    // A project of the removed one's server first.
+    const target = remaining.find((project) => project.server === removed.server) ?? remaining[0];
+    if (target) {
       const targetPath = target.isBare ? target.worktrees[0]?.path : target.path;
       if (targetPath) await wtStore.switchWorktree(worktreeRef(target.server, targetPath));
       else wtStore.reset();
@@ -177,14 +194,15 @@ export const useProjectStore = create<ProjectState>()(
           const data = await api.getProjects();
           // Listed by the window's own server, the one connection it has today.
           const server = localServerId();
-          set({
-            projects: data.projects.map((project) => ({ ...project, server })),
+          const listed = data.projects.map((project) => ({ ...project, server }));
+          set((s) => ({
+            projects: withServerProjects(s.projects, server, listed),
             homeDir: data.homeDir,
             homeDraftsDir: data.homeDraftsDir,
-          });
+          }));
           // Update the worktree store with enriched data
           const { useWorktreeStore } = await import("./worktrees");
-          useWorktreeStore.getState().applyEnrichedProjects(get().projects);
+          useWorktreeStore.getState().applyEnrichedProjects(server, listed);
         } finally {
           // Settle even on failure, so waiting opens report "no project" instead of hanging
           projectsLoaded.resolve();

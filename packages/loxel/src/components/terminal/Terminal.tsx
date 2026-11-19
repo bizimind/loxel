@@ -11,10 +11,9 @@ import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import type { TerminalState } from "@/api/terminal-stream";
-import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { usePanelServer, usePanelWorktree } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
@@ -24,7 +23,7 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { resolveTheme, xtermColorOptions } from "@/lib/loxel-theme";
 import { readThemeTokens } from "@/lib/theme-stylesheet";
 import { WINDOW_ID } from "@/lib/window-id";
-import { useFileSearchStore } from "@/store/file-search";
+import { useFileIndexQuery } from "@/queries/use-file-index";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
@@ -270,7 +269,11 @@ interface TerminalProps {
 }
 
 export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
-  const panelWorktreePath = usePanelWorktreePath();
+  const panelWorktree = usePanelWorktree();
+  const panelWorktreePath = panelWorktree?.path ?? null;
+  const server = usePanelServer();
+  const serverRef = useRef(server);
+  serverRef.current = server;
   const darkMode = useUIStore((s) => s.darkMode);
   // A built-in or stored theme object, so the reference only changes when the colors do.
   const colorTheme = useSettingsStore((s) => resolveTheme(s.themes, darkMode));
@@ -372,6 +375,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
         terminal,
         () => spawnTargetRef.current,
         () => fileIndexRef.current,
+        () => serverRef.current,
       ),
     );
 
@@ -602,27 +606,13 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     };
   }, [terminalId]);
 
-  // Populate file index for bare filename matching in terminal links.
-  // Uses the cached index if available, otherwise fetches in background.
-  useEffect(() => {
-    if (!panelWorktreePath) return;
-
-    const cached = useFileSearchStore.getState().indexByWorktree.get(panelWorktreePath);
-    if (cached) {
-      fileIndexRef.current = buildFileIndex(cached.files);
-      return;
-    }
-
-    let cancelled = false;
-    api.getFileIndex(panelWorktreePath).then((res) => {
-      if (cancelled) return;
-      useFileSearchStore.getState().setFiles(panelWorktreePath, res.files, res.truncated);
-      fileIndexRef.current = buildFileIndex(res.files);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [panelWorktreePath]);
+  // The file index for bare filename matching in terminal links: the cached one, if any.
+  const { data: fileIndexData } = useFileIndexQuery(panelWorktree);
+  const fileIndex = useMemo(
+    () => (fileIndexData ? buildFileIndex(fileIndexData.files) : null),
+    [fileIndexData],
+  );
+  fileIndexRef.current = fileIndex;
 
   // Handle container resize with debounce. Device pixel ratio changes (e.g. moving the window to
   // another display) also refit: the WebGL renderer's cell size is rounded in device pixels, so

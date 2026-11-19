@@ -3,44 +3,40 @@ import { useCallback, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import type { FileOperationResult } from "@/api/file-operations-model";
+import type { WorktreeRef } from "@/api/worktree-ref";
 import type { FilesTreeHandle } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
 import { deleteFile, renameFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { fileParentDir } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getQueryScope } from "@/queries/use-scope";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
+import { getWorktreeUI } from "@/store/worktree-ui";
 
-function dispatchUndoRedoResult(result: FileOperationResult) {
-  const wt = getQueryScope().activeWorktree?.path ?? null;
+/** Tell the app what an undo or redo in worktree `wt` (captured before the request) did. */
+function dispatchUndoRedoResult(wt: WorktreeRef, result: FileOperationResult) {
   switch (result.type) {
     case "rename":
     case "move": {
-      getCurrentWorktreeUI().getState().renameProjectPaths(result.oldPath, result.newPath);
-      window.dispatchEvent(
-        new CustomEvent("loxel-file-moved", {
-          detail: { oldPath: result.oldPath, newPath: result.newPath },
-        }),
-      );
-      const oldParent = fileParentDir(result.oldPath, wt);
-      const newParent = fileParentDir(result.newPath, wt);
-      invalidateDirQueries(oldParent, newParent);
+      getWorktreeUI(wt).getState().renameProjectPaths(result.oldPath, result.newPath);
+      dispatchLoxelEvent("loxel-file-moved", {
+        server: wt.server,
+        oldPath: result.oldPath,
+        newPath: result.newPath,
+      });
+      const oldParent = fileParentDir(result.oldPath, wt.path);
+      const newParent = fileParentDir(result.newPath, wt.path);
+      invalidateDirQueries(wt, oldParent, newParent);
       break;
     }
     case "delete":
-      window.dispatchEvent(
-        new CustomEvent("loxel-file-deleted", { detail: { filePath: result.path } }),
-      );
-      if (wt) {
-        invalidateDirQueries(fileParentDir(result.path, wt));
-      }
+      dispatchLoxelEvent("loxel-file-deleted", { server: wt.server, filePath: result.path });
+      invalidateDirQueries(wt, fileParentDir(result.path, wt.path));
       break;
     case "restore":
     case "create":
-      if (wt) {
-        invalidateDirQueries(fileParentDir(result.path, wt));
-      }
+      invalidateDirQueries(wt, fileParentDir(result.path, wt.path));
       break;
     default: {
       const _exhaustive: never = result;
@@ -124,10 +120,10 @@ export function useFileOperations(
     if (operationPendingRef.current) return;
     operationPendingRef.current = true;
     try {
-      const wt = getQueryScope().activeWorktree?.path;
+      const wt = getQueryScope().activeWorktree;
       if (!wt) return;
-      const { result } = await api.undoFileOperation(wt);
-      if (result) dispatchUndoRedoResult(result);
+      const { result } = await api.undoFileOperation(wt.path);
+      if (result) dispatchUndoRedoResult(wt, result);
     } catch (err) {
       frontendLog
         .child("files")
@@ -141,10 +137,10 @@ export function useFileOperations(
     if (operationPendingRef.current) return;
     operationPendingRef.current = true;
     try {
-      const wt = getQueryScope().activeWorktree?.path;
+      const wt = getQueryScope().activeWorktree;
       if (!wt) return;
-      const { result } = await api.redoFileOperation(wt);
-      if (result) dispatchUndoRedoResult(result);
+      const { result } = await api.redoFileOperation(wt.path);
+      if (result) dispatchUndoRedoResult(wt, result);
     } catch (err) {
       frontendLog
         .child("files")

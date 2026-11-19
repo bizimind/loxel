@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import { localRef, localServerId } from "@/api/local-server";
+import { toServerId } from "@/api/worktree-ref";
 
 const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
@@ -18,6 +19,9 @@ const { activeWorktreeFields, useWorktreeStore } = await import("@/store/worktre
 const MAIN = "/repo";
 const OTHER = "/repo/.worktrees/other";
 const URL_TARGET = "https://example.com/pull/1";
+const HERE = localServerId();
+/** Another server, holding the same paths. */
+const THERE = toServerId("other-server");
 
 describe("opens from outside the window", () => {
   let created: Array<{ url?: string; focus?: boolean }>;
@@ -65,14 +69,14 @@ describe("opens from outside the window", () => {
     getWorktreeUI(layoutWorktree(worktree)).getState().pendingOpens;
 
   test("a page for the worktree on screen opens right away", async () => {
-    await openUrl(MAIN, { url: URL_TARGET });
+    await openUrl(HERE, MAIN, { url: URL_TARGET });
 
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     expect(switched).toEqual([]);
   });
 
   test("a link naming no worktree opens in the worktree on screen", async () => {
-    await openUrl(null, { url: URL_TARGET });
+    await openUrl(HERE, null, { url: URL_TARGET });
 
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     expect(switched).toEqual([]);
@@ -82,7 +86,7 @@ describe("opens from outside the window", () => {
     useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
-    await openUrl(null, { url: URL_TARGET });
+    await openUrl(HERE, null, { url: URL_TARGET });
 
     expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
     expect(switched).toEqual([]);
@@ -92,7 +96,7 @@ describe("opens from outside the window", () => {
     useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi(null);
 
-    await openUrl(null, { url: URL_TARGET });
+    await openUrl(HERE, null, { url: URL_TARGET });
 
     expect(created).toEqual([]);
     expect(switched).toEqual([]);
@@ -103,7 +107,7 @@ describe("opens from outside the window", () => {
     useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
-    await openPath(`${OTHER}/a.md`, { line: 3, column: 1 });
+    await openPath(HERE, `${OTHER}/a.md`, { line: 3, column: 1 });
 
     expect(switched).toEqual([OTHER]);
     expect(pending(OTHER)).toEqual([
@@ -116,10 +120,21 @@ describe("opens from outside the window", () => {
     useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
-    await openPath("/state/detached/home/Plan.md");
+    await openPath(HERE, "/state/detached/home/Plan.md");
 
     expect(openedFiles).toEqual(["/state/detached/home/Plan.md"]);
     expect(switched).toEqual([]);
+    useProjectStore.setState({ homeDraftsDir: null });
+  });
+
+  test("a link to Home's plans folder's path on another server does not open in Home", async () => {
+    useWorktreeStore.setState(activeWorktreeFields(null));
+    useProjectStore.setState({ homeDraftsDir: "/state/detached/home" });
+    setCenterApi({} as never, HOME_LAYOUT_KEY);
+
+    await openPath(THERE, "/state/detached/home/Plan.md");
+
+    expect(openedFiles).toEqual([]);
     useProjectStore.setState({ homeDraftsDir: null });
   });
 
@@ -127,7 +142,7 @@ describe("opens from outside the window", () => {
     useWorktreeStore.setState(activeWorktreeFields(null));
     setCenterApi({} as never, HOME_LAYOUT_KEY);
 
-    await openPath("/elsewhere/notes.md");
+    await openPath(HERE, "/elsewhere/notes.md");
 
     expect(openedFiles).toEqual([]);
     expect(switched).toEqual([]);
@@ -135,7 +150,7 @@ describe("opens from outside the window", () => {
   });
 
   test("a page for another worktree waits for it and switches there", async () => {
-    await openUrl(OTHER, { url: URL_TARGET });
+    await openUrl(HERE, OTHER, { url: URL_TARGET });
 
     expect(created).toEqual([]);
     expect(switched).toEqual([OTHER]);
@@ -143,7 +158,7 @@ describe("opens from outside the window", () => {
   });
 
   test("without focus a page for another worktree waits there, leaving the window alone", async () => {
-    await openUrl(OTHER, { url: URL_TARGET, focus: false });
+    await openUrl(HERE, OTHER, { url: URL_TARGET, focus: false });
 
     expect(created).toEqual([]);
     expect(switched).toEqual([]);
@@ -160,9 +175,9 @@ describe("opens from outside the window", () => {
       data: { url: URL_TARGET, focus: false },
     };
 
-    await openFromInbox("in-1", message);
+    await openFromInbox(HERE, "in-1", message);
     // Sent again after a reconnect, before the user went to the worktree.
-    await openFromInbox("in-1", message);
+    await openFromInbox(HERE, "in-1", message);
     expect(pending(OTHER)).toHaveLength(1);
     expect(sent).toEqual([]);
 
@@ -173,7 +188,7 @@ describe("opens from outside the window", () => {
     expect(sent).toEqual([done]);
 
     // The server missed the answer: it gets it again, and no second panel opens.
-    await openFromInbox("in-1", message);
+    await openFromInbox(HERE, "in-1", message);
     expect(sent).toEqual([done, done]);
     expect(created).toHaveLength(1);
   });
@@ -188,12 +203,32 @@ describe("opens from outside the window", () => {
       data: { url: URL_TARGET, focus: false },
     };
 
-    await openFromInbox("in-2", message);
-    dropInboxOpen("in-2");
+    await openFromInbox(HERE, "in-2", message);
+    dropInboxOpen(HERE, "in-2");
     for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
       dispatchPendingOpen(open);
     expect(created).toEqual([]);
     expect(sent).toEqual([]);
+  });
+
+  test("an inbox open is dropped only by its own server's placed notice, and answered to it", async () => {
+    const sent: unknown[] = [];
+    const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
+    cleanups.push(() => send.mockRestore());
+    const message = {
+      type: "open_url" as const,
+      wtPath: OTHER,
+      data: { url: URL_TARGET, focus: false },
+    };
+
+    await openFromInbox(HERE, "in-5", message);
+    // Another server placed a request of the same id: not this one.
+    dropInboxOpen(THERE, "in-5");
+    for (const open of getWorktreeUI(localRef(OTHER)).getState().takePendingOpens())
+      dispatchPendingOpen(open);
+
+    expect(created.map((detail) => detail.url)).toEqual([URL_TARGET]);
+    expect(sent).toEqual([{ type: "inbox_open_done", inboxId: "in-5" }]);
   });
 
   test("an open from the inbox placed elsewhere while on its way is neither placed nor answered", async () => {
@@ -201,12 +236,12 @@ describe("opens from outside the window", () => {
     const send = spyOn(wsClient, "send").mockImplementation((message) => sent.push(message));
     cleanups.push(() => send.mockRestore());
 
-    const opening = openFromInbox("in-3", {
+    const opening = openFromInbox(HERE, "in-3", {
       type: "open_url",
       wtPath: MAIN,
       data: { url: URL_TARGET },
     });
-    dropInboxOpen("in-3");
+    dropInboxOpen(HERE, "in-3");
     await opening;
     expect(created).toEqual([]);
     expect(sent).toEqual([]);
@@ -219,15 +254,18 @@ describe("opens from outside the window", () => {
     // In Home, a file outside every worktree has nowhere to open.
     useWorktreeStore.setState(activeWorktreeFields(null));
 
-    await openFromInbox("in-4", { type: "open_file", data: { filePath: "/elsewhere/notes.md" } });
+    await openFromInbox(HERE, "in-4", {
+      type: "open_file",
+      data: { filePath: "/elsewhere/notes.md" },
+    });
     expect(openedFiles).toEqual([]);
     expect(sent).toEqual([]);
   });
 
   test("targets arriving during a switch keep their order in the new worktree", async () => {
-    await openFile({ filePath: `${OTHER}/a.md` });
-    await openUrl(OTHER, { url: URL_TARGET });
-    await openFile({ filePath: `${OTHER}/b.md` });
+    await openFile(HERE, { filePath: `${OTHER}/a.md` });
+    await openUrl(HERE, OTHER, { url: URL_TARGET });
+    await openFile(HERE, { filePath: `${OTHER}/b.md` });
 
     expect(switched).toEqual([OTHER]);
     expect(created).toEqual([]);
@@ -239,15 +277,25 @@ describe("opens from outside the window", () => {
     ]);
   });
 
+  test("a file of another server is never opened in this server's worktree at its path", async () => {
+    await openFile(THERE, { filePath: `${OTHER}/a.md` });
+    await openFile(THERE, { filePath: `${MAIN}/a.md` });
+
+    expect(switched).toEqual([]);
+    expect(openedFiles).toEqual([]);
+    expect(pending(OTHER)).toEqual([]);
+    expect(pending(MAIN)).toEqual([]);
+  });
+
   test("a named worktree overrides the one holding the file", async () => {
-    await openFile({ filePath: `${MAIN}/a.md`, worktreePath: OTHER });
+    await openFile(HERE, { filePath: `${MAIN}/a.md`, worktreePath: OTHER });
 
     expect(openedFiles).toEqual([]);
     expect(pending(OTHER)).toEqual([{ kind: "file", path: `${MAIN}/a.md` }]);
   });
 
   test("a file with no named worktree opens in the one holding it", async () => {
-    await openFile({ filePath: `${MAIN}/a.md` });
+    await openFile(HERE, { filePath: `${MAIN}/a.md` });
 
     expect(openedFiles).toEqual([`${MAIN}/a.md`]);
   });
@@ -263,8 +311,8 @@ describe("opens from outside the window", () => {
       },
     });
 
-    const first = openUrl(fresh, { url: URL_TARGET, focus: false });
-    const second = openFile({ filePath: `${MAIN}/a.md` });
+    const first = openUrl(HERE, fresh, { url: URL_TARGET, focus: false });
+    const second = openFile(HERE, { filePath: `${MAIN}/a.md` });
     await refreshStarted.promise;
     expect(openedFiles).toEqual([]);
 
@@ -283,7 +331,7 @@ describe("opens from outside the window", () => {
       },
     });
 
-    await openUrl(fresh, { url: URL_TARGET, focus: false });
+    await openUrl(HERE, fresh, { url: URL_TARGET, focus: false });
 
     expect(pending(fresh)).toEqual([{ kind: "url", url: URL_TARGET, focus: false }]);
     getWorktreeUI(localRef(fresh)).getState().takePendingOpens();

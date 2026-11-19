@@ -159,7 +159,7 @@ export function NotificationItem({
               stack.onDismissAll();
               return;
             }
-            usePanelNotificationStore.getState().dismiss(notification.id);
+            usePanelNotificationStore.getState().dismiss(notification);
           }}
         >
           <XIcon className="size-3" />

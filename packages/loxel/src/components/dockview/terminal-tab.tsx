@@ -2,12 +2,14 @@ import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { HistoryIcon, SquareTerminalIcon } from "lucide-react";
 
 import { type AgentOrigin, agentName } from "@/api/agent-terminal-model";
+import { localServerId } from "@/api/local-server";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { pathName } from "@/lib/project-file-helpers";
 import { confirmRestartTerminal } from "@/lib/restart-terminal";
 import { useRunningTerminals } from "@/queries/use-running-terminals";
 
+import { getPanelServer } from "./panel-context";
 import { Tab, usePanelTitle } from "./tab";
 import { usePanelNotificationDot } from "./use-panel-notification-dot";
 
@@ -31,7 +33,9 @@ export function TerminalTab(
   props: IDockviewPanelHeaderProps<{ terminalId: string; origin?: AgentOrigin }>,
 ) {
   const { terminalId, origin } = props.params;
-  const showDot = usePanelNotificationDot(props.api, terminalId);
+  const showDot = usePanelNotificationDot(props, terminalId);
+  const panel = props.containerApi.getPanel(props.api.id);
+  const server = panel ? getPanelServer(panel) : localServerId();
   const title = usePanelTitle(props.api);
   const otherHostBuild =
     useRunningTerminals()?.find((terminal) => terminal.id === terminalId)?.otherHostBuild ?? false;
@@ -69,7 +73,9 @@ export function TerminalTab(
       }
       contextMenuItems={
         otherHostBuild ? (
-          <ContextMenuItem onClick={() => void confirmRestartTerminal(props.api, terminalId)}>
+          <ContextMenuItem
+            onClick={() => void confirmRestartTerminal(props.api, terminalId, server)}
+          >
             Restart Terminal
           </ContextMenuItem>
         ) : undefined

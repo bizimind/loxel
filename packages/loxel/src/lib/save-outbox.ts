@@ -8,7 +8,15 @@
  */
 
 import * as api from "@/api/client";
-import type { ServerId } from "@/api/worktree-ref";
+import { whenLocalServerKnown } from "@/api/local-server";
+import {
+  type ServerId,
+  type WorktreeRef,
+  type WorktreeRefKey,
+  formatWorktreeRef,
+  sameWorktreeRef,
+  worktreeRef,
+} from "@/api/worktree-ref";
 import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -27,10 +35,11 @@ import {
   type EditorFileEntry,
   type EditorKey,
   diskBase,
+  fileEditorKey,
   isFileTabKey,
   useEditorStateStore,
 } from "@/store/editor-state";
-import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { projectOf, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { isListedWorktree, useWorktreeStore } from "@/store/worktrees";
 
 const log = frontendLog.child("files");
@@ -51,7 +60,14 @@ export interface OutboxEntry {
   /** The window (page load) that owns the entry. Entries of a window that is gone are recovered. */
   ownerId: string;
   editorKey: EditorKey;
+  /**
+   * The server holding the file, the one the save is sent to. Paths alone collide once two
+   * servers hold the same one, and IndexedDB is per origin, not per server.
+   */
+  server: ServerId;
+  /** On `server`. */
   filePath: string;
+  /** On `server`. */
   worktreePath: string | null;
   /** The disk content the edits were made on: the merge base. null if the editor never had it. */
   base: string | null;
@@ -69,9 +85,16 @@ export interface OutboxEntry {
   refusal?: string;
 }
 
+/**
+ * An entry as stored. One stored before entries named their server has none: it was made when one
+ * origin served one server, but which one can no longer be told, so it is never retried, only
+ * kept for review (see `initSaveOutbox`).
+ */
+export type StoredOutboxEntry = Omit<OutboxEntry, "server"> & { server?: ServerId };
+
 /** Where entries persist between runs. A write resolves once stored, and rejects if it was not. */
 export interface OutboxStorage {
-  load: () => Promise<OutboxEntry[]>;
+  load: () => Promise<StoredOutboxEntry[]>;
   put: (entry: OutboxEntry) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
@@ -96,16 +119,29 @@ let failedRounds = 0;
 let currentRun: Promise<void> | null = null;
 /** A retry was asked for while one ran: run another pass once it ends. */
 let runAgain = false;
+/** Entries stored before entries named their server, not shown yet (see `initSaveOutbox`). */
+const fromEarlierVersion = new Set<string>();
 /** Entries recovered from an earlier run whose outcome is not reported yet. */
 const recovered = new Set<string>();
 const recoveredSaved: string[] = [];
 /** The worktree each entry not yet saved holds subscribed (`holdWorktree`), by entry id. */
-const heldWorktrees = new Map<string, string>();
+const heldWorktrees = new Map<string, WorktreeRef>();
 /**
  * Worktrees gone from this window's lists (`loxel-worktree-gone`), until served again, and whether
  * the user discarded them: their saves can no longer be sent, so they are settled, not retried.
  */
-const goneWorktrees = new Map<string, boolean>();
+const goneWorktrees = new Map<WorktreeRefKey, boolean>();
+
+/** The worktree of `entry` on its server; null for a save of no worktree (Home's drafts). */
+function entryWorktree(entry: OutboxEntry): WorktreeRef | null {
+  return entry.worktreePath === null ? null : worktreeRef(entry.server, entry.worktreePath);
+}
+
+/** The key of `entry`'s worktree in {@link goneWorktrees}; null with none. */
+function entryWorktreeKey(entry: OutboxEntry): WorktreeRefKey | null {
+  const wt = entryWorktree(entry);
+  return wt ? formatWorktreeRef(wt) : null;
+}
 
 /**
  * Why a failed request may succeed later: `unreachable`, the server could not be reached (or
@@ -152,6 +188,7 @@ function removeEntry(entry: OutboxEntry): void {
   if (entries.get(entry.id) !== entry) return;
   entries.delete(entry.id);
   recovered.delete(entry.id);
+  fromEarlierVersion.delete(entry.id);
   // Only a stored entry tells that storing works again: a failing store may still delete.
   void storage?.remove(entry.id).catch(storeFailed);
   entriesChanged();
@@ -195,24 +232,27 @@ useEditorStateStore.subscribe(onEditorsChanged);
 
 // A worktree is served again (subscribed, after a reconnect or a server restart): retry its saves
 // at once. The timer is left for the rest, such as a server that answered with an error.
-onLoxelEvent("loxel-worktree-files-resynced", ({ wtPath }) => {
-  goneWorktrees.delete(wtPath); // created again at the same path
+onLoxelEvent("loxel-worktree-files-resynced", ({ wt }) => {
+  const key = formatWorktreeRef(wt);
+  goneWorktrees.delete(key); // created again at the same path
   const waiting = [...entries.values()].some(
-    (entry) => entry.status === "queued" && entry.worktreePath === wtPath,
+    (entry) => entry.status === "queued" && entryWorktreeKey(entry) === key,
   );
   if (!waiting) return;
   failedRounds = 0;
   scheduleRetry(0);
 });
 
-onLoxelEvent("loxel-worktree-gone", ({ wtPath, discarded }) => {
+onLoxelEvent("loxel-worktree-gone", ({ wt, discarded }) => {
+  const key = formatWorktreeRef(wt);
   // A removal in Loxel is also seen in the list that follows it: that must not undo the discard.
-  goneWorktrees.set(wtPath, discarded || goneWorktrees.get(wtPath) === true);
+  goneWorktrees.set(key, discarded || goneWorktrees.get(key) === true);
   settleGoneSaves();
 });
 
 function isGone(entry: OutboxEntry): boolean {
-  return entry.worktreePath !== null && goneWorktrees.has(entry.worktreePath);
+  const key = entryWorktreeKey(entry);
+  return key !== null && goneWorktrees.has(key);
 }
 
 /**
@@ -225,8 +265,9 @@ function isGone(entry: OutboxEntry): boolean {
 function settleGoneSaves(): void {
   const dropped: string[] = [];
   for (const entry of [...entries.values()]) {
-    if (!entry.worktreePath) continue;
-    const discarded = goneWorktrees.get(entry.worktreePath);
+    const key = entryWorktreeKey(entry);
+    if (key === null) continue;
+    const discarded = goneWorktrees.get(key);
     if (discarded === undefined) continue;
     if (discarded && (entry.status === "queued" || entry.status === "review")) {
       dropped.push(getDisplayFilename(entry.filePath));
@@ -268,13 +309,16 @@ function syncEditorFlags(): void {
  * saved, or need the user.
  */
 function syncHeldWorktrees(): void {
-  const wanted = new Map<string, string>();
+  const wanted = new Map<string, WorktreeRef>();
   for (const entry of entries.values()) {
-    if (entry.status !== "review" && entry.worktreePath) wanted.set(entry.id, entry.worktreePath);
+    const wt = entryWorktree(entry);
+    if (entry.status !== "review" && wt) wanted.set(entry.id, wt);
   }
+  const same = (a: WorktreeRef | undefined, b: WorktreeRef | undefined) =>
+    a !== undefined && b !== undefined && sameWorktreeRef(a, b);
   // Held before any is released, so a worktree another entry holds is never let go in between.
-  for (const [id, wt] of wanted) if (heldWorktrees.get(id) !== wt) holdWorktree(wt);
-  for (const [id, wt] of heldWorktrees) if (wanted.get(id) !== wt) releaseWorktree(wt);
+  for (const [id, wt] of wanted) if (!same(heldWorktrees.get(id), wt)) holdWorktree(wt);
+  for (const [id, wt] of heldWorktrees) if (!same(wanted.get(id), wt)) releaseWorktree(wt);
   heldWorktrees.clear();
   for (const [id, wt] of wanted) heldWorktrees.set(id, wt);
 }
@@ -287,7 +331,7 @@ export function addOutboxEntry(
   editor: EditorFileEntry,
   save: Pick<
     OutboxEntry,
-    "editorKey" | "filePath" | "worktreePath" | "base" | "content" | "options"
+    "editorKey" | "server" | "filePath" | "worktreePath" | "base" | "content" | "options"
   >,
   status: "sending" | "queued" | "review",
 ): { entry: OutboxEntry; stored: Promise<void> } {
@@ -366,7 +410,7 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
 }
 
 /**
- * The editor `editorKey` (`editor`, of `worktreePath`) is closing. Edits a move carried over went
+ * The editor `editorKey` (`editor`, of `worktree`) is closing. Edits a move carried over went
  * with it. Those of a file deleted on disk, in the file's own tab, are kept for review, as it shows them now
  * (autosave stopped with the deletion), and shown again when the file's tab next opens (at the
  * latest after a reload): only the user gives them up, by discarding them or deleting the file in
@@ -375,7 +419,7 @@ export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
 export function outboxEditorClosing(
   editorKey: EditorKey,
   editor: EditorFileEntry,
-  worktreePath: string | null,
+  worktree: WorktreeRef | null,
 ): void {
   const entry = entryOfInstance(editor.instanceId);
   if (!editor.deleted && !editor.movedTo) {
@@ -409,8 +453,9 @@ export function outboxEditorClosing(
     editor,
     {
       editorKey,
+      server: editor.server,
       filePath: editor.filePath,
-      worktreePath,
+      worktreePath: worktree?.path ?? null,
       base: diskBase(editor),
       content,
       options: entry?.options,
@@ -435,9 +480,11 @@ export async function unsavedFilesOf(server: ServerId, worktreePath: string): Pr
     log.warn("Failed to read other windows' unsaved edits", { error });
     return [];
   });
-  // This window's are current in memory; the stored copies may lag behind.
+  // This window's are current in memory; the stored copies may lag behind. One stored with no
+  // server may be of any: it counts, so that a removal never discards it unannounced.
   const others = stored.filter((entry) => entry.ownerId !== ownerId);
   for (const entry of [...entries.values(), ...others]) {
+    if (entry.server !== undefined && entry.server !== server) continue;
     if (entry.worktreePath === worktreePath && entry.status !== "sending") {
       files.add(entry.filePath);
     }
@@ -445,9 +492,10 @@ export async function unsavedFilesOf(server: ServerId, worktreePath: string): Pr
   return [...files];
 }
 
-/** Forget the saves of a file, or of everything under a folder, that the user deleted. */
-export function forgetOutboxPath(path: string): void {
+/** Forget the saves of a file of `server`, or of everything under a folder, that the user deleted. */
+export function forgetOutboxPath(server: ServerId, path: string): void {
   for (const entry of entries.values()) {
+    if (entry.server !== server) continue;
     if (entry.filePath === path || entry.filePath.startsWith(`${path}/`)) removeEntry(entry);
   }
 }
@@ -455,13 +503,13 @@ export function forgetOutboxPath(path: string): void {
 // -- Taking over a save in a reopened tab --
 
 /**
- * A save of `filePath` that its file tab can show when it opens: the newest one whose editor is
- * gone and which is not being sent. Pure; the tab takes it over with `adoptOutboxEntry`.
+ * A save of `server`'s `filePath` that its file tab can show when it opens: the newest one whose
+ * editor is gone and which is not being sent. Pure; the tab takes it over with `adoptOutboxEntry`.
  */
-export function findAdoptableEntry(filePath: string): OutboxEntry | null {
+export function findAdoptableEntry(server: ServerId, filePath: string): OutboxEntry | null {
   let found: OutboxEntry | null = null;
   for (const entry of entries.values()) {
-    if (entry.filePath !== filePath || ownerEditor(entry)) continue;
+    if (entry.server !== server || entry.filePath !== filePath || ownerEditor(entry)) continue;
     if (entry.status === "sending" || entry.status === "retrying") continue;
     if (!found || entry.seq > found.seq) found = entry;
   }
@@ -550,11 +598,19 @@ export function retryQueuedSaves(): Promise<void> {
     reportRecovered();
     // Saves of a worktree that went while they were retried are settled instead.
     settleGoneSaves();
-    if ([...entries.values()].some((e) => e.status === "queued" && !isGone(e))) {
+    if ([...entries.values()].some(isRetriable)) {
       scheduleRetry(retryDelay());
     }
   });
   return currentRun;
+}
+
+/**
+ * Whether `entry` waits for a retry the window can send: queued, of a worktree not gone, and of a
+ * server the window is connected to (its requests go to the window's connection, `api`).
+ */
+function isRetriable(entry: OutboxEntry): boolean {
+  return entry.status === "queued" && !isGone(entry) && api.hasConnection(entry.server);
 }
 
 /** Make sure a retry is coming, without cutting short the backoff while the server is away. */
@@ -570,13 +626,11 @@ export function ensureRetryScheduled(): void {
  * not subscribed yet, or removed), so that one cannot hold up the others.
  */
 async function retryRound(): Promise<"done" | "failed" | "changed"> {
-  const queued = [...entries.values()]
-    .filter((e) => e.status === "queued" && !isGone(e))
-    .sort((a, b) => a.seq - b.seq);
+  const queued = [...entries.values()].filter((e) => isRetriable(e)).sort((a, b) => a.seq - b.seq);
   let failed = false;
   let changed = false;
   for (const entry of queued) {
-    if (entries.get(entry.id) !== entry || entry.status !== "queued" || isGone(entry)) continue;
+    if (entries.get(entry.id) !== entry || !isRetriable(entry)) continue;
     const editor = ownerEditor(entry);
     const outcome = editor ? await retryInEditor(entry, editor) : await retryClosed(entry);
     if (outcome === "unreachable") return "failed";
@@ -666,7 +720,7 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
   const result = await postEditorContent(
     entry.filePath,
     pending?.content ?? now?.getEditorContent?.() ?? entry.content,
-    entry.worktreePath,
+    entryWorktree(entry),
     // The entry's options, not the pending edit's: those are always the explicit-save ones, and
     // a queued autosave must not format unless format-on-autosave is on.
     entry.options,
@@ -768,13 +822,9 @@ function toReview(entry: OutboxEntry, disk: string | null, refusal?: string): vo
   // An open editor already shows the edits (with its conflict, deleted or refused-save banner).
   if (ownerEditor(entry)) return;
   const name = getDisplayFilename(entry.filePath);
-  // An entry names no server yet (#1456), so its file's tab is found by path. Recovered entries
-  // get here before the window's server is known, so no key is built from it.
-  const [tabKey, tab] =
-    [...useEditorStateStore.getState().files].find(
-      ([key, editor]) => editor.filePath === entry.filePath && isFileTabKey(key, editor),
-    ) ?? [];
-  if (tabKey && tab) {
+  const tabKey = fileEditorKey(entry.server, entry.filePath);
+  const tab = useEditorStateStore.getState().files.get(tabKey);
+  if (tab) {
     // The file's tab is open (the save came from a closed compare side, or the tab was reopened
     // while the save was being sent): show the edits there if it has none of its own.
     const applied =
@@ -786,13 +836,14 @@ function toReview(entry: OutboxEntry, disk: string | null, refusal?: string): vo
     }
     return;
   }
-  showToast(
-    disk === null
-      ? `Unsaved edits to ${name} could not be saved`
-      : `Unsaved edits to ${name} conflict with changes on disk`,
-    "info",
-  );
-  void openFile({
+  let message = `Unsaved edits to ${name} conflict with changes on disk`;
+  if (disk === null) message = `Unsaved edits to ${name} could not be saved`;
+  // Nothing was tried for those: they wait for the user only because their server is unknown.
+  if (fromEarlierVersion.delete(entry.id)) {
+    message = `Unsaved edits to ${name} from an earlier version of Loxel are kept for review`;
+  }
+  showToast(message, "info");
+  void openFile(entry.server, {
     filePath: entry.filePath,
     worktreePath: entry.worktreePath ?? undefined,
     focus: false,
@@ -831,7 +882,7 @@ function indexedDbStorage(): OutboxStorage | null {
   return {
     load: async () => {
       const d = await db;
-      return new Promise<OutboxEntry[]>((resolve, reject) => {
+      return new Promise<StoredOutboxEntry[]>((resolve, reject) => {
         const request = d.transaction(STORE, "readonly").objectStore(STORE).getAll();
         request.onsuccess = () => resolve(request.result.filter(isOutboxEntry));
         request.onerror = () => reject(request.error ?? new Error("IndexedDB read failed"));
@@ -842,7 +893,7 @@ function indexedDbStorage(): OutboxStorage | null {
   };
 }
 
-function isOutboxEntry(value: unknown): value is OutboxEntry {
+function isOutboxEntry(value: unknown): value is StoredOutboxEntry {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -851,6 +902,7 @@ function isOutboxEntry(value: unknown): value is OutboxEntry {
     typeof v.ownerId === "string" &&
     // An editor key stored by an older version matches no editor; adoption re-keys its entry.
     typeof v.editorKey === "string" &&
+    (v.server === undefined || typeof v.server === "string") &&
     typeof v.filePath === "string" &&
     (typeof v.worktreePath === "string" || v.worktreePath === null) &&
     (typeof v.base === "string" || v.base === null) &&
@@ -890,14 +942,17 @@ async function exclusively<T>(fn: () => Promise<T>): Promise<T> {
  * the last one subscribed.
  */
 function subscribeRecoveredWorktrees(taken: readonly OutboxEntry[]): void {
-  const worktrees = new Set(
-    taken.flatMap((e) => (e.status !== "review" && e.worktreePath ? [e.worktreePath] : [])),
-  );
-  for (const wt of worktrees) {
-    api.wsClient.subscribeWorktree(wt);
+  const worktrees = new Map<WorktreeRefKey, WorktreeRef>();
+  for (const entry of taken) {
+    const wt = entryWorktree(entry);
+    if (entry.status !== "review" && wt) worktrees.set(formatWorktreeRef(wt), wt);
+  }
+  for (const wt of worktrees.values()) {
+    const connection = api.wsClientOf(wt.server);
+    connection.subscribeWorktree(wt);
     onWorktreeSavesDrained(wt, () => {
-      if (useWorktreeStore.getState().activeWorktree?.path !== wt)
-        api.wsClient.unsubscribeWorktree(wt);
+      const active = useWorktreeStore.getState().activeWorktree;
+      if (!active || !sameWorktreeRef(active, wt)) connection.unsubscribeWorktree(wt);
     });
   }
 }
@@ -905,29 +960,35 @@ function subscribeRecoveredWorktrees(taken: readonly OutboxEntry[]): void {
 /**
  * Once the project lists are known, settle the recovered saves of worktrees no longer in them
  * (gone while Loxel was closed, so not discarded in it), as a worktree going while Loxel runs
- * settles its own. A failed fetch leaves no project listed, and a project the server could not
- * initialize (a volume not mounted yet) lists no worktree: then nothing is known to be gone.
+ * settles its own. A failed fetch leaves no project of its server listed, and a project the server
+ * could not initialize (a volume not mounted yet) lists no worktree: then nothing is known to be
+ * gone.
  * Their worktrees were subscribed already, before the one the window shows; a gone one only
  * answers with an error.
  */
 async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
-  if (projects.length === 0) return;
   for (const entry of taken) {
-    if (!entry.worktreePath || isListedWorktree(entry.worktreePath)) continue;
-    const owner = deriveProject(entry.worktreePath, projects);
-    const project = projects.find((candidate) => candidate.path === owner?.path);
+    const wt = entryWorktree(entry);
+    if (!wt || isListedWorktree(wt)) continue;
+    // A server that listed nothing (its fetch failed) says nothing is gone.
+    if (!projects.some((project) => project.server === wt.server)) continue;
+    const project = projectOf(wt, projects);
     if (project && project.worktrees.length === 0) continue;
-    goneWorktrees.set(entry.worktreePath, goneWorktrees.get(entry.worktreePath) === true);
+    const key = formatWorktreeRef(wt);
+    goneWorktrees.set(key, goneWorktrees.get(key) === true);
   }
   settleGoneSaves();
 }
 
 /**
  * Load the outbox and take over the entries of windows that are gone (an earlier run, or a
- * window that crashed), then start retrying. Call once, before the editors mount, so a tab
- * restored with the layout can take over its file's entry.
+ * window that crashed), then start retrying. Only the entries of the server the window is
+ * connected to are taken; other servers' stay in storage, untouched. One stored before entries
+ * named their server is taken as the window's server's, the only one an origin served then, but
+ * since that can't be checked it is kept for review, never written without the user. Call once,
+ * before the editors mount, so a tab restored with the layout can take over its file's entry.
  */
 export async function initSaveOutbox(
   options: { storage?: OutboxStorage | null } = {},
@@ -938,17 +999,26 @@ export async function initSaveOutbox(
     void navigator.locks.request(`${LOCK_PREFIX}${ownerId}`, () => new Promise<never>(() => {}));
   }
   const store = storage;
+  const server = await whenLocalServerKnown();
   const taken = store
     ? await exclusively(async () => {
         const stored = await store.load();
         const live = await liveOwners();
-        const orphans = stored.filter((e) => e.ownerId !== ownerId && !live?.has(e.ownerId));
-        for (const entry of orphans) {
-          entry.ownerId = ownerId;
-          if (entry.status !== "review") {
+        const orphans = stored.flatMap((stored): OutboxEntry[] => {
+          if (stored.ownerId === ownerId || live?.has(stored.ownerId)) return [];
+          if (stored.server !== undefined && stored.server !== server) return [];
+          const entry: OutboxEntry = { ...stored, server: stored.server ?? server };
+          if (stored.server === undefined) {
+            entry.status = "review";
+            fromEarlierVersion.add(entry.id);
+          } else if (entry.status !== "review") {
             entry.status = "queued";
             delete entry.refusal; // carried by a save in flight when the window went
           }
+          return [entry];
+        });
+        for (const entry of orphans) {
+          entry.ownerId = ownerId;
           entry.seq = nextSeq++;
         }
         // Taken over only once stored as this window's, so no other window takes them too.
@@ -982,6 +1052,7 @@ export function resetSaveOutboxForTests(): void {
   ownerId = crypto.randomUUID();
   confirmedSeq.clear();
   recovered.clear();
+  fromEarlierVersion.clear();
   recoveredSaved.length = 0;
   goneWorktrees.clear();
   if (retryTimer) clearTimeout(retryTimer);
