@@ -11,28 +11,28 @@ const disk = new Map<string, { real: string; isDir: boolean }>();
 const calls: unknown[][] = [];
 
 const actualClient = await import("@/api/client");
-const { ApiError } = actualClient;
+const { ApiError } = await import("@/api/server-connection");
 mock.module("@/api/client", () => ({
   ...actualClient,
-  getPathInfo: async (path: string) => {
+  getPathInfo: async (_server: string, path: string) => {
     const entry = disk.get(path);
     if (!entry) throw new ApiError("Path not found", 404);
     return { path: entry.real, isDir: entry.isDir };
   },
-  getFileContentByPath: async (path: string) => ({
+  getFileContentByPath: async (_server: string, path: string) => ({
     content: path.endsWith(".latin1") ? "caf\uFFFD" : `content of ${path}`,
   }),
-  writeFileContent: async (options: unknown) => {
-    calls.push(["write", options]);
+  writeFileContent: async (server: string, options: unknown) => {
+    calls.push(["write", options, server]);
     return { success: true };
   },
-  createProjectDir: async (wt: string, options: { dir: string; name: string }) => {
+  createProjectDir: async (wt: unknown, options: { dir: string; name: string }) => {
     calls.push(["createDir", wt, options]);
     const path = `${options.dir}/${options.name}`;
     disk.set(path, { real: path, isDir: true });
     return { path };
   },
-  createProjectFile: async (wt: string, options: { dir: string; name: string }) => {
+  createProjectFile: async (wt: unknown, options: { dir: string; name: string }) => {
     calls.push(["createFile", wt, options]);
     const path = `${options.dir}/${options.name}`;
     return { path: disk.has(path) ? `${path.replace(/\.py$/, "")} 2.py` : path };
@@ -128,7 +128,11 @@ describe("createLspWorkspaceFiles", () => {
     await files().writeFile(uri("file://test-server/repo/pkg/a.py"), "x = 1\n");
     const [[kind, options]] = calls as [[string, Record<string, unknown>]];
     expect(kind).toBe("write");
-    expect(options).toMatchObject({ path: "/repo/pkg/a.py", content: "x = 1\n", worktreePath: WT });
+    expect(options).toMatchObject({
+      path: "/repo/pkg/a.py",
+      content: "x = 1\n",
+      worktree: localRef(WT),
+    });
     expect(options.format).toBeUndefined();
     expect(typeof options.nonce).toBe("string");
   });
@@ -136,9 +140,9 @@ describe("createLspWorkspaceFiles", () => {
   test("creates missing parent folders before the file", async () => {
     await files().createFile(uri("file://test-server/repo/pkg/sub/deeper/new.py"));
     expect(calls).toEqual([
-      ["createDir", WT, { dir: "/repo/pkg", name: "sub" }],
-      ["createDir", WT, { dir: "/repo/pkg/sub", name: "deeper" }],
-      ["createFile", WT, { dir: "/repo/pkg/sub/deeper", name: "new.py" }],
+      ["createDir", localRef(WT), { dir: "/repo/pkg", name: "sub" }],
+      ["createDir", localRef(WT), { dir: "/repo/pkg/sub", name: "deeper" }],
+      ["createFile", localRef(WT), { dir: "/repo/pkg/sub/deeper", name: "new.py" }],
     ]);
   });
 
@@ -157,7 +161,7 @@ describe("createLspWorkspaceFiles", () => {
       uri("file://test-server/repo/lib/c.py"),
     );
     expect(calls).toEqual([
-      ["createDir", WT, { dir: "/repo", name: "lib" }],
+      ["createDir", localRef(WT), { dir: "/repo", name: "lib" }],
       [
         "move",
         { wt: localRef(WT), srcPath: "/repo/pkg/a.py", destDir: "/repo/lib", newName: "c.py" },

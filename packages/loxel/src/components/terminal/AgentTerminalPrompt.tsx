@@ -7,6 +7,7 @@ import {
   agentName,
 } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { pathName } from "@/lib/project-file-helpers";
@@ -34,7 +35,8 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
   const answer = (choice: AgentTerminalAnswer) => {
     setBusy(true);
     api
-      .answerAgentTerminal(ask.id, choice, WINDOW_ID)
+      // The asks are the window's own server's (its `agent_terminals_changed`).
+      .answerAgentTerminal(localServerId(), ask.id, choice, WINDOW_ID)
       .catch((err: unknown) => {
         showToast(`Could not answer: ${err instanceof Error ? err.message : String(err)}`);
       })

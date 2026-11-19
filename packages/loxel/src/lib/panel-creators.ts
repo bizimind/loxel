@@ -24,7 +24,7 @@ import type {
   PlacementTab,
   SplitDirection,
 } from "@/api/panel-placement-model";
-import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
+import { type ServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import {
   centerLayoutServer,
@@ -340,10 +340,12 @@ export async function createEditor(options?: {
   if (!dv || creatingEditor) return;
   creatingEditor = true;
   try {
-    const wt = useWorktreeStore.getState().activeWorktree?.path;
-    // In Home the plan is one of Home's drafts, which belong to no worktree.
-    const { name, path: filePath } = await api.createDetachedFile({
-      wt: wt ?? HOME_KEY,
+    const active = useWorktreeStore.getState().activeWorktree;
+    const wt = active?.path;
+    // In Home the plan is one of Home's drafts, which belong to no worktree: the server of Home's
+    // layout keeps them, under the `HOME_KEY` scope.
+    const drafts = active ?? worktreeRef(centerLayoutServer(), HOME_KEY);
+    const { name, path: filePath } = await api.createDetachedFile(drafts, {
       prefix: "Note",
       ext: "md",
       content: options?.content ?? "# ",
@@ -385,10 +387,10 @@ export async function createDrawing(placement?: PanelPlacement): Promise<void> {
       appState: { viewBackgroundColor: "transparent" },
       files: {},
     });
-    const wt = useWorktreeStore.getState().activeWorktree?.path;
-    if (!wt) return;
-    const { name, path: filePath } = await api.createDetachedFile({
-      wt,
+    const active = useWorktreeStore.getState().activeWorktree;
+    if (!active) return;
+    const wt = active.path;
+    const { name, path: filePath } = await api.createDetachedFile(active, {
       prefix: "Drawing",
       ext: "excalidraw",
       content: emptyExcalidraw,
@@ -484,10 +486,10 @@ export async function createCodeEditor(options?: {
   if (!dv || creatingCodeEditor) return;
   creatingCodeEditor = true;
   try {
-    const wt = useWorktreeStore.getState().activeWorktree?.path;
-    if (!wt) return;
-    const { name, path: filePath } = await api.createDetachedFile({
-      wt,
+    const active = useWorktreeStore.getState().activeWorktree;
+    if (!active) return;
+    const wt = active.path;
+    const { name, path: filePath } = await api.createDetachedFile(active, {
       prefix: "Untitled",
       ext: options?.ext,
       content: "",
@@ -735,7 +737,7 @@ async function carryPendingEdit(
 ): Promise<boolean> {
   let onDisk: string;
   try {
-    ({ content: onDisk } = await api.getFileContentByPath(newPath, worktree?.path));
+    ({ content: onDisk } = await api.getFileContentByPath(server, newPath, worktree));
   } catch (error: unknown) {
     filesLog.warn("Could not read a moved file; leaving its tab in place", { error, newPath });
     return false;
@@ -758,6 +760,7 @@ async function carryPendingEdit(
   }
   // Awaited: if the write fails, the edits must stay in the old tab rather than be dropped.
   return saveEditorContent(
+    server,
     newPath,
     content,
     worktree,

@@ -2,7 +2,7 @@ import type { TableSchema, ColumnMeta, ColumnDef, OptionSet } from "@bizimind/lo
 import { PencilIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { DataAdapter } from "@/components/localdb/ui";
+import { type DataAdapter, localDbApiUrl } from "@/components/localdb/ui";
 import { Button } from "@/components/ui/button";
 import { useQueryScope } from "@/queries/use-scope";
 
@@ -15,7 +15,8 @@ interface Props {
 }
 
 export function SchemaBuilder({ schema, adapter: _adapter, onSchemaChange }: Props) {
-  const activeProjectPath = useQueryScope().activeProject?.path ?? null;
+  const { activeProject } = useQueryScope();
+  const activeProjectPath = activeProject?.path ?? null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCol, setEditingCol] = useState<ColumnMeta | null>(null);
   const [saving, setSaving] = useState(false);
@@ -28,7 +29,7 @@ export function SchemaBuilder({ schema, adapter: _adapter, onSchemaChange }: Pro
       const project = encodeURIComponent(activeProjectPath ?? "");
       if (editingCol) {
         const res = await fetch(
-          `/api/localdb/tables/${schema.table.name}/columns/${editingCol.name}/apply-migration?project=${project}`,
+          `${localDbApiUrl(activeProject)}/tables/${schema.table.name}/columns/${editingCol.name}/apply-migration?project=${project}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -38,7 +39,7 @@ export function SchemaBuilder({ schema, adapter: _adapter, onSchemaChange }: Pro
         if (!res.ok) throw new Error(await res.text());
       } else {
         const res = await fetch(
-          `/api/localdb/tables/${schema.table.name}/columns?project=${project}`,
+          `${localDbApiUrl(activeProject)}/tables/${schema.table.name}/columns?project=${project}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

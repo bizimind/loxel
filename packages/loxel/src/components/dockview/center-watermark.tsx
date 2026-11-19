@@ -11,6 +11,7 @@ import * as api from "@/api/client";
 import { hostOf } from "@/components/browser/BrowserBookmarks";
 import { Favicon } from "@/components/browser/Favicon";
 import { addressBarUrl } from "@/components/browser/web-search";
+import { useLayoutServer } from "@/components/dockview/panel-context";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import { showToast } from "@/components/ui/toast";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -166,6 +167,8 @@ const FIELD_CLASS =
 function CommandField({ worktreePath }: { worktreePath: string | null }) {
   const [command, setCommand] = useState("");
   const homeDir = useProjectStore((s) => s.homeDir);
+  // The layout's server: the worktree's, or for Home the window's, whose home directory it is.
+  const server = useLayoutServer();
 
   const run = () => {
     const line = command.trim();
@@ -176,7 +179,7 @@ function CommandField({ worktreePath }: { worktreePath: string | null }) {
     // The server starts the shell with the command typed in, then this window opens its panel:
     // in the worktree, or in Home, since the home directory is in none.
     api
-      .postOpenRequest({
+      .postOpenRequest(server, {
         terminal: { cwd, command: line },
         ...(worktreePath ? { pinWtPath: worktreePath } : {}),
         windowId: WINDOW_ID,

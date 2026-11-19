@@ -27,7 +27,7 @@ export function EnableNestingDialog({
   useEffect(() => {
     let cancelled = false;
     api
-      .planEnableWorktreeMetadata(project.path)
+      .planEnableWorktreeMetadata(project)
       .then((plan) => !cancelled && setAction(plan.action))
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to inspect the repo");
@@ -35,7 +35,7 @@ export function EnableNestingDialog({
     return () => {
       cancelled = true;
     };
-  }, [project.path]);
+  }, [project]);
 
   const handleConfirm = async () => {
     setBusy(true);

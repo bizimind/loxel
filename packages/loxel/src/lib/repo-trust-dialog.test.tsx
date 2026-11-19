@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+import { localRef } from "@/api/local-server";
 import type { RepoTrustDecision, RepoTrustStatus } from "@/api/repo-trust-model";
 
 let decision: RepoTrustDecision = "undecided";
@@ -18,14 +19,17 @@ function status(): RepoTrustStatus {
 
 mock.module("@/api/repo-trust-client", () => ({
   getRepoTrust: () => Promise.resolve(status()),
-  setRepoTrust: (request: { decision: RepoTrustDecision; unlessTrusted?: boolean }) => {
+  setRepoTrust: (
+    _wt: unknown,
+    request: { decision: RepoTrustDecision; unlessTrusted?: boolean },
+  ) => {
     sent.push(request.unlessTrusted ? `${request.decision} unless trusted` : request.decision);
     decision = request.decision;
     return Promise.resolve(status());
   },
 }));
 mock.module("@/api/client", () => ({
-  runInitHook: (_projectPath: string, wtPath: string) => {
+  runInitHook: (_project: unknown, wtPath: string) => {
     ran.push(wtPath);
     return Promise.resolve({ hookRan: true });
   },
@@ -62,8 +66,8 @@ beforeEach(() => {
 });
 
 test("offers wait their turn, and once trusted the rest run without asking", async () => {
-  const first = offerToRunInitHook("/repo", "/repo/.worktrees/a");
-  const second = offerToRunInitHook("/repo", "/repo/.worktrees/b");
+  const first = offerToRunInitHook(localRef("/repo"), "/repo/.worktrees/a");
+  const second = offerToRunInitHook(localRef("/repo"), "/repo/.worktrees/b");
 
   // The second waits for the first, which waits for its answer.
   await answerNext(true);
@@ -75,20 +79,20 @@ test("offers wait their turn, and once trusted the rest run without asking", asy
 
 describe("declining", () => {
   test("Not Now records the repository as declined, once", async () => {
-    const first = askToTrustRepo("/repo", ASK);
+    const first = askToTrustRepo(localRef("/repo"), ASK);
     await answerNext(false);
     expect(await first).toBe(false);
     // Unless trusted: another window may have trusted it while the question was open.
     expect(sent).toEqual(["declined unless trusted"]);
 
-    const again = askToTrustRepo("/repo", ASK);
+    const again = askToTrustRepo(localRef("/repo"), ASK);
     await answerNext(false);
     await again;
     expect(sent).toEqual(["declined unless trusted"]);
   });
 
   test("a question another one replaced records nothing", async () => {
-    const asking = askToTrustRepo("/repo", ASK);
+    const asking = askToTrustRepo(localRef("/repo"), ASK);
     await answerNext(null);
     expect(await asking).toBe(false);
     expect(sent).toEqual([]);
@@ -96,7 +100,7 @@ describe("declining", () => {
 
   test("stopping trust records the repository as declined", async () => {
     decision = "trusted";
-    const managing = manageRepoTrust("/repo");
+    const managing = manageRepoTrust(localRef("/repo"));
     await answerNext(true);
     await managing;
     expect(asked).toEqual(["Stop trusting this repository?"]);
@@ -104,7 +108,7 @@ describe("declining", () => {
   });
 
   test("cancelling from Settings is not an answer", async () => {
-    const managing = manageRepoTrust("/repo", { declineOnCancel: false });
+    const managing = manageRepoTrust(localRef("/repo"), { declineOnCancel: false });
     await answerNext(false);
     await managing;
     expect(asked).toEqual(["Trust this repository?"]);

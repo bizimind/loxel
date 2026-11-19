@@ -10,6 +10,12 @@
 import * as api from "@/api/client";
 import { whenLocalServerKnown } from "@/api/local-server";
 import {
+  ApiError,
+  hasConnection,
+  isDiskChangedError,
+  isFileMissingError,
+} from "@/api/server-connection";
+import {
   type ServerId,
   type WorktreeRef,
   type WorktreeRefKey,
@@ -152,7 +158,7 @@ function entryWorktreeKey(entry: OutboxEntry): WorktreeRefKey | null {
  */
 function retryReason(err: unknown): "unreachable" | "unavailable" | null {
   if (err instanceof TypeError) return "unreachable"; // fetch could not reach the server
-  if (!(err instanceof api.ApiError)) return null;
+  if (!(err instanceof ApiError)) return null;
   if (err.status === 404) return err.code === "ENOENT" ? null : "unavailable";
   return [401, 502, 503, 504].includes(err.status) ? "unreachable" : null;
 }
@@ -393,7 +399,7 @@ export function outboxSaveWritten(entry: OutboxEntry, written: string): void {
  */
 export function outboxSaveFailed(entry: OutboxEntry, err: unknown): void {
   if (entries.get(entry.id) !== entry) return;
-  if (!isRetriableSaveError(err) && !api.isDiskChangedError(err)) {
+  if (!isRetriableSaveError(err) && !isDiskChangedError(err)) {
     toReview(entry, null, refusalReason(err));
     return;
   }
@@ -610,7 +616,7 @@ export function retryQueuedSaves(): Promise<void> {
  * server the window is connected to (its requests go to the window's connection, `api`).
  */
 function isRetriable(entry: OutboxEntry): boolean {
-  return entry.status === "queued" && !isGone(entry) && api.hasConnection(entry.server);
+  return entry.status === "queued" && !isGone(entry) && hasConnection(entry.server);
 }
 
 /** Make sure a retry is coming, without cutting short the backoff while the server is away. */
@@ -651,10 +657,14 @@ type DiskRead =
 /** Read the file for a retry. Errors other than a missing file count as the server being away. */
 async function readDisk(entry: OutboxEntry): Promise<DiskRead> {
   try {
-    const { content } = await api.getFileContentByPath(entry.filePath, entry.worktreePath);
+    const { content } = await api.getFileContentByPath(
+      entry.server,
+      entry.filePath,
+      entryWorktree(entry),
+    );
     return { kind: "content", content };
   } catch (error) {
-    if (api.isFileMissingError(error)) return { kind: "missing" };
+    if (isFileMissingError(error)) return { kind: "missing" };
     const reason = retryReason(error);
     if (reason === "unreachable") return { kind: "unreachable" };
     if (reason === "unavailable") return { kind: "unavailable" };
@@ -718,6 +728,7 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
   const now = ownerEditor(entry);
   const pending = now?.takePendingEdit?.();
   const result = await postEditorContent(
+    entry.server,
     entry.filePath,
     pending?.content ?? now?.getEditorContent?.() ?? entry.content,
     entryWorktree(entry),
@@ -727,7 +738,7 @@ async function retryInEditor(entry: OutboxEntry, editor: EditorFileEntry): Promi
     entry.editorKey,
     disk.content,
   );
-  if (!result.ok && api.isDiskChangedError(result.error)) return "changed";
+  if (!result.ok && isDiskChangedError(result.error)) return "changed";
   return hasQueuedSave(current) ? "unavailable" : "done";
 }
 
@@ -767,19 +778,19 @@ async function retryClosed(entry: OutboxEntry): Promise<RetryOutcome> {
     content = merged.merged;
   }
   try {
-    await api.writeFileContent({
+    await api.writeFileContent(entry.server, {
       path: entry.filePath,
       content,
       // Its echo reaches no editor of this save; other editors of the file see a change.
       nonce: crypto.randomUUID(),
-      worktreePath: entry.worktreePath ?? undefined,
+      worktree: entryWorktree(entry) ?? undefined,
       format: entry.options?.format,
       formattingSettings: entry.options?.formattingSettings,
       expectedContent: disk.content,
     });
   } catch (error) {
     if (entries.get(entry.id) !== entry) return "done";
-    if (api.isDiskChangedError(error)) {
+    if (isDiskChangedError(error)) {
       entry.status = "queued";
       return "changed";
     }

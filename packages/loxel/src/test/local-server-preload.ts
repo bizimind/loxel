@@ -1,4 +1,4 @@
-import { setLocalServerId } from "@/api/local-server";
+import { connectLocalServer } from "@/api/client";
 
-// The app sets this from the server before it renders (main.tsx); tests run without one.
-setLocalServerId("test-server");
+// The app connects to its server before it renders (main.tsx); tests run without one.
+connectLocalServer("test-server");

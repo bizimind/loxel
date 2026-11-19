@@ -6,7 +6,7 @@ import { toServerId, worktreeRef } from "@/api/worktree-ref";
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
-  writeFileContent: async (options: { content: string }) => ({
+  writeFileContent: async (_server: string, options: { content: string }) => ({
     success: true,
     content: `formatted ${options.content}`,
   }),
@@ -34,7 +34,7 @@ describe("saved content stash", () => {
     store.openFile(tab, server, "/repo/a.ts");
     store.openFile(side, server, "/repo/a.ts");
 
-    await saveEditorContent("/repo/a.ts", "text", localRef("/repo"), undefined, side);
+    await saveEditorContent(server, "/repo/a.ts", "text", localRef("/repo"), undefined, side);
     const [nonce] = useEditorStateStore.getState().files.get(side)!.pendingNonces;
 
     expect(consumeSavedContent(nonce!, side)).toBe("formatted text");

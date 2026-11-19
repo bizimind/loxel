@@ -37,7 +37,7 @@ describe("selectRustToolchain", () => {
     pick = (ids) => ids.at(-1) ?? "";
     await selectRustToolchain(localRef("/wt"));
     expect(setRustToolchainChoice.mock.calls).toEqual([
-      [{ worktreePath: "/wt", toolchain: "automatic" }],
+      [localRef("/wt"), { toolchain: "automatic" }],
     ] as never);
   });
 
@@ -45,7 +45,7 @@ describe("selectRustToolchain", () => {
     pick = (ids) => ids[0] ?? "";
     await selectRustToolchain(localRef("/wt"));
     expect(setRustToolchainChoice.mock.calls).toEqual([
-      [{ worktreePath: "/wt", toolchain: null }],
+      [localRef("/wt"), { toolchain: null }],
     ] as never);
   });
 });

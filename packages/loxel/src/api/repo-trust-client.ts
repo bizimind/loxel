@@ -1,32 +1,38 @@
-import { fetchJson, withScope } from "./client";
+import { withScope } from "./client";
 import type {
   RepoTrustListResponse,
   RepoTrustStatus,
   SetRepoTrustRequest,
 } from "./repo-trust-model";
+import { connectionOf } from "./server-connection";
+import type { ServerId, WorktreeRef } from "./worktree-ref";
 
-export async function getRepoTrust(worktreePath: string): Promise<RepoTrustStatus> {
-  return fetchJson<RepoTrustStatus>(withScope("/repo-trust", { wt: worktreePath }));
+export async function getRepoTrust(wt: WorktreeRef): Promise<RepoTrustStatus> {
+  return connectionOf(wt.server).fetchJson<RepoTrustStatus>(
+    withScope("/repo-trust", { wt: wt.path }),
+  );
 }
 
-/** Every project's repository and every stored answer, for Settings > Security. */
-export async function listRepoTrust(): Promise<RepoTrustListResponse> {
-  return fetchJson<RepoTrustListResponse>("/repo-trust/list");
+/** Every project's repository on `server` and every answer it stores, for Settings > Security. */
+export async function listRepoTrust(server: ServerId): Promise<RepoTrustListResponse> {
+  return connectionOf(server).fetchJson<RepoTrustListResponse>("/repo-trust/list");
 }
 
 export async function setRepoTrust(
-  request: Extract<SetRepoTrustRequest, { worktreePath: string }>,
+  wt: WorktreeRef,
+  choice: Omit<Extract<SetRepoTrustRequest, { worktreePath: string }>, "worktreePath">,
 ): Promise<RepoTrustStatus> {
-  return fetchJson<RepoTrustStatus>("/repo-trust", {
+  const request: SetRepoTrustRequest = { worktreePath: wt.path, ...choice };
+  return connectionOf(wt.server).fetchJson<RepoTrustStatus>("/repo-trust", {
     method: "POST",
     body: JSON.stringify(request),
   });
 }
 
-/** Clear the stored answer for a repository, so Loxel asks again. */
-export async function forgetRepoTrust(repositoryId: string): Promise<void> {
+/** Clear the stored answer for a repository of `server`, so Loxel asks again. */
+export async function forgetRepoTrust(server: ServerId, repositoryId: string): Promise<void> {
   const request: SetRepoTrustRequest = { repositoryId, decision: "undecided" };
-  await fetchJson<{ success: boolean }>("/repo-trust", {
+  await connectionOf(server).fetchJson<{ success: boolean }>("/repo-trust", {
     method: "POST",
     body: JSON.stringify(request),
   });

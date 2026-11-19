@@ -449,7 +449,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         restartLanguageServers();
         break;
       case "worktree.manageRepoTrust":
-        void manageRepoTrust(requireActiveWorktree().path);
+        void manageRepoTrust(requireActiveWorktree());
         break;
       case "project.add":
         openAddProjectWizard();

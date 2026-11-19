@@ -132,7 +132,7 @@ export function automaticDescription(status: CompileDatabaseStatus, wtPath: stri
 export async function selectCompileDatabase(wt: WorktreeRef): Promise<void> {
   const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const state = getCompileDatabaseStatus(wtPath);
+  const state = getCompileDatabaseStatus(wt);
   const items = state.then((status) => {
     const list: QuickPickItem[] = [
       { id: ENTER_PATH_ID, label: "Enter a folder or compile database path…" },
@@ -166,7 +166,7 @@ export async function selectCompileDatabase(wt: WorktreeRef): Promise<void> {
   }
 
   try {
-    await setCompileDatabaseChoice({ worktreePath: wtPath, path: chosen });
+    await setCompileDatabaseChoice(wt, { path: chosen });
     // The status and each file's answer, whose keys extend it.
     await queryClient.invalidateQueries({
       queryKey: queryKeys.toolchainStatus(cCppToolchain.id, projectRefOf(wt), wt),

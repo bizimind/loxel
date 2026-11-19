@@ -5,8 +5,7 @@ import { createRoot } from "react-dom/client";
 
 import { startLanguageServers } from "@/lib/monaco-env";
 
-import { fetchLocalServerId } from "./api/client";
-import { setLocalServerId } from "./api/local-server";
+import { connectLocalServer, fetchLocalServerId } from "./api/client";
 import App from "./App";
 import { frontendLog } from "./lib/frontend-logger";
 import { startPerfMonitor } from "./lib/perf-monitor";
@@ -48,7 +47,7 @@ if (!root) throw new Error("Root element not found");
 // save of its file that an earlier run left unsent. Never holds the app back for long.
 const OUTBOX_INIT_WAIT_MS = 2_000;
 // Every query key names the server, so the app also waits until it knows which one it talks to.
-const serverKnown = fetchLocalServerId().then(setLocalServerId);
+const serverKnown = fetchLocalServerId().then(connectLocalServer);
 void Promise.race([
   initSaveOutbox(),
   new Promise((resolve) => {

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
+import { hasConnection } from "@/api/server-connection";
 import type { WorktreeRef } from "@/api/worktree-ref";
 
 import { queryKeys } from "./query-keys";
@@ -19,9 +20,9 @@ export function useFileIndexQuery(wt: WorktreeRef | null, { fresh = false } = {}
     queryKey: queryKeys.fileIndex(project, wt),
     queryFn: () => {
       if (!wt) throw new Error("No worktree to index");
-      return api.getFileIndex(wt.path);
+      return api.getFileIndex(wt);
     },
-    enabled: wt !== null && project !== null && api.hasConnection(wt.server),
+    enabled: wt !== null && project !== null && hasConnection(wt.server),
     staleTime: fresh ? 0 : Number.POSITIVE_INFINITY,
   });
 }

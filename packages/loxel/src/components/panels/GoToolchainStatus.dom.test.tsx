@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import type { GoEnv, GoEnvResponse, GoToolchainChoiceRequest } from "@/api/go-env-model";
 import { localRef } from "@/api/local-server";
-import { formatWorktreeRef } from "@/api/worktree-ref";
+import { formatWorktreeRef, type WorktreeRef } from "@/api/worktree-ref";
 import { useCommandPaletteStore } from "@/store/command-palette";
 
 const ENV: GoEnv = {
@@ -26,9 +26,9 @@ const ENV: GoEnv = {
 
 let response: GoEnvResponse = { env: ENV, chosen: null };
 const originalClient = await import("@/api/go-env-client");
-const getGoEnv = jest.fn(async (_wtPath: string) => response);
-const refreshGoEnv = jest.fn(async (_wtPath: string) => response);
-const getGoToolchainCandidates = jest.fn(async (_wtPath: string) => ({
+const getGoEnv = jest.fn(async (_wt: WorktreeRef) => response);
+const refreshGoEnv = jest.fn(async (_wt: WorktreeRef) => response);
+const getGoToolchainCandidates = jest.fn(async (_wt: WorktreeRef) => ({
   candidates: [
     { path: "/home/me/sdk/go1.24.1/bin/go", version: "1.24.1", fromModuleCache: false },
     { path: "/home/me/go/pkg/mod/t/bin/go", version: "1.26.0", fromModuleCache: true },
@@ -203,12 +203,11 @@ describe("GoToolchainStatus", () => {
       await done;
     };
     await pick("/home/me/sdk/go1.24.1/bin/go");
-    expect(setGoToolchainChoice).toHaveBeenLastCalledWith({
-      worktreePath: "/wt-a",
+    expect(setGoToolchainChoice).toHaveBeenLastCalledWith(localRef("/wt-a"), {
       goPath: "/home/me/sdk/go1.24.1/bin/go",
     });
     await pick("#automatic");
-    expect(setGoToolchainChoice).toHaveBeenLastCalledWith({ worktreePath: "/wt-a", goPath: null });
+    expect(setGoToolchainChoice).toHaveBeenLastCalledWith(localRef("/wt-a"), { goPath: null });
     expect(restartStoppedLanguageServers).toHaveBeenCalled();
   });
 
@@ -216,7 +215,7 @@ describe("GoToolchainStatus", () => {
     renderStatus();
     fireEvent.click(await screen.findByRole("button", { name: "Go 1.27.3" }));
     await refreshGoEnv.mock.results[0]?.value;
-    expect(refreshGoEnv).toHaveBeenCalledWith("/wt-a");
+    expect(refreshGoEnv).toHaveBeenCalledWith(localRef("/wt-a"));
     await waitFor(() => expect(restartStoppedLanguageServers).toHaveBeenCalled());
   });
 

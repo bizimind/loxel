@@ -548,7 +548,7 @@ describe("Sidebar worktree nesting", () => {
 
       fireEvent.contextMenu(screen.getByText("parent"));
       fireEvent.click(await screen.findByRole("menuitem", { name: "New child worktree" }));
-      expect(plan).toHaveBeenCalledWith(project.path, parent.path);
+      expect(plan).toHaveBeenCalledWith(PROJECT, parent.path);
       expect(await screen.findByText("Starts from origin/main")).toBeDefined();
       const stack = screen.getByLabelText("Start from parent");
       expect(stack).not.toBeChecked();

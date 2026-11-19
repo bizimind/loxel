@@ -48,9 +48,8 @@ export function javaEnvSourceDescription(source: JavaEnvSource): string {
  * everything that resolves the worktree's JDK.
  */
 export async function selectJavaRuntime(wt: WorktreeRef): Promise<void> {
-  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const state = getJavaEnvCandidates(wtPath);
+  const state = getJavaEnvCandidates(wt);
   const items = state.then(({ candidates, automatic, overridePath }) => {
     const list: QuickPickItem[] = [
       { id: ENTER_PATH_ID, label: "Enter JDK path…" },
@@ -84,7 +83,7 @@ export async function selectJavaRuntime(wt: WorktreeRef): Promise<void> {
   }
 
   try {
-    const response = await setJavaOverride({ worktreePath: wtPath, javaHome });
+    const response = await setJavaOverride(wt, { javaHome });
     setToolchainStatusData(javaToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the JDK");

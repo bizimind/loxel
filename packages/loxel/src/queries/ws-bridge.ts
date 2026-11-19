@@ -4,9 +4,10 @@ import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import { HOME_KEY } from "@/api/home-model";
 import { localRef, localServerId } from "@/api/local-server";
+import { isFileMissingError } from "@/api/server-connection";
 import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
-import type { WorktreeRef } from "@/api/worktree-ref";
+import type { ServerId, WorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
@@ -101,7 +102,7 @@ export function refreshOpenFile(
     return;
   }
 
-  void fetchIntoOpenFile(project, wt, editorKey, path, nonces);
+  void fetchIntoOpenFile(project, wt, editorKey, entry.server, path, nonces);
 }
 
 /**
@@ -113,17 +114,18 @@ async function fetchIntoOpenFile(
   project: WorktreeRef | null,
   wt: WorktreeRef | undefined,
   editorKey: EditorKey,
+  server: ServerId,
   path: string,
   nonces: string[],
 ): Promise<void> {
   const editorStore = useEditorStateStore.getState();
   const queryKey = queryKeys.fileContent(project, path, undefined, wt);
   try {
-    const data = await api.getFileContentByPath(path, wt?.path);
+    const data = await api.getFileContentByPath(server, path, wt);
     editorStore.handleDiskChange(editorKey, nonces, data.content);
     await applyFetchedContent(queryKey, data);
   } catch (error: unknown) {
-    if (api.isFileMissingError(error)) {
+    if (isFileMissingError(error)) {
       editorStore.setDeleted(editorKey, true);
       return;
     }
@@ -150,7 +152,7 @@ export async function checkOpenFileExists(
   if (!initial || initial.movedTo) return;
   const path = initial.filePath;
   try {
-    const data = await api.getFileContentByPath(path, wt?.path);
+    const data = await api.getFileContentByPath(initial.server, path, wt);
     // Read the entry after the fetch: another request (e.g. the editor's own refetch) may have
     // marked it deleted, or a move may have started, while this one was in flight.
     const entry = useEditorStateStore.getState().files.get(editorKey);
@@ -158,7 +160,7 @@ export async function checkOpenFileExists(
     useEditorStateStore.getState().handleDiskChange(editorKey, [], data.content);
     await applyFetchedContent(queryKeys.fileContent(project, path, undefined, wt), data);
   } catch (error: unknown) {
-    if (api.isFileMissingError(error)) {
+    if (isFileMissingError(error)) {
       useEditorStateStore.getState().setDeleted(editorKey, true);
       return;
     }
@@ -315,7 +317,7 @@ export function useWsBridge(): void {
             const path = entry.filePath;
             const queryKey = queryKeys.fileContent(project, path, undefined, wt);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
-            void fetchIntoOpenFile(project, wt, editorKey, path, []);
+            void fetchIntoOpenFile(project, wt, editorKey, entry.server, path, []);
           }
           // For what the cache does not hold: the files tree reads its listings imperatively, so
           // the invalidation above refreshes none of them, and the open files outside the

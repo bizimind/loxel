@@ -14,8 +14,9 @@ export function useRunningTerminals(
   options: { enabled?: boolean } = {},
 ): RunningTerminal[] | undefined {
   const { data } = useQuery({
+    // The window's own server's terminals, the ones its `terminals_changed` keeps current.
     queryKey: queryKeys.runningTerminals(localServerId()),
-    queryFn: () => api.getRunningTerminals({ programs: false }),
+    queryFn: () => api.getRunningTerminals(localServerId(), { programs: false }),
     enabled: options.enabled ?? true,
     staleTime: Infinity,
   });

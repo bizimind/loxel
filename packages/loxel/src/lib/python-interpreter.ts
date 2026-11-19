@@ -70,7 +70,7 @@ export function pythonEnvSourceDescription(source: PythonEnvSource): string {
 export async function selectPythonInterpreter(wt: WorktreeRef): Promise<void> {
   const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const state = getPythonEnvCandidates(wtPath);
+  const state = getPythonEnvCandidates(wt);
   const items = state.then(({ candidates, automaticPath, overridePath }) => {
     const automatic = candidates.find((c) => c.pythonPath === automaticPath);
     const list: QuickPickItem[] = [
@@ -105,7 +105,7 @@ export async function selectPythonInterpreter(wt: WorktreeRef): Promise<void> {
   }
 
   try {
-    const response = await setPythonOverride({ worktreePath: wtPath, pythonPath });
+    const response = await setPythonOverride(wt, { pythonPath });
     setToolchainStatusData(pythonToolchain, wt, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Python interpreter");

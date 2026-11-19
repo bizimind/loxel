@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { createPortal } from "react-dom";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { useSchemaConsentStore } from "@/store/schema-consent";
@@ -17,7 +18,8 @@ export function SchemaConsentPrompt() {
 
   const decide = useCallback(
     (decision: "trust" | "deny") => {
-      if (url) api.decideSchemaConsent(url, decision).catch(reportFailure);
+      // The pending URLs are the window's own server's (its `schema_consent_changed`).
+      if (url) api.decideSchemaConsent(localServerId(), url, decision).catch(reportFailure);
     },
     [url],
   );
@@ -45,7 +47,8 @@ export function SchemaConsentPrompt() {
           variant="ghost"
           size="xs"
           onClick={() => {
-            api.setSchemaNeverFetch(true).catch(reportFailure);
+            // The window's own server's setting, as for the decision above.
+            api.setSchemaNeverFetch(localServerId(), true).catch(reportFailure);
           }}
         >
           Never ask

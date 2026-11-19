@@ -36,12 +36,20 @@ let createHookSkipped = false;
 let initHookOffers: string[] = [];
 
 const actualClient = await import("@/api/client");
+const { registerConnection, ServerConnection } = await import("@/api/server-connection");
+// The other server is connected too, so its worktrees can be subscribed.
+registerConnection(
+  new ServerConnection({
+    server: THERE,
+    baseUrl: "/peers/server-there",
+    ws: new actualClient.WsClient(),
+  }),
+);
 
 // Override only the worktree-removal calls; the rest of the client module
 // (logging, ws client) is shared with the store under test.
 mock.module("@/api/client", () => ({
   ...actualClient,
-  hasConnection: (server: string) => server === localServerId() || server === THERE,
   planRemoveWorktree: (_projectPath: string, wtPath: string) => {
     planRemoveCalls.push(wtPath);
     return Promise.resolve(plan);

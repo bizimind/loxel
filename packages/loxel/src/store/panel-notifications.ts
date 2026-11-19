@@ -1,3 +1,7 @@
+import { create } from "zustand";
+
+import { wsClientOf } from "@/api/client";
+import { type ServerNotification, isPanelSource } from "@/api/notification-model";
 /**
  * Panel notification state.
  *
@@ -10,10 +14,7 @@
  * - Worktree sidebar items show a badge dot when the worktree is not active
  * - The notification center overlay shows a scrollable list
  */
-import { create } from "zustand";
-
-import { hasConnection, wsClientOf } from "@/api/client";
-import { type ServerNotification, isPanelSource } from "@/api/notification-model";
+import { hasConnection } from "@/api/server-connection";
 import {
   type ServerId,
   type WorktreeRef,

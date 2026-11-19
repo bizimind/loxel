@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import type { BrowseEntry } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,8 @@ export function FolderPickerContent({ onSelect, allowNonGitFolders }: FolderPick
     setLoading(true);
     setError(null);
     try {
-      const result = await api.browse(path);
+      // The window's own server's folders, where the Add Project wizard adds projects.
+      const result = await api.browse(localServerId(), path);
       setCurrentPath(result.path);
       setDirs(result.dirs);
     } catch (err) {

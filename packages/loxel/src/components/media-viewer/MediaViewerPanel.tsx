@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getPathInfo, wsClient } from "@/api/client";
+import { connectionOf } from "@/api/server-connection";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktree } from "@/components/dockview/panel-context";
@@ -87,7 +88,6 @@ const FRAME_STEP = 1 / 30; // ~1 frame at 30fps
 
 export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) {
   const worktree = usePanelWorktree();
-  const worktreePath = worktree?.path ?? null;
   const mediaType = getMediaType(filePath);
   const isVideo = mediaType === "video";
   // SVGs are inlined into the frame and may carry their own scripts, so they stay in an opaque
@@ -122,8 +122,10 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   mediaBoxRef.current = mediaBox;
 
   // --- URL ---
-  const iframeSrc = worktreePath
-    ? `/api/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktreePath)}&v=${version}`
+  const iframeSrc = worktree
+    ? connectionOf(worktree.server).apiUrl(
+        `/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktree.path)}&v=${version}`,
+      )
     : "";
 
   // --- Send command to iframe video ---
@@ -207,7 +209,7 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
     if (!worktree) return;
     const absolutePath = filePath.startsWith("/") ? filePath : `${worktree.path}/${filePath}`;
     const readStamp = () =>
-      getPathInfo(absolutePath).then(
+      getPathInfo(worktree.server, absolutePath).then(
         ({ size, mtimeMs }) => `${size}:${mtimeMs}`,
         () => null,
       );

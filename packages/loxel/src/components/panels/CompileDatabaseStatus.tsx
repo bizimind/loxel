@@ -28,15 +28,11 @@ export function CompileDatabaseStatusItem() {
   const filePath = useActiveEditorFile()?.filePath ?? null;
   const associations = useSettingsStore(selectEffectiveFileAssociations);
   const wt = active?.wt ?? null;
-  const worktreePath = wt?.path ?? null;
   const project = useProjectRef(wt);
   const { data: file } = useQuery({
     // Extends the status's key, so that its changed message refreshes this too.
     queryKey: queryKeys.toolchainFileStatus(cCppToolchain.id, project, wt, filePath),
-    queryFn:
-      worktreePath && filePath
-        ? () => getFileCompileDatabase({ worktreePath, filePath })
-        : skipToken,
+    queryFn: wt && filePath ? () => getFileCompileDatabase(wt, { filePath }) : skipToken,
   });
 
   if (!active || !file || !filePath) return null;

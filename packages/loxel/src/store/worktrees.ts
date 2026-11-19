@@ -7,6 +7,7 @@ import { wsClientOf } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import { localServerId, whenLocalServerKnown } from "@/api/local-server";
 import type { EnrichedProject } from "@/api/project-model";
+import { hasConnection } from "@/api/server-connection";
 import {
   type ServerId,
   type WorktreeRef,
@@ -507,7 +508,7 @@ export const useWorktreeStore = create<WorktreeState>()(
           // server's says nothing about this list, unless the window has no connection to it (a
           // session restored after the server's id changed).
           const active = get().activeWorktree;
-          if (!active || (active.server !== server && api.hasConnection(active.server))) return;
+          if (!active || (active.server !== server && hasConnection(active.server))) return;
           const listed = new Set(
             enriched.flatMap((p) => {
               const project = projectRef(p);
@@ -536,7 +537,7 @@ export const useWorktreeStore = create<WorktreeState>()(
           const prior = getProject(get(), project).worktrees;
           const priorPaths = new Set(prior.map((wt) => wt.path));
 
-          const data = await api.getProjectWorktrees(listed.id);
+          const data = await api.getProjectWorktrees(project.server, listed.id);
           if (refreshRequestIds.get(key) !== requestId) return;
           const validPaths = new Set([
             ...data.worktrees.map((wt) => wt.path),
@@ -597,7 +598,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         createWorktree: async (project, name, options) => {
-          const plan = await api.planAddWorktree(project.path, name);
+          const plan = await api.planAddWorktree(project, name);
           const parentPath = options?.parentPath;
           const fromParent = options?.fromParent;
           const title = options?.title;
@@ -636,7 +637,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         requestRemoveWorktree: async (project, wt) => {
-          const plan = await api.planRemoveWorktree(project.path, wt.path);
+          const plan = await api.planRemoveWorktree(project, wt.path);
           set({ pendingRemovePlan: { ...plan, wtPath: wt.path, project } });
         },
 
@@ -660,7 +661,7 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
           let result: Awaited<ReturnType<typeof api.removeWorktreeByWtPath>>;
           try {
-            result = await api.removeWorktreeByWtPath(project.path, wtPath, {
+            result = await api.removeWorktreeByWtPath(project, wtPath, {
               deleteBranch,
               force,
               nested,
@@ -699,7 +700,7 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
           if (parentPath) expand(set, project, parentPath);
           try {
-            await api.updateWorktreeMeta(project.path, path, { parentPath });
+            await api.updateWorktreeMeta(project, path, { parentPath });
           } finally {
             await get().refreshProjectWorktrees(project);
           }
@@ -709,14 +710,14 @@ export const useWorktreeStore = create<WorktreeState>()(
           const trimmed = title.trim();
           patchEntry(set, project, path, { title: trimmed || undefined });
           try {
-            await api.updateWorktreeMeta(project.path, path, { title: trimmed || null });
+            await api.updateWorktreeMeta(project, path, { title: trimmed || null });
           } finally {
             await get().refreshProjectWorktrees(project);
           }
         },
 
         enableWorktreeMetadata: async (project) => {
-          await api.enableWorktreeMetadata(project.path);
+          await api.enableWorktreeMetadata(project);
           await get().refreshProjectWorktrees(project);
         },
 
@@ -959,8 +960,8 @@ async function finishCreate(
 ): Promise<boolean> {
   let created = true;
   try {
-    const result = await api.createWorktree(project.path, name, options);
-    if (result.hookSkipped) void offerToRunInitHook(project.path, result.path);
+    const result = await api.createWorktree(project, name, options);
+    if (result.hookSkipped) void offerToRunInitHook(project, result.path);
   } catch (err) {
     created = false;
     const reason = err instanceof Error ? err.message : String(err);

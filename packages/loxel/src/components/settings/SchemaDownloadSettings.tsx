@@ -1,6 +1,7 @@
 import { Trash2Icon } from "lucide-react";
 
 import * as api from "@/api/client";
+import { localServerId } from "@/api/local-server";
 import { Switch } from "@/components/ui/switch";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 
@@ -16,7 +17,8 @@ function SchemaUrlRow({ url, trusted }: { url: string; trusted: boolean }) {
       <button
         aria-label={`Forget ${url}`}
         onClick={() => {
-          api.decideSchemaConsent(url, null).catch(reportFailure);
+          // Settings show the window's own server's decisions (its `schema_consent_changed`).
+          api.decideSchemaConsent(localServerId(), url, null).catch(reportFailure);
         }}
         className="text-muted-foreground hover:text-destructive flex size-7 items-center justify-center rounded p-1 opacity-0 transition-colors group-hover:opacity-100 focus-visible:opacity-100"
       >
@@ -55,7 +57,8 @@ export function SchemaDownloadSettings() {
           checked={neverFetch}
           aria-label="Never fetch schemas named by files"
           onCheckedChange={(checked) => {
-            api.setSchemaNeverFetch(checked).catch(reportFailure);
+            // The window's own server's setting, as for the decisions.
+            api.setSchemaNeverFetch(localServerId(), checked).catch(reportFailure);
           }}
         />
       </div>

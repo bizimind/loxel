@@ -3,7 +3,7 @@ import { DockviewReact } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { localConnection, localServerId } from "@/api/local-server";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
@@ -303,7 +303,8 @@ export function PersistedLayoutComponent({
     if (pendingPayloadRef.current.size === 0) return;
     for (const [fullKey, snapshot] of pendingPayloadRef.current) {
       try {
-        void fetch(`/api/stores/${encodeURIComponent(fullKey)}`, {
+        // The window's own server, the one `storedOnWindowServer` lets layouts be written to.
+        void fetch(localConnection().apiUrl(`/stores/${encodeURIComponent(fullKey)}`), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ value: snapshot }),

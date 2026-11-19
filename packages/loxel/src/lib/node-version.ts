@@ -29,9 +29,8 @@ export function nodeSourceDescription(env: NodeEnv, pinFile: string | null): str
  * one on `PATH`, or automatic detection. The choice is saved per worktree on the server.
  */
 export async function selectNodeVersion(wt: WorktreeRef): Promise<void> {
-  const wtPath = wt.path;
   const { homeDir } = useProjectStore.getState();
-  const items = getNodeEnvCandidates(wtPath).then(({ candidates, automaticPath, overridePath }) => {
+  const items = getNodeEnvCandidates(wt).then(({ candidates, automaticPath, overridePath }) => {
     const automatic = candidates.find((c) => c.nodePath === automaticPath);
     const list: QuickPickItem[] = [
       {
@@ -54,8 +53,7 @@ export async function selectNodeVersion(wt: WorktreeRef): Promise<void> {
   if (picked === null) return;
 
   try {
-    const response = await setNodeOverride({
-      worktreePath: wtPath,
+    const response = await setNodeOverride(wt, {
       nodePath: picked === AUTOMATIC_ID ? null : picked,
     });
     setToolchainStatusData(nodeToolchain, wt, response);

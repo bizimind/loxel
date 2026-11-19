@@ -25,7 +25,7 @@ export async function confirmRestartTerminal(
 ): Promise<void> {
   let program: string | null | undefined;
   try {
-    const running = await api.getRunningTerminals({ programs: true });
+    const running = await api.getRunningTerminals(server, { programs: true });
     program = running.find((terminal) => terminal.id === terminalId)?.program;
   } catch (err) {
     uiLog.warn("Could not read the terminal's foreground program", { error: err });

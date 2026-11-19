@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
-import { hasConnection, wsClientOf } from "@/api/client";
+import { wsClientOf } from "@/api/client";
+import { hasConnection } from "@/api/server-connection";
 import { type WorktreeRef, sameWorktreeRef, sameOptionalWorktreeRef } from "@/api/worktree-ref";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
