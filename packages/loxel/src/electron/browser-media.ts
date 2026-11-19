@@ -28,6 +28,7 @@ import {
   systemPreferences,
 } from "electron";
 
+import { onAppWindowMessage } from "./app-windows";
 import {
   MEDIA_DEVICES,
   type MediaDevice,
@@ -364,9 +365,7 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   settleDecidedRequests();
 }
 
-function setSites(event: IpcMainEvent, value: unknown): void {
-  // Only Loxel's own windows hold the settings; a page must never decide for itself.
-  if (event.sender.getType() !== "window") return;
+function setSites(_event: IpcMainEvent, value: unknown): void {
   sites = parseMediaSites(value);
   if (!sitesLoaded) {
     sitesLoaded = true;
@@ -398,8 +397,8 @@ const SYSTEM_SETTINGS: Record<MediaDevice, string> = {
   microphone: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
 };
 
-function openSystemSettings(event: IpcMainEvent, value: unknown): void {
-  if (event.sender.getType() !== "window" || process.platform !== "darwin") return;
+function openSystemSettings(_event: IpcMainEvent, value: unknown): void {
+  if (process.platform !== "darwin") return;
   const device = mediaDeviceSchema.safeParse(value);
   if (device.success) void shell.openExternal(SYSTEM_SETTINGS[device.data]);
 }
@@ -413,12 +412,11 @@ export function installBrowserMedia(): void {
       event.returnValue = null;
     }
   });
-  ipcMain.on(BROWSER_MEDIA_LISTEN, (event) => {
-    if (event.sender.getType() === "window") listeningHosts.add(event.sender);
-  });
-  ipcMain.on(BROWSER_MEDIA_SET_SITES, setSites);
-  ipcMain.on(BROWSER_MEDIA_PERMISSION_RESPOND, respondToRequest);
-  ipcMain.on(BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS, openSystemSettings);
+  onAppWindowMessage(BROWSER_MEDIA_LISTEN, (event) => listeningHosts.add(event.sender));
+  // Only Loxel's own windows hold the settings; a page must never decide for itself.
+  onAppWindowMessage(BROWSER_MEDIA_SET_SITES, setSites);
+  onAppWindowMessage(BROWSER_MEDIA_PERMISSION_RESPOND, respondToRequest);
+  onAppWindowMessage(BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS, openSystemSettings);
 }
 
 /** Withdraw the guest's open prompts, refusing what waits on them: its page is going away. */
