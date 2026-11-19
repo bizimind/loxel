@@ -4,6 +4,7 @@ import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { codingAgentName, isCodingAgent } from "./coding-agent-env";
 import { SOCKET_URL, findServer, givenServerGone, waitForServer } from "./find-server";
 import { WINDOW_WAIT_MS, requestOpenAll } from "./open-request";
+import { getCurrentVersion } from "./server/version";
 import { isHttpUrl } from "./url-utils";
 
 /**
@@ -33,6 +34,12 @@ function launchLoxel({ background = false } = {}): void {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // The release workflow runs `--version` to check the signed binary still starts.
+  if (args.length === 1 && (args[0] === "--version" || args[0] === "-V")) {
+    console.log(getCurrentVersion());
+    return;
+  }
 
   // No arguments: focus/launch loxel
   if (args.length === 0) {

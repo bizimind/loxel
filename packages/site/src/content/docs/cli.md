@@ -15,7 +15,15 @@ loxel terminal --split right -- pnpm dev          # run a command in a new split
 loxel terminal --cwd ../other-worktree -- claude  # start an agent in another worktree
 ```
 
-> **Note:** The installer doesn't add `loxel` to your system `PATH` yet, so it works from inside Loxel terminals only.
+## Installing
+
+Loxel ships the CLI and puts it on the `PATH` of every Loxel terminal, so there is nothing to install there, and it updates with the app. To use it in other terminals too, link it into a directory on your `PATH`:
+
+```bash
+ln -sf /Applications/Loxel.app/Contents/Resources/bin/loxel ~/.local/bin/loxel
+```
+
+Each [release](https://github.com/bizimind/loxel/releases) also lists the CLI on its own for macOS, for machines without the app. A directory your shell's startup files put first on `PATH` wins over the bundled CLI in Loxel terminals too, so remove an old copy of `loxel` from it, or link it as above.
 
 ---
 
@@ -24,6 +32,7 @@ loxel terminal --cwd ../other-worktree -- claude  # start an agent in another wo
 ```
 loxel [open flags] <file-path | folder-path | url>...
 loxel terminal [--cwd <dir>] [--title <name>] [open flags] [--] [command...]
+loxel --version
 
 open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree <path>] [--focus | --no-focus]
 ```

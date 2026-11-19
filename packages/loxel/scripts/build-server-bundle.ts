@@ -70,6 +70,7 @@ copyBuilt(
   path.join(packageRoot, "build", TERMINAL_HOST_BINARY),
   path.join(bundleDir, TERMINAL_HOST_BINARY),
 );
+copyBuilt(path.join(packageRoot, "build", "loxel"), path.join(bundleDir, "bin", "loxel"));
 copyBuilt(STAGE_DIR, bundleDir);
 // `pnpm run build` also writes the server's JS bundle into dist/server/, which is not the renderer.
 const distDir = path.join(packageRoot, "dist");

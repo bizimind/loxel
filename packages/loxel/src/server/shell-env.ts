@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 import { logger } from "./logger";
 import { measureSpawn } from "./spawn-metrics";
@@ -300,11 +301,24 @@ export function buildShellSpawnEnv(): Env {
   return withSpawnDefaults(env);
 }
 
+/** `path` with `dir` in front, unless it already holds it. */
+export function withPathEntry(path: string | undefined, dir: string): string {
+  if (!path) return dir;
+  return path.split(delimiter).includes(dir) ? path : `${dir}${delimiter}${path}`;
+}
+
+/**
+ * The `bin` directory beside the compiled server, which holds the `loxel` CLI: the app's
+ * `Contents/Resources/bin`, or the standalone server bundle's. Null when the server runs from
+ * source, which has none.
+ */
+export function bundledBinDir(execPath: string = process.execPath): string | null {
+  const dir = join(dirname(execPath), "bin");
+  return existsSync(join(dir, "loxel")) ? dir : null;
+}
+
 function withSpawnDefaults(env: Env): Env {
-  const localBin = join(homedir(), ".local", "bin");
-  if (!env.PATH || !env.PATH.split(delimiter).includes(localBin)) {
-    env.PATH = env.PATH ? `${localBin}${delimiter}${env.PATH}` : localBin;
-  }
+  env.PATH = withPathEntry(env.PATH, join(homedir(), ".local", "bin"));
   if (!env.HOME) {
     env.HOME = homedir();
   }
