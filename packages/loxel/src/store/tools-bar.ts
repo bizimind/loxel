@@ -52,7 +52,7 @@ let outerApi: DockviewApi | null = null;
 /** Module-level reference to the center (editor/terminal) dockview API. */
 let centerApi: DockviewApi | null = null;
 /**
- * The layout key the center API was mounted for: a worktree path, or `HOME_LAYOUT_KEY`. A worktree
+ * The layout key the center API was mounted for: a worktree's `LayoutKey`, or `HOME_LAYOUT_KEY`. A worktree
  * switch remounts the center.
  */
 let centerApiLayoutKey: LayoutKey | null = null;

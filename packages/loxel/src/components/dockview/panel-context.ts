@@ -26,8 +26,12 @@ export const LayoutServerContext = createContext<ServerId | null>(null);
  */
 export function useLayoutServer(): ServerId {
   const server = useContext(LayoutServerContext);
-  if (server === null) throw new Error("Panels render inside a layout, which names their server");
+  if (server === null) throw outsideLayout();
   return server;
+}
+
+function outsideLayout(): Error {
+  return new Error("Panels render inside a layout, which names their server");
 }
 
 /** The worktree of a panel's persisted `worktreePath` param, on the server of its layout. */
@@ -68,13 +72,16 @@ export function usePanelWorktreePath(): string | null {
 export function usePanelServer(): ServerId {
   const worktree = usePanelWorktree();
   const layout = useContext(LayoutServerContext);
-  const server = worktree?.server ?? layout;
-  if (server === null) throw new Error("Panels render inside a layout, which names their server");
-  return server;
+  if (worktree) return worktree.server;
+  if (layout === null) throw outsideLayout();
+  return layout;
 }
 
-/** The server of the center layout, the only one whose panels code outside React looks up. */
-function centerLayoutServer(): ServerId {
+/**
+ * The server of the center layout, the only one whose panels code outside React looks up (its
+ * worktree's, or the window's for Home's). Throws while no center is mounted.
+ */
+export function centerLayoutServer(): ServerId {
   const layoutKey = getCenterApiLayoutKey();
   if (layoutKey === null) throw new Error("No center layout is mounted");
   return layoutServer(layoutKey);

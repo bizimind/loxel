@@ -18,7 +18,6 @@ import type { AgentOrigin } from "@/api/agent-terminal-model";
 import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
 import { HOME_KEY } from "@/api/home-model";
-import { localServerId } from "@/api/local-server";
 import type {
   PanelOpenOptions,
   PanelPlacement,
@@ -27,7 +26,11 @@ import type {
 } from "@/api/panel-placement-model";
 import type { ServerId } from "@/api/worktree-ref";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
-import { getPanelServer, getPanelWorktree } from "@/components/dockview/panel-context";
+import {
+  centerLayoutServer,
+  getPanelServer,
+  getPanelWorktree,
+} from "@/components/dockview/panel-context";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { showToast } from "@/components/ui/toast";
@@ -344,7 +347,7 @@ export async function createEditor(options?: {
     const title = options?.title || name;
 
     if (options?.content) {
-      setEditorContent(fileEditorKey(centerServer(), filePath), options.content);
+      setEditorContent(fileEditorKey(centerLayoutServer(), filePath), options.content);
     }
 
     addPlacedPanel(dv, options?.placement, {
@@ -698,7 +701,7 @@ export async function handleFileMoved(
         return false;
       }
     }
-    return replaceMovedPanel(dv, oldPath, newPath, options?.announce ?? false);
+    return replaceMovedPanel(dv, server, oldPath, newPath, options?.announce ?? false);
   } finally {
     movesInProgress.delete(oldPath);
   }
@@ -753,6 +756,7 @@ async function carryPendingEdit(
 /** Open the moved file's tab in the old tab's place and close the old one. */
 function replaceMovedPanel(
   dv: DockviewApi,
+  server: ServerId,
   oldPath: string,
   newPath: string,
   announce: boolean,
@@ -765,7 +769,6 @@ function replaceMovedPanel(
     return false;
   }
 
-  const server = getPanelServer(oldPanel);
   renameEditorCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
   renameDrawingCacheKey(fileEditorKey(server, oldPath), fileEditorKey(server, newPath));
 
@@ -797,19 +800,12 @@ function replaceMovedPanel(
  * autosave cannot re-create the file.
  */
 function markOtherViewsDeleted(path: string): void {
-  const server = centerServer();
+  const server = centerLayoutServer();
   const store = useEditorStateStore.getState();
   for (const [key, entry] of store.files) {
     if (entry.server !== server || isFileTabKey(key, entry)) continue;
     if (isWithin(entry.filePath, path)) store.setDeleted(key, true);
   }
-}
-
-/** The server holding the center layout's files: its worktree's, or the window's in Home. */
-function centerServer(): ServerId {
-  const layoutKey = getCenterApiLayoutKey();
-  const worktree = layoutKey === null ? null : layoutWorktree(layoutKey);
-  return worktree?.server ?? localServerId();
 }
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */

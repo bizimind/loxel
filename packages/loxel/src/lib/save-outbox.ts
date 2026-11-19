@@ -916,6 +916,7 @@ async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Pr
   const { projects } = useProjectStore.getState();
   if (projects.length === 0) return;
   for (const entry of taken) {
+    // Outbox entries are saved through the window's server, the only one it reaches today.
     if (!entry.worktreePath || isListedWorktree(localRef(entry.worktreePath))) continue;
     const owner = deriveProject(entry.worktreePath, projects);
     const project = projects.find((candidate) => candidate.path === owner?.path);
