@@ -2,6 +2,11 @@ import { XIcon } from "lucide-react";
 
 import { hostOf } from "@/components/browser/BrowserBookmarks";
 import { muteLabel, useActiveNotificationMutes } from "@/components/notifications/site-mute";
+import {
+  MEDIA_DEVICES,
+  type MediaDevice,
+  mediaDecisionSchema,
+} from "@/electron/browser-media-protocol";
 import { notificationSiteDecisionSchema } from "@/electron/browser-notification-protocol";
 import { BUDGET_PROFILES } from "@/store/browser-page-budget";
 import {
@@ -28,12 +33,71 @@ function modeHint(mode: BackgroundTabsMode): string {
   return `Up to ${Math.round(memoryShare * 100)}% of this Mac's memory. ${pause}`;
 }
 
+const DEVICE_LABELS: Record<MediaDevice, string> = { camera: "Camera", microphone: "Microphone" };
+
+const byHost = (a: string, b: string) => hostOf(a).localeCompare(hostOf(b));
+
+/** The sites that asked for the camera or microphone, each device's decision changeable. */
+function MediaSites() {
+  const sites = useSettingsStore((s) => s.browser.mediaSites);
+  const setMediaSite = useSettingsStore((s) => s.setMediaSite);
+  const origins = Object.keys(sites).toSorted(byHost);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-muted-foreground text-xs">Camera and Microphone</label>
+      <p className="text-muted-foreground text-[10px]">
+        Sites ask before they use your camera or microphone, such as for a video call. Choose Ask to
+        have a site ask again, or remove it to forget it.
+      </p>
+      {origins.length === 0 ? (
+        <p className="text-muted-foreground pt-1 text-xs">No sites allowed or blocked yet.</p>
+      ) : (
+        <div className="space-y-1 pt-1">
+          {origins.map((origin) => (
+            <div key={origin} className="flex items-center gap-2">
+              <span className="text-foreground min-w-0 flex-1 truncate text-xs" title={origin}>
+                {hostOf(origin)}
+              </span>
+              {MEDIA_DEVICES.map((device) => (
+                <select
+                  key={device}
+                  aria-label={`${DEVICE_LABELS[device]} for ${hostOf(origin)}`}
+                  title={DEVICE_LABELS[device]}
+                  value={sites[origin]?.[device] ?? "ask"}
+                  onChange={(e) => {
+                    const decision = mediaDecisionSchema.safeParse(e.target.value);
+                    setMediaSite(origin, [device], decision.success ? decision.data : null);
+                  }}
+                  className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+                >
+                  <option value="ask">{DEVICE_LABELS[device]}: Ask</option>
+                  <option value="allow">{DEVICE_LABELS[device]}: Allow</option>
+                  <option value="block">{DEVICE_LABELS[device]}: Block</option>
+                </select>
+              ))}
+              <button
+                title="Remove"
+                aria-label={`Remove ${hostOf(origin)} from camera and microphone`}
+                className="text-muted-foreground hover:text-foreground rounded p-1"
+                onClick={() => setMediaSite(origin, MEDIA_DEVICES, null)}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BrowserSection() {
   const sites = useSettingsStore((s) => s.browser.notificationSites);
   const setNotificationSite = useSettingsStore((s) => s.setNotificationSite);
   const setNotificationMute = useSettingsStore((s) => s.setNotificationMute);
   const mutes = useActiveNotificationMutes();
-  const origins = Object.keys(sites).toSorted((a, b) => hostOf(a).localeCompare(hostOf(b)));
+  const origins = Object.keys(sites).toSorted(byHost);
   const backgroundTabs = useSettingsStore((s) => s.browser.backgroundTabs);
   const setBackgroundTabs = useSettingsStore((s) => s.setBackgroundTabs);
 
@@ -127,6 +191,8 @@ export function BrowserSection() {
           </div>
         )}
       </div>
+
+      <MediaSites />
     </div>
   );
 }

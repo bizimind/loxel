@@ -123,6 +123,23 @@ interface Window {
     respondToNotificationPermission: (response: unknown) => void;
     /** The user clicked a page's notification in the notification center (payload: `{ ref }`). */
     clickBrowserNotification: (ref: unknown) => void;
+    /**
+     * Browser panel pages' camera and microphone: a site asks to use them
+     * (`MediaPermissionRequest`, sent again with the same id when it asks for another device), such
+     * a request was withdrawn (`{ id, webContentsId }`), or an allowed site was refused because the
+     * OS has Loxel's access off (`MediaSystemBlocked`). Subscribing tells main this document asks.
+     */
+    onBrowserMediaPermissions: (handlers: {
+      onRequest: (request: unknown) => void;
+      onWithdrawn: (withdrawn: unknown) => void;
+      onSystemBlocked: (notice: unknown) => void;
+    }) => () => void;
+    /** The per-site camera and microphone decisions from settings (payload: `MediaSites`). */
+    setMediaSites: (sites: unknown) => void;
+    /** Answer a camera or microphone request (payload: `MediaPermissionResponse`). */
+    respondToMediaPermission: (response: unknown) => void;
+    /** Open the OS privacy settings for `device` (`MediaDevice`), where Loxel's access is turned on. */
+    openMediaSystemSettings: (device: unknown) => void;
     /** Quit, ending the terminals, without asking. */
     quitEndingTerminals: () => void;
     /** Tell main the "When quitting Loxel" setting, which Quit Loxel and the app menu follow. */

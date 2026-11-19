@@ -10,6 +10,13 @@ import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { DEFAULT_SCROLLBACK_LINES } from "@/api/terminal-limits";
 import { DEFAULT_NOTIFICATION_SEQUENCES, type NotificationSequences } from "@/api/ws-protocol";
 import {
+  type MediaDecision,
+  type MediaDevice,
+  type MediaSites,
+  parseMediaSites,
+  withMediaDecision,
+} from "@/electron/browser-media-protocol";
+import {
   type NotificationMute,
   type NotificationMutes,
   type NotificationSiteDecision,
@@ -103,6 +110,12 @@ export interface BrowserSettings {
    */
   notificationMutes: NotificationMutes;
   /**
+   * Whether each site (by origin) may use the camera and the microphone in browser panels; a
+   * device not listed for a site asks. The Electron main process enforces these (see
+   * browser-media.ts).
+   */
+  mediaSites: MediaSites;
+  /**
    * How much the browser pages of layouts not shown (other worktrees, or Home) may cost before
    * they are frozen or unloaded (see store/browser-page-budget.ts).
    */
@@ -122,6 +135,7 @@ function parseBrowserSettings(value: unknown): BrowserSettings {
   return {
     notificationSites: parseNotificationSites(fields.notificationSites),
     notificationMutes: parseNotificationMutes(fields.notificationMutes),
+    mediaSites: parseMediaSites(fields.mediaSites),
     backgroundTabs: isBackgroundTabsMode(fields.backgroundTabs)
       ? fields.backgroundTabs
       : DEFAULT_BACKGROUND_TABS,
@@ -698,6 +712,12 @@ export interface SettingsState {
    */
   setNotificationMute: (origin: string, mute: NotificationMute | null) => void;
   /** Set how much background browser pages may cost before they are frozen or unloaded. */
+  /** Allow or block a site's use of `devices`, or forget it (`null`) so the site asks again. */
+  setMediaSite: (
+    origin: string,
+    devices: readonly MediaDevice[],
+    decision: MediaDecision | null,
+  ) => void;
   setBackgroundTabs: (mode: BackgroundTabsMode) => void;
 
   // Wt config actions
@@ -801,6 +821,7 @@ export const useSettingsStore = create<SettingsState>()(
       browser: {
         notificationSites: {},
         notificationMutes: {},
+        mediaSites: {},
         backgroundTabs: DEFAULT_BACKGROUND_TABS,
       },
 
@@ -1113,6 +1134,14 @@ export const useSettingsStore = create<SettingsState>()(
           if (mute) notificationMutes[origin] = mute;
           return { browser: { ...s.browser, notificationMutes } };
         }),
+
+      setMediaSite: (origin, devices, decision) =>
+        set((s) => ({
+          browser: {
+            ...s.browser,
+            mediaSites: withMediaDecision(s.browser.mediaSites, origin, devices, decision),
+          },
+        })),
 
       setBackgroundTabs: (mode) =>
         set((s) => ({ browser: { ...s.browser, backgroundTabs: mode } })),

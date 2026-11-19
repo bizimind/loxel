@@ -11,6 +11,10 @@ import {
 type CheckHandler = Parameters<Session["setPermissionCheckHandler"]>[0];
 type RequestHandler = Parameters<Session["setPermissionRequestHandler"]>[0];
 
+/** What the camera and microphone module was handed, standing in for `browser-media.ts`. */
+const mediaCheck = mock((..._args: unknown[]) => true);
+const mediaRequest = mock((..._args: unknown[]) => {});
+
 /** The handlers `installBrowserPermissions` gives a session. */
 function installedHandlers(): {
   check: NonNullable<CheckHandler>;
@@ -18,14 +22,17 @@ function installedHandlers(): {
 } {
   let check: CheckHandler = null;
   let request: RequestHandler = null;
-  installBrowserPermissions({
-    setPermissionCheckHandler: (handler) => {
-      check = handler;
+  installBrowserPermissions(
+    {
+      setPermissionCheckHandler: (handler) => {
+        check = handler;
+      },
+      setPermissionRequestHandler: (handler) => {
+        request = handler;
+      },
     },
-    setPermissionRequestHandler: (handler) => {
-      request = handler;
-    },
-  });
+    { check: mediaCheck, request: mediaRequest },
+  );
   if (!check || !request) throw new Error("installBrowserPermissions set no handler");
   return { check, request };
 }
@@ -128,5 +135,17 @@ describe("installBrowserPermissions", () => {
     request(webContents, "openExternal", callback, page);
     request(webContents, "openExternal", callback, ad);
     expect(callback.mock.calls).toEqual([[false], [true], [true], [false]]);
+  });
+
+  test("the camera and microphone are decided by the media module", () => {
+    const webContents = {} as Parameters<typeof request>[0];
+    const details = { isMainFrame: true, mediaType: "video" as const };
+    expect(check(webContents, "media", "https://meet.example/", details)).toBe(true);
+    expect(mediaCheck).toHaveBeenCalledWith(webContents, "https://meet.example/", "video");
+    const callback = mock((_granted: boolean) => {});
+    const media = { isMainFrame: true, requestingUrl: "https://meet.example/", mediaTypes: [] };
+    request(webContents, "media", callback, media);
+    expect(mediaRequest).toHaveBeenCalledWith(webContents, media, callback);
+    expect(callback).not.toHaveBeenCalled();
   });
 });
