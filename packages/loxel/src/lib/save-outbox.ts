@@ -1050,13 +1050,12 @@ async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Pr
  * window that crashed), then start retrying. The entries of the server the window is connected
  * to are taken as they are. Those of another server are left in storage, untouched, while a
  * window connected to it may be open (each holds a lock named after its server, and one that does
- not know its server yet could be connected to any); with none open, no
- * window would ever show them, so they are taken as the window's server's, like one stored before
- * entries named their server (the only one an origin served then): the edits most likely were
- * made on the same files, as when the server's ID changed with its state directory, but since
- * that can't be checked they are only shown for review, never written without the user
- * (`takenFrom`). Call once, before the editors mount, so a tab restored with the layout can take
- * over its file's entry.
+ * not know its server yet could be connected to any); with none open, no window would ever show
+ * them, so they are taken as the window's server's, like one stored before entries named their
+ * server (the only one an origin served then): the edits most likely were made on the same files,
+ * as when the server's ID changed with its state directory, but since that can't be checked they
+ * are only shown for review, never written without the user (`takenFrom`). Call once, before the
+ * editors mount, so a tab restored with the layout can take over its file's entry.
  */
 export async function initSaveOutbox(
   options: { storage?: OutboxStorage | null } = {},
