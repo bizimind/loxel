@@ -34,6 +34,15 @@ function shape(list: ClientNotification[]): string[][] {
 }
 
 describe("groupNotifications", () => {
+  test("keeps two servers' notifications of the same id apart, each its own row", () => {
+    const here = terminal();
+    const there = { ...here, server: toServerId("server-b") };
+    const entries = groupNotifications([here, there]);
+
+    expect(shape([here, there])).toEqual([[here.id], [here.id]]);
+    expect(new Set(entries.map((entry) => entry.key)).size).toBe(2);
+  });
+
   test("stacks a site's notifications where its newest is, keeping the rest in order", () => {
     const build1 = browser("http://localhost:5173");
     const agent = terminal();

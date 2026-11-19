@@ -103,7 +103,17 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ## Site permissions
 
-Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer or keyboard in games, remote desktops and 3D views, keeping the screen awake, and saving to files you pick. Links meant for other apps, such as `mailto:` links, open in that app. Everything else a browser would ask you about first is turned off, so sites can't use your camera, microphone or location, or read your clipboard. Notifications are the exception: a site that wants to send them asks you first (see [Notifications](#notifications)). A site that asks is told no and can offer its usual fallback; for a video call, use another browser.
+Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. Links meant for other apps, such as `mailto:` links, open in that app. A site that wants your camera or microphone, or to send notifications, asks you first (see [Camera and microphone](#camera-and-microphone) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
+
+When a page goes full screen or hides your pointer, Loxel names the site at the top of the page for a few seconds, every time, and again when you come back to a full screen page after a while away, so a page can't pass itself off as Loxel or as your Mac asking for a password. Press Esc to leave full screen or get your pointer back. Popup windows that sites open can't go full screen or hide your pointer.
+
+### Camera and microphone
+
+Video calls such as Google Meet work in a browser panel as they do in a browser. When a site first wants your camera or microphone, a bar under its address bar asks: **Allow** lets it use them on every visit, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good. Close the bar to turn down just this request, so the site can ask again. A site that asks for the camera and then the microphone gets one question for both. Only sites on `https` or on your own machine (such as `http://localhost`) can ask.
+
+The first time a site you allowed uses one, macOS asks whether Loxel may use your camera or microphone. If Loxel's access is turned off in **System Settings > Privacy & Security**, the bar says so and opens the right pane; macOS may ask you to quit and reopen Loxel before the change applies.
+
+Change a site's choice for each device, or remove it so the site asks again, in **Settings > Browser > Camera and Microphone**. A change applies the next time the site asks, such as when you join a call or reload the page.
 
 ---
 

@@ -9,7 +9,7 @@
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
-import { wsClient } from "@/api/client";
+import { wsClientOf } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
@@ -20,6 +20,7 @@ import {
   HOME_LAYOUT_KEY,
   type LayoutKey,
   layoutKeyOf,
+  layoutServer,
   layoutWorktree,
 } from "@/store/active-worktree";
 import { closeBrowserPage } from "@/store/browser-pages";
@@ -34,7 +35,6 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { CenterWatermark } from "./center-watermark";
 import { syncTerminalsFromLayout } from "./default-layout";
 import { MaximizedGroupActions } from "./maximized-group-actions";
-import { getPanelServer } from "./panel-context";
 import { centerComponents, centerTabComponents, homeComponents, homeTabComponents } from "./panels";
 import {
   PersistedLayoutComponent,
@@ -112,6 +112,8 @@ function CenterLayout({
       // changes layoutKey) and the outer swap (unmounts CenterHost entirely).
       if (swappingRef.current || isOuterSwapping()) return;
 
+      // The layout's server holds its panels' terminals and watchers.
+      const server = layoutServer(layoutKeyRef.current);
       const removedDef = getCenterPanelDef(event.id);
       if (removedDef) {
         uiLog.info("Panel removed", { panelType: removedDef.type, panelId: event.id });
@@ -120,8 +122,8 @@ function CenterLayout({
       if (removedDef?.type === "terminal") {
         const terminalId = (event.params as { terminalId?: string })?.terminalId;
         if (terminalId) {
-          wsClient.send({ type: "terminal_destroy", id: terminalId });
-          usePanelNotificationStore.getState().unregisterPanel(getPanelServer(event), terminalId);
+          wsClientOf(server).send({ type: "terminal_destroy", id: terminalId });
+          usePanelNotificationStore.getState().unregisterPanel(server, terminalId);
         }
         if (layoutKeyRef.current !== HOME_LAYOUT_KEY) {
           getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
@@ -129,7 +131,7 @@ function CenterLayout({
       }
 
       if (removedDef?.type === "browser") {
-        usePanelNotificationStore.getState().unregisterPanel(getPanelServer(event), event.id);
+        usePanelNotificationStore.getState().unregisterPanel(server, event.id);
         closeBrowserPage(event.id);
       }
 
@@ -142,7 +144,7 @@ function CenterLayout({
         const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));
         for (const filePath of panelFilePaths(event.params)) {
           if (filePath.startsWith(worktreePath + "/") || stillShown.has(filePath)) continue;
-          wsClient.send({ type: "close_external_file", worktreePath, filePath });
+          wsClientOf(server).send({ type: "close_external_file", worktreePath, filePath });
         }
       }
     });

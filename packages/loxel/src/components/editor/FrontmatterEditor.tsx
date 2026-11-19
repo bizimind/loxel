@@ -10,17 +10,18 @@ import { codeFontOptions, useCodeFontOptions } from "@/hooks/useCodeFontOptions"
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { editorFileUri } from "@/lib/live-editor-model";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
+import { type EditorKey, fileEditorKey } from "@/store/editor-state";
 import { useUIStore } from "@/store/ui";
 
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 
 /**
- * Per-file UI state — survives tab switches within the same session.
- * Growth is bounded by the number of distinct files opened (typically dozens),
+ * Per-file UI state, by the file's tab key (its server and path) — survives tab switches within
+ * the same session. Growth is bounded by the number of distinct files opened (typically dozens),
  * and entries are lightweight (boolean / number), so no eviction is needed.
  */
-const collapseState = new Map<string, boolean>();
-const savedHeight = new Map<string, number>();
+const collapseState = new Map<EditorKey, boolean>();
+const savedHeight = new Map<EditorKey, number>();
 
 const MIN_HEIGHT = 66; // ~3 lines at 22px
 const DEFAULT_MAX_HEIGHT = 300;
@@ -53,6 +54,7 @@ export function FrontmatterEditor({
 }: FrontmatterEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
   const server = usePanelServer();
+  const fileKey = fileEditorKey(server, filePath);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   useInlayHintsOption(editorRef);
@@ -61,22 +63,22 @@ export function FrontmatterEditor({
   onChangeRef.current = onChange;
 
   // Collapse: default to expanded if frontmatter exists, collapsed if null
-  const [collapsed, setCollapsed] = useState(() => collapseState.get(filePath) ?? value === null);
+  const [collapsed, setCollapsed] = useState(() => collapseState.get(fileKey) ?? value === null);
   // If the user has manually resized, use that; otherwise auto-height from line count
   const [height, setHeight] = useState(
-    () => savedHeight.get(filePath) ?? computeAutoHeight(value ? value.split("\n").length : 1),
+    () => savedHeight.get(fileKey) ?? computeAutoHeight(value ? value.split("\n").length : 1),
   );
   // Track whether user has manually resized (disables auto-height on content change)
-  const manuallyResizedRef = useRef(savedHeight.has(filePath));
+  const manuallyResizedRef = useRef(savedHeight.has(fileKey));
 
   // Persist collapse state per file
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      collapseState.set(filePath, next);
+      collapseState.set(fileKey, next);
       return next;
     });
-  }, [filePath]);
+  }, [fileKey]);
 
   // Model lifecycle — independent of collapse state to preserve undo history.
   // Created when frontmatter exists, disposed when frontmatter is removed or component unmounts.
@@ -177,10 +179,10 @@ export function FrontmatterEditor({
   }, [darkMode]);
 
   const handleAdd = useCallback(() => {
-    collapseState.set(filePath, false);
+    collapseState.set(fileKey, false);
     setCollapsed(false);
     onChange("");
-  }, [filePath, onChange]);
+  }, [fileKey, onChange]);
 
   const handleRemove = useCallback(() => {
     onChange(null);
@@ -196,7 +198,7 @@ export function FrontmatterEditor({
       const onMouseMove = (ev: MouseEvent) => {
         const newHeight = Math.max(MIN_HEIGHT, startHeight + (ev.clientY - startY));
         setHeight(newHeight);
-        savedHeight.set(filePath, newHeight);
+        savedHeight.set(fileKey, newHeight);
         manuallyResizedRef.current = true;
       };
 
@@ -208,7 +210,7 @@ export function FrontmatterEditor({
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
     },
-    [height, filePath],
+    [height, fileKey],
   );
 
   // No frontmatter — show add button

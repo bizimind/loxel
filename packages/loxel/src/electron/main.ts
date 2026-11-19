@@ -10,7 +10,6 @@ import {
   app,
   BrowserWindow,
   dialog,
-  ipcMain,
   powerMonitor,
   session,
   shell,
@@ -25,6 +24,7 @@ import {
   WhenQuittingSchema,
 } from "../lib/quit-terminals";
 import {
+  APP_ORIGIN,
   APP_SESSION_SECRET,
   SERVER_PORT,
   SERVER_URL,
@@ -87,13 +87,20 @@ import {
   scheduleAutomaticUpdateCheck,
   terminalsForUpdateInstall,
 } from "./app-updater";
-import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
+import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
 import { installBrowserFavicons } from "./browser-favicons";
+import {
+  checkMediaPermission,
+  installBrowserMedia,
+  requestMediaPermission,
+  trackWebviewMedia,
+} from "./browser-media";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installDefaultBrowser } from "./default-browser";
+import { noteExclusiveAccessGrant, trackWebviewExclusiveAccess } from "./exclusive-access";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
@@ -105,11 +112,7 @@ import {
   WINDOW_FOCUS_CHANGE,
   WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
-import {
-  configureWebviewDialogs,
-  installJavaScriptDialogs,
-  trackWebviewDialogs,
-} from "./javascript-dialogs";
+import { installJavaScriptDialogs, trackWebviewDialogs } from "./javascript-dialogs";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
@@ -135,6 +138,7 @@ import {
   installAccountChooser,
   installHybridQrCode,
 } from "./webauthn";
+import { secureWebviewAttach } from "./webview-attach";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
 import { handleWebviewWindowOpens } from "./webview-new-tabs";
@@ -297,8 +301,6 @@ function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
     check();
   });
 }
-
-const APP_ORIGIN = new URL(DEV_RENDERER_URL ?? SERVER_URL).origin;
 
 function isLocal(url: string): boolean {
   try {
@@ -775,7 +777,9 @@ app.on("web-contents-created", (_, contents) => {
   forwardWebviewKeystrokes(contents);
   trackWebviewDialogs(contents);
   trackWebviewNotifications(contents);
+  trackWebviewMedia(contents);
   trackWebviewFocus(contents);
+  trackWebviewExclusiveAccess(contents);
 
   if (contents.getType() === "webview") {
     // New tabs and windows a browser panel's page opens become browser tabs next to it, and its
@@ -798,17 +802,9 @@ app.on("web-contents-created", (_, contents) => {
     });
   }
 
-  // Strip dangerous preferences from any dynamically-created webview, then load Loxel's own
-  // sandboxed preload (which also runs in subframes, without Node.js).
-  contents.on("will-attach-webview", (_, webPreferences) => {
-    // Browser panels' partition, whatever the element asks for: never the windows' session, whose
-    // requests to the server carry the app's secret.
-    webPreferences.partition = BROWSER_PARTITION;
-    delete webPreferences.preload;
-    webPreferences.nodeIntegration = false;
-    webPreferences.nodeIntegrationInWorker = false;
-    webPreferences.contextIsolation = true;
-    configureWebviewDialogs(webPreferences);
+  // Lock down every webview's preferences, whatever its element asks for.
+  contents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (!secureWebviewAttach(webPreferences, params)) event.preventDefault();
   });
 });
 
@@ -879,25 +875,26 @@ installBrowserPageLifecycle();
 installJavaScriptDialogs();
 installNativeTheme();
 installBrowserNotifications();
+installBrowserMedia();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
-ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
+onAppWindowMessage(GET_WINDOW_FULL_SCREEN, (event) => {
   event.returnValue = BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false;
 });
 
 // macOS: show notification count on dock icon
-ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {
+onAppWindowMessage(SET_DOCK_BADGE, (_event, count: unknown) => {
   if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return;
   app.dock?.setBadge(count > 0 ? String(count) : "");
 });
 
 // The command palette's quits and Restart Loxel, the same as the app menu's.
-ipcMain.on(APP_QUIT_KEEPING_TERMINALS, () => quitApp(QUIT_KEEPING_TERMINALS));
-ipcMain.on(APP_QUIT_ENDING_TERMINALS, () => quitApp(QUIT));
-ipcMain.on(APP_RESTART, () => quitApp(RESTART));
+onAppWindowMessage(APP_QUIT_KEEPING_TERMINALS, () => quitApp(QUIT_KEEPING_TERMINALS));
+onAppWindowMessage(APP_QUIT_ENDING_TERMINALS, () => quitApp(QUIT));
+onAppWindowMessage(APP_RESTART, () => quitApp(RESTART));
 
 // The menu offers on ⌥⌘Q the quit that Quit Loxel is not, so it changes with the setting.
-ipcMain.on(SET_WHEN_QUITTING, (_event, value: unknown) => {
+onAppWindowMessage(SET_WHEN_QUITTING, (_event, value: unknown) => {
   const parsed = WhenQuittingSchema.safeParse(value);
   if (!parsed.success || parsed.data === whenQuitting) return;
   whenQuitting = parsed.data;
@@ -1131,7 +1128,11 @@ app.whenReady().then(async () => {
     // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    installBrowserPermissions(browserSession);
+    installBrowserPermissions(
+      browserSession,
+      { check: checkMediaPermission, request: requestMediaPermission },
+      noteExclusiveAccessGrant,
+    );
     installBrowserFavicons(browserSession);
     installServiceWorkerNotifications(browserSession);
 

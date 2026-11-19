@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, jest, mock, setSystemTime, test } from "bun:test";
 
-import type { IpcMainEvent, ServiceWorkerMain, Session, WebContents } from "electron";
+import type { ServiceWorkerMain, Session, WebContents } from "electron";
 
 import {
   type NotificationMutes,
@@ -47,8 +47,7 @@ const addHandler = (channel: string, handler: Handler) =>
   ipcHandlers.set(channel, [...(ipcHandlers.get(channel) ?? []), handler]);
 const guests: WebContents[] = [];
 void mock.module("electron", () => ({
-  // webview-new-tabs.ts (USER_ACTIVATION_MS) imports it.
-  BrowserWindow: {},
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   ipcMain: { on: addHandler, handle: addHandler },
   webContents: {
     getAllWebContents: () => guests,
@@ -56,6 +55,7 @@ void mock.module("electron", () => ({
   },
 }));
 
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const { installBrowserNotifications, trackWebviewNotifications } =
   await import("./browser-notifications");
 const { installServiceWorkerNotifications, trackWebviewFocus } =
@@ -125,14 +125,13 @@ const ipc = (channel: string, event: unknown, value?: unknown) =>
 let nextContentsId = 1;
 function fakeHost() {
   const sent: { channel: string; args: unknown[] }[] = [];
-  const host = {
+  const host = fakeWindow({
     ...fakeEmitter(),
     id: nextContentsId++,
-    getType: () => "window",
     isDestroyed: () => false,
     send: (channel: string, ...args: unknown[]) => sent.push({ channel, args }),
-  } as unknown as WebContents;
-  ipc(BROWSER_NOTIFICATION_LISTEN, { sender: host });
+  });
+  ipc(BROWSER_NOTIFICATION_LISTEN, mainFrameEvent(host));
   const of = (channel: string) => sent.filter((m) => m.channel === channel).map((m) => m.args);
   return {
     host,
@@ -157,10 +156,11 @@ function fakeGuest(host: WebContents, origin = SITE) {
   return { guest, focus: () => emitter.emit("focus") };
 }
 
+const settingsWindow = mainFrameEvent(fakeWindow({ id: nextContentsId++ }));
 const setSites = (sites: NotificationSites) =>
-  ipc(BROWSER_NOTIFICATION_SET_SITES, { sender: { getType: () => "window" } }, sites);
+  ipc(BROWSER_NOTIFICATION_SET_SITES, settingsWindow, sites);
 const setMutes = (mutes: NotificationMutes) =>
-  ipc(BROWSER_NOTIFICATION_SET_MUTES, { sender: { getType: () => "window" } }, mutes);
+  ipc(BROWSER_NOTIFICATION_SET_MUTES, settingsWindow, mutes);
 
 const notification = (fields: Record<string, unknown> = {}) => ({
   title: "Build",
@@ -178,7 +178,7 @@ function fromPage(guest: WebContents, channel: string, value: unknown) {
 }
 
 const click = (sender: WebContents, ref: string) =>
-  ipc(BROWSER_NOTIFICATION_CLICK, { sender } as unknown as IpcMainEvent, { ref });
+  ipc(BROWSER_NOTIFICATION_CLICK, mainFrameEvent(sender), { ref });
 
 /** Let the handlers' pending microtasks (their awaits) run, without waiting on time. */
 const microtasksDone = () =>
