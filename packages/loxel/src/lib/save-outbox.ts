@@ -83,14 +83,24 @@ export interface OutboxEntry {
    * and kept while a newer save of the editor is being sent; absent in entries of older versions.
    */
   refusal?: string;
+  /**
+   * Set on an entry taken over at startup whose edits may not have been made on `server`'s file:
+   * one stored before entries named their server (`earlier-version`), or one of a server no open
+   * window is connected to (`other-server`), such as the window's own server before its ID
+   * changed. It is kept in `review` and shown as a conflict with the file on disk, never written
+   * without the user, until the user acts on it (see `initSaveOutbox`).
+   */
+  takenFrom?: TakenFrom;
 }
+
+export type TakenFrom = "earlier-version" | "other-server";
 
 /**
  * An entry as stored. One stored before entries named their server has none: it was made when one
- * origin served one server, but which one can no longer be told, so it is never retried, only
- * kept for review (see `initSaveOutbox`).
+ * origin served one server, but which one can no longer be told (see `takenFrom`). Its `server` is
+ * whatever was stored: one the ID grammar refuses is of no server the window knows.
  */
-export type StoredOutboxEntry = Omit<OutboxEntry, "server"> & { server?: ServerId };
+export type StoredOutboxEntry = Omit<OutboxEntry, "server"> & { server?: string };
 
 /** Where entries persist between runs. A write resolves once stored, and rejects if it was not. */
 export interface OutboxStorage {
@@ -102,6 +112,10 @@ export interface OutboxStorage {
 /** Retry delays after consecutive failed rounds; the last one repeats. */
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const LOCK_PREFIX = "loxel-save-outbox:";
+/** Each window also holds a shared lock named after its server, for as long as it is open. */
+const SERVER_LOCK_PREFIX = "loxel-save-outbox-server:";
+/** Held by a window until it holds its server's lock: its server may be any, so it is every one's. */
+const STARTING_LOCK_PREFIX = "loxel-save-outbox-starting:";
 /** Passes in a row a retry round makes for saves whose file changed between read and write. */
 const MAX_CHANGED_PASSES = 3;
 
@@ -119,8 +133,6 @@ let failedRounds = 0;
 let currentRun: Promise<void> | null = null;
 /** A retry was asked for while one ran: run another pass once it ends. */
 let runAgain = false;
-/** Entries stored before entries named their server, not shown yet (see `initSaveOutbox`). */
-const fromEarlierVersion = new Set<string>();
 /** Entries recovered from an earlier run whose outcome is not reported yet. */
 const recovered = new Set<string>();
 const recoveredSaved: string[] = [];
@@ -188,7 +200,6 @@ function removeEntry(entry: OutboxEntry): void {
   if (entries.get(entry.id) !== entry) return;
   entries.delete(entry.id);
   recovered.delete(entry.id);
-  fromEarlierVersion.delete(entry.id);
   // Only a stored entry tells that storing works again: a failing store may still delete.
   void storage?.remove(entry.id).catch(storeFailed);
   entriesChanged();
@@ -350,6 +361,10 @@ export function addOutboxEntry(
     // Its editor goes on showing why the last save was refused until this one is answered.
     ...(status === "sending" && previous?.refusal !== undefined
       ? { refusal: previous.refusal }
+      : {}),
+    // Kept for review again (its file's tab closed), it is still of unconfirmed origin.
+    ...(status === "review" && previous?.takenFrom !== undefined
+      ? { takenFrom: previous.takenFrom }
       : {}),
   };
   entries.set(entry.id, entry);
@@ -519,13 +534,15 @@ export function findAdoptableEntry(server: ServerId, filePath: string): OutboxEn
 /**
  * The editor `editorKey` mounted showing `entry`'s content: it takes over the save, as unsaved
  * edits on the entry's base, or in conflict with the disk version the save could not merge with.
- * A save in review stays in review.
+ * A save in review stays in review; one of unconfirmed origin (`takenFrom`) is always shown as a
+ * conflict, with the file's disk version read afresh.
  */
 export function adoptOutboxEntry(editorKey: EditorKey, entry: OutboxEntry): void {
   const store = useEditorStateStore.getState();
   store.adoptQueuedEdit(editorKey, {
     base: entry.base,
     disk: entry.status === "review" ? entry.disk : null,
+    conflict: entry.takenFrom !== undefined,
   });
   const editor = store.files.get(editorKey);
   if (!editor || entries.get(entry.id) !== entry) return;
@@ -535,7 +552,27 @@ export function adoptOutboxEntry(editorKey: EditorKey, entry: OutboxEntry): void
   void persist(entry);
   entriesChanged();
   if (entry.status === "queued") scheduleRetry(0);
-  if (entry.status === "review" && entry.refusal !== undefined) void mergeDiskIntoAdopted(entry);
+  if (entry.takenFrom) void showDiskOfTakenOver(entry);
+  else if (entry.status === "review" && entry.refusal !== undefined) {
+    void mergeDiskIntoAdopted(entry);
+  }
+}
+
+/**
+ * A save of unconfirmed origin its file's tab took over, shown as a conflict: read the file for the
+ * conflict's disk version, which the user can take instead of the edits. A file missing from disk
+ * is marked deleted. One the server does not serve yet is read again once it does, by the refetch
+ * of open editors that follows a worktree being served.
+ */
+async function showDiskOfTakenOver(entry: OutboxEntry): Promise<void> {
+  const disk = await readDisk(entry);
+  const editor = entries.get(entry.id) === entry ? ownerEditor(entry) : undefined;
+  if (editor?.state !== "diverged") return;
+  const store = useEditorStateStore.getState();
+  if (disk.kind === "missing") store.setDeleted(entry.editorKey, true);
+  else if (disk.kind === "content" && disk.content !== editor.diskContent) {
+    store.setDiskContent(entry.editorKey, disk.content);
+  }
 }
 
 /**
@@ -836,18 +873,25 @@ function toReview(entry: OutboxEntry, disk: string | null, refusal?: string): vo
     }
     return;
   }
-  let message = `Unsaved edits to ${name} conflict with changes on disk`;
-  if (disk === null) message = `Unsaved edits to ${name} could not be saved`;
-  // Nothing was tried for those: they wait for the user only because their server is unknown.
-  if (fromEarlierVersion.delete(entry.id)) {
-    message = `Unsaved edits to ${name} from an earlier version of Loxel are kept for review`;
-  }
-  showToast(message, "info");
+  showToast(reviewMessage(entry, name, disk), "info");
   void openFile(entry.server, {
     filePath: entry.filePath,
     worktreePath: entry.worktreePath ?? undefined,
     focus: false,
   });
+}
+
+/** What the user is told when `entry` is kept for review with no editor showing it. */
+function reviewMessage(entry: OutboxEntry, name: string, disk: string | null): string {
+  // Nothing was tried for those: they wait for the user only because their server is unknown.
+  if (entry.takenFrom === "earlier-version") {
+    return `Unsaved edits to ${name} from an earlier version of Loxel are kept for review`;
+  }
+  if (entry.takenFrom === "other-server") {
+    return `Unsaved edits to ${name} from another Loxel server are kept for review`;
+  }
+  if (disk === null) return `Unsaved edits to ${name} could not be saved`;
+  return `Unsaved edits to ${name} conflict with changes on disk`;
 }
 
 function reportRecovered(): void {
@@ -910,6 +954,9 @@ function isOutboxEntry(value: unknown): value is StoredOutboxEntry {
     typeof v.seq === "number" &&
     (typeof v.disk === "string" || v.disk === null) &&
     (v.refusal === undefined || typeof v.refusal === "string") &&
+    (v.takenFrom === undefined ||
+      v.takenFrom === "earlier-version" ||
+      v.takenFrom === "other-server") &&
     (v.status === "sending" ||
       v.status === "queued" ||
       v.status === "retrying" ||
@@ -918,16 +965,32 @@ function isOutboxEntry(value: unknown): value is StoredOutboxEntry {
 }
 
 /**
- * Owners whose window is still open. Each window holds a Web Lock named after its owner id for
- * its lifetime; null when the API is missing, and then every other owner counts as gone.
+ * What the Web Locks held or waited for under `prefix` name, the prefix cut off; null when the API
+ * is missing.
  */
-async function liveOwners(): Promise<Set<string> | null> {
+async function lockedNames(prefix: string): Promise<Set<string> | null> {
   if (typeof navigator === "undefined" || !navigator.locks) return null;
   const { held = [], pending = [] } = await navigator.locks.query();
   const names = [...held, ...pending].map((lock) => lock.name ?? "");
-  return new Set(
-    names.filter((n) => n.startsWith(LOCK_PREFIX)).map((n) => n.slice(LOCK_PREFIX.length)),
-  );
+  return new Set(names.filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
+}
+
+/**
+ * Hold a Web Lock named `name` until `until` settles (the window going away, by default). Resolves
+ * once it is held.
+ */
+function holdLock(
+  name: string,
+  mode: LockMode,
+  until: Promise<unknown> = new Promise<never>(() => {}),
+): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.locks) return Promise.resolve();
+  const held = Promise.withResolvers<void>();
+  void navigator.locks.request(name, { mode }, () => {
+    held.resolve();
+    return until;
+  });
+  return held.promise;
 }
 
 /** Run `fn` while no other window is recovering entries. */
@@ -984,35 +1047,49 @@ async function settleRecoveredOfGoneWorktrees(taken: readonly OutboxEntry[]): Pr
 
 /**
  * Load the outbox and take over the entries of windows that are gone (an earlier run, or a
- * window that crashed), then start retrying. Only the entries of the server the window is
- * connected to are taken; other servers' stay in storage, untouched. One stored before entries
- * named their server is taken as the window's server's, the only one an origin served then, but
- * since that can't be checked it is kept for review, never written without the user. Call once,
- * before the editors mount, so a tab restored with the layout can take over its file's entry.
+ * window that crashed), then start retrying. The entries of the server the window is connected
+ * to are taken as they are. Those of another server are left in storage, untouched, while a
+ * window connected to it may be open (each holds a lock named after its server, and one that does
+ not know its server yet could be connected to any); with none open, no
+ * window would ever show them, so they are taken as the window's server's, like one stored before
+ * entries named their server (the only one an origin served then): the edits most likely were
+ * made on the same files, as when the server's ID changed with its state directory, but since
+ * that can't be checked they are only shown for review, never written without the user
+ * (`takenFrom`). Call once, before the editors mount, so a tab restored with the layout can take
+ * over its file's entry.
  */
 export async function initSaveOutbox(
   options: { storage?: OutboxStorage | null } = {},
 ): Promise<void> {
   storage = options.storage === undefined ? indexedDbStorage() : options.storage;
-  if (typeof navigator !== "undefined" && navigator.locks) {
-    // Held until the window goes away.
-    void navigator.locks.request(`${LOCK_PREFIX}${ownerId}`, () => new Promise<never>(() => {}));
-  }
+  void holdLock(`${LOCK_PREFIX}${ownerId}`, "exclusive");
+  // Until this window holds its server's lock, a window recovering meanwhile can't tell which
+  // server's entries it would leave without one.
+  const serverLockHeld = Promise.withResolvers<void>();
+  void holdLock(`${STARTING_LOCK_PREFIX}${ownerId}`, "shared", serverLockHeld.promise);
   const store = storage;
   const server = await whenLocalServerKnown();
+  await holdLock(`${SERVER_LOCK_PREFIX}${server}`, "shared");
+  serverLockHeld.resolve();
   const taken = store
     ? await exclusively(async () => {
         const stored = await store.load();
-        const live = await liveOwners();
+        const live = await lockedNames(LOCK_PREFIX);
+        const liveServers = await lockedNames(SERVER_LOCK_PREFIX);
+        const starting = await lockedNames(STARTING_LOCK_PREFIX);
+        /** Whether a window connected to `from` may be open, which then shows its entries. */
+        const othersStarting = [...(starting ?? [])].some((owner) => owner !== ownerId);
+        const served = (from: string) => othersStarting || liveServers?.has(from) === true;
         const orphans = stored.flatMap((stored): OutboxEntry[] => {
           if (stored.ownerId === ownerId || live?.has(stored.ownerId)) return [];
-          if (stored.server !== undefined && stored.server !== server) return [];
-          const entry: OutboxEntry = { ...stored, server: stored.server ?? server };
-          if (stored.server === undefined) {
-            entry.status = "review";
-            fromEarlierVersion.add(entry.id);
-          } else if (entry.status !== "review") {
-            entry.status = "queued";
+          const from = stored.server;
+          if (from !== undefined && from !== server && served(from)) return [];
+          let takenFrom = stored.takenFrom;
+          if (from === undefined) takenFrom = "earlier-version";
+          else if (from !== server) takenFrom = "other-server";
+          const entry: OutboxEntry = { ...stored, server, ...(takenFrom ? { takenFrom } : {}) };
+          if (entry.status !== "review") {
+            entry.status = takenFrom ? "review" : "queued";
             delete entry.refusal; // carried by a save in flight when the window went
           }
           return [entry];
@@ -1052,7 +1129,6 @@ export function resetSaveOutboxForTests(): void {
   ownerId = crypto.randomUUID();
   confirmedSeq.clear();
   recovered.clear();
-  fromEarlierVersion.clear();
   recoveredSaved.length = 0;
   goneWorktrees.clear();
   if (retryTimer) clearTimeout(retryTimer);

@@ -10,9 +10,17 @@ import type { ClientNotification } from "@/store/panel-notifications";
 import { setCenterApi } from "@/store/tools-bar";
 import { activeWorktreeFields, useWorktreeStore } from "@/store/worktrees";
 
-import { navigateToNotification } from "./notification-navigation";
-
 const ELSEWHERE = toServerId("elsewhere");
+/** The servers the window has a connection to, besides its own. */
+let connected = new Set<string>();
+const actualClient = await import("@/api/client");
+mock.module("@/api/client", () => ({
+  ...actualClient,
+  hasConnection: (server: string) => server === localServerId() || connected.has(server),
+}));
+
+const { navigateToNotification } = await import("./notification-navigation");
+
 const switchWorktree = mock(async (wt: WorktreeRef) => {
   useWorktreeStore.setState(activeWorktreeFields(wt));
 });
@@ -35,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  connected = new Set();
   switchWorktree.mockClear();
   showHome.mockClear();
   setCenterApi(null);
@@ -59,9 +68,17 @@ describe("navigateToNotification", () => {
   });
 
   test("switches to the same path on another server", () => {
+    connected.add(ELSEWHERE);
     navigateToNotification(notification(terminalIn("/repo"), ELSEWHERE));
 
     expect(switchWorktree.mock.calls).toEqual([[worktreeRef(ELSEWHERE, "/repo")]]);
+  });
+
+  test("stays put for a worktree of a server the window has no connection to", () => {
+    navigateToNotification(notification(terminalIn("/repo/.worktrees/a"), ELSEWHERE));
+
+    expect(switchWorktree).not.toHaveBeenCalled();
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(localRef("/repo"));
   });
 
   test("shows Home for a Home panel's notification", () => {
