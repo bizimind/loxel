@@ -39,6 +39,8 @@ export interface WorktreeStatusTrackerOptions {
   urgentDelayMs?: number;
   activityIntervalMs?: number;
   requestMaxAgeMs?: number;
+  /** The clock sweep timing is measured on, in ms. */
+  now?: () => number;
 }
 
 /**
@@ -70,8 +72,12 @@ export class WorktreeStatusTracker {
   private timerDueAt = 0;
   private lastSweepStartedAt = Number.NEGATIVE_INFINITY;
   private lastSweepFinishedAt = Number.NEGATIVE_INFINITY;
-  /** When activity last asked for a sweep; one that began before it does not cover it. */
-  private lastActivityAt = Number.NEGATIVE_INFINITY;
+  /**
+   * Counts activity that asked for a sweep; a sweep that began before the latest does not cover
+   * it. A counter, not a timestamp: activity in the same millisecond a sweep began may still come
+   * after the sweep read its snapshot, so a millisecond comparison could wrongly count it covered.
+   */
+  private activityCount = 0;
   private lastPublished: string | null = null;
   private disposed = false;
 
@@ -79,19 +85,21 @@ export class WorktreeStatusTracker {
   private readonly urgentDelayMs: number;
   private readonly activityIntervalMs: number;
   private readonly requestMaxAgeMs: number;
+  private readonly now: () => number;
 
   constructor(private readonly options: WorktreeStatusTrackerOptions) {
     this.readStatuses = options.readStatuses ?? readWorktreeStatuses;
     this.urgentDelayMs = options.urgentDelayMs ?? URGENT_SWEEP_DELAY_MS;
     this.activityIntervalMs = options.activityIntervalMs ?? ACTIVITY_SWEEP_INTERVAL_MS;
     this.requestMaxAgeMs = options.requestMaxAgeMs ?? REQUEST_MAX_AGE_MS;
+    this.now = options.now ?? Date.now;
   }
 
   /** The current list, sweeping first unless a sweep that is still valid finished just now. */
   async get(): Promise<WorktreeStatusInfo[]> {
     const fresh =
       this.sweptGeneration === this.generation &&
-      Date.now() - this.lastSweepFinishedAt <= this.requestMaxAgeMs;
+      this.now() - this.lastSweepFinishedAt <= this.requestMaxAgeMs;
     if (!fresh) await this.sweep();
     return this.list();
   }
@@ -105,12 +113,12 @@ export class WorktreeStatusTracker {
       // fires a `worktrees` event). Once a list exists, a path that never matches it must not
       // turn every save into an urgent sweep.
       if (this.sweptGeneration === -1) this.invalidate();
-      else this.scheduleActivitySweep();
+      else this.onActivity();
       return;
     }
     entry.status = toDirtyWorktreeStatus(entry.worktree, status);
     this.publish();
-    this.scheduleActivitySweep();
+    this.onActivity();
   }
 
   /** Git metadata changed; any worktree's status may have. */
@@ -133,21 +141,25 @@ export class WorktreeStatusTracker {
     return statuses;
   }
 
+  private onActivity(): void {
+    this.activityCount++;
+    this.scheduleActivitySweep();
+  }
+
   /**
    * Schedule the rate-limited sweep that follows activity. Spaced from the end of the last sweep,
    * not its start: a sweep slower than the interval would otherwise run back to back.
    */
   private scheduleActivitySweep(): void {
-    this.lastActivityAt = Date.now();
     const readyAt =
       Math.max(this.lastSweepStartedAt, this.lastSweepFinishedAt) + this.activityIntervalMs;
-    this.schedule(Math.max(this.urgentDelayMs, readyAt - Date.now()));
+    this.schedule(Math.max(this.urgentDelayMs, readyAt - this.now()));
   }
 
   /** Run a sweep after `delayMs`, unless one is already due sooner. Skipped while unobserved. */
   private schedule(delayMs: number): void {
     if (!this.options.hasListeners()) return;
-    const dueAt = Date.now() + delayMs;
+    const dueAt = this.now() + delayMs;
     if (this.timer && this.timerDueAt <= dueAt) return;
     this.clearTimer();
     this.timerDueAt = dueAt;
@@ -184,14 +196,14 @@ export class WorktreeStatusTracker {
     }
 
     this.clearTimer();
-    const startedAt = Date.now();
-    this.lastSweepStartedAt = startedAt;
+    this.lastSweepStartedAt = this.now();
+    const activityAtStart = this.activityCount;
     const generation = this.generation;
     const promise = this.runSweep(generation).finally(() => {
       this.inFlight = null;
       // Activity during a long sweep may have armed a timer that fired mid-sweep and joined it;
       // that sweep began too early to cover the activity, so schedule the one it asked for.
-      if (!this.disposed && this.lastActivityAt > startedAt) this.scheduleActivitySweep();
+      if (!this.disposed && this.activityCount !== activityAtStart) this.scheduleActivitySweep();
     });
     this.inFlight = { generation, promise };
     return promise;
@@ -216,7 +228,7 @@ export class WorktreeStatusTracker {
     }
     this.entries = next;
     this.sweptGeneration = generation;
-    this.lastSweepFinishedAt = Date.now();
+    this.lastSweepFinishedAt = this.now();
     this.publish();
   }
 

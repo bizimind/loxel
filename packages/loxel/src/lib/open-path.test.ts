@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import { localRef, localServerId } from "@/api/local-server";
-import { toServerId } from "@/api/worktree-ref";
+import { toServerId, worktreeRef } from "@/api/worktree-ref";
 
 const actualProjects = await import("@/store/projects");
 mock.module("@/store/projects", () => ({ ...actualProjects, whenProjectsLoaded: async () => {} }));
@@ -112,6 +112,24 @@ describe("opens from outside the window", () => {
     expect(switched).toEqual([OTHER]);
     expect(pending(OTHER)).toEqual([
       { kind: "file", path: `${OTHER}/a.md`, location: { line: 3, column: 1 } },
+    ]);
+  });
+
+  test("a file link of another server opens in its worktree there, not in the one on screen", async () => {
+    useProjectStore.setState({
+      projects: [
+        ...useProjectStore.getState().projects,
+        { server: THERE, path: MAIN, isBare: false, worktrees: [{ path: MAIN }, { path: OTHER }] },
+      ] as never,
+    });
+
+    await openPath(THERE, `${MAIN}/a.md`);
+
+    expect(openedFiles).toEqual([]);
+    expect(switched).toEqual([MAIN]);
+    expect(useWorktreeStore.getState().activeWorktree).toEqual(worktreeRef(THERE, MAIN));
+    expect(getWorktreeUI(worktreeRef(THERE, MAIN)).getState().takePendingOpens()).toEqual([
+      { kind: "file", path: `${MAIN}/a.md` },
     ]);
   });
 

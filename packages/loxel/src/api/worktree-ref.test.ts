@@ -59,6 +59,12 @@ describe("WorktreeRef", () => {
     }
   });
 
+  test("refuses the authorities model URIs use for something other than a server", () => {
+    for (const id of ["head", "compare"]) {
+      expect(() => toServerId(id)).toThrow("Not a server id");
+    }
+  });
+
   test("accepts the IDs servers generate", () => {
     expect(toServerId(randomUUID())).toBeDefined();
   });

@@ -30,6 +30,7 @@ import {
 } from "electron";
 
 import { isHttpUrl } from "../url-utils";
+import { onAppWindowMessage } from "./app-windows";
 import {
   type RegistrationNotificationInfo,
   type RegistrationShowResult,
@@ -417,7 +418,7 @@ export function installServiceWorkerNotifications(session: Session): void {
     close(pageCaller(event, claimedScope(value)), value),
   );
   // Next to the pages' listener in browser-notifications.ts: each acts on its own refs only.
-  ipcMain.on(BROWSER_NOTIFICATION_CLICK, (event, value: unknown) => {
+  onAppWindowMessage(BROWSER_NOTIFICATION_CLICK, (event, value: unknown) => {
     void click(session, event, value);
   });
 }
