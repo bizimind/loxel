@@ -61,4 +61,14 @@ describe("useFileClipboard", () => {
     expect(copies).toEqual([]);
     expect(toasts).toEqual(["Can't move or copy between servers"]);
   });
+
+  test("shows a cut file as cut only on its own server", () => {
+    useWorktreeStore.setState(activeWorktreeFields(localRef(REPO)));
+    const { result } = renderClipboard();
+    act(() => result.current.handleCut("/repo/a.ts"));
+    expect(result.current.cutPath).toBe("/repo/a.ts");
+    act(() => useWorktreeStore.setState(activeWorktreeFields(worktreeRef(THERE, REPO))));
+    expect(result.current.cutPath).toBeNull();
+    expect(result.current.clipboard).toBeNull();
+  });
 });

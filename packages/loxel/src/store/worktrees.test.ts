@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import type { AddWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
@@ -37,25 +37,26 @@ let initHookOffers: string[] = [];
 
 const actualClient = await import("@/api/client");
 const { registerConnection, ServerConnection } = await import("@/api/server-connection");
-// The other server is connected too, so its worktrees can be subscribed.
-registerConnection(
+// The other server is connected too, so its worktrees can be subscribed, until this file is done.
+const unregisterThere = registerConnection(
   new ServerConnection({
     server: THERE,
     baseUrl: "/peers/server-there",
     ws: new actualClient.WsClient(),
   }),
 );
+afterAll(unregisterThere);
 
 // Override only the worktree-removal calls; the rest of the client module
 // (logging, ws client) is shared with the store under test.
 mock.module("@/api/client", () => ({
   ...actualClient,
-  planRemoveWorktree: (_projectPath: string, wtPath: string) => {
+  planRemoveWorktree: (_project: unknown, wtPath: string) => {
     planRemoveCalls.push(wtPath);
     return Promise.resolve(plan);
   },
   removeWorktreeByWtPath: (
-    _projectPath: string,
+    _project: unknown,
     wtPath: string,
     options: { deleteBranch: boolean; force: boolean; nested?: string },
   ) => {
@@ -70,7 +71,7 @@ mock.module("@/api/client", () => ({
   },
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
   planAddWorktree: () => Promise.resolve(addPlan),
-  createWorktree: (_projectPath: string, name: string) => {
+  createWorktree: (_project: unknown, name: string) => {
     createCalls.push(name);
     return (createGate ?? Promise.resolve()).then(() => ({
       path: NEW_PATH,
@@ -80,7 +81,7 @@ mock.module("@/api/client", () => ({
   },
 }));
 mock.module("@/lib/repo-trust-dialog", () => ({
-  offerToRunInitHook: (_projectPath: string, wtPath: string) => {
+  offerToRunInitHook: (_project: unknown, wtPath: string) => {
     initHookOffers.push(wtPath);
     return Promise.resolve();
   },

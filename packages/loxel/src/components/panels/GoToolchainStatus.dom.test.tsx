@@ -36,7 +36,9 @@ const getGoToolchainCandidates = jest.fn(async (_wt: WorktreeRef) => ({
   automatic: ENV,
   chosen: response.chosen,
 }));
-const setGoToolchainChoice = jest.fn(async (_request: GoToolchainChoiceRequest) => response);
+const setGoToolchainChoice = jest.fn(
+  async (_wt: WorktreeRef, _choice: Omit<GoToolchainChoiceRequest, "worktreePath">) => response,
+);
 mock.module("@/api/go-env-client", () => ({
   ...originalClient,
   getGoEnv,

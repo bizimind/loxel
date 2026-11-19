@@ -11,6 +11,7 @@ import {
   registerConnection,
   ServerConnection,
 } from "./server-connection";
+import * as serverConnection from "./server-connection";
 import { toServerId, worktreeRef } from "./worktree-ref";
 
 /** A second server, holding the same paths as the window's own. */
@@ -128,6 +129,24 @@ describe("server connections", () => {
     expect(expired).toHaveBeenCalledTimes(1);
     expect(localExpired).not.toHaveBeenCalled();
     localExpired.mockRestore();
+  });
+
+  test("the window's stores and log need no connection, as they start before it exists", async () => {
+    const noConnection = spyOn(serverConnection, "connectionOf").mockImplementation(() => {
+      throw new Error("No connection yet");
+    });
+    try {
+      await api.getStore("settings");
+      await api.putStore("settings", "{}");
+      api.postLogEntry({ level: "info", cat: "test", msg: "hi" });
+    } finally {
+      noConnection.mockRestore();
+    }
+    expect(requests.map((r) => r.url)).toEqual([
+      "/api/stores/settings",
+      "/api/stores/settings",
+      "/api/log",
+    ]);
   });
 
   test("a server has one connection", () => {

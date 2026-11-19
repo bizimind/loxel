@@ -11,7 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getPathInfo, wsClient } from "@/api/client";
-import { connectionOf } from "@/api/server-connection";
+import { connectionOf, hasConnection } from "@/api/server-connection";
 import { sameWorktreeRef } from "@/api/worktree-ref";
 import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktree } from "@/components/dockview/panel-context";
@@ -122,11 +122,13 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
   mediaBoxRef.current = mediaBox;
 
   // --- URL ---
-  const iframeSrc = worktree
-    ? connectionOf(worktree.server).apiUrl(
-        `/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktree.path)}&v=${version}`,
-      )
-    : "";
+  // Nothing to show for a worktree of a server the window has no connection to.
+  const iframeSrc =
+    worktree && hasConnection(worktree.server)
+      ? connectionOf(worktree.server).apiUrl(
+          `/media-frame?path=${encodeURIComponent(filePath)}&wt=${encodeURIComponent(worktree.path)}&v=${version}`,
+        )
+      : "";
 
   // --- Send command to iframe video ---
   const sendCommand = useCallback((command: string, value?: number) => {

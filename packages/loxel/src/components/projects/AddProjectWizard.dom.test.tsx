@@ -58,7 +58,9 @@ const added: ProjectSetupResult = {
   isBare: true,
 };
 
-const addProject = jest.fn(async (_req: AddProjectRequest): Promise<ProjectSetupResult> => added);
+const addProject = jest.fn(
+  async (_server: string, _req: AddProjectRequest): Promise<ProjectSetupResult> => added,
+);
 const originalClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...originalClient,

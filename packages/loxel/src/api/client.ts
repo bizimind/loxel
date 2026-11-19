@@ -83,10 +83,19 @@ function on(wt: WorktreeRef): ServerConnection {
   return connectionOf(wt.server);
 }
 
-// Store persistence (server-backed Zustand storage)
-// The window's own server keeps its stores: they are the window's state, not a worktree's.
+/**
+ * A request to the window's own server, at the origin the window was loaded from, for the
+ * window's own state: its stores and its log. These start as modules load, before the server's id
+ * is known and its connection made, so they need no connection; a refused session still expires
+ * the window's socket, as on the connection.
+ */
+function windowFetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+  return fetchApiJson<T>(LOCAL_BASE_URL, path, options, () => wsClient.expireSession());
+}
+
+// Store persistence (server-backed Zustand storage): the window's state, on its own server.
 export async function getStore(key: string): Promise<string | null> {
-  const { value } = await localConnection().fetchJson<{ value: string | null }>(
+  const { value } = await windowFetchJson<{ value: string | null }>(
     `/stores/${encodeURIComponent(key)}`,
   );
   return value;
@@ -98,8 +107,7 @@ export async function putStore(
   nonce?: string,
   options?: Pick<RequestInit, "keepalive">,
 ): Promise<void> {
-  // The window's own server, as for `getStore`.
-  await localConnection().fetchJson(`/stores/${encodeURIComponent(key)}`, {
+  await windowFetchJson(`/stores/${encodeURIComponent(key)}`, {
     ...options,
     method: "PUT",
     body: JSON.stringify({ value, nonce }),
@@ -126,8 +134,9 @@ export function postLogEntry(entry: {
   msg: string;
   ctx?: Record<string, unknown>;
 }): void {
-  // Fire-and-forget — logging should never block the UI. The window's log goes to its own server.
-  fetch(localConnection().apiUrl("/log"), {
+  // Fire-and-forget — logging should never block the UI. The window's log goes to its own server,
+  // from the start, before its connection exists (`windowFetchJson`).
+  fetch(`${LOCAL_BASE_URL}/api/log`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entry),
@@ -144,7 +153,7 @@ export async function getLogs(options?: {
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   const query = params.toString();
   // The Logs panel shows the window's own server's log.
-  return localConnection().fetchJson(`/logs${query ? `?${query}` : ""}`);
+  return windowFetchJson(`/logs${query ? `?${query}` : ""}`);
 }
 
 export async function getLog(wt: WorktreeRef, options?: LogQueryOptions) {

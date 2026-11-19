@@ -77,7 +77,6 @@ export function withServerProjects(
   return [...others.slice(0, index), ...listed, ...others.slice(index)];
 }
 
-/** `discarded`: the project's files are deleted, not only removed from Loxel. */
 /**
  * The listed project `id` names. Ids are UUIDs each server makes, so one names one project across
  * the window's servers; the request about it goes to its server.
@@ -88,6 +87,7 @@ function listedProject(get: () => ProjectState, id: string): ListedProject {
   return project;
 }
 
+/** `discarded`: the project's files are deleted, not only removed from Loxel. */
 async function removeAndSwitchProject(
   id: string,
   get: () => ProjectState,

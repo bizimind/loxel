@@ -12,6 +12,7 @@ import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { getWorktreeUI } from "@/store/worktree-ui";
+import { useWorktreeStore } from "@/store/worktrees";
 
 /** A cut or copied file: its path on the server of `source`, the worktree it was taken in. */
 interface FileClipboard {
@@ -113,7 +114,10 @@ export function useFileClipboard(
     [queryClient, activeWorktreePath, getTreeRoot],
   );
 
-  const cutPath = clipboard?.mode === "cut" ? clipboard.path : null;
+  // Another server's file is not the one shown at the same path: no cut mark, nothing to paste.
+  const activeServer = useWorktreeStore((s) => s.activeWorktree?.server);
+  const shown = clipboard?.source.server === activeServer ? clipboard : null;
+  const cutPath = shown?.mode === "cut" ? shown.path : null;
 
-  return { clipboard, cutPath, handleCut, handleCopyFile, handlePaste, resolveTargetDir };
+  return { clipboard: shown, cutPath, handleCut, handleCopyFile, handlePaste, resolveTargetDir };
 }

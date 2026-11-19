@@ -9,7 +9,7 @@
 import * as monaco from "monaco-editor";
 
 import * as api from "@/api/client";
-import { localServerId } from "@/api/local-server";
+import { localServerId, whenLocalServerKnown } from "@/api/local-server";
 import type { ServerId } from "@/api/worktree-ref";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 import {
@@ -142,12 +142,11 @@ export function initSchemaSync(): void {
     requestSchemasForOpenFiles();
   });
 
-  // Wait for settings store to hydrate from localStorage, then sync
+  // Wait for the settings store to hydrate, and for the window's server (`schemaServer`), then sync
+  const syncOnceKnown = () => void whenLocalServerKnown().then(syncSchemas);
   if (useSettingsStore.persist.hasHydrated()) {
-    syncSchemas();
+    syncOnceKnown();
   } else {
-    useSettingsStore.persist.onFinishHydration(() => {
-      syncSchemas();
-    });
+    useSettingsStore.persist.onFinishHydration(syncOnceKnown);
   }
 }

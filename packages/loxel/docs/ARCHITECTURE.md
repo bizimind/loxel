@@ -36,7 +36,7 @@ File naming conventions (hook file casing, kebab-case versus PascalCase in `comp
 - **Zod schemas with inferred types** in [project-model.ts](../src/api/project-model.ts), [review-model.ts](../src/api/review-model.ts), [comment-model.ts](../src/api/comment-model.ts) and [open-in-model.ts](../src/api/open-in-model.ts). The schema is canonical and the type is `z.infer`.
 - **Plain TypeScript types** everywhere else (`git-models.ts`, `diff-model.ts`, `log-entry-model.ts`, `search-model.ts`, ...).
 
-Request bodies are validated on the server: [review-routes.ts](../src/server/review-routes.ts) and [open-in-routes.ts](../src/server/open-in-routes.ts) `safeParse` request bodies; [routes.ts](../src/server/routes.ts) checks fields by hand (`parseBody`, `requireString`, `requireStringArray`). The client does not validate responses: `fetchJson<T>` returns the parsed JSON as `T`.
+Request bodies are validated on the server: [review-routes.ts](../src/server/review-routes.ts) and [open-in-routes.ts](../src/server/open-in-routes.ts) `safeParse` request bodies; [routes.ts](../src/server/routes.ts) checks fields by hand (`parseBody`, `requireString`, `requireStringArray`). The client does not validate responses: `ServerConnection.fetchJson<T>` returns the parsed JSON as `T`.
 
 ### REST
 
