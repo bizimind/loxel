@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-import { localRef } from "@/api/local-server";
+import { localRef, localServerId } from "@/api/local-server";
 import type { WorktreeRef } from "@/api/worktree-ref";
 import { getCurrentRepositoryStore } from "@/store/worktree-repository";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
@@ -71,11 +71,14 @@ mock.module("@/queries/use-repo-queries", () => ({
 }));
 
 const { FileTreePanel } = await import("./FileTreePanel");
+const { LayoutServerContext } = await import("@/components/dockview/panel-context");
 
 function renderPanel() {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <FileTreePanel />
+      <LayoutServerContext.Provider value={localServerId()}>
+        <FileTreePanel />
+      </LayoutServerContext.Provider>
     </QueryClientProvider>,
   );
 }

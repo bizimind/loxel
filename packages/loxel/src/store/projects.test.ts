@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
+import { localServerId } from "@/api/local-server";
 import type { EnrichedProject } from "@/api/project-model";
 import { toServerId } from "@/api/worktree-ref";
 
@@ -9,6 +10,7 @@ import {
   SIDEBAR_MIN_WIDTH,
   clampSidebarWidth,
   deriveProject,
+  useProjectStore,
   withServerProjects,
 } from "./projects";
 
@@ -81,5 +83,31 @@ describe("withServerProjects", () => {
       "server-a:/repo",
       "server-b:/repo",
     ]);
+  });
+});
+
+describe("the persisted sidebar state", () => {
+  afterEach(() =>
+    useProjectStore.setState({ projects: [], expandedProjectIds: [], autoExpandedProjectIds: [] }),
+  );
+
+  test("names only the window's server's projects, keeping ids of none listed", () => {
+    useProjectStore.setState({
+      projects: [
+        { ...project("/here", []), id: "here", server: localServerId() },
+        { ...project("/there", []), id: "there", server: toServerId("other-server") },
+      ],
+      expandedProjectIds: ["here", "there", "not-loaded"],
+      autoExpandedProjectIds: ["there", "here"],
+    });
+
+    const persisted = useProjectStore.persist.getOptions().partialize?.(useProjectStore.getState());
+
+    expect(persisted).toMatchObject({
+      expandedProjectIds: ["here", "not-loaded"],
+      autoExpandedProjectIds: ["here"],
+    });
+    // Still expanded here, only not stored on the window's server.
+    expect(useProjectStore.getState().expandedProjectIds).toContain("there");
   });
 });

@@ -18,7 +18,7 @@ import {
   parseBindingOverrides,
   useKeybindingStore,
 } from "./keybindings/keybinding-store";
-import { useProjectStore } from "./projects";
+import { otherServerProjectIds, useProjectStore, windowServerProjectIds } from "./projects";
 import { useSearchStore } from "./search";
 import { persistedSettings, useSettingsStore, withValidSettings } from "./settings-store";
 import { useUIStore } from "./ui";
@@ -119,10 +119,21 @@ const syncTargets: Record<string, SyncTarget> = {
       return {
         sidebarExpanded: s.sidebarExpanded,
         sidebarWidth: s.sidebarWidth,
-        expandedProjectIds: s.expandedProjectIds,
+        expandedProjectIds: windowServerProjectIds(s.expandedProjectIds, s.projects),
       };
     },
-    setState: (partial) => useProjectStore.setState(partial),
+    setState: (partial) => {
+      const { expandedProjectIds: incoming } = partial;
+      if (!Array.isArray(incoming)) {
+        useProjectStore.setState(partial);
+        return;
+      }
+      // The window's server's state names only its projects: other servers' stay as they are.
+      const s = useProjectStore.getState();
+      const ids = incoming.filter((id): id is string => typeof id === "string");
+      const others = otherServerProjectIds(s.expandedProjectIds, s.projects);
+      useProjectStore.setState({ ...partial, expandedProjectIds: [...ids, ...others] });
+    },
   },
 
   "browser-bookmarks": {

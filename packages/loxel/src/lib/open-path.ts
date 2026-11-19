@@ -348,8 +348,9 @@ export function dispatchPendingOpen(open: PendingOpen): void {
 /**
  * Open a path of `server` whose type is unknown (e.g. a terminal link): folders go to
  * {@link openFolder}, files to their editor. Missing paths still open an editor, which reports the
- * error. In Home, which shows no worktree's files, a file opens in the worktree holding it,
- * switching there.
+ * error. A file opens in the worktree on screen when that is on `server`; in Home, which shows no
+ * worktree's files, or with another server's worktree on screen, it opens in the worktree holding
+ * it, switching there.
  */
 export async function openPath(
   server: ServerId,
@@ -362,18 +363,18 @@ export async function openPath(
     return;
   }
   const filePath = info?.path ?? path;
-  if (useWorktreeStore.getState().activeWorktree === null) {
-    await openFileFromHome(server, filePath, location);
+  if (useWorktreeStore.getState().activeWorktree?.server === server) {
+    dispatchOpenFile(filePath, location);
     return;
   }
-  dispatchOpenFile(filePath, location);
+  await openFileInItsWorktree(server, filePath, location);
 }
 
 /**
- * A file link followed in Home: one of Home's own drafts opens there; any other file opens in the
- * worktree holding it, switching there, since Home shows no worktree's files.
+ * A file link followed where the screen shows none of `server`'s worktrees: in Home, one of Home's
+ * own drafts opens there; any other file opens in the worktree holding it, switching there.
  */
-function openFileFromHome(
+function openFileInItsWorktree(
   server: ServerId,
   path: string,
   location: FileLocation | undefined,
@@ -382,7 +383,13 @@ function openFileFromHome(
     await whenProjectsLoaded();
     // Home's drafts are kept on the window's server.
     const { homeDraftsDir } = useProjectStore.getState();
-    if (server === localServerId() && homeDraftsDir && path.startsWith(homeDraftsDir + "/")) {
+    const inHome = useWorktreeStore.getState().activeWorktree === null;
+    if (
+      inHome &&
+      server === localServerId() &&
+      homeDraftsDir &&
+      path.startsWith(homeDraftsDir + "/")
+    ) {
       dispatchOpenFile(path, location);
       return;
     }

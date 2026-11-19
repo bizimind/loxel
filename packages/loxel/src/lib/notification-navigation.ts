@@ -6,6 +6,7 @@
  */
 import type { IDockviewPanel } from "dockview-react";
 
+import { hasConnection } from "@/api/client";
 import { type PanelNotificationSource, isPanelSource } from "@/api/notification-model";
 import { type WorktreeRef, sameWorktreeRef } from "@/api/worktree-ref";
 import { type PageSlot, getBrowserPageSlot, whenBrowserPageAttached } from "@/store/browser-pages";
@@ -83,9 +84,11 @@ export function navigateToNotification(notification: ClientNotification): void {
 
 /**
  * Show a worktree, or Home (null), then call `then` with whether it had to switch there, once the
- * swapped-in layout has had a frame to mount.
+ * swapped-in layout has had a frame to mount. A worktree of a server the window has no connection
+ * to can't be shown: nothing happens.
  */
 function showPlace(worktree: WorktreeRef | null, then: (afterSwitch: boolean) => void): void {
+  if (worktree && !hasConnection(worktree.server)) return;
   const wtStore = useWorktreeStore.getState();
   const active = wtStore.activeWorktree;
   if (worktree === null && active !== null) {
