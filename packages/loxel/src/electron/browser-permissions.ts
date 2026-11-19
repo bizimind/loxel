@@ -9,7 +9,18 @@ export type BrowserPermission = Parameters<PermissionCheckHandler>[1];
 /** The frame a permission check or request comes from. */
 export interface PermissionAsker {
   isMainFrame: boolean;
+  /** It is in a browser panel's page, not a popup window (or no page, such as a worker). */
+  inBrowserPanel: boolean;
 }
+
+/**
+ * Permissions that take the screen or the pointer. Only a browser panel can say which site has
+ * them (exclusive-access.ts), so popup windows don't get them.
+ */
+const EXCLUSIVE_ACCESS: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
+  "fullscreen",
+  "pointerLock",
+]);
 
 /**
  * Permissions every browser panel page gets without being asked, as browsers give them. Everything
@@ -27,13 +38,14 @@ const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
   // `navigator.clipboard.write()` / `writeText()` from a click or key press: copy buttons. Writes
   // without one, or of custom formats, count as `clipboard-read`, which stays refused with reads.
   "clipboard-sanitized-write",
-  // `requestFullscreen()`, as video players use it. Chromium already requires a user gesture, and
-  // Esc leaves. Fullscreen without a gesture (`automatic-fullscreen`) stays refused.
+  // `requestFullscreen()`, as video players use it. Chromium already requires a user gesture, Esc
+  // leaves, and the panel names the site (exclusive-access.ts). Fullscreen without a gesture
+  // (`automatic-fullscreen`) stays refused. `navigator.keyboard.lock()` (`keyboardLock`) is refused:
+  // Chromium refuses it to webviews before asking anyway, and a lock that held Esc would make the
+  // panel's "Press Esc" wrong.
   "fullscreen",
-  // `navigator.keyboard.lock()`, for remote desktops and cloud games: only held while the page is
-  // fullscreen and focused, and holding Esc leaves.
-  "keyboardLock",
-  // `requestPointerLock()`, for games and 3D viewers. Needs a click, and Esc releases it.
+  // `requestPointerLock()`, for games and 3D viewers. Needs a click, Esc releases it, and the panel
+  // names the site.
   "pointerLock",
   // `navigator.wakeLock.request("screen")`, for slides, recipes and video calls: keeps the display
   // awake, nothing more, and Chromium releases it when the page is hidden.
@@ -62,6 +74,7 @@ export function browserPermissionGranted(
   // Browsers ask first; until Loxel can, the page itself may open them, but frames embedded in it,
   // such as ads, may not.
   if (permission === "openExternal") return asker.isMainFrame;
+  if (EXCLUSIVE_ACCESS.has(permission) && !asker.inBrowserPanel) return false;
   return GRANTED.has(permission);
 }
 
@@ -72,11 +85,25 @@ export function browserPermissionGranted(
  */
 export function installBrowserPermissions(
   browserSession: Pick<Session, "setPermissionCheckHandler" | "setPermissionRequestHandler">,
+  onGranted?: (
+    webContents: Parameters<PermissionRequestHandler>[0],
+    permission: BrowserPermission,
+    requestingUrl: string,
+  ) => void,
 ): void {
-  const check: PermissionCheckHandler = (_webContents, permission, _origin, details) =>
-    browserPermissionGranted(permission, { isMainFrame: details.isMainFrame });
-  const request: PermissionRequestHandler = (_webContents, permission, callback, details) => {
-    callback(browserPermissionGranted(permission, { isMainFrame: details.isMainFrame }));
+  const check: PermissionCheckHandler = (webContents, permission, _origin, details) =>
+    browserPermissionGranted(permission, {
+      isMainFrame: details.isMainFrame,
+      inBrowserPanel: webContents?.getType() === "webview",
+    });
+  const request: PermissionRequestHandler = (webContents, permission, callback, details) => {
+    const granted = browserPermissionGranted(permission, {
+      isMainFrame: details.isMainFrame,
+      inBrowserPanel: webContents.getType() === "webview",
+    });
+    // Before the callback, which can act on the grant synchronously (fullscreen does).
+    if (granted) onGranted?.(webContents, permission, details.requestingUrl);
+    callback(granted);
   };
   browserSession.setPermissionCheckHandler(check);
   browserSession.setPermissionRequestHandler(request);

@@ -79,6 +79,15 @@ interface Window {
       onShow: (request: unknown) => void,
       onHide: (webContentsId: unknown) => void,
     ) => () => void;
+    /**
+     * Fullscreen and pointer lock notices for this window's browser panels: `onShow` gets an
+     * `ExclusiveAccessNotice` payload, `onHide` the webContents ID whose page left fullscreen.
+     * Returns an unsubscribe function.
+     */
+    onExclusiveAccessNotice: (
+      onShow: (notice: unknown) => void,
+      onHide: (webContentsId: unknown) => void,
+    ) => () => void;
     /** The app update's current state, kept by Electron main. */
     getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
     /** Check the release manifest for a newer version; the result arrives as a status change. */
