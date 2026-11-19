@@ -88,6 +88,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
+import { installBrowserDownloads } from "./browser-downloads";
 import { installBrowserFavicons } from "./browser-favicons";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
@@ -1133,6 +1134,7 @@ app.whenReady().then(async () => {
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
     installBrowserPermissions(browserSession);
     installBrowserFavicons(browserSession);
+    installBrowserDownloads(browserSession);
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();
