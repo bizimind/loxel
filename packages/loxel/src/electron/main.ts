@@ -88,6 +88,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
+import { installClientCertificatePicker } from "./browser-client-certificates";
 import { installBrowserFavicons } from "./browser-favicons";
 import {
   checkMediaPermission,
@@ -1134,6 +1135,7 @@ app.whenReady().then(async () => {
       noteExclusiveAccessGrant,
     );
     installBrowserFavicons(browserSession);
+    installClientCertificatePicker(browserSession);
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();
