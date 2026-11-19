@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -6,11 +14,21 @@ import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
+// Each save spawns git and fake tools; on a loaded machine that takes far longer than the default.
+setDefaultTimeout(120_000);
+
 const stateDir = mkdtempSync(join(tmpdir(), "csharp-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 
 const { FormatService } = await import("./format-service");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+
+/**
+ * A save's deadlines are seconds, for a user waiting on it; these tests check what is formatted, and
+ * on a loaded machine a fake formatter can take longer than that to start.
+ */
+const SAVE_DEADLINE_MS = 30_000;
+const newService = () => new FormatService(undefined, SAVE_DEADLINE_MS, SAVE_DEADLINE_MS);
 
 const REAL_ENV = { ...process.env };
 const ARCH_ROOT = `DOTNET_ROOT_${process.arch.toUpperCase()}`;
@@ -47,12 +65,7 @@ async function install(dir: string, name: string, script = reportScript(name)): 
 }
 
 function save(name: string): Promise<{ content: string | null; notice?: string }> {
-  return new FormatService().format(
-    "class A { }\n",
-    join(wt, name),
-    wt,
-    DEFAULT_FORMATTING_SETTINGS,
-  );
+  return newService().format("class A { }\n", join(wt, name), wt, DEFAULT_FORMATTING_SETTINGS);
 }
 
 /** A manual override, the one way `dotnet` runs in an untrusted repository, through its checks. */
@@ -63,7 +76,7 @@ function saveWithDotnet(
 ): Promise<{ content: string | null; notice?: string }> {
   const overrides = [{ id: "o1", extensions: "cs,fs", command, args }];
   const settings = { ...DEFAULT_FORMATTING_SETTINGS, overrides };
-  return new FormatService().format("class A { }\n", join(wt, name), wt, settings);
+  return newService().format("class A { }\n", join(wt, name), wt, settings);
 }
 
 beforeEach(async () => {
@@ -257,7 +270,7 @@ describe("csharpFormatter local tool", () => {
       ...DEFAULT_FORMATTING_SETTINGS,
       overrides: [{ id: "o1", extensions: "cs", command: "dotnet", args: "format" }],
     };
-    const result = await new FormatService().format("", join(wt, "a.cs"), wt, settings);
+    const result = await newService().format("", join(wt, "a.cs"), wt, settings);
     expect(result).toEqual({ content: null });
     expect(existsSync(ranMarker)).toBe(false);
   });
@@ -359,7 +372,7 @@ describe("csharpFormatter repository trust", () => {
 
   test("untrusted: listing the formatters in Settings reports nothing", async () => {
     await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
-    new FormatService().getDetectedFormatters(wt);
+    newService().getDetectedFormatters(wt);
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 

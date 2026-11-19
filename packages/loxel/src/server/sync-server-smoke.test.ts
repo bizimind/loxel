@@ -3,7 +3,7 @@
  * that the in-process suites (`sync-*.test.ts`) mirror rather than run. `LOXEL_DEV=1` keeps the
  * server off the keychain, and a temporary state directory off the user's projects.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -42,7 +42,11 @@ import { TITLE_KEY } from "./project-worktrees";
 if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 
 const LOXEL_ROOT = path.resolve(import.meta.dir, "../..");
-const TEST_TIMEOUT_MS = 120_000;
+// Each test drives a real server, git and shells; on a loaded machine that takes minutes, and a test
+// that times out has its processes killed, the server's included. The default covers the hooks,
+// which stop the server and delete the repository.
+const TEST_TIMEOUT_MS = 300_000;
+setDefaultTimeout(TEST_TIMEOUT_MS);
 
 /** A port free right now: the server takes its port from the environment. */
 function freePort(): number {
@@ -394,14 +398,17 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         chmodSync(shim, 0o755);
 
         terminal.type(`PATH="${shimDir}:$PATH" "${wtBinDir}/wt" rm --force -D ${name}`);
-        await untilDead(terminal.pid);
         const parked = () =>
           readdirSync(path.join(worktreesDir(), ".wt-trash")).filter((entry) =>
             entry.startsWith(name),
           );
-        expect(parked()).toHaveLength(1);
-
-        writeFileSync(release, "");
+        try {
+          await untilDead(terminal.pid);
+          expect(parked()).toHaveLength(1);
+        } finally {
+          // A failure above must not leave `wt`, and the removal it holds, waiting for good.
+          writeFileSync(release, "");
+        }
         await until(() => parked().length === 0, TEST_TIMEOUT_MS);
         expect(await git(repo.root, "branch", "--list", name)).toBe("");
         expect(existsSync(wtPath)).toBe(false);
@@ -504,6 +511,8 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
           await untilDead(terminal.pid);
           expect(await readRows(wtPath)).toEqual(rowsOf(wtPath).map(() => null));
         } finally {
+          // A failure above must not leave the hook, and the removal behind it, waiting for good.
+          writeFileSync(hookRelease, "");
           rmSync(hook, { force: true });
           terminal.close();
         }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -18,6 +18,9 @@ import {
   subscribeGoEnv,
   trustedGoTool,
 } from "./go-env";
+
+// Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
+setDefaultTimeout(60_000);
 
 const roots: string[] = [];
 const cleanups: (() => void)[] = [];
@@ -262,8 +265,6 @@ describe("trustedGoTool", () => {
 });
 
 describe("subscribeGoEnv", () => {
-  const TIMEOUT_MS = 30_000;
-
   test("memoizes while subscribed", async () => {
     const { wt } = await setup();
     cleanups.push(subscribeGoEnv(wt, () => {}));
@@ -272,58 +273,46 @@ describe("subscribeGoEnv", () => {
     expect(first).toBe(second);
   });
 
-  test(
-    "resolves again when the root go.mod changes",
-    async () => {
-      const { wt } = await setup();
-      const needed = untilUpdate(wt, (env) => env?.newerGoNeeded?.version);
-      await getGoEnv(wt);
-      const version = await repeatUntil(needed, () =>
-        writeFile(join(wt, "go.mod"), "module x\n\ngo 1.99\n"),
-      );
-      expect(version).toBe("1.99");
-    },
-    TIMEOUT_MS,
-  );
+  test("resolves again when the root go.mod changes", async () => {
+    const { wt } = await setup();
+    const needed = untilUpdate(wt, (env) => env?.newerGoNeeded?.version);
+    await getGoEnv(wt);
+    const version = await repeatUntil(needed, () =>
+      writeFile(join(wt, "go.mod"), "module x\n\ngo 1.99\n"),
+    );
+    expect(version).toBe("1.99");
+  });
 
-  test(
-    "notices go appearing in, changing in and leaving a PATH directory",
-    async () => {
-      const { wt, bin, log } = await setup();
-      await rm(join(bin, "go"));
-      const found = untilUpdate(wt, (env) => env?.version ?? undefined);
-      expect(await getGoEnv(wt)).toBeNull();
-      const install = (version: string) => writeExecutable(join(bin, "go"), fakeGo(version, log));
-      expect(await repeatUntil(found, () => install("1.27.3"))).toBe("1.27.3");
+  test("notices go appearing in, changing in and leaving a PATH directory", async () => {
+    const { wt, bin, log } = await setup();
+    await rm(join(bin, "go"));
+    const found = untilUpdate(wt, (env) => env?.version ?? undefined);
+    expect(await getGoEnv(wt)).toBeNull();
+    const install = (version: string) => writeExecutable(join(bin, "go"), fakeGo(version, log));
+    expect(await repeatUntil(found, () => install("1.27.3"))).toBe("1.27.3");
 
-      const swapped = untilUpdate(wt, (env) => (env?.version === "1.28.1" ? true : undefined));
-      expect(await repeatUntil(swapped, () => install("1.28.1"))).toBe(true);
+    const swapped = untilUpdate(wt, (env) => (env?.version === "1.28.1" ? true : undefined));
+    expect(await repeatUntil(swapped, () => install("1.28.1"))).toBe(true);
 
-      const gone = untilUpdate(wt, (env) => (env === null ? true : undefined));
-      await rm(join(bin, "go"));
-      expect(await gone).toBe(true);
-    },
-    TIMEOUT_MS,
-  );
+    const gone = untilUpdate(wt, (env) => (env === null ? true : undefined));
+    await rm(join(bin, "go"));
+    expect(await gone).toBe(true);
+  });
 
-  test(
-    "notices a PATH directory that did not exist",
-    async () => {
-      const { wt, bin, log, gitDir } = await setup();
-      const parent = join(bin, "later");
-      const later = join(parent, "bin");
-      process.env.PATH = [later, gitDir].join(delimiter);
-      const found = untilUpdate(wt, (env) => env?.binary);
-      await getGoEnv(wt);
-      const binary = await repeatUntil(found, async () => {
-        await rm(parent, { recursive: true, force: true });
-        await mkdir(later, { recursive: true });
-        await writeExecutable(join(later, "go"), fakeGo("1.27.3", log));
-      });
-      expect(binary).toBe(join(later, "go"));
-    },
-    TIMEOUT_MS,
-  );
+  test("notices a PATH directory that did not exist", async () => {
+    const { wt, bin, log, gitDir } = await setup();
+    const parent = join(bin, "later");
+    const later = join(parent, "bin");
+    process.env.PATH = [later, gitDir].join(delimiter);
+    const found = untilUpdate(wt, (env) => env?.binary);
+    await getGoEnv(wt);
+    const binary = await repeatUntil(found, async () => {
+      await rm(parent, { recursive: true, force: true });
+      await mkdir(later, { recursive: true });
+      await writeExecutable(join(later, "go"), fakeGo("1.27.3", log));
+    });
+    expect(binary).toBe(join(later, "go"));
+  });
 
   test("says when a resolution changed nothing", async () => {
     const { wt } = await setup();

@@ -25,7 +25,11 @@ import type { SpawnEnv } from "./toolchain-env-contributor";
 
 const log = logger.child("server");
 
-const VERSION_TIMEOUT_MS = 5000;
+/**
+ * `node --version` answers at once, but on a loaded machine a timeout reads as an unknown version,
+ * which flags a pin as not installed: a wait is better. Terminals and saves cap it themselves.
+ */
+const VERSION_TIMEOUT_MS = 30_000;
 /** Quiet period after the last filesystem event before re-resolving (installers write in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 /** An installed version's directory name. Aliases (mise's `22`, `latest`) and pre-releases differ. */

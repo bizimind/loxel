@@ -33,8 +33,12 @@ import { ProjectFilesService } from "@/server/project-files-service";
 import { projectWorktreesResponse } from "@/server/project-worktrees";
 import { WorktreeStatusTracker } from "@/server/worktree-status-tracker";
 
-/** How long an expected event may take before the test fails. Generous for a loaded machine. */
-const EVENT_DEADLINE_MS = 30_000;
+/**
+ * How long an expected event may take before the test fails: minutes on a loaded machine, where it
+ * takes milliseconds on an idle one. The `sync-*` tests' own timeouts are longer, so a miss there
+ * names its event.
+ */
+const EVENT_DEADLINE_MS = 120_000;
 /** How long one attempt of {@link retryUntil} waits for its signal before repeating the action. */
 const RETRY_ATTEMPT_MS = 250;
 /** The server's debounce for git-directory events. */

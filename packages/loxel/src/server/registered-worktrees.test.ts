@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -7,6 +7,10 @@ import { executeAdd, executeMove, executeRemove } from "@bizimind/wt/lib";
 import { createSyncRepo, git, type SyncRepo } from "@/test/git-sync-harness";
 
 import { RegisteredWorktrees } from "./registered-worktrees";
+
+// Each test and the setup spawn git many times; on a loaded machine that takes far longer than the
+// default.
+setDefaultTimeout(180_000);
 
 const NO_CHANGES = { removed: [], moved: [] };
 

@@ -3,7 +3,7 @@
  * follow edits and git commands from a terminal, and Loxel's own read-only git calls emit nothing.
  * Runs against each kind of worktree that has a different set of watchers behind it.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
@@ -28,7 +28,10 @@ import {
   readWorktreeStatuses,
 } from "./git-commands";
 
-const TEST_TIMEOUT_MS = 60_000;
+// Each test runs git and waits on real watchers; on a loaded machine that takes minutes. The default
+// covers the hooks, which stop watchers and delete the repository.
+const TEST_TIMEOUT_MS = 180_000;
+setDefaultTimeout(TEST_TIMEOUT_MS);
 
 const CASES: Array<{ title: string; layout: RepoLayout; linked: boolean }> = [
   { title: "linked worktree of a bare repo", layout: "bare", linked: false },

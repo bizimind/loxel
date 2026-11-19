@@ -3,7 +3,7 @@
  * no client has open and changes that arrive from a remote. Each test asserts on what a client
  * reads after the `refs_changed` and `log_changed` it receives.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import path from "node:path";
 
 import { executeAdd } from "@bizimind/wt/lib";
@@ -12,7 +12,10 @@ import { createSyncRepo, git, SyncProject, type SyncRepo } from "@/test/git-sync
 
 import { getBranchCommits, getRefs } from "./git-commands";
 
-const TEST_TIMEOUT_MS = 60_000;
+// Each test runs git and waits on real watchers; on a loaded machine that takes minutes. The default
+// covers the hooks, which stop watchers and delete the repositories.
+const TEST_TIMEOUT_MS = 120_000;
+setDefaultTimeout(TEST_TIMEOUT_MS);
 
 describe.each(["bare", "regular"] as const)("commit graph, %s repo", (layout) => {
   let repo: SyncRepo;

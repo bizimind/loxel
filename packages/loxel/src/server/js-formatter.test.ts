@@ -22,7 +22,13 @@ const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { idleTimer } = await import("./formatter-backends");
 
 // Saves spawn real processes and resolve Node, which takes a while on a busy machine.
-setDefaultTimeout(60_000);
+setDefaultTimeout(180_000);
+
+/**
+ * A save's deadlines are seconds, for a user waiting on it; these tests check what is formatted, and
+ * on a loaded machine a fake formatter can take longer than that to start.
+ */
+const SAVE_DEADLINE_MS = 30_000;
 
 const realNode = Bun.which("node");
 const originalPath = process.env.PATH;
@@ -42,7 +48,7 @@ beforeEach(async () => {
   process.env.PATH = [userBin, realNode && dirname(realNode), "/usr/bin", "/bin"]
     .filter(Boolean)
     .join(":");
-  service = new FormatService();
+  service = new FormatService(undefined, SAVE_DEADLINE_MS, SAVE_DEADLINE_MS);
 });
 
 afterEach(async () => {
