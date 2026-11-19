@@ -109,6 +109,7 @@ export class FormatService {
   constructor(
     private readonly languages: readonly LanguageFormatter[] = languageFormatters,
     private readonly prepareTimeoutMs = PREPARE_TIMEOUT_MS,
+    private readonly formatTimeoutMs = FORMAT_TIMEOUT_MS,
   ) {}
 
   /**
@@ -431,7 +432,7 @@ export class FormatService {
       const exitCode = await Promise.race([
         proc.exited,
         new Promise<"timeout">((resolve) => {
-          setTimeout(() => resolve("timeout"), FORMAT_TIMEOUT_MS);
+          setTimeout(() => resolve("timeout"), this.formatTimeoutMs);
         }),
       ]);
 
@@ -440,7 +441,7 @@ export class FormatService {
         log.warn("Formatter timed out", { command, filePath });
         return {
           content: null,
-          notice: `Format on save skipped: "${command}" timed out after ${FORMAT_TIMEOUT_MS / 1_000}s.`,
+          notice: `Format on save skipped: "${command}" timed out after ${this.formatTimeoutMs / 1_000}s.`,
         };
       }
 
