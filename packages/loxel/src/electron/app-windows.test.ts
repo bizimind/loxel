@@ -103,7 +103,7 @@ test("only page channels and the quit question's register on ipcMain directly", 
     if (file.endsWith(".test.ts") || file === "app-windows.ts") continue;
     const source = await Bun.file(`${import.meta.dirname}/${file}`).text();
     for (const [, channel] of source.matchAll(
-      /ipcMain\.(?:on|once|handle|handleOnce)\(\s*(\w+)/g,
+      /ipcMain\.(?:on|once|handle|handleOnce)\(\s*([^\s,)]+)/g,
     )) {
       if (!RAW_IPC_CHANNELS.has(channel!)) raw.push(`${file}: ${channel}`);
     }
