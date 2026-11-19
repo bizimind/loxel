@@ -89,6 +89,7 @@ import {
 } from "./app-updater";
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
 import { installClientCertificatePicker } from "./browser-client-certificates";
+import { installBrowserDownloads } from "./browser-downloads";
 import { installBrowserFavicons } from "./browser-favicons";
 import {
   checkMediaPermission,
@@ -1135,6 +1136,7 @@ app.whenReady().then(async () => {
       noteExclusiveAccessGrant,
     );
     installBrowserFavicons(browserSession);
+    installBrowserDownloads(browserSession);
     installClientCertificatePicker(browserSession);
     installServiceWorkerNotifications(browserSession);
 
