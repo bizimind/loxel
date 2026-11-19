@@ -11,6 +11,10 @@ import {
 type CheckHandler = Parameters<Session["setPermissionCheckHandler"]>[0];
 type RequestHandler = Parameters<Session["setPermissionRequestHandler"]>[0];
 
+/** What the camera and microphone module was handed, standing in for `browser-media.ts`. */
+const mediaCheck = mock((..._args: unknown[]) => true);
+const mediaRequest = mock((..._args: unknown[]) => {});
+
 /** The handlers `installBrowserPermissions` gives a session. */
 function installedHandlers(): {
   check: NonNullable<CheckHandler>;
@@ -18,14 +22,17 @@ function installedHandlers(): {
 } {
   let check: CheckHandler = null;
   let request: RequestHandler = null;
-  installBrowserPermissions({
-    setPermissionCheckHandler: (handler) => {
-      check = handler;
+  installBrowserPermissions(
+    {
+      setPermissionCheckHandler: (handler) => {
+        check = handler;
+      },
+      setPermissionRequestHandler: (handler) => {
+        request = handler;
+      },
     },
-    setPermissionRequestHandler: (handler) => {
-      request = handler;
-    },
-  });
+    { check: mediaCheck, request: mediaRequest },
+  );
   if (!check || !request) throw new Error("installBrowserPermissions set no handler");
   return { check, request };
 }
@@ -143,6 +150,22 @@ describe("installBrowserPermissions", () => {
     expect(callback.mock.calls).toEqual([[false], [true], [true], [false]]);
   });
 
+  test("the camera and microphone are decided by the media module", () => {
+    const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
+    const details = { isMainFrame: true, mediaType: "video" as const };
+    expect(check(webContents, "media", "https://meet.example/", details)).toBe(true);
+    expect(mediaCheck).toHaveBeenCalledWith(webContents, "https://meet.example/", "video");
+    const callback = mock((_granted: boolean) => {});
+    const media = { isMainFrame: true, requestingUrl: "https://meet.example/", mediaTypes: [] };
+    request(webContents, "media", callback, media);
+    expect(mediaRequest).toHaveBeenCalledWith(webContents, media, expect.any(Function));
+    expect(callback).not.toHaveBeenCalled();
+    // The media module's answer reaches the page through the same callback.
+    const answer = mediaRequest.mock.calls[0]![2] as (granted: boolean) => void;
+    answer(true);
+    expect(callback).toHaveBeenCalledWith(true);
+  });
+
   test("grants are reported, with the frame that asked, before they take effect", () => {
     const events: string[] = [];
     let request: RequestHandler = null;
@@ -153,6 +176,7 @@ describe("installBrowserPermissions", () => {
           request = handler;
         },
       },
+      { check: mediaCheck, request: mediaRequest },
       (_webContents, permission, requestingUrl) => events.push(`${permission} ${requestingUrl}`),
     );
     if (!request) throw new Error("installBrowserPermissions set no request handler");
@@ -167,5 +191,11 @@ describe("installBrowserPermissions", () => {
       "answered true",
       "answered false",
     ]);
+    // A camera grant, answered later by the media module, is reported before it too.
+    const media = { isMainFrame: true, requestingUrl: "https://meet.example/", mediaTypes: [] };
+    handler(webContents, "media", callback, media);
+    const answer = mediaRequest.mock.calls.at(-1)![2] as (granted: boolean) => void;
+    answer(true);
+    expect(events.slice(3)).toEqual(["media https://meet.example/", "answered true"]);
   });
 });

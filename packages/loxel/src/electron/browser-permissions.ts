@@ -1,5 +1,7 @@
 import type { Session } from "electron";
 
+import type { checkMediaPermission, requestMediaPermission } from "./browser-media";
+
 type PermissionCheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
 type PermissionRequestHandler = NonNullable<Parameters<Session["setPermissionRequestHandler"]>[0]>;
 
@@ -24,8 +26,9 @@ const EXCLUSIVE_ACCESS: ReadonlySet<BrowserPermission> = new Set<BrowserPermissi
 
 /**
  * Permissions every browser panel page gets without being asked, as browsers give them. Everything
- * else is refused, since Loxel has no permission prompt; Electron's default, with no handler,
- * grants every permission to every page.
+ * else is refused, unless Loxel asks the user for it itself (the camera and microphone, in
+ * `browser-media.ts`, and notifications); Electron's default, with no handler, grants every
+ * permission to every page.
  *
  * Some permissions browsers grant quietly are refused anyway, as pages carry on without them:
  * `persistent-storage` (storage stays best-effort), and `background-sync`, `sensors` and
@@ -59,9 +62,10 @@ const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
 ]);
 
 /**
- * Whether a browser panel page gets `permission`. One decision answers both the check and the
- * request, so what a page reads (`navigator.permissions.query()`) matches what asking gets it. Each
- * permission decided otherwise than by the allowlist has its own branch here.
+ * Whether a browser panel page gets `permission`, for every permission but `media`, which the user
+ * decides per site (`browser-media.ts`). One decision answers both the check and the request, so
+ * what a page reads (`navigator.permissions.query()`) matches what asking gets it. Each permission
+ * decided otherwise than by the allowlist has its own branch here.
  */
 export function browserPermissionGranted(
   permission: BrowserPermission,
@@ -81,29 +85,41 @@ export function browserPermissionGranted(
 /**
  * Decide browser panel permissions in `browserSession`. Both handlers are needed: requests answer
  * `requestPermission()`-style calls, and checks are what `navigator.permissions.query()` and many
- * APIs read before (or instead of) asking.
+ * APIs read before (or instead of) asking. The camera and microphone (`media`) go to `media`
+ * (`browser-media.ts`), which may ask the user before answering a request.
  */
 export function installBrowserPermissions(
   browserSession: Pick<Session, "setPermissionCheckHandler" | "setPermissionRequestHandler">,
+  media: { check: typeof checkMediaPermission; request: typeof requestMediaPermission },
   onGranted?: (
     webContents: Parameters<PermissionRequestHandler>[0],
     permission: BrowserPermission,
     requestingUrl: string,
   ) => void,
 ): void {
-  const check: PermissionCheckHandler = (webContents, permission, _origin, details) =>
-    browserPermissionGranted(permission, {
+  const check: PermissionCheckHandler = (webContents, permission, origin, details) => {
+    if (permission === "media") return media.check(webContents, origin, details.mediaType);
+    return browserPermissionGranted(permission, {
       isMainFrame: details.isMainFrame,
       inBrowserPanel: webContents?.getType() === "webview",
     });
+  };
   const request: PermissionRequestHandler = (webContents, permission, callback, details) => {
-    const granted = browserPermissionGranted(permission, {
-      isMainFrame: details.isMainFrame,
-      inBrowserPanel: webContents.getType() === "webview",
-    });
     // Before the callback, which can act on the grant synchronously (fullscreen does).
-    if (granted) onGranted?.(webContents, permission, details.requestingUrl);
-    callback(granted);
+    const answer = (granted: boolean) => {
+      if (granted) onGranted?.(webContents, permission, details.requestingUrl);
+      callback(granted);
+    };
+    if (permission === "media" && "mediaTypes" in details) {
+      media.request(webContents, details, answer);
+      return;
+    }
+    answer(
+      browserPermissionGranted(permission, {
+        isMainFrame: details.isMainFrame,
+        inBrowserPanel: webContents.getType() === "webview",
+      }),
+    );
   };
   browserSession.setPermissionCheckHandler(check);
   browserSession.setPermissionRequestHandler(request);

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import {
+  BROWSER_MEDIA_PERMISSION,
   BROWSER_NOTIFICATION_CLOSE,
   BROWSER_NOTIFICATION_EVENT,
   BROWSER_NOTIFICATION_PERMISSION,
@@ -44,8 +45,8 @@ void mock.module("electron", () => ({
   },
 }));
 await import("./webview-preload.cjs");
-const [dialogScript, notificationScript] = scripts;
-if (!dialogScript || !notificationScript) {
+const [dialogScript, notificationScript, mediaScript] = scripts;
+if (!dialogScript || !notificationScript || !mediaScript) {
   throw new Error("the preload did not install its main-world scripts");
 }
 const installDialogs = dialogScript.func as unknown as InstallDialogs;
@@ -323,5 +324,46 @@ describe("webview preload notifications", () => {
       invoke.mockImplementation(() => Promise.resolve("granted"));
       Reflect.deleteProperty(globalThis, "ServiceWorkerRegistration");
     }
+  });
+});
+
+describe("webview preload camera and microphone permission", () => {
+  /** Chromium's PermissionStatus, whose state comes from main's check: denied until allowed. */
+  class ChromiumStatus {
+    get state() {
+      return "denied";
+    }
+  }
+  /** Install the script over a page whose Chromium query answers for `name`. */
+  function mediaPage() {
+    const query = mock((_descriptor: { name: string }) => Promise.resolve(new ChromiumStatus()));
+    const prototype = { query };
+    Object.assign(globalThis, { Permissions: { prototype } });
+    const install = mediaScript!.func as unknown as (pageStates: unknown) => void;
+    install(mediaScript!.args[0]);
+    const permissions = Object.create(prototype) as {
+      query: (descriptor: { name: string }) => Promise<{ state: string }>;
+    };
+    return { permissions, query };
+  }
+
+  test("reports main's state for the camera and microphone on every read", async () => {
+    const { permissions } = mediaPage();
+    sendSync.mockImplementation(() => ({ camera: "prompt", microphone: "granted" }));
+    const camera = await permissions.query({ name: "camera" });
+    expect(camera.state).toBe("prompt");
+    expect((await permissions.query({ name: "microphone" })).state).toBe("granted");
+    sendSync.mockImplementation(() => ({ camera: "granted", microphone: "granted" }));
+    expect(camera.state).toBe("granted");
+    expect(sendSync).toHaveBeenLastCalledWith(BROWSER_MEDIA_PERMISSION);
+  });
+
+  test("leaves Chromium's answer for frames main doesn't decide, and other permissions", async () => {
+    const { permissions } = mediaPage();
+    sendSync.mockImplementation(() => null);
+    expect((await permissions.query({ name: "camera" })).state).toBe("denied");
+    sendSync.mockClear();
+    expect((await permissions.query({ name: "geolocation" })).state).toBe("denied");
+    expect(sendSync).not.toHaveBeenCalled();
   });
 });

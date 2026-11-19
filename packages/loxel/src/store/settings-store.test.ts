@@ -551,7 +551,7 @@ describe("browser notification mutes", () => {
   const backgroundTabs = DEFAULT_BACKGROUND_TABS;
   const reset = () =>
     useSettingsStore.setState({
-      browser: { notificationSites: {}, notificationMutes: {}, backgroundTabs },
+      browser: { notificationSites: {}, notificationMutes: {}, mediaSites: {}, backgroundTabs },
     });
   const browser = () => useSettingsStore.getState().browser;
 
@@ -563,6 +563,7 @@ describe("browser notification mutes", () => {
     expect(browser()).toEqual({
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: {} },
+      mediaSites: {},
       backgroundTabs,
     });
     store.setNotificationMute(site, null);
@@ -578,7 +579,12 @@ describe("browser notification mutes", () => {
     store.setNotificationSite(site, "block");
     expect(browser().notificationMutes).toEqual({ [site]: {} });
     store.setNotificationSite(site, null);
-    expect(browser()).toEqual({ notificationSites: {}, notificationMutes: {}, backgroundTabs });
+    expect(browser()).toEqual({
+      notificationSites: {},
+      notificationMutes: {},
+      mediaSites: {},
+      backgroundTabs,
+    });
     reset();
   });
 
@@ -594,6 +600,7 @@ describe("browser notification mutes", () => {
       browser: {
         notificationSites: { [site]: "allow" },
         notificationMutes: { "https://old.example": { until: 1 } },
+        mediaSites: {},
         backgroundTabs,
       },
     });
@@ -612,11 +619,13 @@ describe("browser notification mutes", () => {
     expect(merge({ browser: stored }, current).browser).toEqual({
       notificationSites: { [site]: "allow" },
       notificationMutes: { [site]: { until: 5 } },
+      mediaSites: {},
       backgroundTabs,
     });
     expect(merge({ browser: { notificationSites: {} } }, current).browser).toEqual({
       notificationSites: {},
       notificationMutes: {},
+      mediaSites: {},
       backgroundTabs,
     });
   });
@@ -629,5 +638,34 @@ describe("browser notification mutes", () => {
     expect(stored({ backgroundTabs: "save-memory" }).browser.backgroundTabs).toBe("save-memory");
     expect(stored({ backgroundTabs: "fast" }).browser.backgroundTabs).toBe("balanced");
     expect(stored({ backgroundPages: 10 }).browser).not.toHaveProperty("backgroundPages");
+  });
+});
+
+describe("browser camera and microphone sites", () => {
+  const site = "https://meet.example";
+  const mediaSites = () => useSettingsStore.getState().browser.mediaSites;
+
+  test("saves each device's decision, and forgetting the last one forgets the site", () => {
+    const store = useSettingsStore.getState();
+    store.setMediaSite(site, ["camera", "microphone"], "allow");
+    store.setMediaSite(site, ["microphone"], "block");
+    expect(mediaSites()).toEqual({ [site]: { camera: "allow", microphone: "block" } });
+    store.setMediaSite(site, ["camera"], null);
+    expect(mediaSites()).toEqual({ [site]: { microphone: "block" } });
+    store.setMediaSite(site, ["camera", "microphone"], null);
+    expect(mediaSites()).toEqual({});
+  });
+
+  test("stored decisions are checked on load", () => {
+    const merge = useSettingsStore.persist.getOptions().merge!;
+    const stored = {
+      mediaSites: {
+        [site]: { camera: "allow", microphone: "maybe" },
+        "https://bad.example": "allow",
+        "https://empty.example": { speaker: "allow" },
+      },
+    };
+    const merged = merge({ browser: stored }, useSettingsStore.getState());
+    expect(merged.browser.mediaSites).toEqual({ [site]: { camera: "allow" } });
   });
 });

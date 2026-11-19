@@ -117,6 +117,25 @@ export const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN =
 /** Renderer → main: the user clicked a page's notification in the notification center. */
 export const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
 /**
+ * Webview preload → main, synchronous: the page read a camera or microphone permission from
+ * `navigator.permissions.query()`. See `browser-media.ts`.
+ */
+export const BROWSER_MEDIA_PERMISSION = "browser-media:permission";
+/** Renderer → main: this document asks the user about its webviews' camera and microphone use. */
+export const BROWSER_MEDIA_LISTEN = "browser-media:listen";
+/** Renderer → main: the per-site camera and microphone decisions from Loxel's settings. */
+export const BROWSER_MEDIA_SET_SITES = "browser-media:set-sites";
+/** Main → renderer: ask whether a site may use the camera or microphone, in the page's panel. */
+export const BROWSER_MEDIA_PERMISSION_REQUEST = "browser-media:permission-request";
+/** Renderer → main: the user answered a camera or microphone request. */
+export const BROWSER_MEDIA_PERMISSION_RESPOND = "browser-media:permission-respond";
+/** Main → renderer: a camera or microphone request was withdrawn. */
+export const BROWSER_MEDIA_PERMISSION_WITHDRAWN = "browser-media:permission-withdrawn";
+/** Main → renderer: an allowed site was refused because the OS has Loxel's access turned off. */
+export const BROWSER_MEDIA_SYSTEM_BLOCKED = "browser-media:system-blocked";
+/** Renderer → main: open the OS privacy settings for the camera or microphone. */
+export const BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS = "browser-media:open-system-settings";
+/**
  * Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.showNotification()`.
  * See `service-worker-notifications.ts`.
  */

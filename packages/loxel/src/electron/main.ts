@@ -89,6 +89,12 @@ import {
 } from "./app-updater";
 import { appWindowList, isAppWindow, registerAppWindow } from "./app-windows";
 import { installBrowserFavicons } from "./browser-favicons";
+import {
+  checkMediaPermission,
+  installBrowserMedia,
+  requestMediaPermission,
+  trackWebviewMedia,
+} from "./browser-media";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
 import { BROWSER_PARTITION } from "./browser-partition";
@@ -776,6 +782,7 @@ app.on("web-contents-created", (_, contents) => {
   forwardWebviewKeystrokes(contents);
   trackWebviewDialogs(contents);
   trackWebviewNotifications(contents);
+  trackWebviewMedia(contents);
   trackWebviewFocus(contents);
   trackWebviewExclusiveAccess(contents);
 
@@ -881,6 +888,7 @@ installBrowserPageLifecycle();
 installJavaScriptDialogs();
 installNativeTheme();
 installBrowserNotifications();
+installBrowserMedia();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
@@ -1133,7 +1141,11 @@ app.whenReady().then(async () => {
     // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    installBrowserPermissions(browserSession, noteExclusiveAccessGrant);
+    installBrowserPermissions(
+      browserSession,
+      { check: checkMediaPermission, request: requestMediaPermission },
+      noteExclusiveAccessGrant,
+    );
     installBrowserFavicons(browserSession);
     installServiceWorkerNotifications(browserSession);
 

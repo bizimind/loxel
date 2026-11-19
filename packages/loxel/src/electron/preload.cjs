@@ -41,6 +41,13 @@ const BROWSER_NOTIFICATION_PERMISSION_REQUEST = "browser-notification:permission
 const BROWSER_NOTIFICATION_PERMISSION_RESPOND = "browser-notification:permission-respond";
 const BROWSER_NOTIFICATION_PERMISSION_WITHDRAWN = "browser-notification:permission-withdrawn";
 const BROWSER_NOTIFICATION_CLICK = "browser-notification:click";
+const BROWSER_MEDIA_LISTEN = "browser-media:listen";
+const BROWSER_MEDIA_SET_SITES = "browser-media:set-sites";
+const BROWSER_MEDIA_PERMISSION_REQUEST = "browser-media:permission-request";
+const BROWSER_MEDIA_PERMISSION_RESPOND = "browser-media:permission-respond";
+const BROWSER_MEDIA_PERMISSION_WITHDRAWN = "browser-media:permission-withdrawn";
+const BROWSER_MEDIA_SYSTEM_BLOCKED = "browser-media:system-blocked";
+const BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS = "browser-media:open-system-settings";
 const APP_QUIT_ENDING_TERMINALS = "app:quit-ending-terminals";
 const SET_WHEN_QUITTING = "quit:set-when-quitting";
 const QUIT_QUESTION = "quit:question";
@@ -173,6 +180,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
   respondToNotificationPermission: (response) =>
     ipcRenderer.send(BROWSER_NOTIFICATION_PERMISSION_RESPOND, response),
   clickBrowserNotification: (ref) => ipcRenderer.send(BROWSER_NOTIFICATION_CLICK, ref),
+  onBrowserMediaPermissions: (handlers) => {
+    const subscriptions = [
+      [BROWSER_MEDIA_PERMISSION_REQUEST, (_event, request) => handlers.onRequest(request)],
+      [BROWSER_MEDIA_PERMISSION_WITHDRAWN, (_event, withdrawn) => handlers.onWithdrawn(withdrawn)],
+      [BROWSER_MEDIA_SYSTEM_BLOCKED, (_event, notice) => handlers.onSystemBlocked(notice)],
+    ];
+    for (const [channel, handler] of subscriptions) ipcRenderer.on(channel, handler);
+    ipcRenderer.send(BROWSER_MEDIA_LISTEN);
+    return () => {
+      for (const [channel, handler] of subscriptions) ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  setMediaSites: (sites) => ipcRenderer.send(BROWSER_MEDIA_SET_SITES, sites),
+  respondToMediaPermission: (response) =>
+    ipcRenderer.send(BROWSER_MEDIA_PERMISSION_RESPOND, response),
+  openMediaSystemSettings: (device) => ipcRenderer.send(BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS, device),
   quitEndingTerminals: () => ipcRenderer.send(APP_QUIT_ENDING_TERMINALS),
   setWhenQuitting: (setting) => ipcRenderer.send(SET_WHEN_QUITTING, setting),
   onQuitQuestion: (callback) => {
