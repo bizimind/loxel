@@ -149,6 +149,19 @@ interface Window {
     respondToMediaPermission: (response: unknown) => void;
     /** Open the OS privacy settings for `device` (`MediaDevice`), where Loxel's access is turned on. */
     openMediaSystemSettings: (device: unknown) => void;
+    /**
+     * Browser panel pages asking to open a link in another app or to reach this machine and the
+     * local network (`SiteAccessRequest`), or such a request was withdrawn (`{ id, webContentsId }`).
+     * Subscribing tells main this document asks.
+     */
+    onSiteAccess: (handlers: {
+      onRequest: (request: unknown) => void;
+      onWithdrawn: (withdrawn: unknown) => void;
+    }) => () => void;
+    /** The per-site decisions for other apps and the local network (payload: `SiteAccessSites`). */
+    setSiteAccessSites: (sites: unknown) => void;
+    /** Answer a site access request (payload: `SitePermissionResponse`). */
+    respondToSiteAccess: (response: unknown) => void;
     /** Quit, ending the terminals, without asking. */
     quitEndingTerminals: () => void;
     /** Tell main the "When quitting Loxel" setting, which Quit Loxel and the app menu follow. */

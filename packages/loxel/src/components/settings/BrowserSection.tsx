@@ -8,6 +8,7 @@ import {
   mediaDecisionSchema,
 } from "@/electron/browser-media-protocol";
 import { notificationSiteDecisionSchema } from "@/electron/browser-notification-protocol";
+import { type SiteDecision, siteDecisionSchema } from "@/electron/site-permission-protocol";
 import { BUDGET_PROFILES } from "@/store/browser-page-budget";
 import {
   BACKGROUND_TABS_MODES,
@@ -85,6 +86,125 @@ function MediaSites() {
                 <XIcon className="size-3" />
               </button>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A site's Allow / Block, which it can change, and Remove, which forgets it so it asks again. */
+function SiteDecisionRow({
+  origin,
+  detail,
+  label,
+  decision,
+  onChange,
+}: {
+  origin: string;
+  /** What the decision is about, after the site's name (`zoommtg: links`). */
+  detail?: string;
+  /** The accessible name of what is decided, such as "Local network". */
+  label: string;
+  decision: SiteDecision;
+  onChange: (decision: SiteDecision | null) => void;
+}) {
+  const name = detail ? `${hostOf(origin)} ${detail}` : hostOf(origin);
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-foreground min-w-0 flex-1 truncate text-xs" title={origin}>
+        {hostOf(origin)}
+        {detail && <span className="text-muted-foreground"> · {detail}</span>}
+      </span>
+      <select
+        aria-label={`${label} for ${name}`}
+        value={decision}
+        onChange={(e) => {
+          const parsed = siteDecisionSchema.safeParse(e.target.value);
+          if (parsed.success) onChange(parsed.data);
+        }}
+        className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+      >
+        <option value="allow">Allow</option>
+        <option value="block">Block</option>
+      </select>
+      <button
+        title="Remove"
+        aria-label={`Remove ${name} from ${label.toLowerCase()}`}
+        className="text-muted-foreground hover:text-foreground rounded p-1"
+        onClick={() => onChange(null)}
+      >
+        <XIcon className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+/** The sites that asked to open links in other apps, by the link's scheme. */
+function ExternalAppSites() {
+  const sites = useSettingsStore((s) => s.browser.externalAppSites);
+  const setExternalAppSite = useSettingsStore((s) => s.setExternalAppSite);
+  const rows = Object.keys(sites)
+    .toSorted(byHost)
+    .flatMap((origin) =>
+      Object.entries(sites[origin] ?? {})
+        .toSorted(([a], [b]) => a.localeCompare(b))
+        .map(([scheme, decision]) => ({ origin, scheme, decision })),
+    );
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-muted-foreground text-xs">Other Apps</label>
+      <p className="text-muted-foreground text-[10px]">
+        Sites ask before a link opens another app, such as a meeting link opening Zoom, and only
+        right after you click or type in the page. Remove a site to have it ask again.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-muted-foreground pt-1 text-xs">No sites allowed or blocked yet.</p>
+      ) : (
+        <div className="space-y-1 pt-1">
+          {rows.map(({ origin, scheme, decision }) => (
+            <SiteDecisionRow
+              key={`${origin} ${scheme}`}
+              origin={origin}
+              detail={`${scheme}: links`}
+              label="Other apps"
+              decision={decision}
+              onChange={(next) => setExternalAppSite(origin, scheme, next)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The sites that asked to reach this Mac and the local network. */
+function LocalNetworkSites() {
+  const sites = useSettingsStore((s) => s.browser.localNetworkSites);
+  const setLocalNetworkSite = useSettingsStore((s) => s.setLocalNetworkSite);
+  const origins = Object.keys(sites).toSorted(byHost);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-muted-foreground text-xs">Local Network</label>
+      <p className="text-muted-foreground text-[10px]">
+        Sites on the internet ask before they connect to apps on this Mac, such as your dev servers,
+        or to devices on your local network, such as a router or printer. Pages on this Mac never
+        ask. Remove a site to have it ask again.
+      </p>
+      {origins.length === 0 ? (
+        <p className="text-muted-foreground pt-1 text-xs">No sites allowed or blocked yet.</p>
+      ) : (
+        <div className="space-y-1 pt-1">
+          {origins.map((origin) => (
+            <SiteDecisionRow
+              key={origin}
+              origin={origin}
+              label="Local network"
+              decision={sites[origin] ?? "block"}
+              onChange={(next) => setLocalNetworkSite(origin, next)}
+            />
           ))}
         </div>
       )}
@@ -193,6 +313,8 @@ export function BrowserSection() {
       </div>
 
       <MediaSites />
+      <ExternalAppSites />
+      <LocalNetworkSites />
     </div>
   );
 }

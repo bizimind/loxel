@@ -88,6 +88,7 @@ import {
   terminalsForUpdateInstall,
 } from "./app-updater";
 import { appWindowList, isAppWindow, onAppWindowMessage, registerAppWindow } from "./app-windows";
+import { requestExternalApp } from "./browser-external-apps";
 import { installBrowserFavicons } from "./browser-favicons";
 import {
   checkMediaPermission,
@@ -99,6 +100,7 @@ import { installBrowserNotifications, trackWebviewNotifications } from "./browse
 import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
 import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
+import { installSiteAccess, trackWebviewSiteAccess } from "./browser-site-access";
 import { installDefaultBrowser } from "./default-browser";
 import { noteExclusiveAccessGrant, trackWebviewExclusiveAccess } from "./exclusive-access";
 import {
@@ -778,6 +780,7 @@ app.on("web-contents-created", (_, contents) => {
   trackWebviewDialogs(contents);
   trackWebviewNotifications(contents);
   trackWebviewMedia(contents);
+  trackWebviewSiteAccess(contents);
   trackWebviewFocus(contents);
   trackWebviewExclusiveAccess(contents);
 
@@ -876,6 +879,7 @@ installJavaScriptDialogs();
 installNativeTheme();
 installBrowserNotifications();
 installBrowserMedia();
+installSiteAccess();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 onAppWindowMessage(GET_WINDOW_FULL_SCREEN, (event) => {
@@ -1130,7 +1134,10 @@ app.whenReady().then(async () => {
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
     installBrowserPermissions(
       browserSession,
-      { check: checkMediaPermission, request: requestMediaPermission },
+      {
+        media: { check: checkMediaPermission, request: requestMediaPermission },
+        openExternal: requestExternalApp,
+      },
       noteExclusiveAccessGrant,
     );
     installBrowserFavicons(browserSession);

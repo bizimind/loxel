@@ -1,5 +1,6 @@
 import type { Session } from "electron";
 
+import type { requestExternalApp } from "./browser-external-apps";
 import type { checkMediaPermission, requestMediaPermission } from "./browser-media";
 
 type PermissionCheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
@@ -27,15 +28,16 @@ const EXCLUSIVE_ACCESS: ReadonlySet<BrowserPermission> = new Set<BrowserPermissi
 /**
  * Permissions every browser panel page gets without being asked, as browsers give them. Everything
  * else is refused, unless Loxel asks the user for it itself (the camera and microphone, in
- * `browser-media.ts`, and notifications); Electron's default, with no handler, grants every
- * permission to every page.
+ * `browser-media.ts`, links to other apps, in `browser-external-apps.ts`, and notifications);
+ * Electron's default, with no handler, grants every permission to every page.
  *
  * Some permissions browsers grant quietly are refused anyway, as pages carry on without them:
  * `persistent-storage` (storage stays best-effort), and `background-sync`, `sensors` and
- * `payment-handler`, which do nothing in Loxel. Local network access (`local-network-access`,
- * `local-network`, `loopback-network`) is refused too, but Electron turns Chromium's checks off, so
- * nothing asks for it; if an Electron upgrade turns them on, public pages that call local dev
- * servers need a decision here.
+ * `payment-handler`, which do nothing in Loxel. Chromium's own local network access permissions
+ * (`local-network-access`, `local-network`, `loopback-network`) are refused too: Electron turns
+ * Chromium's checks off, and Loxel asks the user itself, on the session's requests
+ * (`browser-local-network.ts`). If an Electron upgrade turns Chromium's checks on, its permission
+ * requests need the same decision here.
  */
 const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
   // `navigator.clipboard.write()` / `writeText()` from a click or key press: copy buttons. Writes
@@ -62,10 +64,11 @@ const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
 ]);
 
 /**
- * Whether a browser panel page gets `permission`, for every permission but `media`, which the user
- * decides per site (`browser-media.ts`). One decision answers both the check and the request, so
- * what a page reads (`navigator.permissions.query()`) matches what asking gets it. Each permission
- * decided otherwise than by the allowlist has its own branch here.
+ * Whether a browser panel page gets `permission`, for every permission but `media` and the
+ * `openExternal` request, which the user decides per site (`browser-media.ts`,
+ * `browser-external-apps.ts`). One decision answers both the check and the request, so what a page
+ * reads (`navigator.permissions.query()`) matches what asking gets it. Each permission decided
+ * otherwise than by the allowlist has its own branch here.
  */
 export function browserPermissionGranted(
   permission: BrowserPermission,
@@ -74,23 +77,27 @@ export function browserPermissionGranted(
   // Chromium's notifications would bypass Loxel's: pages get Loxel's own Notification, which
   // asks the user per site and shows in the notification center (browser-notifications.ts).
   if (permission === "notifications") return false;
-  // Links to other apps (`mailto:`, `zoommtg:`, `vscode:`), which open in those apps today.
-  // Browsers ask first; until Loxel can, the page itself may open them, but frames embedded in it,
-  // such as ads, may not.
-  if (permission === "openExternal") return asker.isMainFrame;
+  // Links to other apps are only ever requested, and asked about (browser-external-apps.ts).
+  if (permission === "openExternal") return false;
   if (EXCLUSIVE_ACCESS.has(permission) && !asker.inBrowserPanel) return false;
   return GRANTED.has(permission);
+}
+
+/** The modules that ask the user before answering a permission (passed in by `main.ts`). */
+export interface PermissionAskers {
+  media: { check: typeof checkMediaPermission; request: typeof requestMediaPermission };
+  openExternal: typeof requestExternalApp;
 }
 
 /**
  * Decide browser panel permissions in `browserSession`. Both handlers are needed: requests answer
  * `requestPermission()`-style calls, and checks are what `navigator.permissions.query()` and many
- * APIs read before (or instead of) asking. The camera and microphone (`media`) go to `media`
- * (`browser-media.ts`), which may ask the user before answering a request.
+ * APIs read before (or instead of) asking. The camera and microphone (`media`) and links to other
+ * apps (`openExternal`) go to `askers`, which may ask the user before answering a request.
  */
 export function installBrowserPermissions(
   browserSession: Pick<Session, "setPermissionCheckHandler" | "setPermissionRequestHandler">,
-  media: { check: typeof checkMediaPermission; request: typeof requestMediaPermission },
+  { media, openExternal }: PermissionAskers,
   onGranted?: (
     webContents: Parameters<PermissionRequestHandler>[0],
     permission: BrowserPermission,
@@ -112,6 +119,10 @@ export function installBrowserPermissions(
     };
     if (permission === "media" && "mediaTypes" in details) {
       media.request(webContents, details, answer);
+      return;
+    }
+    if (permission === "openExternal") {
+      openExternal(webContents, details, answer);
       return;
     }
     answer(

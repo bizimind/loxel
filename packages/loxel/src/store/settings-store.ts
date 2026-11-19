@@ -25,6 +25,14 @@ import {
   parseNotificationMutes,
   parseNotificationSites,
 } from "@/electron/browser-notification-protocol";
+import {
+  type ExternalAppSites,
+  type LocalNetworkSites,
+  type SiteDecision,
+  parseExternalAppSites,
+  parseLocalNetworkSites,
+  withExternalAppDecision,
+} from "@/electron/site-permission-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { isRecord } from "@/lib/is-record";
 import {
@@ -116,6 +124,18 @@ export interface BrowserSettings {
    */
   mediaSites: MediaSites;
   /**
+   * Links to other apps (`zoommtg:`) each site (by origin) may open from browser panels, by the
+   * link's scheme; a scheme not listed for a site asks. The Electron main process enforces these
+   * (see browser-external-apps.ts).
+   */
+  externalAppSites: ExternalAppSites;
+  /**
+   * Whether each site (by origin) may reach this machine and the local network from browser
+   * panels; sites not listed ask. The Electron main process enforces these (see
+   * browser-local-network.ts).
+   */
+  localNetworkSites: LocalNetworkSites;
+  /**
    * How much the browser pages of layouts not shown (other worktrees, or Home) may cost before
    * they are frozen or unloaded (see store/browser-page-budget.ts).
    */
@@ -136,6 +156,8 @@ function parseBrowserSettings(value: unknown): BrowserSettings {
     notificationSites: parseNotificationSites(fields.notificationSites),
     notificationMutes: parseNotificationMutes(fields.notificationMutes),
     mediaSites: parseMediaSites(fields.mediaSites),
+    externalAppSites: parseExternalAppSites(fields.externalAppSites),
+    localNetworkSites: parseLocalNetworkSites(fields.localNetworkSites),
     backgroundTabs: isBackgroundTabsMode(fields.backgroundTabs)
       ? fields.backgroundTabs
       : DEFAULT_BACKGROUND_TABS,
@@ -717,6 +739,10 @@ export interface SettingsState {
     devices: readonly MediaDevice[],
     decision: MediaDecision | null,
   ) => void;
+  /** Allow or block a site's links to other apps of `scheme`, or forget it (`null`) so it asks. */
+  setExternalAppSite: (origin: string, scheme: string, decision: SiteDecision | null) => void;
+  /** Allow or block a site's access to the local network, or forget it (`null`) so it asks. */
+  setLocalNetworkSite: (origin: string, decision: SiteDecision | null) => void;
   /** Set how much background browser pages may cost before they are frozen or unloaded. */
   setBackgroundTabs: (mode: BackgroundTabsMode) => void;
 
@@ -822,6 +848,8 @@ export const useSettingsStore = create<SettingsState>()(
         notificationSites: {},
         notificationMutes: {},
         mediaSites: {},
+        externalAppSites: {},
+        localNetworkSites: {},
         backgroundTabs: DEFAULT_BACKGROUND_TABS,
       },
 
@@ -1142,6 +1170,26 @@ export const useSettingsStore = create<SettingsState>()(
             mediaSites: withMediaDecision(s.browser.mediaSites, origin, devices, decision),
           },
         })),
+
+      setExternalAppSite: (origin, scheme, decision) =>
+        set((s) => ({
+          browser: {
+            ...s.browser,
+            externalAppSites: withExternalAppDecision(
+              s.browser.externalAppSites,
+              origin,
+              scheme,
+              decision,
+            ),
+          },
+        })),
+
+      setLocalNetworkSite: (origin, decision) =>
+        set((s) => {
+          const { [origin]: _previous, ...others } = s.browser.localNetworkSites;
+          const localNetworkSites = decision ? { ...others, [origin]: decision } : others;
+          return { browser: { ...s.browser, localNetworkSites } };
+        }),
 
       setBackgroundTabs: (mode) =>
         set((s) => ({ browser: { ...s.browser, backgroundTabs: mode } })),

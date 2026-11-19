@@ -45,6 +45,8 @@ beforeEach(() => {
       notificationSites: { [site]: "allow" },
       notificationMutes: {},
       mediaSites: {},
+      externalAppSites: {},
+      localNetworkSites: {},
       backgroundTabs: DEFAULT_BACKGROUND_TABS,
     },
   });

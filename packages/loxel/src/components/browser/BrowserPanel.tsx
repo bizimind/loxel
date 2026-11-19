@@ -54,9 +54,11 @@ import { JavaScriptDialog } from "./JavaScriptDialog";
 import { MediaPermissionBar, MediaSystemBlockedBar } from "./MediaPermissionBar";
 import { NotificationPermissionBar } from "./NotificationPermissionBar";
 import { PasskeyQrOverlay } from "./PasskeyQrOverlay";
+import { SiteAccessBar } from "./SiteAccessBar";
 import { useBrowserMediaPermissions } from "./useBrowserMediaPermissions";
 import { useBrowserNotifications } from "./useBrowserNotifications";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
+import { useSiteAccess } from "./useSiteAccess";
 import { addressBarUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
@@ -181,6 +183,9 @@ export function BrowserPanel({
     systemBlocked: mediaSystemBlocked,
     dismissSystemBlocked: dismissMediaSystemBlocked,
   } = useBrowserMediaPermissions(webContentsId, pageUrl);
+  // And so does a site asking to open another app or to reach the local network.
+  const { request: siteAccessRequest, answer: answerSiteAccessRequest } =
+    useSiteAccess(webContentsId);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -596,6 +601,14 @@ export function BrowserPanel({
           key={mediaRequest.id}
           request={mediaRequest}
           onAnswer={answerMediaRequest}
+        />
+      )}
+
+      {siteAccessRequest && (
+        <SiteAccessBar
+          key={siteAccessRequest.id}
+          request={siteAccessRequest}
+          onAnswer={answerSiteAccessRequest}
         />
       )}
 

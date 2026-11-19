@@ -135,6 +135,16 @@ export const BROWSER_MEDIA_PERMISSION_WITHDRAWN = "browser-media:permission-with
 export const BROWSER_MEDIA_SYSTEM_BLOCKED = "browser-media:system-blocked";
 /** Renderer → main: open the OS privacy settings for the camera or microphone. */
 export const BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS = "browser-media:open-system-settings";
+/** Renderer → main: this document asks the user about its webviews' site access. */
+export const SITE_ACCESS_LISTEN = "site-access:listen";
+/** Renderer → main: the per-site decisions for links to other apps and the local network. */
+export const SITE_ACCESS_SET_SITES = "site-access:set-sites";
+/** Main → renderer: ask whether a site may open another app or reach the local network. */
+export const SITE_ACCESS_REQUEST = "site-access:request";
+/** Renderer → main: the user answered a site access request. */
+export const SITE_ACCESS_RESPOND = "site-access:respond";
+/** Main → renderer: a site access request was withdrawn. */
+export const SITE_ACCESS_WITHDRAWN = "site-access:withdrawn";
 /**
  * Webview or service worker preload → main (invoke): `ServiceWorkerRegistration.showNotification()`.
  * See `service-worker-notifications.ts`.

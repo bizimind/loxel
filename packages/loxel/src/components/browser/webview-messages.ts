@@ -89,17 +89,18 @@ export function useWebviewRequests<T extends WebviewRequest>(
 }
 
 /**
- * Send main the setting `select` picks now and whenever it changes, with `push`. Not before
- * hydration: main would take the defaults for the user's decisions.
+ * Send main the setting `select` picks now and whenever it changes (by `isEqual`), with `push`.
+ * Not before hydration: main would take the defaults for the user's decisions.
  */
 export function syncSettingToMain<T>(
   select: (state: SettingsState) => T,
   push: (value: T) => void,
+  isEqual: (a: T, b: T) => boolean = Object.is,
 ): void {
   const send = () => push(select(useSettingsStore.getState()));
   if (useSettingsStore.persist.hasHydrated()) send();
   else useSettingsStore.persist.onFinishHydration(send);
   useSettingsStore.subscribe((state, previous) => {
-    if (select(state) !== select(previous)) send();
+    if (!isEqual(select(state), select(previous))) send();
   });
 }
