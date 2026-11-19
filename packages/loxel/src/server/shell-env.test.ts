@@ -6,10 +6,13 @@ import { join } from "node:path";
 import {
   buildShellSpawnEnv,
   buildSpawnEnv,
+  bundledBinDir,
   captureLoginShellEnv,
   LoginShellEnv,
   onLoginShellEnvChange,
   resolveLoginShellEnv,
+  withPathEntry,
+  withPathFirst,
 } from "./shell-env";
 
 const root = await mkdtemp(join(tmpdir(), "loxel-shell-env-"));
@@ -203,5 +206,30 @@ describe("module API", () => {
     const terminalEnv = buildShellSpawnEnv();
     expect(terminalEnv.PATH).toContain(`/opt/tools/bin:${process.env.PATH}`);
     expect(terminalEnv.LOXEL_TEST_MODULE_API).toBeUndefined();
+  });
+});
+
+describe("withPathEntry", () => {
+  test("puts the directory first, once", () => {
+    expect(withPathEntry("/usr/bin:/bin", "/opt/bin")).toBe("/opt/bin:/usr/bin:/bin");
+    expect(withPathEntry("/usr/bin:/opt/bin", "/opt/bin")).toBe("/usr/bin:/opt/bin");
+    expect(withPathEntry(undefined, "/opt/bin")).toBe("/opt/bin");
+  });
+});
+
+describe("withPathFirst", () => {
+  test("moves the directory to the front", () => {
+    expect(withPathFirst("/usr/bin:/opt/bin:/bin", "/opt/bin")).toBe("/opt/bin:/usr/bin:/bin");
+    expect(withPathFirst(undefined, "/opt/bin")).toBe("/opt/bin");
+  });
+});
+
+describe("bundledBinDir", () => {
+  test("is the bin directory beside the server when it holds the CLI", async () => {
+    const resources = join(root, "Resources");
+    await mkdir(join(resources, "bin"), { recursive: true });
+    expect(bundledBinDir(join(resources, "loxel-server"))).toBeNull();
+    await writeFile(join(resources, "bin", "loxel"), "");
+    expect(bundledBinDir(join(resources, "loxel-server"))).toBe(join(resources, "bin"));
   });
 });

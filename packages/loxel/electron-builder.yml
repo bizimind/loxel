@@ -16,6 +16,9 @@ extraResources:
   # Never run from here: the server clones it out of the bundle first (docs/TERMINAL_HOST.md)
   - from: build/loxel-terminal-host
     to: loxel-terminal-host
+  # The `loxel` CLI, which Loxel terminals get on PATH (docs/TERMINALS.md#the-loxel-cli)
+  - from: build/loxel
+    to: bin/loxel
   # Every language server's files, staged from scripts/language-servers/*.json
   - from: build/language-servers
     to: .

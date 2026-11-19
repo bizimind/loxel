@@ -32,6 +32,7 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 loxel [open flags] <file | folder | url>...
 loxel terminal [--cwd <dir>] [--title <name>] [open flags] [--] [command...]
 loxel                      # launch or focus Loxel
+loxel --version            # print the CLI's version
 
 open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree <path>] [--focus | --no-focus]
 ```

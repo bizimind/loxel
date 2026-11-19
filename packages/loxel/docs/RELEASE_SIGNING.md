@@ -1,6 +1,6 @@
 # Releasing the desktop app: macOS signing and provisioning
 
-Release builds of `packages/loxel` are signed with the Developer ID certificate in the `LOXEL_CERTIFICATE` secret and notarized with the App Store Connect API key secrets. Passkey support adds one more input: the `keychain-access-groups` entitlement in `assets/entitlements.mac.plist` is restricted, and macOS refuses to launch a Developer ID app that carries it unless the bundle embeds a provisioning profile granting it. The release workflow therefore requires the `LOXEL_PROVISIONING_PROFILE` secret and fails before building when it is missing.
+Release builds of `packages/loxel` are signed with the Developer ID certificate in the `LOXEL_CERTIFICATE` secret and notarized with the App Store Connect API key secrets. Passkey support adds one more input: the `keychain-access-groups` entitlement in `assets/entitlements.mac.plist` is restricted, and macOS refuses to launch a Developer ID app that carries it unless the bundle embeds a provisioning profile granting it. The release workflow therefore requires the `LOXEL_PROVISIONING_PROFILE` secret and fails before building when it is missing. The standalone `loxel` CLI each release publishes is signed and notarized with the same certificate and API key, under its own identifier and without the app's entitlements ([ELECTRON.md](ELECTRON.md#build-and-release)).
 
 To create or renew the profile:
 

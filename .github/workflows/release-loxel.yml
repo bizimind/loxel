@@ -127,6 +127,8 @@ jobs:
       sha512_zip_x64: ${{ steps.sha.outputs.sha512_zip_x64 }}
       size_zip_arm64: ${{ steps.sha.outputs.size_zip_arm64 }}
       size_zip_x64: ${{ steps.sha.outputs.size_zip_x64 }}
+      sha256_cli_arm64: ${{ steps.sha.outputs.sha256_cli_arm64 }}
+      sha256_cli_x64: ${{ steps.sha.outputs.sha256_cli_x64 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -185,6 +187,30 @@ jobs:
           echo "$APPLE_API_KEY_BASE64" | base64 --decode > /tmp/AuthKey.p8
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
+
+      # The `loxel` CLI on its own, for use outside Loxel's terminals (build:server:standalone built
+      # it). Signed under its own identifier, since the app's is com.bizimind.loxel, then notarized:
+      # a bare binary cannot be stapled, so Gatekeeper looks the ticket up when a browser download is
+      # first run. electron-builder signs the app's own copy (Resources/bin/loxel) with the app.
+      # Hashed now, as uploaded: notarization does not change the file.
+      - name: Sign the CLI
+        id: cli
+        run: |
+          bun packages/cli-common/scripts/codesign-release.ts packages/loxel/build/loxel loxel-cli
+          echo "sha256=$(shasum -a 256 packages/loxel/build/loxel | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Submitted without waiting, so Apple's queue overlaps the app build; checked before upload.
+      - name: Submit the CLI for notarization
+        id: cli-notary
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent packages/loxel/build/loxel "$RUNNER_TEMP/loxel-cli.zip"
+          ID=$(xcrun notarytool submit "$RUNNER_TEMP/loxel-cli.zip" --output-format json \
+            --key /tmp/AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" | jq -r .id)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
       # The keychain-access-groups entitlement (passkeys) is only honoured when a
       # Developer ID provisioning profile granting it is embedded in the bundle;
@@ -252,6 +278,27 @@ jobs:
       - name: Check the terminal host is packaged
         run: ls packages/loxel/release/mac*/Loxel.app/Contents/Resources/loxel-terminal-host
 
+      # Loxel terminals get this directory on PATH (packages/loxel/docs/TERMINALS.md#environment).
+      - name: Check the CLI is packaged
+        run: packages/loxel/release/mac*/Loxel.app/Contents/Resources/bin/loxel --version
+
+      # notarytool can exit 0 for a rejected submission, so the status decides.
+      - name: Wait for the CLI's notarization
+        run: |
+          set -euo pipefail
+          AUTH=(--key /tmp/AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+          STATUS=$(xcrun notarytool wait "$ID" --output-format json "${AUTH[@]}" | jq -r .status)
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::CLI notarization ended $STATUS"
+            xcrun notarytool log "$ID" "${AUTH[@]}"
+            exit 1
+          fi
+          echo "${{ steps.cli.outputs.sha256 }}  packages/loxel/build/loxel" | shasum -a 256 -c
+        env:
+          ID: ${{ steps.cli-notary.outputs.id }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
       - name: Calculate checksums
         id: sha
         run: |
@@ -263,6 +310,7 @@ jobs:
             # electron-updater checks the downloaded zip against a base64 SHA-512
             echo "sha512_zip_${ARCH}=$(openssl dgst -sha512 -binary "$ZIP" | base64 | tr -d '\n')"
             echo "size_zip_${ARCH}=$(stat -f %z "$ZIP")"
+            echo "sha256_cli_${ARCH}=${{ steps.cli.outputs.sha256 }}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload to R2
@@ -280,6 +328,10 @@ jobs:
           SBOM="Loxel-${{ needs.check-and-bump.outputs.version }}-mac-${{ matrix.arch }}.cdx.json"
           aws s3 cp "packages/loxel/build/$SBOM" "s3://loxel/loxel/app/darwin-${{ matrix.arch }}/$SBOM" \
             --content-type application/vnd.cyclonedx+json
+          # Under the version, like the installers: the manifest points at it only once it is released.
+          aws s3 cp packages/loxel/build/loxel \
+            "s3://loxel/loxel/cli/darwin-${{ matrix.arch }}/${{ needs.check-and-bump.outputs.version }}/loxel" \
+            --content-type application/octet-stream
 
   release:
     needs: [check-and-bump, build-electron]
@@ -302,7 +354,8 @@ jobs:
 
           # `app` holds the installers the site links to; `update` the zips the app updates from;
           # `terminal_host_protocol` what the app updater decides the terminals' fate by; `sbom` each
-          # architecture's CycloneDX SBOM, which the site's download page links to.
+          # architecture's CycloneDX SBOM, which the site's download page links to; `cli` the
+          # standalone `loxel` CLI.
           jq -n \
             --arg v "$VERSION" \
             --arg protocol "$PROTOCOL" \
@@ -313,6 +366,8 @@ jobs:
             --arg zip_sha_x64 "${{ needs.build-electron.outputs.sha512_zip_x64 }}" \
             --argjson zip_size_arm64 "${{ needs.build-electron.outputs.size_zip_arm64 }}" \
             --argjson zip_size_x64 "${{ needs.build-electron.outputs.size_zip_x64 }}" \
+            --arg cli_sha_arm64 "${{ needs.build-electron.outputs.sha256_cli_arm64 }}" \
+            --arg cli_sha_x64 "${{ needs.build-electron.outputs.sha256_cli_x64 }}" \
             '{
               version: $v,
               released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
@@ -328,6 +383,10 @@ jobs:
               update: {
                 "darwin-arm64": {url: "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.zip", sha512: $zip_sha_arm64, size: $zip_size_arm64},
                 "darwin-x64": {url: "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.zip", sha512: $zip_sha_x64, size: $zip_size_x64}
+              },
+              cli: {
+                "darwin-arm64": {url: "\($base)/cli/darwin-arm64/\($v)/loxel", sha256: $cli_sha_arm64},
+                "darwin-x64": {url: "\($base)/cli/darwin-x64/\($v)/loxel", sha256: $cli_sha_x64}
               }
             }' > manifest.json
           cat manifest.json
@@ -345,12 +404,14 @@ jobs:
           VERSION="${{ needs.check-and-bump.outputs.version }}"
           BASE="https://loxel.bizimind.io/loxel"
           LINKS=""
+          CLI_LINKS=""
           SBOMS=()
           for ARCH in arm64 x64; do
             SBOM="Loxel-${VERSION}-mac-${ARCH}.cdx.json"
             aws s3 cp "s3://loxel/loxel/app/darwin-${ARCH}/$SBOM" "$SBOM"
             SBOMS+=("$SBOM")
             LINKS="${LINKS}- [macOS ${ARCH}](${BASE}/app/darwin-${ARCH}/Loxel-${VERSION}-mac-${ARCH}.dmg) ([SBOM](${BASE}/app/darwin-${ARCH}/${SBOM}))"$'\n'
+            CLI_LINKS="${CLI_LINKS}- [macOS ${ARCH}](${BASE}/cli/darwin-${ARCH}/${VERSION}/loxel)"$'\n'
           done
 
           # The SBOMs are attached too, where SBOM tooling looks for them.
@@ -359,7 +420,12 @@ jobs:
             --generate-notes \
             --notes "## Downloads
 
-          ${LINKS}"
+          ${LINKS}
+          ### \`loxel\` CLI
+
+          The app ships it and puts it on \`PATH\` in Loxel terminals; these are for other shells.
+
+          ${CLI_LINKS}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

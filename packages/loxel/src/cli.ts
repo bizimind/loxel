@@ -4,6 +4,7 @@ import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 import { codingAgentName, isCodingAgent } from "./coding-agent-env";
 import { SOCKET_URL, findServer, givenServerGone, waitForServer } from "./find-server";
 import { WINDOW_WAIT_MS, requestOpenAll } from "./open-request";
+import { getCurrentVersion } from "./server/version";
 import { isHttpUrl } from "./url-utils";
 
 /**
@@ -25,14 +26,24 @@ async function detectWorktree(dir: string): Promise<string> {
   return stdout.trim();
 }
 
-/** Launch Loxel, or bring it to the front if it is running; `-g` launches it in the background. */
+/**
+ * Launch Loxel, or bring it to the front if it is running; `-g` launches it in the background.
+ * Only macOS has the app: elsewhere the CLI runs beside a standalone server, which it waits for.
+ */
 function launchLoxel({ background = false } = {}): void {
+  if (process.platform !== "darwin") return;
   const args = background ? ["open", "-g", "-a", "Loxel"] : ["open", "-a", "Loxel"];
   Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // The release workflow runs `--version` to check the signed binary still starts.
+  if (args.length === 1 && (args[0] === "--version" || args[0] === "-V")) {
+    console.log(getCurrentVersion());
+    return;
+  }
 
   // No arguments: focus/launch loxel
   if (args.length === 0) {

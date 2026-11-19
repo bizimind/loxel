@@ -26,7 +26,7 @@ const OPEN_FLAGS =
 
 const TERMINAL_SYNOPSIS = `loxel terminal [--cwd <dir>] [--title <name>] ${OPEN_FLAGS} [--] [command...]`;
 
-export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>...\n       ${TERMINAL_SYNOPSIS}`;
+export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>...\n       ${TERMINAL_SYNOPSIS}\n       loxel --version`;
 
 export const TERMINAL_USAGE = `usage: ${TERMINAL_SYNOPSIS}`;
 

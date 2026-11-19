@@ -5,7 +5,8 @@
  *   bun scripts/build-server-bundle.ts   # release/server/loxel-server-<version>-<platform>.tar.gz
  *
  * The bundle is laid out as the server finds its resources: the terminal host and every language
- * server beside `loxel-server` (as in the app's Resources), and the renderer in `renderer/`, which a
+ * server beside `loxel-server` (as in the app's Resources), the `loxel` CLI in `bin/`, which the
+ * server's terminals get on PATH, and the renderer in `renderer/`, which a
  * compiled server serves when `LOXEL_STATIC_DIR` is unset. Loxel's license and the language
  * servers' notices go in `LICENSE` and `licenses/`. The server, the terminal host and the language
  * servers are all built for the machine they build on, so each platform builds on its own runner.
@@ -70,6 +71,7 @@ copyBuilt(
   path.join(packageRoot, "build", TERMINAL_HOST_BINARY),
   path.join(bundleDir, TERMINAL_HOST_BINARY),
 );
+copyBuilt(path.join(packageRoot, "build", "loxel"), path.join(bundleDir, "bin", "loxel"));
 copyBuilt(STAGE_DIR, bundleDir);
 // `pnpm run build` also writes the server's JS bundle into dist/server/, which is not the renderer.
 const distDir = path.join(packageRoot, "dist");
