@@ -13,6 +13,16 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * The web origin of a URL or origin (`https://example.com/` → `https://example.com`), as pages
+ * name it; null for an opaque origin (`data:`, `about:blank`) or anything that isn't a URL.
+ */
+export function normalizeOrigin(url: string | undefined): string | null {
+  if (!url || !URL.canParse(url)) return null;
+  const { origin } = new URL(url);
+  return origin === "null" ? null : origin;
+}
+
 /** Whether `a` and `b` are URLs of the same web origin (never an opaque one, such as `data:`). */
 export function isSameOrigin(a: string, b: string): boolean {
   if (!URL.canParse(a) || !URL.canParse(b)) return false;

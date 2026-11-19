@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { IpcMainEvent, MediaAccessPermissionRequest, WebContents } from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import {
   type MediaDevice,
   type MediaSites,
@@ -47,7 +48,6 @@ const {
   deviceState,
   devicesOf,
   installBrowserMedia,
-  normalizeOrigin,
   requestMediaPermission,
   requestState,
   trackWebviewMedia,

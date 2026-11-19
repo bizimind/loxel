@@ -82,14 +82,14 @@ describe("Favicon in the desktop app", () => {
     await resolve(url, null);
   });
 
-  test("asks for the site's cookies only for a favicon of the page's own origin", async () => {
+  test("names the page each favicon is for, so main decides cookies and reach by it", async () => {
     const { loadFavicon, resolve } = controlledLoads();
     const url = "https://e.example/favicon.ico";
     render(<Favicon url={url} pageUrl="https://e.example/inbox" />);
     render(<Favicon url={url} pageUrl="https://other.example/" />);
     expect(loadFavicon.mock.calls).toEqual([
       [url, "https://e.example/inbox"],
-      [url, undefined],
+      [url, "https://other.example/"],
     ]);
     await resolve(url, null);
   });

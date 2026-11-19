@@ -56,6 +56,8 @@ const browserSession = {
     onHeadersReceived: (listener: Listener) => {
       headersReceived = listener;
     },
+    onCompleted: () => {},
+    onErrorOccurred: () => {},
   },
   resolveHost: async (host: string) => {
     const addresses = dns.get(host);
@@ -85,7 +87,6 @@ async function panel(origin: string, ip = "93.184.216.34", { listening = true } 
   trackWebviewSiteAccess(page.guest);
   /** Navigate the page to `url`, its document coming from `address`, once main has noted it. */
   const load = async (url: string, address: string) => {
-    page.navigate(new URL(url).origin);
     const response = decided(headersReceived, {
       id: nextRequestId++,
       url,
@@ -94,6 +95,7 @@ async function panel(origin: string, ip = "93.184.216.34", { listening = true } 
       ip: address,
     });
     await settled(response);
+    page.navigate(new URL(url).origin);
   };
   await load(`${origin}/`, ip);
   /** The page requests `url` (from its own origin, or `initiator`); resolves with its fate. */
@@ -302,6 +304,67 @@ describe("a page's own address space", () => {
       ip: "127.0.0.1",
     });
     expect(await settled(viaProxy)).toBe(true);
+  });
+});
+
+describe("review cases", () => {
+  test("a response that never commits leaves the page's own space", async () => {
+    dns.set("intranet2.example", ["10.0.0.6"]);
+    const intranet = await panel("https://intranet2.example", "10.0.0.6");
+    // A download or a 204 the page navigated to: its response arrives, but nothing commits.
+    const response = decided(headersReceived, {
+      id: nextRequestId++,
+      url: "https://files.example/report.pdf",
+      resourceType: "mainFrame",
+      webContents: intranet.guest,
+      ip: "93.184.216.34",
+    });
+    expect(await settled(response)).toBe(true);
+    const printer = await intranet.request("http://192.168.1.20/");
+    expect(await settled(printer.fate)).toBe(true);
+  });
+
+  test("a `.local` page served from this machine counts as this machine", async () => {
+    const dev = await panel("http://mymac.local:3000", "127.0.0.1");
+    const api = await dev.request("http://localhost:8080/api");
+    expect(await settled(api.fate)).toBe(true);
+    expect(dev.requests()).toEqual([]);
+  });
+
+  test("a caller with no document seen counts by its least private address", async () => {
+    // A name that resolves to a public address and to this machine stays public.
+    dns.set("dual.example", ["93.184.216.40", "127.0.0.1"]);
+    const fromWorker = decided(beforeRequest, {
+      id: nextRequestId++,
+      url: "http://192.168.1.1/",
+      resourceType: "other",
+      initiatorOrigin: "https://dual.example",
+    });
+    expect(await settled(fromWorker)).toBe(false);
+    // A dev server on a hosts-file name, all of whose addresses are this machine, stays local.
+    dns.set("app.test", ["127.0.0.1"]);
+    const fromDevWorker = decided(beforeRequest, {
+      id: nextRequestId++,
+      url: "http://localhost:8080/",
+      resourceType: "other",
+      initiatorOrigin: "http://app.test",
+    });
+    expect(await settled(fromDevWorker)).toBe(true);
+  });
+
+  test("a request nobody made counts as a public site's that can't be asked", async () => {
+    const local = decided(beforeRequest, {
+      id: nextRequestId++,
+      url: "http://localhost:1/",
+      resourceType: "other",
+    });
+    expect(await settled(local)).toBe(false);
+    const remote = decided(beforeRequest, {
+      id: nextRequestId++,
+      url: "https://example.com/",
+      resourceType: "other",
+    });
+    expect(await settled(remote)).toBe(true);
   });
 });
 

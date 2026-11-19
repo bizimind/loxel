@@ -14,20 +14,28 @@
  *
  * Address spaces:
  * - A request's target is classified by its URL's host when that names its space (an IP address,
- *   `localhost`, a `.local` name), and otherwise by the addresses the name resolves to
+ *   `localhost`, a `.local` name), and otherwise by the most private address the name resolves to
  *   (`session.resolveHost`), so a public name that resolves to a private address counts as
- *   private. The resolution is Loxel's own, not the connection's; when a response then comes from
- *   a more private address than the request was let through for, and not through a proxy, it is
- *   refused.
+ *   private. When a response then comes from a more private address than the request was let
+ *   through for, and not through a proxy, it is refused.
  * - A page's own space is that of the address its document was loaded from, kept for the
  *   document's life, so a name that changes its answer later can't make the page more private.
+ *   A caller with no such document (a service worker, a page a service worker served) counts by
+ *   its host the other way round: by the least private address it resolves to.
  *
  * A site without a decision gets the panel's bar (`browser-site-access.ts`) while its requests
  * wait: Allow lets them through, and Block or closing the bar fails them. They fail too when the
  * page navigates away.
  */
-import { type Session, type WebContents, webContents as allWebContents } from "electron";
+import {
+  type OnBeforeRequestListenerDetails,
+  type OnHeadersReceivedListenerDetails,
+  type Session,
+  type WebContents,
+  webContents as allWebContents,
+} from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import {
   type AddressSpace,
   ipAddressSpace,
@@ -47,11 +55,9 @@ import type { SiteAccess } from "./site-permission-protocol";
 /** URL schemes that reach the network. */
 const NETWORK_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
-/** How long a name's resolved space is kept: Chromium's own cache time for the OS resolver. */
-const RESOLVED_TTL_MS = 60_000;
-const MAX_RESOLVED = 1000;
-/** Requests let through whose responses are still to be checked; past this, the oldest go. */
-const MAX_CHECKED = 5000;
+/** How long whether an origin's requests go through a proxy is kept. */
+const PROXY_TTL_MS = 60_000;
+const MAX_PROXIES = 1000;
 
 /** Who makes a request: the page (or worker) it is attributed to. */
 interface Caller {
@@ -72,21 +78,37 @@ interface Checked {
   contentsId: number | null;
 }
 
-/** Per webview or popup, the space of each origin's documents it loaded since its last page. */
+/** The most and least private spaces of a name's addresses. */
+interface ResolvedSpaces {
+  most: AddressSpace;
+  least: AddressSpace;
+}
+
+type RequestDetails = Pick<
+  OnBeforeRequestListenerDetails,
+  "id" | "url" | "resourceType" | "webContents" | "initiatorOrigin"
+>;
+
+interface ResponseDetails extends Pick<
+  OnHeadersReceivedListenerDetails,
+  "id" | "url" | "resourceType" | "webContents"
+> {
+  /** The address the response came from; Electron reports it, though its types leave it out. */
+  ip?: unknown;
+}
+
+/** Per webview or popup, the space of each origin's documents it shows on its current page. */
 const documentSpaces = new Map<number, Map<string, AddressSpace>>();
-const resolved = new Map<string, { space: AddressSpace; until: number }>();
-const resolving = new Map<string, Promise<AddressSpace>>();
+/** Per webview or popup, the main-frame document it is loading, until that commits. */
+const loadingPages = new Map<number, { origin: string; space: AddressSpace }>();
+const resolving = new Map<string, Promise<ResolvedSpaces>>();
+const proxies = new Map<string, { proxied: Promise<boolean>; until: number }>();
+/** Requests let through without asking, until their response arrives or they end. */
 const checked = new Map<number, Checked>();
 
 /** Main's own fetches through the browser session for a page, by URL, until each starts. */
 const pendingMainFetches = new Map<string, { pageUrl: string | undefined }[]>();
 const mainFetches = new Map<number, { pageUrl: string | undefined }>();
-
-function originOf(url: string | undefined): string | null {
-  if (!url || !URL.canParse(url)) return null;
-  const { origin } = new URL(url);
-  return origin === "null" ? null : origin;
-}
 
 /**
  * Let main fetch `url` through the browser session for the page at `pageUrl` (its favicon), as
@@ -105,76 +127,74 @@ export function fetchForPage(url: string, pageUrl: string | undefined): () => vo
   };
 }
 
-interface RequestDetails {
-  id: number;
-  url: string;
-  resourceType: string;
-  webContents?: WebContents;
-  initiatorOrigin?: string;
-}
-
-function callerOf(details: RequestDetails): Caller | null {
+function callerOf(details: RequestDetails): Caller {
   const contents =
     details.webContents && !details.webContents.isDestroyed() ? details.webContents : null;
   if (contents) {
-    const site = originOf(contents.mainFrame.origin);
-    return { contents, site, initiator: originOf(details.initiatorOrigin) ?? site, mayAsk: true };
+    const site = normalizeOrigin(contents.mainFrame.origin);
+    const initiator = normalizeOrigin(details.initiatorOrigin) ?? site;
+    return { contents, site, initiator, mayAsk: true };
   }
-  const initiator = originOf(details.initiatorOrigin);
+  const initiator = normalizeOrigin(details.initiatorOrigin);
   if (initiator) return { contents: null, site: initiator, initiator, mayAsk: true };
   // A request of no page and no initiator is main's own: a fetch it made for a page (redirects
-  // keep their request's id), or one of no page's, which only Loxel's code chooses.
+  // keep their request's id). Any other counts as a public site's that can't be asked.
   let fetch = mainFetches.get(details.id);
   if (!fetch) {
     fetch = pendingMainFetches.get(details.url)?.shift();
-    if (!fetch) return null;
-    mainFetches.set(details.id, fetch);
+    if (fetch) mainFetches.set(details.id, fetch);
   }
-  const page = originOf(fetch.pageUrl);
+  const page = normalizeOrigin(fetch?.pageUrl);
   return { contents: null, site: page, initiator: page, mayAsk: false };
 }
 
-/** The most private space `host`'s addresses fall in; public when it doesn't resolve. */
-function resolvedSpace(browserSession: Session, host: string): Promise<AddressSpace> {
-  const cached = resolved.get(host);
-  if (cached && cached.until > Date.now()) return Promise.resolve(cached.space);
+/** The more public of two spaces. */
+const leastPrivate = (a: AddressSpace, b: AddressSpace) => (mostPrivate(a, b) === a ? b : a);
+
+/**
+ * The spaces of `host`'s addresses; public when it doesn't resolve. Concurrent lookups share one;
+ * each request looks up again, so the answer follows the session's own cache.
+ */
+function resolvedSpaces(browserSession: Session, host: string): Promise<ResolvedSpaces> {
   const inFlight = resolving.get(host);
   if (inFlight) return inFlight;
   const lookup = browserSession
     .resolveHost(host)
     .then(
-      ({ endpoints }) =>
-        endpoints.reduce<AddressSpace>(
-          (space, { address }) => mostPrivate(space, ipAddressSpace(address) ?? "public"),
-          "public",
-        ),
-      (): AddressSpace => "public",
+      ({ endpoints }): ResolvedSpaces => {
+        const spaces = endpoints.map(({ address }) => ipAddressSpace(address) ?? "public");
+        if (spaces.length === 0) return { most: "public", least: "public" };
+        return { most: spaces.reduce(mostPrivate), least: spaces.reduce(leastPrivate) };
+      },
+      (): ResolvedSpaces => ({ most: "public", least: "public" }),
     )
-    .then((space) => {
-      resolved.set(host, { space, until: Date.now() + RESOLVED_TTL_MS });
-      if (resolved.size > MAX_RESOLVED) resolved.delete(resolved.keys().next().value ?? "");
-      return space;
-    })
     .finally(() => resolving.delete(host));
   resolving.set(host, lookup);
   return lookup;
 }
 
-/** The space of `hostname` as a URL names it: by itself, or by what it resolves to. */
-function hostSpace(browserSession: Session, hostname: string): Promise<AddressSpace> {
-  const literal = literalHostSpace(hostname);
-  return literal ? Promise.resolve(literal) : resolvedSpace(browserSession, hostname);
+/** The space a request to `hostname` reaches: as it names itself, or its most private address. */
+async function targetSpace(browserSession: Session, hostname: string): Promise<AddressSpace> {
+  return literalHostSpace(hostname) ?? (await resolvedSpaces(browserSession, hostname)).most;
+}
+
+/**
+ * The space of a caller of `origin` with no document Loxel saw load: as its host names itself,
+ * or its least private address, so a name that also resolves to this machine can't make it local.
+ */
+async function originSpace(browserSession: Session, origin: string): Promise<AddressSpace> {
+  const { hostname } = new URL(origin);
+  return literalHostSpace(hostname) ?? (await resolvedSpaces(browserSession, hostname)).least;
 }
 
 /** The space of the document or worker making a request. */
-async function callerSpace(browserSession: Session, caller: Caller): Promise<AddressSpace> {
+function callerSpace(browserSession: Session, caller: Caller): Promise<AddressSpace> {
   const spaces = caller.contents ? documentSpaces.get(caller.contents.id) : undefined;
   // An opaque origin (a sandboxed frame) counts as its page.
   const origin = caller.initiator ?? caller.site;
   const known = origin ? spaces?.get(origin) : undefined;
-  if (known) return known;
-  if (!origin) return "public";
-  return hostSpace(browserSession, new URL(origin).hostname);
+  if (known) return Promise.resolve(known);
+  return origin ? originSpace(browserSession, origin) : Promise.resolve("public");
 }
 
 /** Whether `caller`'s site may reach a more private space: decided, or asked in a panel. */
@@ -209,19 +229,29 @@ async function admit(browserSession: Session, details: RequestDetails): Promise<
   const url = new URL(details.url);
   if (!NETWORK_PROTOCOLS.has(url.protocol)) return true;
   const caller = callerOf(details);
-  if (!caller) return true;
   const space = await callerSpace(browserSession, caller);
   if (space === "loopback") return true;
-  if (isMorePrivate(await hostSpace(browserSession, url.hostname), space)) {
+  if (isMorePrivate(await targetSpace(browserSession, url.hostname), space)) {
     return allowedFor(caller);
   }
-  checked.set(details.id, {
-    callerSpace: space,
-    site: caller.site,
-    contentsId: caller.contents?.id ?? null,
-  });
-  if (checked.size > MAX_CHECKED) checked.delete(checked.keys().next().value ?? 0);
+  const contentsId = caller.contents?.id ?? null;
+  checked.set(details.id, { callerSpace: space, site: caller.site, contentsId });
   return true;
+}
+
+/** Whether requests to `url`'s origin go through a proxy, whose address is not the server's. */
+function isProxied(browserSession: Session, url: string): Promise<boolean> {
+  const { origin } = new URL(url);
+  const cached = proxies.get(origin);
+  if (cached && cached.until > Date.now()) return cached.proxied;
+  const proxied = browserSession.resolveProxy(url).then(
+    (proxy) => proxy.trim().toUpperCase() !== "DIRECT",
+    () => false,
+  );
+  proxies.delete(origin);
+  proxies.set(origin, { proxied, until: Date.now() + PROXY_TTL_MS });
+  if (proxies.size > MAX_PROXIES) proxies.delete(proxies.keys().next().value ?? "");
+  return proxied;
 }
 
 /** The space of the address a response came from, or null when it came through a proxy. */
@@ -232,36 +262,56 @@ async function responseSpace(
 ): Promise<AddressSpace | null> {
   const space = ipAddressSpace(ip);
   if (!space || space === "public") return space;
-  // Through a proxy, the address is the proxy's, not the server's.
-  const proxy = await browserSession.resolveProxy(url).catch(() => "DIRECT");
-  return proxy.trim().toUpperCase() === "DIRECT" ? space : null;
+  return (await isProxied(browserSession, url)) ? null : space;
 }
 
-interface ResponseDetails extends RequestDetails {
-  /** The address the response came from; Electron reports it, though its types leave it out. */
-  ip?: unknown;
+/**
+ * The spaces of the documents `contents` shows. A main frame's response starts its new page's once
+ * it commits: a response that doesn't commit (a download, a 204) leaves the page as it was.
+ */
+function documentSpacesOf(contents: WebContents): Map<string, AddressSpace> {
+  const id = contents.id;
+  const known = documentSpaces.get(id);
+  if (known) return known;
+  const spaces = new Map<string, AddressSpace>();
+  documentSpaces.set(id, spaces);
+  contents.on("did-navigate", () => {
+    const loading = loadingPages.get(id);
+    loadingPages.delete(id);
+    const page = new Map<string, AddressSpace>();
+    if (loading && loading.origin === normalizeOrigin(contents.mainFrame.origin)) {
+      page.set(loading.origin, loading.space);
+    }
+    documentSpaces.set(id, page);
+  });
+  contents.once("destroyed", () => {
+    documentSpaces.delete(id);
+    loadingPages.delete(id);
+  });
+  return spaces;
 }
 
 /** Remember the space of the document a frame response loads. */
 async function noteDocument(browserSession: Session, details: ResponseDetails): Promise<void> {
   const contents = details.webContents;
-  const origin = originOf(details.url);
+  const origin = normalizeOrigin(details.url);
   if (!contents || contents.isDestroyed() || !origin) return;
-  const literal = literalHostSpace(new URL(origin).hostname);
+  const { hostname } = new URL(origin);
+  const literal = literalHostSpace(hostname);
+  // An IP address or `localhost` is its space; a `.local` name's document counts by the address
+  // it came from, which may be this machine.
+  const named = literal && !hostname.endsWith(".local") ? literal : null;
   const fromIp =
-    typeof details.ip === "string"
+    named === null && typeof details.ip === "string"
       ? await responseSpace(browserSession, details.url, details.ip)
       : null;
-  const space = literal ?? fromIp ?? (await hostSpace(browserSession, new URL(origin).hostname));
-  let spaces = documentSpaces.get(contents.id);
-  if (!spaces) {
-    spaces = new Map();
-    documentSpaces.set(contents.id, spaces);
-    const id = contents.id;
-    contents.once("destroyed", () => documentSpaces.delete(id));
+  const space = named ?? fromIp ?? literal ?? (await originSpace(browserSession, origin));
+  const spaces = documentSpacesOf(contents);
+  if (details.resourceType === "mainFrame") {
+    loadingPages.set(contents.id, { origin, space });
+    return;
   }
-  // A new page starts over; a frame keeps the space its origin's first document had.
-  if (details.resourceType === "mainFrame") spaces.clear();
+  // A frame keeps the space its origin's first document on the page had.
   if (!spaces.has(origin)) spaces.set(origin, space);
 }
 
@@ -306,4 +356,11 @@ export function installLocalNetworkAccess(browserSession: Session): void {
       },
     );
   });
+  // A request that ends leaves nothing to check.
+  const forget = ({ id }: { id: number }) => {
+    checked.delete(id);
+    mainFetches.delete(id);
+  };
+  browserSession.webRequest.onCompleted(forget);
+  browserSession.webRequest.onErrorOccurred(forget);
 }

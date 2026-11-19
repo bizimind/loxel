@@ -28,6 +28,7 @@ import {
   systemPreferences,
 } from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import { onAppWindowMessage } from "./app-windows";
 import {
   MEDIA_DEVICES,
@@ -92,16 +93,6 @@ export function devicesOf(mediaTypes: readonly ("video" | "audio")[]): MediaDevi
   const devices = new Set<MediaDevice>();
   for (const type of mediaTypes) devices.add(type === "video" ? "camera" : "microphone");
   return [...devices];
-}
-
-/** An origin as Electron's handlers give it (`https://example.com/`), as pages name it. */
-export function normalizeOrigin(origin: string): string | null {
-  try {
-    const { origin: normalized } = new URL(origin);
-    return normalized === "null" ? null : normalized;
-  } catch {
-    return null;
-  }
 }
 
 const sites = createSettingsMirror<MediaSites>({});

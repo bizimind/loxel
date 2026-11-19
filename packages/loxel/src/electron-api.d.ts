@@ -52,8 +52,9 @@ interface Window {
     setBrowserPageFrozen: (webContentsId: number, frozen: boolean) => Promise<boolean>;
     /**
      * A browser page's favicon as a `data:` URL, or null if it is no image or can't be loaded.
-     * It loads through the browser panels' session, with cookies only if it has the origin of
-     * `pageUrl`, the page it is shown for. A `blob:` favicon is read in the page of webview
+     * It loads through the browser panels' session as `pageUrl`, the page it is shown for, would:
+     * with cookies only if it has that page's origin, and reaching this machine or the local
+     * network only as far as that page may. A `blob:` favicon is read in the page of webview
      * `webContentsId`, which must be one of this window's.
      */
     loadFavicon: (

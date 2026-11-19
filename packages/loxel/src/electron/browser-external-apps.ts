@@ -12,7 +12,7 @@
  */
 import { type OpenExternalPermissionRequest, type WebContents, app } from "electron";
 
-import { normalizeOrigin } from "./browser-media";
+import { normalizeOrigin } from "../url-utils";
 import { askSiteAccess, siteAccessLoaded, siteAccessState } from "./browser-site-access";
 import type { SiteAccess } from "./site-permission-protocol";
 import { userActivationOf } from "./user-activation";
