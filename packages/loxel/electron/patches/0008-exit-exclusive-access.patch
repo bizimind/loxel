@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ori Shalom <ori.100000@gmail.com>
+Date: Sat, 21 Nov 2026 00:44:29 +0200
+Subject: [PATCH] feat: add webContents.exitExclusiveAccess()
+
+An app that shows its own UI over a web page, such as a permission
+prompt, has no way to take the page out of HTML fullscreen or release
+its pointer lock first, so a fullscreen page can cover the prompt and a
+locked pointer can't reach it. The user can press Esc, but the app
+can't do the same.
+
+Add webContents.exitExclusiveAccess(), which does what Esc does: it
+releases pointer lock from whichever frame holds it, then exits the
+exclusive access manager's fullscreen and keyboard lock. It does nothing
+when the page holds none of them. For a <webview>, it is called on the
+guest's webContents, whose manager holds the guest's fullscreen.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/api/web-contents.md                      |  8 +++++
+ .../browser/api/electron_api_web_contents.cc  | 14 +++++++++
+ shell/browser/api/electron_api_web_contents.h |  1 +
+ spec/api-web-contents.spec.ts                 | 30 +++++++++++++++++++
+ 4 files changed, 53 insertions(+)
+
+diff --git a/docs/api/web-contents.md b/docs/api/web-contents.md
+index dcac97b489..8daee37997 100644
+--- a/docs/api/web-contents.md
++++ b/docs/api/web-contents.md
+@@ -1191,6 +1191,14 @@ Focuses the web page.
+ 
+ Returns `boolean` - Whether the web page is focused.
+ 
++#### `contents.exitExclusiveAccess()`
++
++Takes the web page out of HTML fullscreen and releases its pointer lock and
++keyboard lock, as the user pressing Esc does. Does nothing when the page holds
++none of them. Use it before showing UI over a page, such as a permission prompt,
++so that a fullscreen page can't hide it and the user's pointer is free to reach
++it. For a `<webview>`, call it on the guest's `webContents`.
++
+ #### `contents.isLoading()`
+ 
+ Returns `boolean` - Whether web page is still loading resources.
+diff --git a/shell/browser/api/electron_api_web_contents.cc b/shell/browser/api/electron_api_web_contents.cc
+index 65b5e518fb..d14a444997 100644
+--- a/shell/browser/api/electron_api_web_contents.cc
++++ b/shell/browser/api/electron_api_web_contents.cc
+@@ -4508,6 +4508,19 @@ bool WebContents::IsFocused() const {
+ 
+   return view->HasFocus();
+ }
++
++void WebContents::ExitExclusiveAccess() {
++  // The exclusive access controllers only reset their state when pointer lock
++  // ends; the lock itself is the frame's widget's. Release it from whichever
++  // frame holds it, as the Esc key does.
++  web_contents()->ForEachRenderFrameHost([](content::RenderFrameHost* frame) {
++    if (auto* view = frame->GetView())
++      view->UnlockPointer();
++  });
++  // Leaves HTML fullscreen and releases keyboard lock as the Esc key does
++  // (PreHandleKeyboardEvent), and does nothing when neither is held.
++  exclusive_access_manager_.ExitExclusiveAccess();
++}
+ #endif
+ 
+ void WebContents::SendInputEvent(v8::Isolate* isolate,
+@@ -5869,6 +5882,7 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
+       .SetMethod<&WebContents::StopFindInPage>("stopFindInPage")
+       .SetMethod<&WebContents::Focus>("focus")
+       .SetMethod<&WebContents::IsFocused>("isFocused")
++      .SetMethod<&WebContents::ExitExclusiveAccess>("exitExclusiveAccess")
+       .SetMethod<&WebContents::SendInputEvent>("sendInputEvent")
+       .SetMethod<&WebContents::BeginFrameSubscription>("beginFrameSubscription")
+       .SetMethod<&WebContents::EndFrameSubscription>("endFrameSubscription")
+diff --git a/shell/browser/api/electron_api_web_contents.h b/shell/browser/api/electron_api_web_contents.h
+index 37c5ec256c..3e3e481efd 100644
+--- a/shell/browser/api/electron_api_web_contents.h
++++ b/shell/browser/api/electron_api_web_contents.h
+@@ -331,6 +331,7 @@ class WebContents final : public ExclusiveAccessContext,
+   // Focus.
+   void Focus();
+   bool IsFocused() const;
++  void ExitExclusiveAccess();
+ 
+   // Send WebInputEvent to the page.
+   void SendInputEvent(v8::Isolate* isolate, v8::Local<v8::Value> input_event);
+diff --git a/spec/api-web-contents.spec.ts b/spec/api-web-contents.spec.ts
+index 4c36113f6a..ca62b44c0c 100644
+--- a/spec/api-web-contents.spec.ts
++++ b/spec/api-web-contents.spec.ts
+@@ -480,6 +480,36 @@ describe('webContents module', { retry: 0 }, () => {
+     });
+   });
+ 
++  describe('webContents.exitExclusiveAccess()', () => {
++    afterEach(closeAllWindows);
++
++    it('takes the page out of HTML fullscreen', async () => {
++      const w = new BrowserWindow({ show: true });
++      await w.loadFile(path.join(fixturesPath, 'pages', 'a.html'));
++      const entered = once(w.webContents, 'enter-html-full-screen');
++      await w.webContents.executeJavaScript('document.getElementById("div").requestFullscreen()', true);
++      await entered;
++
++      const left = once(w.webContents, 'leave-html-full-screen');
++      w.webContents.exitExclusiveAccess();
++      await left;
++      expect(await w.webContents.executeJavaScript('document.fullscreenElement')).toBeNull();
++    });
++
++    it('does nothing when the page holds no exclusive access', async () => {
++      const w = new BrowserWindow({ show: false });
++      await w.loadURL('about:blank');
++      let left = false;
++      w.webContents.on('leave-html-full-screen', () => {
++        left = true;
++      });
++      w.webContents.exitExclusiveAccess();
++      expect(await w.webContents.executeJavaScript('document.fullscreenElement')).toBeNull();
++      expect(w.isFullScreen()).toBe(false);
++      expect(left).toBe(false);
++    });
++  });
++
+   describe('webContents.executeJavaScript', () => {
+     describe('in about:blank', () => {
+       const expected = 'hello, world!';

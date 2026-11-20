@@ -1,6 +1,6 @@
 # Patched Electron
 
-Loxel's releases run on a patched build of Electron, not the npm package's binary. The patches in [`electron/patches/`](../electron/patches/) add what Electron doesn't have yet: WebAuthn security key PIN entry and passkeys from a phone over the FIDO hybrid transport (from the open upstream PRs electron/electron#55426 and #55427, plus a fix so the QR code is offered only when the request can use the phone), File System Access prompts that stock Electron skips once an app sets a permission check handler, macOS quarantine for downloads and files sites save, and a way for the app to turn Chromium's Local Network Access checks on. When Electron ships a patch's change, that patch is deleted, and with none left Loxel goes back to stock Electron.
+Loxel's releases run on a patched build of Electron, not the npm package's binary. The patches in [`electron/patches/`](../electron/patches/) add what Electron doesn't have yet: WebAuthn security key PIN entry and passkeys from a phone over the FIDO hybrid transport (from the open upstream PRs electron/electron#55426 and #55427, plus a fix so the QR code is offered only when the request can use the phone), File System Access prompts that stock Electron skips once an app sets a permission check handler, macOS quarantine for downloads and files sites save, a way for the app to turn Chromium's Local Network Access checks on, and a way for it to take a page out of fullscreen and pointer lock before showing a prompt over it. When Electron ships a patch's change, that patch is deleted, and with none left Loxel goes back to stock Electron.
 
 ## Patches
 
@@ -15,6 +15,7 @@ Each patch is a pair in `electron/patches/`: `<nnnn>-<name>.patch`, a `git forma
 | `0005-file-system-access-grants`    | [File System Access check handler as a veto](../electron/patches/0005-file-system-access-grants-patch.md) |
 | `0006-quarantine-service`           | [Quarantine service for downloads and saved files](../electron/patches/0006-quarantine-service-patch.md)  |
 | `0007-local-network-access-opt-in`  | [Local Network Access opt-in](../electron/patches/0007-local-network-access-opt-in-patch.md)              |
+| `0008-exit-exclusive-access`        | [`webContents.exitExclusiveAccess()`](../electron/patches/0008-exit-exclusive-access-patch.md)            |
 
 ## What defines a build
 
@@ -56,6 +57,6 @@ Local packaged builds (`build:app`, `build:app:local`) use the patched zip in `b
   4. Build and upload the release for both architectures, then merge.
 - **Behavior to recheck on a bump**, in a hidden demo on the patched build:
   - A click on a page's `<usermedia>`, `<camera>` or `<microphone>` element (Google Meet's "Use microphone and camera" is a `<usermedia>`) must still reach the browser session's check handler once per device it asks for, with `mediaType` set, before the request handler's `media` calls without `mediaTypes`, all in one task: `requestFromElement` in [browser-media.ts](../src/electron/browser-media.ts) asks for the last devices `checkedDevices` recorded before the calls, one per call. Check it with local pages holding `<usermedia type="camera microphone">`, `<camera>` and `<microphone>`: each click shows the panel's bar for exactly the element's devices, and Allow lets the page's `getUserMedia()` in without a second bar.
-  - Each patch's own check, from the Testing section of its doc: a file opened for reading asks before it is written (0005); a completed download and a file a page saves get `com.apple.quarantine` (0006); a public page's request to `localhost` is refused before the local server sees it unless the site is allowed, while `http://localhost` and LAN-address pages reach other local ports without asking (0007).
+  - Each patch's own check, from the Testing section of its doc: a file opened for reading asks before it is written (0005); a completed download and a file a page saves get `com.apple.quarantine` (0006); a public page's request to `localhost` is refused before the local server sees it unless the site is allowed, while `http://localhost` and LAN-address pages reach other local ports without asking (0007); `exitExclusiveAccess()` on a fullscreen guest exits fullscreen and does nothing otherwise (0008).
 - **A patch that no longer applies**: rebase it as in step 2. Its doc's rebase notes name the likely conflict spots.
 - **Upstream ships a patch's change**: delete the patch and its doc, and update the table above. With none left, remove the fetch step and `electronDist` flag from the release workflow and this pipeline.
