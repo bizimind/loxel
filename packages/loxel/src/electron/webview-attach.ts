@@ -47,6 +47,7 @@ export function secureWebviewAttach(
   webPreferences.plugins = false;
   webPreferences.navigateOnDragDrop = false;
   delete webPreferences.enableBlinkFeatures;
+  delete webPreferences.disableBlinkFeatures;
   // Loxel's own preload (which also runs in subframes, sandboxed, without Node.js).
   configureWebviewDialogs(webPreferences);
   return true;

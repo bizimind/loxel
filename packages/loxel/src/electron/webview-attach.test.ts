@@ -20,6 +20,7 @@ const asked = (): WebPreferences => ({
   webviewTag: true,
   experimentalFeatures: true,
   enableBlinkFeatures: "SomeFeature",
+  disableBlinkFeatures: "SomeFeature",
   plugins: true,
   navigateOnDragDrop: true,
 });
@@ -43,6 +44,7 @@ describe("secureWebviewAttach", () => {
     });
     expect(webPreferences.preload).toEndWith("/webview-preload.cjs");
     expect(webPreferences).not.toHaveProperty("enableBlinkFeatures");
+    expect(webPreferences).not.toHaveProperty("disableBlinkFeatures");
   });
 
   test("attaches webviews that start blank or on a web page only", () => {
