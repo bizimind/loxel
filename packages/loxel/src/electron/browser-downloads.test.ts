@@ -629,6 +629,8 @@ describe("installBrowserDownloads", () => {
       const other = join(dir, "other.sh");
       const keeping = download(page()).item;
       shown[1]?.answer(other);
+      // Only once the answer is in: then nothing was there to confirm replacing.
+      await settle();
       await writeFile(other, "made since");
       await keeping.progress("keeping");
       keeping.finish("completed");
