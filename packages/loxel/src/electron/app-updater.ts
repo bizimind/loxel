@@ -3,8 +3,9 @@
  * zip, and let Squirrel.Mac replace the bundle and relaunch. Main keeps the `UpdateState` and
  * sends it to every window; the renderer drives it from Settings > General.
  */
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, session } from "electron";
 import { autoUpdater } from "electron-updater";
+import { NET_SESSION_NAME } from "electron-updater/out/electronHttpExecutor";
 
 import type { RestartsTerminals, UpdateState } from "../api/update-model";
 import type { ShutdownTerminals } from "../parent-channel-protocol";
@@ -18,6 +19,7 @@ import {
   UPDATE_STATUS_CHANGED,
 } from "./ipc-channels";
 import { readSettingsRow } from "./settings-row";
+import { primeRangeRequests } from "./update-edge-priming";
 import { ManifestProvider, terminalHostProtocolOf } from "./update-manifest";
 import { terminalsForInstall, updateRestartsTerminals } from "./update-terminals";
 
@@ -26,7 +28,7 @@ const AUTO_CHECK_DELAY_MS = 5000;
 
 let status: UpdateState = { state: "idle" };
 /** What the update found by the latest check does to the terminals, for when it is downloaded. */
-let found: { version: string; restartsTerminals: RestartsTerminals } | null = null;
+let found: { version: string; restartsTerminals: RestartsTerminals; urls: string[] } | null = null;
 /** What the install under way does to the terminals, once Install & Restart is chosen. */
 let installTerminals: ShutdownTerminals | null = null;
 
@@ -67,6 +69,11 @@ async function downloadUpdate(): Promise<void> {
     restartsTerminals: status.restartsTerminals,
   });
   try {
+    if (found?.version === status.version) {
+      // The session electron-updater downloads with, without an HTTP cache.
+      const updaterSession = session.fromPartition(NET_SESSION_NAME, { cache: false });
+      await primeRangeRequests(found.urls, (url, init) => updaterSession.fetch(url, init));
+    }
     await autoUpdater.downloadUpdate();
   } catch (err) {
     console.error("[updater] Update download failed:", err);
@@ -113,7 +120,7 @@ export function installAppUpdater(): void {
   autoUpdater.on("checking-for-update", () => setStatus({ state: "checking" }));
   autoUpdater.on("update-available", (info) => {
     const restartsTerminals = updateRestartsTerminals(terminalHostProtocolOf(info));
-    found = { version: info.version, restartsTerminals };
+    found = { version: info.version, restartsTerminals, urls: info.files.map((file) => file.url) };
     setStatus({
       state: "available",
       version: info.version,
@@ -124,7 +131,8 @@ export function installAppUpdater(): void {
   autoUpdater.on("update-not-available", () => setStatus({ state: "idle" }));
   autoUpdater.on("download-progress", (progress) => {
     if (status.state !== "downloading") return;
-    const percent = Math.floor(progress.percent);
+    // Capped: a differential download that gets more bytes than it asked for counts them all.
+    const percent = Math.min(100, Math.floor(progress.percent));
     if (percent !== status.percent) setStatus({ ...status, percent });
   });
   autoUpdater.on("update-downloaded", (info) => {
