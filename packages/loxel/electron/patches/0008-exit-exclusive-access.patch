@@ -18,10 +18,10 @@ guest's webContents, whose manager holds the guest's fullscreen.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  docs/api/web-contents.md                      | 11 ++++
- .../browser/api/electron_api_web_contents.cc  | 15 ++++++
+ .../browser/api/electron_api_web_contents.cc  | 15 +++++
  shell/browser/api/electron_api_web_contents.h |  1 +
- spec/api-web-contents.spec.ts                 | 51 +++++++++++++++++++
- 4 files changed, 78 insertions(+)
+ spec/api-web-contents.spec.ts                 | 55 +++++++++++++++++++
+ 4 files changed, 82 insertions(+)
 
 diff --git a/docs/api/web-contents.md b/docs/api/web-contents.md
 index dcac97b489..06d3704496 100644
@@ -91,10 +91,10 @@ index 37c5ec256c..3e3e481efd 100644
    // Send WebInputEvent to the page.
    void SendInputEvent(v8::Isolate* isolate, v8::Local<v8::Value> input_event);
 diff --git a/spec/api-web-contents.spec.ts b/spec/api-web-contents.spec.ts
-index 4c36113f6a..868cb9ce81 100644
+index 4c36113f6a..c2a2382499 100644
 --- a/spec/api-web-contents.spec.ts
 +++ b/spec/api-web-contents.spec.ts
-@@ -480,6 +480,57 @@ describe('webContents module', { retry: 0 }, () => {
+@@ -480,6 +480,61 @@ describe('webContents module', { retry: 0 }, () => {
      });
    });
  
@@ -105,16 +105,20 @@ index 4c36113f6a..868cb9ce81 100644
 +      const w = new BrowserWindow({ show: true });
 +      await w.loadFile(path.join(fixturesPath, 'pages', 'a.html'));
 +      const entered = once(w.webContents, 'enter-html-full-screen');
-+      await w.webContents.executeJavaScript('document.getElementById("div").requestFullscreen()', true);
++      // Resolves on the page's own fullscreenchange, which comes after requestFullscreen() resolves.
++      await w.webContents.executeJavaScript(
++        'new Promise((resolve) => { document.addEventListener("fullscreenchange", resolve, { once: true }); document.getElementById("div").requestFullscreen(); })',
++        true
++      );
 +      await entered;
++      await w.webContents.executeJavaScript(
++        'window.pageLeft = new Promise((resolve) => document.addEventListener("fullscreenchange", () => resolve(document.fullscreenElement), { once: true })); null'
++      );
 +
 +      const left = once(w.webContents, 'leave-html-full-screen');
-+      const pageLeft = w.webContents.executeJavaScript(
-+        'new Promise((resolve) => document.addEventListener("fullscreenchange", () => resolve(document.fullscreenElement), { once: true }))'
-+      );
 +      w.webContents.exitExclusiveAccess();
 +      await left;
-+      expect(await pageLeft).toBeNull();
++      expect(await w.webContents.executeJavaScript('window.pageLeft')).toBeNull();
 +    });
 +
 +    it('leaves a window the user put in fullscreen as it is', async () => {
@@ -129,7 +133,7 @@ index 4c36113f6a..868cb9ce81 100644
 +        left = true;
 +      });
 +      w.webContents.exitExclusiveAccess();
-+      // A round trip to the page, after which a fullscreen change would have started.
++      // The call is synchronous; a round trip to the page lets anything it queued run.
 +      await w.webContents.executeJavaScript('null');
 +      expect(w.isFullScreen()).toBe(true);
 +      expect(left).toBe(false);
