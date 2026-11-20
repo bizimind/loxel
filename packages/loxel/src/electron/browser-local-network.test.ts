@@ -246,6 +246,15 @@ describe("public sites", () => {
     expect(await settled(allowed.fate)).toBe(true);
   });
 
+  test("a frame of another origin follows the page's decision without asking", async () => {
+    const site = await panel("https://host.example");
+    for (const initiator of ["https://widget.example", "null"]) {
+      const fromFrame = await site.request("http://localhost:1/", { initiator });
+      expect(await settled(fromFrame.fate)).toBe(false);
+    }
+    expect(site.requests()).toEqual([]);
+  });
+
   test("a non-secure public site is refused without asking, as Chromium refuses it", async () => {
     sendSites(channels, { localNetwork: { "http://app.example": "allow" } });
     const site = await panel("http://app.example");
@@ -400,6 +409,22 @@ describe("requests of no page", () => {
     expect(await settled(noPanel)).toBe(false);
   });
 
+  test("a worker's Allow this time reaches Chromium's check too", async () => {
+    const site = await panel("https://worker-once.example");
+    const fromWorker = decided(beforeRequest, {
+      id: nextRequestId++,
+      url: "http://localhost:1/",
+      resourceType: "other",
+      initiatorOrigin: "https://worker-once.example",
+    });
+    await afterMicrotasks(() => site.requests().length === 1, "the prompt");
+    site.respond(site.requests()[0]!.id, "allow-once");
+    expect(await settled(fromWorker)).toBe(true);
+    expect(localNetworkPermitted(null, "https://worker-once.example")).toBe(true);
+    site.navigate("https://elsewhere.example");
+    expect(localNetworkPermitted(null, "https://worker-once.example")).toBe(false);
+  });
+
   test("main's fetches for a page follow its decision without asking, redirects included", async () => {
     const done = fetchForPage("https://example.com/favicon.ico", "https://app.example/");
     const id = nextRequestId++;
@@ -463,12 +488,15 @@ describe("Chromium's own check", () => {
     expect(localNetworkPermitted(other.guest, "https://app.example")).toBe(false);
   });
 
-  test("decides a worker's by its origin, and refuses a non-secure site", () => {
+  test("decides a worker's by its origin, and refuses a non-secure public site", () => {
     sendSites(channels, {
       localNetwork: { "https://app.example": "allow", "http://plain.example": "allow" },
     });
     expect(localNetworkPermitted(null, "https://app.example/")).toBe(true);
     expect(localNetworkPermitted(null, "https://other.example/")).toBe(false);
     expect(localNetworkPermitted(null, "http://plain.example/")).toBe(false);
+    // `http://localhost` is a secure context, so what it embeds may be allowed.
+    sendSites(channels, { localNetwork: { "http://localhost:3000": "allow" } });
+    expect(localNetworkPermitted(null, "http://localhost:3000/")).toBe(true);
   });
 });

@@ -14,7 +14,8 @@
  * the checks off, and the `webRequest` gate alone applies. Top-level navigations aren't gated, as in
  * Chrome. The site deciding is the top-level page's, so embedded frames follow its decision; a
  * worker's requests have no page and are decided by the worker's origin. A public site that isn't
- * a secure context (`http:`) is refused without asking, as Chromium refuses it.
+ * a secure context (plain `http:` off this machine) is refused without asking, as Chromium refuses
+ * it, and a frame of another origin than its page follows the page's decision without asking.
  *
  * Address spaces:
  * - A request's target is classified by its URL's host when that names its space (an IP address,
@@ -39,7 +40,7 @@ import {
   webContents as allWebContents,
 } from "electron";
 
-import { normalizeOrigin } from "../url-utils";
+import { isLoopbackHost, normalizeOrigin } from "../url-utils";
 import {
   type AddressSpace,
   ipAddressSpace,
@@ -71,7 +72,10 @@ interface Caller {
   site: string | null;
   /** The origin of the document or worker that made it. */
   initiator: string | null;
-  /** Whether the user may be asked; main's own fetches for a page never ask. */
+  /**
+   * Whether the user may be asked: not for main's own fetches for a page, nor for a frame of
+   * another origin than the page's.
+   */
   mayAsk: boolean;
 }
 
@@ -137,7 +141,12 @@ function callerOf(details: RequestDetails): Caller {
   if (contents) {
     const site = normalizeOrigin(contents.mainFrame.origin);
     const initiator = normalizeOrigin(details.initiatorOrigin) ?? site;
-    return { contents, site, initiator, mayAsk: true };
+    // Chromium lets a cross-origin or sandboxed frame use the page's permission only when the page
+    // delegates it (`allow="local-network"`), which isn't visible here: its requests follow the
+    // page's decision but never ask, so the bar can't promise what Chromium then refuses.
+    const ownFrame =
+      details.initiatorOrigin === undefined || normalizeOrigin(details.initiatorOrigin) === site;
+    return { contents, site, initiator, mayAsk: ownFrame };
   }
   const initiator = normalizeOrigin(details.initiatorOrigin);
   if (initiator) return { contents: null, site: initiator, initiator, mayAsk: true };
@@ -201,12 +210,19 @@ function callerSpace(browserSession: Session, caller: Caller): Promise<AddressSp
   return origin ? originSpace(browserSession, origin) : Promise.resolve("public");
 }
 
+/**
+ * Whether Chromium refuses `site` a more private address whatever the user says: a public page on
+ * plain `http` isn't a secure context. `http://localhost` is, so frames it embeds may still ask.
+ */
+function refusedOutright(site: string): boolean {
+  const { protocol, hostname } = new URL(site);
+  return protocol === "http:" && !isLoopbackHost(hostname);
+}
+
 /** Whether `caller`'s site may reach a more private space: decided, or asked in a panel. */
 async function allowedFor(caller: Caller): Promise<boolean> {
   const { site, contents } = caller;
-  // Chromium never lets a non-secure public page reach a more private address, whatever the user
-  // says, so asking would be a promise it can't keep.
-  if (!site || new URL(site).protocol === "http:") return false;
+  if (!site || refusedOutright(site)) return false;
   await siteAccessLoaded();
   const access: SiteAccess = { kind: "local-network", origin: site };
   const state = siteAccessState(contents?.id ?? null, access);
@@ -335,7 +351,7 @@ async function acceptResponse(browserSession: Session, details: ResponseDetails)
   if (!request || typeof details.ip !== "string") return true;
   const space = ipAddressSpace(details.ip);
   if (!space || !isMorePrivate(space, request.callerSpace)) return true;
-  if (request.site) {
+  if (request.site && !refusedOutright(request.site)) {
     await siteAccessLoaded();
     const access: SiteAccess = { kind: "local-network", origin: request.site };
     if (siteAccessState(request.contentsId, access) === "allow") return true;
@@ -347,9 +363,10 @@ async function acceptResponse(browserSession: Session, details: ResponseDetails)
  * Chromium's own check (the `local-network`, `loopback-network` and `local-network-access`
  * permission checks): whether the site may reach this machine or the local network. Chromium asks
  * only for a public page or worker reaching a more private address, and the answer is the site's
- * saved decision or the panel's Allow this time, which the `webRequest` gate asked the user for.
+ * saved decision or a panel's Allow this time, which the `webRequest` gate asked the user for.
  * `contents` is the webview or popup of the page asking, whose top-level origin decides (the
- * check's `embeddingOrigin` when it names one); with none, a worker's origin decides.
+ * check's `embeddingOrigin` when it names one); with none, a worker's origin decides, and Allow
+ * this time in any panel on that site counts, as the gate asked there.
  */
 export function localNetworkPermitted(
   contents: WebContents | null,
@@ -360,7 +377,7 @@ export function localNetworkPermitted(
   const site = page
     ? (normalizeOrigin(embeddingOrigin) ?? normalizeOrigin(page.mainFrame.origin))
     : normalizeOrigin(requestingOrigin);
-  if (!site || new URL(site).protocol === "http:") return false;
+  if (!site || refusedOutright(site)) return false;
   return siteAccessState(page?.id ?? null, { kind: "local-network", origin: site }) === "allow";
 }
 

@@ -82,13 +82,19 @@ function savedDecision(access: SiteAccess): SiteDecision | undefined {
 
 /**
  * `access`'s state for the page of guest `guestId` (null for requests of no page, such as a
- * worker's): its saved decision, or the panel's Allow this time, or still to ask.
+ * worker's): its saved decision, or the panel's (for no page, any panel's) Allow this time, or
+ * still to ask.
  */
 export function siteAccessState(guestId: number | null, access: SiteAccess): SiteDecision | "ask" {
   const saved = savedDecision(access);
   if (saved) return saved;
-  const once = guestId === null ? undefined : localNetworkOnce.get(guestId);
-  return access.kind === "local-network" && once === access.origin ? "allow" : "ask";
+  if (access.kind !== "local-network") return "ask";
+  // A request of no page (a worker's) counts Allow this time given in any panel on its site.
+  const once =
+    guestId === null
+      ? [...localNetworkOnce.values()].includes(access.origin)
+      : localNetworkOnce.get(guestId) === access.origin;
+  return once ? "allow" : "ask";
 }
 
 /** Resolves once a window has sent the settings' decisions; requests wait for them. */

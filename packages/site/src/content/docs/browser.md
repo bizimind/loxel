@@ -133,7 +133,7 @@ Change or remove a site's choices in **Settings > Browser > Other Apps**.
 
 Your dev servers stay private to your Mac: a site on the internet asks before it connects to apps on your Mac, such as a dev server or a local API, or to devices on your network, such as your router or printer. Pages on your Mac or your local network never ask, such as `http://localhost:3000`, `http://127.0.0.1:5173` or a dev server opened on your Mac's network address, so a dev server's page reaches its API, live reload and other local ports as before.
 
-While the bar asks, the site's requests wait. **Allow** lets them through and lets the site connect from then on, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good, which fails those requests. Close the bar to fail them for now: the site doesn't ask again until you reload or leave the page. Frames embedded in a page follow the page's choice, and a site's background workers ask in a tab showing the site.
+While the bar asks, the site's requests wait. **Allow** lets them through and lets the site connect from then on, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good, which fails those requests. Close the bar to fail them for now: the site doesn't ask again until you reload or leave the page. Frames from other sites embedded in a page, such as ads or widgets, never ask, and connect only when the page allowed its site and lets the frame use that choice. A site's background workers ask in a tab showing the site.
 
 Change or remove a site's choice in **Settings > Browser > Local Network**.
 

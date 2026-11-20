@@ -11,22 +11,23 @@ SpareRendererForSitePerProcess, and share the lookup between the two.
 
 With the checks on, a request from a page or worker on a public address
 to a private or loopback address needs the local-network or
-loopback-network permission, decided before the request is sent. As
-Electron's permission manager never answers "ask", the session's
-permission check handler decides it.
+loopback-network permission. The network service checks it once it has
+connected and before it sends the request, and the browser process
+decides it; as Electron's permission manager never answers "ask", the
+session's permission check handler decides alone.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- docs/api/command-line-switches.md |  7 ++++
+ docs/api/command-line-switches.md | 11 +++++
  shell/browser/feature_list.cc     | 41 ++++++++++++------
  spec/chromium.spec.ts             | 70 +++++++++++++++++++++++++++++++
- 3 files changed, 106 insertions(+), 12 deletions(-)
+ 3 files changed, 110 insertions(+), 12 deletions(-)
 
 diff --git a/docs/api/command-line-switches.md b/docs/api/command-line-switches.md
-index a4a032fb47..015dfac8b0 100644
+index a4a032fb47..f0497d206b 100644
 --- a/docs/api/command-line-switches.md
 +++ b/docs/api/command-line-switches.md
-@@ -392,6 +392,13 @@ Finally, you'll need to ensure that the version of Chromium in Electron matches
+@@ -392,6 +392,17 @@ Finally, you'll need to ensure that the version of Chromium in Electron matches
    [`long-animation-frame`](https://developer.mozilla.org/en-US/docs/Web/API/Performance_API/Long_animation_frame_timing)
    `PerformanceObserver` events for non-http(s), non-data, non-blob URLs (such as `file:` or custom
    protocol URLs).
@@ -36,7 +37,11 @@ index a4a032fb47..015dfac8b0 100644
 +  private or loopback address then needs the `local-network` or `loopback-network` permission, and
 +  one from a non-secure context is blocked. Electron never prompts for these, so the session's
 +  permission check handler alone decides (see
-+  [`ses.setPermissionCheckHandler`](session.md#sessetpermissioncheckhandlerhandler)).
++  [`ses.setPermissionCheckHandler`](session.md#sessetpermissioncheckhandlerhandler)); without a
++  handler they are granted. A cross-origin frame gets them only when its embedder delegates them
++  with `allow="local-network"` or `allow="loopback-network"`. With the checks on, Chromium also lets
++  a secure page load `http:` and `ws:` URLs on private addresses, subject to the permission, rather
++  than blocking them as mixed content. Pages on custom protocols count as public.
  * `SpareRendererForSitePerProcess`: keeps a spare renderer process running at all times so
    that a new window, or a navigation that needs a new process, does not wait for a process to
    launch. Electron starts one such process when the default session is created, for the first
