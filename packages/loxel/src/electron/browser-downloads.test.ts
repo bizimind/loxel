@@ -329,6 +329,20 @@ describe("numberedName", () => {
     expect(numberedName("db.backup.gz", 1)).toBe("db.backup (1).gz");
     expect(numberedName("README", 1)).toBe("README (1)");
   });
+
+  test("cuts a name too long for the file system before its extension", () => {
+    const bytes = (name: string) => Buffer.byteLength(name, "utf8");
+    const long = `${"a".repeat(252)}.sh`;
+    expect(numberedName(long, 0)).toBe(long);
+    expect(numberedName(long, 1)).toBe(`${"a".repeat(248)} (1).sh`);
+    expect(bytes(numberedName(`${"a".repeat(300)}.sh`, 0))).toBe(255);
+    // Three-byte characters are cut whole.
+    const cjk = numberedName(`${"文".repeat(90)}.txt`, 1);
+    expect(cjk).toBe(`${"文".repeat(82)} (1).txt`);
+    expect(bytes(cjk)).toBeLessThanOrEqual(255);
+    // An extension that leaves no room is cut too.
+    expect(bytes(numberedName(`a.${"b".repeat(300)}`, 2))).toBeLessThanOrEqual(255);
+  });
 });
 
 describe("freePath", () => {
@@ -501,6 +515,30 @@ describe("installBrowserDownloads", () => {
       second.finish("completed");
       await untilCalls(3);
       expect(await readFile(first.getSavePath(), "utf8")).toBe("first");
+    }));
+
+  test("starts a download whose name is as long as the file system takes", () =>
+    withDir(async (dir) => {
+      const { download, shown } = setup(dir);
+      const long = `${"文".repeat(83)}.sh`;
+      const { item, started } = download(page(), long);
+      expect(started).toBe(true);
+      expect(shown[0]?.defaultPath).toBe(join(dir, long));
+      await item.progress();
+      expect(existsSync(item.savePath)).toBe(true);
+    }));
+
+  test("a download that ended unfinished leaves another's hold on its path alone", () =>
+    withDir(async (dir) => {
+      const { download, shown } = setup(dir);
+      const first = download(page()).item;
+      first.finish("interrupted");
+      const second = download(page()).item;
+      expect(second.getSavePath()).toBe(first.getSavePath());
+      // The first's dialog, answered late.
+      shown[0]?.answer(null);
+      await settle();
+      expect(download(page()).item.getSavePath()).not.toBe(second.getSavePath());
     }));
 
   test("the next dialog starts in the folder last saved to", () =>

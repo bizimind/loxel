@@ -208,11 +208,34 @@ function extensionOf(name: string): string {
   return name.slice(last);
 }
 
-/** `name` numbered as Chrome numbers a download beside a file: `name (n).ext`, `a (n).tar.gz`. */
+/** The longest file name macOS file systems take, in UTF-8 bytes. */
+const NAME_MAX_BYTES = 255;
+
+const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+/** The longest start of `text` that fits in `maxBytes` of UTF-8, never splitting a character. */
+function truncateUtf8(text: string, maxBytes: number): string {
+  let bytes = 0;
+  let end = 0;
+  for (const char of text) {
+    bytes += utf8Bytes(char);
+    if (bytes > maxBytes) break;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
+
+/**
+ * `name` numbered as Chrome numbers a download beside a file: `name (n).ext`, `a (n).tar.gz`. A
+ * name too long for the file system is cut before its extension to fit, as Chrome cuts one.
+ */
 export function numberedName(name: string, n: number): string {
-  if (n === 0) return name;
-  const ext = extensionOf(name);
-  return `${name.slice(0, name.length - ext.length)} (${n})${ext}`;
+  const suffix = n === 0 ? "" : ` (${n})`;
+  let ext = extensionOf(name);
+  // An extension that leaves no room is cut with the rest.
+  if (utf8Bytes(suffix + ext) >= NAME_MAX_BYTES) ext = "";
+  const stem = name.slice(0, name.length - ext.length);
+  return `${truncateUtf8(stem, NAME_MAX_BYTES - utf8Bytes(suffix + ext))}${suffix}${ext}`;
 }
 
 /** Paths to skip when picking one, besides those something is at. */
@@ -246,9 +269,9 @@ export function freePath(dir: string, name: string, taken: TakenPaths): string {
   }
 }
 
-/** A file name a download may be saved under: Chromium's suggestion, never a path. */
+/** A file name a download may be saved under: Chromium's suggestion, never a path, cut to fit. */
 function downloadFileName(item: DownloadItem): string {
-  const name = basename(item.getFilename());
+  const name = numberedName(basename(item.getFilename()), 0);
   return name === "" || name === "." || name === ".." ? "download" : name;
 }
 
@@ -452,7 +475,13 @@ export function installBrowserDownloads(
     // A path set during this event is where Chromium writes, and Electron shows no dialog.
     item.setSavePath(savePath);
     reserved.add(savePath);
-    const release = () => reserved.delete(savePath);
+    // Once only: after the download ends unfinished, another one may take the path.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      reserved.delete(savePath);
+    };
     const startedMs = item.getStartTime() * 1000;
 
     const tracked = trackQuarantine(item, quarantine);
