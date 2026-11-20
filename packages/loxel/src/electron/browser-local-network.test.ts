@@ -29,7 +29,8 @@ const { windowOf } = await import("../test/fake-app-windows");
 const { afterMicrotasks, fakeGuest, fakeHost, sendSites } =
   await import("../test/fake-browser-panels");
 const { installSiteAccess, trackWebviewSiteAccess } = await import("./browser-site-access");
-const { fetchForPage, installLocalNetworkAccess } = await import("./browser-local-network");
+const { fetchForPage, installLocalNetworkAccess, localNetworkPermitted } =
+  await import("./browser-local-network");
 installSiteAccess();
 
 const channels = {
@@ -245,6 +246,14 @@ describe("public sites", () => {
     expect(await settled(allowed.fate)).toBe(true);
   });
 
+  test("a non-secure public site is refused without asking, as Chromium refuses it", async () => {
+    sendSites(channels, { localNetwork: { "http://app.example": "allow" } });
+    const site = await panel("http://app.example");
+    const held = await site.request("http://localhost:1/");
+    expect(await settled(held.fate)).toBe(false);
+    expect(site.requests()).toEqual([]);
+  });
+
   test("a popup window, with no panel to ask in, is refused undecided access", async () => {
     const window = fakeHost(channels);
     const popup = fakeGuest(window.host, "https://app.example", "window");
@@ -426,5 +435,40 @@ describe("requests of no page", () => {
     });
     expect(await settled(none)).toBe(false);
     releaseNone();
+  });
+});
+
+describe("Chromium's own check", () => {
+  test("follows the site's decision, never asking", async () => {
+    const site = await panel("https://app.example");
+    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(false);
+    expect(site.requests()).toEqual([]);
+    sendSites(channels, { localNetwork: { "https://app.example": "allow" } });
+    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(true);
+    // An embedded frame's check names its page's origin, which decides.
+    expect(
+      localNetworkPermitted(site.guest, "https://widget.example", "https://app.example/"),
+    ).toBe(true);
+    sendSites(channels, { localNetwork: { "https://app.example": "block" } });
+    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(false);
+  });
+
+  test("lets Allow this time through for the panel that was answered", async () => {
+    const site = await panel("https://app.example");
+    void site.request("http://localhost:1/");
+    await afterMicrotasks(() => site.requests().length === 1, "the prompt");
+    site.respond(site.requests()[0]!.id, "allow-once");
+    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(true);
+    const other = await panel("https://app.example");
+    expect(localNetworkPermitted(other.guest, "https://app.example")).toBe(false);
+  });
+
+  test("decides a worker's by its origin, and refuses a non-secure site", () => {
+    sendSites(channels, {
+      localNetwork: { "https://app.example": "allow", "http://plain.example": "allow" },
+    });
+    expect(localNetworkPermitted(null, "https://app.example/")).toBe(true);
+    expect(localNetworkPermitted(null, "https://other.example/")).toBe(false);
+    expect(localNetworkPermitted(null, "http://plain.example/")).toBe(false);
   });
 });

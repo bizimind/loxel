@@ -1,0 +1,192 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ori Shalom <ori.100000@gmail.com>
+Date: Sat, 21 Nov 2026 00:13:38 +0200
+Subject: [PATCH] feat: let apps turn Chromium's Local Network Access checks on
+
+Electron adds LocalNetworkAccessChecks to the disabled features, and
+disabled features win over enabled ones, so an app's
+--enable-features=LocalNetworkAccessChecks had no effect. Add it only
+when the app doesn't enable the feature itself, as with
+SpareRendererForSitePerProcess, and share the lookup between the two.
+
+With the checks on, a request from a page or worker on a public address
+to a private or loopback address needs the local-network or
+loopback-network permission, decided before the request is sent. As
+Electron's permission manager never answers "ask", the session's
+permission check handler decides it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/api/command-line-switches.md |  7 ++++
+ shell/browser/feature_list.cc     | 41 ++++++++++++------
+ spec/chromium.spec.ts             | 70 +++++++++++++++++++++++++++++++
+ 3 files changed, 106 insertions(+), 12 deletions(-)
+
+diff --git a/docs/api/command-line-switches.md b/docs/api/command-line-switches.md
+index a4a032fb47..015dfac8b0 100644
+--- a/docs/api/command-line-switches.md
++++ b/docs/api/command-line-switches.md
+@@ -392,6 +392,13 @@ Finally, you'll need to ensure that the version of Chromium in Electron matches
+   [`long-animation-frame`](https://developer.mozilla.org/en-US/docs/Web/API/Performance_API/Long_animation_frame_timing)
+   `PerformanceObserver` events for non-http(s), non-data, non-blob URLs (such as `file:` or custom
+   protocol URLs).
++* `LocalNetworkAccessChecks`: turns on Chromium's
++  [Local Network Access](https://github.com/explainers-by-googlers/local-network-access) checks,
++  which Electron turns off by default. A request from a page or worker on a public address to a
++  private or loopback address then needs the `local-network` or `loopback-network` permission, and
++  one from a non-secure context is blocked. Electron never prompts for these, so the session's
++  permission check handler alone decides (see
++  [`ses.setPermissionCheckHandler`](session.md#sessetpermissioncheckhandlerhandler)).
+ * `SpareRendererForSitePerProcess`: keeps a spare renderer process running at all times so
+   that a new window, or a navigation that needs a new process, does not wait for a process to
+   launch. Electron starts one such process when the default session is created, for the first
+diff --git a/shell/browser/feature_list.cc b/shell/browser/feature_list.cc
+index a3a3be0787..a88f3bac91 100644
+--- a/shell/browser/feature_list.cc
++++ b/shell/browser/feature_list.cc
+@@ -42,6 +42,24 @@
+ 
+ namespace electron {
+ 
++namespace {
++
++// Whether the app's --enable-features names `feature`, so a feature Electron
++// turns off by default can be turned back on.
++bool IsEnabledByApp(std::string_view enable_features,
++                    const base::Feature& feature) {
++  return std::ranges::any_of(
++      base::FeatureList::SplitFeatureListString(enable_features),
++      [&feature](std::string_view entry) {
++        std::string name, study, group, params;
++        return base::FeatureList::ParseEnableFeatureString(
++                   entry, &name, &study, &group, &params) &&
++               name == feature.name;
++      });
++}
++
++}  // namespace
++
+ void InitializeFeatureList() {
+   auto* cmd_line = base::CommandLine::ForCurrentProcess();
+   auto enable_features =
+@@ -52,17 +70,20 @@ void InitializeFeatureList() {
+   // so Electron warms one spare itself (for the first sandboxed window) rather
+   // than letting content keep one alive at all times; apps that open many
+   // windows can opt back into that with --enable-features.
+-  if (!std::ranges::any_of(
+-          base::FeatureList::SplitFeatureListString(enable_features),
+-          [](std::string_view entry) {
+-            std::string name, study, group, params;
+-            return base::FeatureList::ParseEnableFeatureString(
+-                       entry, &name, &study, &group, &params) &&
+-                   name == features::kSpareRendererForSitePerProcess.name;
+-          })) {
++  if (!IsEnabledByApp(enable_features,
++                      features::kSpareRendererForSitePerProcess)) {
+     disable_features +=
+         std::string(",") + features::kSpareRendererForSitePerProcess.name;
+   }
++  // Local Network Access checks (https://crrev.com/c/6910012) stay off unless
++  // the app turns them on. Electron's permission manager never answers "ask",
++  // so with them on the session's permission check handler alone decides
++  // `local-network` and `loopback-network`.
++  if (!IsEnabledByApp(enable_features,
++                      network::features::kLocalNetworkAccessChecks)) {
++    disable_features +=
++        std::string(",") + network::features::kLocalNetworkAccessChecks.name;
++  }
+   disable_features +=
+       // See https://chromium-review.googlesource.com/c/chromium/src/+/6487926
+       // this breaks PDFs locally as we don't have GLIC infra enabled.
+@@ -71,10 +92,6 @@ void InitializeFeatureList() {
+       // Needed so that ElectronBrowserClient::RegisterPendingSiteInstance does
+       // not throw a check.
+       std::string(", TraceSiteInstanceGetProcessCreation") +
+-      // See https://chromium-review.googlesource.com/c/chromium/src/+/6910012
+-      // Needed until we rework some of our logic and checks to enable this
+-      // properly.
+-      std::string(",") + network::features::kLocalNetworkAccessChecks.name +
+       // See 4803165: Enable suppressing input event dispatch while
+       // paint-holding. Needed to prevent spurious input event handling
+       // failures.
+diff --git a/spec/chromium.spec.ts b/spec/chromium.spec.ts
+index 12631820ea..40824746d0 100644
+--- a/spec/chromium.spec.ts
++++ b/spec/chromium.spec.ts
+@@ -4739,6 +4739,76 @@ describe('chromium features', () => {
+     });
+   });
+ 
++  describe('Local Network Access', () => {
++    let pageServer: http.Server;
++    let targetServer: http.Server;
++    let pagePort: number;
++    let targetPort: number;
++    let targetRequests = 0;
++
++    beforeAll(async () => {
++      pageServer = http.createServer((_req, res) => res.end('<!doctype html>'));
++      targetServer = http.createServer((_req, res) => {
++        targetRequests++;
++        res.setHeader('Access-Control-Allow-Origin', '*');
++        res.end('ok');
++      });
++      pagePort = (await listen(pageServer)).port;
++      targetPort = (await listen(targetServer)).port;
++    });
++
++    afterAll(() => {
++      pageServer.close();
++      targetServer.close();
++    });
++
++    beforeEach(() => {
++      targetRequests = 0;
++    });
++
++    // The page's server counts as public, so its fetch of another port on
++    // this machine is a local network request.
++    const fetchFromPublicPage = async (extraArgs: string[] = []) => {
++      const rc = await startRemoteControlApp([
++        `--ip-address-space-overrides=127.0.0.1:${pagePort}=public`,
++        ...extraArgs
++      ]);
++      return rc.remotely(
++        async (pageUrl: string, targetUrl: string) => {
++          const { BrowserWindow, session } = require('electron/main');
++          const checks: string[] = [];
++          session.defaultSession.setPermissionCheckHandler((_wc: unknown, permission: string) => {
++            if (permission.endsWith('-network')) checks.push(permission);
++            return false;
++          });
++          const w = new BrowserWindow({ show: false });
++          await w.loadURL(pageUrl);
++          const fetched = await w.webContents.executeJavaScript(
++            `fetch(${JSON.stringify(targetUrl)}).then(() => true, () => false)`
++          );
++          global.setTimeout(() => require('electron').app.quit());
++          return { fetched, checks };
++        },
++        `http://127.0.0.1:${pagePort}/`,
++        `http://127.0.0.1:${targetPort}/`
++      );
++    };
++
++    it('is off by default', async () => {
++      const { fetched, checks } = await fetchFromPublicPage();
++      expect(fetched).toBe(true);
++      expect(checks).toEqual([]);
++      expect(targetRequests).toBe(1);
++    });
++
++    it('lets the permission check handler decide once the app enables LocalNetworkAccessChecks', async () => {
++      const { fetched, checks } = await fetchFromPublicPage(['--enable-features=LocalNetworkAccessChecks']);
++      expect(fetched).toBe(false);
++      expect(checks).toContain('loopback-network');
++      expect(targetRequests).toBe(0);
++    });
++  });
++
+   describe('long-animation-frame', () => {
+     it('should include script attribution on custom protocols if AlwaysLogLOAFURL is enabled', async () => {
+       const rc = await startRemoteControlApp(['--enable-features=AlwaysLogLOAFURL']);

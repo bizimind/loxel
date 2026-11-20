@@ -88,7 +88,10 @@ export function parseSiteAccessSites(value: unknown): SiteAccessSites {
   };
 }
 
-/** What a site asks for: to open a link in another app, or to reach the local network. */
+/**
+ * What a site asks for: to open a link in another app, to reach the local network, or to read or
+ * write a file or folder the user gave it (File System Access).
+ */
 export const siteAccessSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("external-app"),
@@ -99,12 +102,24 @@ export const siteAccessSchema = z.discriminatedUnion("kind", [
     app: z.string(),
   }),
   z.object({ kind: z.literal("local-network"), origin: z.string() }),
+  z.object({
+    kind: z.literal("file-system"),
+    origin: z.string(),
+    path: z.string(),
+    /** The file or folder's name, as the prompt shows it. */
+    name: z.string(),
+    directory: z.boolean(),
+    /** Whether the site asks to write (and read), not only to read. */
+    write: z.boolean(),
+  }),
 ]);
 export type SiteAccess = z.infer<typeof siteAccessSchema>;
 
 /**
  * Main → window renderer: ask the user whether to let a site have `access`. Allow this time opens
- * this one link, or lets the page reach the local network while the panel stays on the site.
+ * this one link, or lets the page reach the local network while the panel stays on the site. File
+ * access is never saved: its prompt offers Allow (`allow-once`: the page keeps the access while it
+ * stays on the site) and Block (`dismiss`: this request only).
  */
 export const siteAccessRequestSchema = z.object({
   id: z.number().int(),

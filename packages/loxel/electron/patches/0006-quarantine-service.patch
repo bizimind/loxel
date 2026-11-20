@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ori Shalom <ori.100000@gmail.com>
+Date: Sat, 21 Nov 2026 00:12:03 +0200
+Subject: [PATCH] fix: give Chromium a quarantine service for downloads and
+ saved files
+
+Chromium marks a completed download, and a file the File System Access
+API writes, through the embedder's quarantine service connection
+(DownloadManagerDelegate and ContentBrowserClient
+GetQuarantineConnectionCallback). Electron overrode neither, so outside
+Windows, where Chromium writes the Mark of the Web itself without one,
+such files got no quarantine attribute: on macOS no
+com.apple.quarantine, so Gatekeeper never checked them when opened.
+
+Connect both to a quarantine service in the browser process, as Chrome
+does outside Windows (ChromeDownloadManagerDelegate::
+ConnectToQuarantineService). On macOS that also records where the file
+came from (kMDItemWhereFroms and the quarantine event's URLs). Windows
+keeps Chromium's direct Mark of the Web.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ BUILD.gn                                      |  1 +
+ shell/browser/electron_browser_client.cc      |  6 +++++
+ shell/browser/electron_browser_client.h       |  2 ++
+ .../electron_download_manager_delegate.cc     | 22 +++++++++++++++++++
+ .../electron_download_manager_delegate.h      |  9 ++++++++
+ spec/api-session.spec.ts                      | 15 +++++++++++++
+ 6 files changed, 55 insertions(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index fdc47087c5..58b91dbd54 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -535,6 +535,7 @@ source_set("electron_lib") {
+     "//components/pref_registry",
+     "//components/prefs",
+     "//components/security_state/content",
++    "//components/services/quarantine",
+     "//components/tracing:tracing_metrics",
+     "//components/upload_list",
+     "//components/user_prefs",
+diff --git a/shell/browser/electron_browser_client.cc b/shell/browser/electron_browser_client.cc
+index 6592976876..53e1210175 100644
+--- a/shell/browser/electron_browser_client.cc
++++ b/shell/browser/electron_browser_client.cc
+@@ -94,6 +94,7 @@
+ #include "shell/browser/electron_autofill_driver_factory.h"
+ #include "shell/browser/electron_browser_context.h"
+ #include "shell/browser/electron_browser_main_parts.h"
++#include "shell/browser/electron_download_manager_delegate.h"
+ #include "shell/browser/electron_child_process_host_flags.h"
+ #include "shell/browser/electron_navigation_throttle.h"
+ #include "shell/browser/electron_plugin_info_host_impl.h"
+@@ -2008,6 +2009,11 @@ std::string ElectronBrowserClient::GetApplicationLocale() {
+              : *g_application_locale;
+ }
+ 
++download::QuarantineConnectionCallback
++ElectronBrowserClient::GetQuarantineConnectionCallback() {
++  return ElectronDownloadManagerDelegate::QuarantineServiceConnection();
++}
++
+ bool ElectronBrowserClient::ShouldUseSpareRenderProcessHost(
+     content::BrowserContext* browser_context,
+     const GURL& site_url,
+diff --git a/shell/browser/electron_browser_client.h b/shell/browser/electron_browser_client.h
+index 265a387eb6..0a47e26d70 100644
+--- a/shell/browser/electron_browser_client.h
++++ b/shell/browser/electron_browser_client.h
+@@ -83,6 +83,8 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
+ 
+   // content::ContentBrowserClient:
+   std::string GetApplicationLocale() override;
++  download::QuarantineConnectionCallback GetQuarantineConnectionCallback()
++      override;
+   bool* spare_renderer_compatible() { return &spare_renderer_compatible_; }
+ 
+   // Ids handed out as webRequest details.id, shared by every proxy and gate.
+diff --git a/shell/browser/electron_download_manager_delegate.cc b/shell/browser/electron_download_manager_delegate.cc
+index 7eae1e9bd9..66346aa92a 100644
+--- a/shell/browser/electron_download_manager_delegate.cc
++++ b/shell/browser/electron_download_manager_delegate.cc
+@@ -15,10 +15,12 @@
+ #include "chrome/common/pref_names.h"
+ #include "components/download/public/common/download_danger_type.h"
+ #include "components/prefs/pref_service.h"
++#include "components/services/quarantine/quarantine_impl.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/download_item_utils.h"
+ #include "content/public/browser/download_manager.h"
++#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+ #include "net/base/filename_util.h"
+ #include "shell/browser/api/electron_api_download_item.h"
+ #include "shell/browser/electron_browser_context.h"
+@@ -384,4 +386,24 @@ void ElectronDownloadManagerDelegate::GetNextId(
+   std::move(callback).Run(next_id++);
+ }
+ 
++download::QuarantineConnectionCallback
++ElectronDownloadManagerDelegate::GetQuarantineConnectionCallback() {
++  return QuarantineServiceConnection();
++}
++
++// static
++download::QuarantineConnectionCallback
++ElectronDownloadManagerDelegate::QuarantineServiceConnection() {
++#if BUILDFLAG(IS_WIN)
++  return {};
++#else
++  return base::BindRepeating(
++      [](mojo::PendingReceiver<quarantine::mojom::Quarantine> receiver) {
++        mojo::MakeSelfOwnedReceiver(
++            std::make_unique<quarantine::QuarantineImpl>(),
++            std::move(receiver));
++      });
++#endif
++}
++
+ }  // namespace electron
+diff --git a/shell/browser/electron_download_manager_delegate.h b/shell/browser/electron_download_manager_delegate.h
+index 74c590b235..4ea44ae900 100644
+--- a/shell/browser/electron_download_manager_delegate.h
++++ b/shell/browser/electron_download_manager_delegate.h
+@@ -7,6 +7,7 @@
+ 
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "components/download/public/common/quarantine_connection.h"
+ #include "content/public/browser/download_manager_delegate.h"
+ #include "shell/browser/ui/file_dialog.h"
+ 
+@@ -41,6 +42,14 @@ class ElectronDownloadManagerDelegate
+       download::DownloadItem* download,
+       content::DownloadOpenDelayedCallback callback) override;
+   void GetNextId(content::DownloadIdCallback callback) override;
++  download::QuarantineConnectionCallback GetQuarantineConnectionCallback()
++      override;
++
++  // Connects to a quarantine service in this process, as Chrome does outside
++  // Windows. On Windows there is none, and Chromium writes the Mark of the Web
++  // itself. Files the File System Access API writes are quarantined with it
++  // too (ElectronBrowserClient).
++  static download::QuarantineConnectionCallback QuarantineServiceConnection();
+ 
+  private:
+   // Get the save path set on the associated api::DownloadItem object
+diff --git a/spec/api-session.spec.ts b/spec/api-session.spec.ts
+index cb725c7e36..687d9ffe38 100644
+--- a/spec/api-session.spec.ts
++++ b/spec/api-session.spec.ts
+@@ -1493,6 +1493,21 @@ describe('session module', { retry: 0 }, () => {
+         assertDownload(state, item);
+       });
+ 
++      ifit(process.platform === 'darwin')('quarantines a completed download', async () => {
++        const willDownload = once(session.defaultSession, 'will-download');
++        session.defaultSession.downloadURL(`${url}:${port}`);
++        const [, item] = await willDownload;
++        item.savePath = downloadFilePath;
++        const [, state] = await once(item, 'done');
++        expect(state).toBe('completed');
++        try {
++          const quarantine = ChildProcess.execFileSync('/usr/bin/xattr', ['-p', 'com.apple.quarantine', downloadFilePath]);
++          expect(quarantine.toString().trim()).not.toBe('');
++        } finally {
++          fs.unlinkSync(downloadFilePath);
++        }
++      });
++
+       it('can perform a download with a valid auth header', async () => {
+         server = http.createServer((req, res) => {
+           const { authorization } = req.headers;

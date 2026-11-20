@@ -1,13 +1,15 @@
 /**
  * Site access that browser panels ask the user about, as browsers do: opening a link in another
- * app (`browser-external-apps.ts`), and reaching this machine or the local network
- * (`browser-local-network.ts`).
+ * app (`browser-external-apps.ts`), reaching this machine or the local network
+ * (`browser-local-network.ts`), and reading or writing a file the user gave the page
+ * (`browser-file-access.ts`).
  *
  * A site without a decision gets a bar in the panel of the page that asked: Allow and Block are
  * saved for the site (and, for apps, the link's scheme) in Loxel's settings, which window renderers
  * send here on load and on every change. Allow this time opens that one link, or lets the page
- * reach the local network while the panel stays on the site. Requests from the same page for the
- * same access share one prompt and one answer.
+ * reach the local network while the panel stays on the site. File access is asked about each time,
+ * as Chrome does, and answers only its request. Requests from the same page for the same access
+ * share one prompt and one answer.
  */
 import type { IpcMainEvent, WebContents } from "electron";
 
@@ -60,11 +62,21 @@ const localNetworkOnce = new Map<number, string>();
  */
 const dismissedLocalNetwork = new Set<number>();
 
-/** The saved decision for `access`, if the user made one. */
+/** The saved decision for `access`, if the user made one. File access has none. */
 function savedDecision(access: SiteAccess): SiteDecision | undefined {
   const { externalApps, localNetwork } = sites.get();
-  if (access.kind === "local-network") return localNetwork[access.origin];
-  return externalApps[access.origin]?.[access.scheme];
+  switch (access.kind) {
+    case "local-network":
+      return localNetwork[access.origin];
+    case "external-app":
+      return externalApps[access.origin]?.[access.scheme];
+    case "file-system":
+      return undefined;
+    default: {
+      const _exhaustive: never = access;
+      throw new Error(`Unknown site access: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
 }
 
 /**
@@ -90,10 +102,30 @@ function listeningHost(guest: WebContents): WebContents | null {
   return host;
 }
 
-const sameAccess = (a: SiteAccess, b: SiteAccess) =>
-  a.kind === b.kind &&
-  a.origin === b.origin &&
-  (a.kind === "local-network" || (b.kind === "external-app" && a.scheme === b.scheme));
+/**
+ * Whether the answer to an open prompt for `asked` also answers `wanted`. Writing a file covers
+ * reading it: a folder picker requests both at once.
+ */
+function answersAccess(asked: SiteAccess, wanted: SiteAccess): boolean {
+  if (asked.origin !== wanted.origin) return false;
+  switch (asked.kind) {
+    case "local-network":
+      return wanted.kind === "local-network";
+    case "external-app":
+      return wanted.kind === "external-app" && asked.scheme === wanted.scheme;
+    case "file-system":
+      return (
+        wanted.kind === "file-system" &&
+        asked.path === wanted.path &&
+        asked.directory === wanted.directory &&
+        (asked.write || !wanted.write)
+      );
+    default: {
+      const _exhaustive: never = asked;
+      throw new Error(`Unknown site access: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+}
 
 /** Whether `guest`'s panel can ask about local network access for `origin` now. */
 export function canAskLocalNetwork(guest: WebContents): boolean {
@@ -126,7 +158,7 @@ export function askSiteAccess(guest: WebContents, access: SiteAccess): Promise<b
     // Asking again while the prompt is up (each held request, or another click on the link)
     // waits for the same answer.
     for (const [, pending] of prompts.entries()) {
-      if (pending.guestId !== guest.id || !sameAccess(pending.access, access)) continue;
+      if (pending.guestId !== guest.id || !answersAccess(pending.access, access)) continue;
       pending.waiters.push(resolve);
       return;
     }
@@ -150,7 +182,7 @@ function settleDecidedRequests(): void {
 /** `current` with the user's `decision` for `access`. */
 function withDecision(
   current: SiteAccessSites,
-  access: SiteAccess,
+  access: Exclude<SiteAccess, { kind: "file-system" }>,
   decision: SiteDecision,
 ): SiteAccessSites {
   if (access.kind === "external-app") {
@@ -172,6 +204,11 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   const pending = prompts.answered(event, id);
   if (!pending) return;
   const { access, guestId } = pending;
+  // File access answers only this request; Chromium keeps the grant while the page is on the site.
+  if (access.kind === "file-system") {
+    withdraw(id, answer === "allow" || answer === "allow-once");
+    return;
+  }
   if (answer === "dismiss") {
     if (access.kind === "local-network") dismissedLocalNetwork.add(guestId);
     withdraw(id, false);

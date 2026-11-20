@@ -113,7 +113,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
 - [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
-- [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) — the patched Electron releases ship with: its patches, building and uploading it, and keeping it current
+- [docs/PATCHED_ELECTRON.md](docs/PATCHED_ELECTRON.md) — the patched Electron releases ship with: its patches and their docs, building, testing and uploading it, and keeping it current
 
 **Workspace**
 

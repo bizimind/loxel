@@ -1,6 +1,9 @@
 import type { Session } from "electron";
 
+import { normalizeOrigin } from "../url-utils";
 import type { requestExternalApp } from "./browser-external-apps";
+import type { requestFileAccess } from "./browser-file-access";
+import type { localNetworkPermitted } from "./browser-local-network";
 import type { checkMediaPermission, requestMediaPermission } from "./browser-media";
 
 type PermissionCheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
@@ -25,19 +28,23 @@ const EXCLUSIVE_ACCESS: ReadonlySet<BrowserPermission> = new Set<BrowserPermissi
   "pointerLock",
 ]);
 
+/** Chromium's Local Network Access permissions, decided by `browser-local-network.ts`. */
+const LOCAL_NETWORK: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
+  "local-network",
+  "local-network-access",
+  "loopback-network",
+]);
+
 /**
  * Permissions every browser panel page gets without being asked, as browsers give them. Everything
- * else is refused, unless Loxel asks the user for it itself (the camera and microphone, in
- * `browser-media.ts`, links to other apps, in `browser-external-apps.ts`, and notifications);
+ * else is refused, unless Loxel decides it itself (the camera and microphone, in
+ * `browser-media.ts`, links to other apps, in `browser-external-apps.ts`, file access requests, in
+ * `browser-file-access.ts`, the local network, in `browser-local-network.ts`, and notifications);
  * Electron's default, with no handler, grants every permission to every page.
  *
  * Some permissions browsers grant quietly are refused anyway, as pages carry on without them:
  * `persistent-storage` (storage stays best-effort), and `background-sync`, `sensors` and
- * `payment-handler`, which do nothing in Loxel. Chromium's own local network access permissions
- * (`local-network-access`, `local-network`, `loopback-network`) are refused too: Electron turns
- * Chromium's checks off, and Loxel asks the user itself, on the session's requests
- * (`browser-local-network.ts`). If an Electron upgrade turns Chromium's checks on, its permission
- * requests need the same decision here.
+ * `payment-handler`, which do nothing in Loxel.
  */
 const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
   // `navigator.clipboard.write()` / `writeText()` from a click or key press: copy buttons. Writes
@@ -55,18 +62,20 @@ const GRANTED: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
   // `navigator.wakeLock.request("screen")`, for slides, recipes and video calls: keeps the display
   // awake, nothing more, and Chromium releases it when the page is hidden.
   "screen-wake-lock",
-  // File System Access. Required, not chosen: once a check handler exists, Electron decides every
-  // file handle's access from it alone, so refusing it breaks the API, save dialogs included. What
-  // it grants is read and write access to whatever the user picked or dropped on the page, also
-  // through handles the page kept from an earlier visit; browsers ask before writing to a file
-  // picked for reading.
+  // File System Access checks. The patched Electron makes this check a veto (PATCHED_ELECTRON.md):
+  // it keeps the access the page was given (a file the user picked, saved or dropped, or access
+  // the user allowed), and refusing it would break the API, save dialogs included. Access the page
+  // doesn't have is requested, and the user is asked (browser-file-access.ts). On stock Electron,
+  // as in dev runs and tests, this check alone decides, and grants write access to a file picked
+  // only for reading.
   "fileSystem",
 ]);
 
 /**
- * Whether a browser panel page gets `permission`, for every permission but `media` and the
- * `openExternal` request, which the user decides per site (`browser-media.ts`,
- * `browser-external-apps.ts`). One decision answers both the check and the request, so what a page
+ * Whether a browser panel page gets `permission`, for every permission but `media`, the
+ * `openExternal` and `fileSystem` requests and the local network, which the user decides
+ * (`browser-media.ts`, `browser-external-apps.ts`, `browser-file-access.ts`,
+ * `browser-local-network.ts`). One decision answers both the check and the request, so what a page
  * reads (`navigator.permissions.query()`) matches what asking gets it. Each permission decided
  * otherwise than by the allowlist has its own branch here.
  */
@@ -83,21 +92,24 @@ export function browserPermissionGranted(
   return GRANTED.has(permission);
 }
 
-/** The modules that ask the user before answering a permission (passed in by `main.ts`). */
+/** The modules that decide a permission from what the user said (passed in by `main.ts`). */
 export interface PermissionAskers {
   media: { check: typeof checkMediaPermission; request: typeof requestMediaPermission };
   openExternal: typeof requestExternalApp;
+  fileSystem: typeof requestFileAccess;
+  localNetwork: typeof localNetworkPermitted;
 }
 
 /**
  * Decide browser panel permissions in `browserSession`. Both handlers are needed: requests answer
  * `requestPermission()`-style calls, and checks are what `navigator.permissions.query()` and many
- * APIs read before (or instead of) asking. The camera and microphone (`media`) and links to other
- * apps (`openExternal`) go to `askers`, which may ask the user before answering a request.
+ * APIs read before (or instead of) asking. The camera and microphone (`media`), links to other
+ * apps (`openExternal`), file access requests (`fileSystem`) and the local network go to `askers`,
+ * which may ask the user before answering a request.
  */
 export function installBrowserPermissions(
   browserSession: Pick<Session, "setPermissionCheckHandler" | "setPermissionRequestHandler">,
-  { media, openExternal }: PermissionAskers,
+  { media, openExternal, fileSystem, localNetwork }: PermissionAskers,
   onGranted?: (
     webContents: Parameters<PermissionRequestHandler>[0],
     permission: BrowserPermission,
@@ -106,6 +118,9 @@ export function installBrowserPermissions(
 ): void {
   const check: PermissionCheckHandler = (webContents, permission, origin, details) => {
     if (permission === "media") return media.check(webContents, origin, details.mediaType);
+    if (LOCAL_NETWORK.has(permission)) {
+      return localNetwork(webContents, origin, details.embeddingOrigin);
+    }
     return browserPermissionGranted(permission, {
       isMainFrame: details.isMainFrame,
       inBrowserPanel: webContents?.getType() === "webview",
@@ -125,6 +140,15 @@ export function installBrowserPermissions(
     }
     if (permission === "openExternal") {
       openExternal(webContents, details, answer);
+      return;
+    }
+    if (permission === "fileSystem") {
+      fileSystem(webContents, details, answer);
+      return;
+    }
+    // Electron only checks these, never requests them; a request gets the same answer.
+    if (LOCAL_NETWORK.has(permission)) {
+      answer(localNetwork(webContents, normalizeOrigin(details.requestingUrl) ?? ""));
       return;
     }
     answer(

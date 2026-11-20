@@ -4,12 +4,17 @@
  * the local network reach anything, so a dev server's page, on `localhost` or its LAN address,
  * calls its API on another port without asking.
  *
- * Electron turns Chromium's own checks off, so main gates the browser session's requests itself,
- * in `webRequest`, which sees every frame's subresources, fetches, websockets, subframes and
- * workers' requests, including frames the webview preload never runs in (`about:blank`). Top-level
- * navigations aren't gated, as in Chrome. The site deciding is the top-level page's, so embedded
- * frames follow its decision; a worker's requests have no page and are decided by the worker's
- * origin.
+ * Two gates apply the same decision. Main gates the browser session's requests in `webRequest`,
+ * which sees every frame's subresources, fetches, websockets, subframes and workers' requests,
+ * including frames the webview preload never runs in (`about:blank`), and is where the user is
+ * asked. Chromium's own Local Network Access checks, which the patched Electron Loxel ships lets
+ * main turn on (`main.ts`), then check each request once it has connected and before it sends
+ * anything, from the address it actually reached, through the session's permission check
+ * (`localNetworkPermitted`), which never asks. Stock Electron, as in dev runs and tests, leaves
+ * the checks off, and the `webRequest` gate alone applies. Top-level navigations aren't gated, as in
+ * Chrome. The site deciding is the top-level page's, so embedded frames follow its decision; a
+ * worker's requests have no page and are decided by the worker's origin. A public site that isn't
+ * a secure context (`http:`) is refused without asking, as Chromium refuses it.
  *
  * Address spaces:
  * - A request's target is classified by its URL's host when that names its space (an IP address,
@@ -199,7 +204,9 @@ function callerSpace(browserSession: Session, caller: Caller): Promise<AddressSp
 /** Whether `caller`'s site may reach a more private space: decided, or asked in a panel. */
 async function allowedFor(caller: Caller): Promise<boolean> {
   const { site, contents } = caller;
-  if (!site) return false;
+  // Chromium never lets a non-secure public page reach a more private address, whatever the user
+  // says, so asking would be a promise it can't keep.
+  if (!site || new URL(site).protocol === "http:") return false;
   await siteAccessLoaded();
   const access: SiteAccess = { kind: "local-network", origin: site };
   const state = siteAccessState(contents?.id ?? null, access);
@@ -334,6 +341,27 @@ async function acceptResponse(browserSession: Session, details: ResponseDetails)
     if (siteAccessState(request.contentsId, access) === "allow") return true;
   }
   return (await responseSpace(browserSession, details.url, details.ip)) === null;
+}
+
+/**
+ * Chromium's own check (the `local-network`, `loopback-network` and `local-network-access`
+ * permission checks): whether the site may reach this machine or the local network. Chromium asks
+ * only for a public page or worker reaching a more private address, and the answer is the site's
+ * saved decision or the panel's Allow this time, which the `webRequest` gate asked the user for.
+ * `contents` is the webview or popup of the page asking, whose top-level origin decides (the
+ * check's `embeddingOrigin` when it names one); with none, a worker's origin decides.
+ */
+export function localNetworkPermitted(
+  contents: WebContents | null,
+  requestingOrigin: string,
+  embeddingOrigin?: string,
+): boolean {
+  const page = contents && !contents.isDestroyed() ? contents : null;
+  const site = page
+    ? (normalizeOrigin(embeddingOrigin) ?? normalizeOrigin(page.mainFrame.origin))
+    : normalizeOrigin(requestingOrigin);
+  if (!site || new URL(site).protocol === "http:") return false;
+  return siteAccessState(page?.id ?? null, { kind: "local-network", origin: site }) === "allow";
 }
 
 /** Gate `browserSession`'s requests (the browser panels' session). */
