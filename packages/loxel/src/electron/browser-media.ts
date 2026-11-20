@@ -1,6 +1,7 @@
 /**
- * Camera and microphone for browser panel pages (`getUserMedia()`), per site with the user's
- * permission, as in browsers: video calls such as Google Meet work in a panel.
+ * Camera and microphone for browser panel pages (`getUserMedia()` and the `<usermedia>` element),
+ * per site with the user's permission, as in browsers: video calls such as Google Meet work in a
+ * panel.
  *
  * The browser session's permission handlers (`browser-permissions.ts`) hand every `media` check
  * and request here. A request from a site without a decision is forwarded to the window hosting
@@ -290,16 +291,73 @@ async function decideRequest(
   return siteOfGuest(guest) === site;
 }
 
-/** The `media` permission request: a page called `getUserMedia()` for the camera or microphone. */
+/** Answer `callbacks` with Loxel's decision on `details`. */
+function decide(
+  guest: WebContents,
+  details: MediaAccessPermissionRequest,
+  callbacks: readonly ((granted: boolean) => void)[],
+): void {
+  const answer = (granted: boolean) => {
+    for (const callback of callbacks) callback(granted);
+  };
+  decideRequest(guest, details).then(answer, (error: unknown) => {
+    console.error("[browser-media] Refused a camera or microphone request after an error", error);
+    answer(false);
+  });
+}
+
+/** A `<usermedia>` element's calls, by guest webContents id, until the task issuing them ends. */
+const elementCalls = new Map<number, ((granted: boolean) => void)[]>();
+
+/**
+ * A `<usermedia>` element's request, which Electron hands the handler as one call per device it
+ * asks for, with no media types and nothing else to tell them apart, all in one task: Electron's
+ * `ElectronPermissionManager::RequestPermissionsFromCurrentDocument` passes no details on to
+ * `RequestPermissionsWithDetails`, which runs the handler in a loop over the request's permissions
+ * (`shell/browser/electron_permission_manager.cc`). The element asks for the camera and the
+ * microphone together (Blink's `html_user_media_element.cc` allows no other pair), so its two
+ * calls get one prompt for both. A lone call doesn't say which device it is for, and is refused.
+ * Guests don't have the single-device `<camera>` and `<microphone>` elements (`webview-attach.ts`).
+ */
+function requestFromElement(
+  guest: WebContents,
+  details: MediaAccessPermissionRequest,
+  callback: (granted: boolean) => void,
+): void {
+  const calls = elementCalls.get(guest.id);
+  if (calls) {
+    calls.push(callback);
+    return;
+  }
+  elementCalls.set(guest.id, [callback]);
+  setImmediate(() => {
+    const callbacks = elementCalls.get(guest.id) ?? [];
+    elementCalls.delete(guest.id);
+    if (callbacks.length !== MEDIA_DEVICES.length) {
+      console.warn(
+        `[browser-media] Refused ${callbacks.length} camera or microphone request(s) that named no device`,
+      );
+      for (const refuse of callbacks) refuse(false);
+      return;
+    }
+    decide(guest, { ...details, mediaTypes: ["video", "audio"] }, callbacks);
+  });
+}
+
+/**
+ * The `media` permission request: a page called `getUserMedia()` for the camera or microphone, or
+ * the user clicked its `<usermedia>` element.
+ */
 export function requestMediaPermission(
   guest: WebContents,
   details: MediaAccessPermissionRequest,
   callback: (granted: boolean) => void,
 ): void {
-  decideRequest(guest, details).then(callback, (error: unknown) => {
-    console.error("[browser-media] Refused a camera or microphone request after an error", error);
-    callback(false);
-  });
+  if (!details.mediaTypes) {
+    requestFromElement(guest, details, callback);
+    return;
+  }
+  decide(guest, details, [callback]);
 }
 
 function respondToRequest(event: IpcMainEvent, value: unknown): void {
