@@ -47,10 +47,6 @@ export function secureWebviewAttach(
   webPreferences.plugins = false;
   webPreferences.navigateOnDragDrop = false;
   delete webPreferences.enableBlinkFeatures;
-  // The `<camera>` and `<microphone>` elements ask for their device without naming it to Loxel's
-  // permission handler, which can't tell them apart (browser-media.ts); pages without them use
-  // getUserMedia(). `<usermedia>` asks for both devices, and stays.
-  webPreferences.disableBlinkFeatures = "CameraAndMicrophoneElements";
   // Loxel's own preload (which also runs in subframes, sandboxed, without Node.js).
   configureWebviewDialogs(webPreferences);
   return true;

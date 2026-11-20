@@ -1,7 +1,7 @@
 /**
- * Camera and microphone for browser panel pages (`getUserMedia()` and the `<usermedia>` element),
- * per site with the user's permission, as in browsers: video calls such as Google Meet work in a
- * panel.
+ * Camera and microphone for browser panel pages (`getUserMedia()` and the `<usermedia>`, `<camera>`
+ * and `<microphone>` elements), per site with the user's permission, as in browsers: video calls
+ * such as Google Meet work in a panel.
  *
  * The browser session's permission handlers (`browser-permissions.ts`) hand every `media` check
  * and request here. A request from a site without a decision is forwarded to the window hosting
@@ -143,6 +143,25 @@ function listeningHost(guest: WebContents): WebContents | null {
 }
 
 /**
+ * The devices each guest's `media` checks named, in order, until main's next turn, by guest
+ * webContents id. Node's next immediate is the closest end of task main can see (Electron runs
+ * microtasks after every handler call), and it may come a few tasks late, so the record can hold
+ * checks from earlier tasks too: an element's registration, or the page's
+ * `navigator.permissions.query()`.
+ */
+const checkedDevices = new Map<number, MediaDevice[]>();
+
+function recordCheck(guestId: number, device: MediaDevice): void {
+  const devices = checkedDevices.get(guestId);
+  if (devices) {
+    devices.push(device);
+    return;
+  }
+  checkedDevices.set(guestId, [device]);
+  setImmediate(() => checkedDevices.delete(guestId));
+}
+
+/**
  * The `media` permission check: what `navigator.permissions.query()` (before the preload's
  * answer), `enumerateDevices()` device labels and Chromium's own checks read. Only the page's own
  * frames get a grant: a check can't see what the page's permissions policy delegates.
@@ -152,6 +171,9 @@ export function checkMediaPermission(
   requestingOrigin: string,
   mediaType: "video" | "audio" | "unknown" | undefined,
 ): boolean {
+  if (guest && (mediaType === "video" || mediaType === "audio")) {
+    recordCheck(guest.id, mediaType === "video" ? "camera" : "microphone");
+  }
   const site = siteOfGuest(guest);
   if (!guest || !site || normalizeOrigin(requestingOrigin) !== site) return false;
   // Device labels are checked with no type: they are the page's once it may use either device.
@@ -306,18 +328,25 @@ function decide(
   });
 }
 
-/** A `<usermedia>` element's calls, by guest webContents id, until the task issuing them ends. */
-const elementCalls = new Map<number, ((granted: boolean) => void)[]>();
+interface ElementCalls {
+  /** The guest's checked devices when the first call came, the element's own last. */
+  checked: readonly MediaDevice[];
+  callbacks: ((granted: boolean) => void)[];
+}
+
+/** An element's calls, by guest webContents id, until main's next turn. */
+const elementCalls = new Map<number, ElementCalls>();
 
 /**
- * A `<usermedia>` element's request, which Electron hands the handler as one call per device it
- * asks for, with no media types and nothing else to tell them apart, all in one task: Electron's
+ * A click on a page's `<usermedia>`, `<camera>` or `<microphone>` element, which Electron hands
+ * the handler as one call per device it asks for, with no media types, in a loop in one task:
  * `ElectronPermissionManager::RequestPermissionsFromCurrentDocument` passes no details on to
- * `RequestPermissionsWithDetails`, which runs the handler in a loop over the request's permissions
- * (`shell/browser/electron_permission_manager.cc`). The element asks for the camera and the
- * microphone together (Blink's `html_user_media_element.cc` allows no other pair), so its two
- * calls get one prompt for both. A lone call doesn't say which device it is for, and is refused.
- * Guests don't have the single-device `<camera>` and `<microphone>` elements (`webview-attach.ts`).
+ * `RequestPermissionsWithDetails` (`shell/browser/electron_permission_manager.cc`). Right before,
+ * in the same task, Chromium checks each of those devices
+ * (`PermissionServiceImpl::RequestPageEmbeddedPermission` in
+ * `content/browser/permissions/permission_service_impl.cc`), and Electron gives those checks their
+ * media type. So the element asks for the last checked devices, one per call. Calls with fewer
+ * checks before them don't say which devices they are for, and are refused.
  */
 function requestFromElement(
   guest: WebContents,
@@ -326,27 +355,30 @@ function requestFromElement(
 ): void {
   const calls = elementCalls.get(guest.id);
   if (calls) {
-    calls.push(callback);
+    calls.callbacks.push(callback);
     return;
   }
-  elementCalls.set(guest.id, [callback]);
+  const checked = [...(checkedDevices.get(guest.id) ?? [])];
+  const callbacks = [callback];
+  elementCalls.set(guest.id, { checked, callbacks });
   setImmediate(() => {
-    const callbacks = elementCalls.get(guest.id) ?? [];
     elementCalls.delete(guest.id);
-    if (callbacks.length !== MEDIA_DEVICES.length) {
+    if (checked.length < callbacks.length) {
       console.warn(
         `[browser-media] Refused ${callbacks.length} camera or microphone request(s) that named no device`,
       );
       for (const refuse of callbacks) refuse(false);
       return;
     }
-    decide(guest, { ...details, mediaTypes: ["video", "audio"] }, callbacks);
+    const devices = checked.slice(-callbacks.length);
+    const mediaTypes = devices.map((device) => (device === "camera" ? "video" : "audio"));
+    decide(guest, { ...details, mediaTypes }, callbacks);
   });
 }
 
 /**
  * The `media` permission request: a page called `getUserMedia()` for the camera or microphone, or
- * the user clicked its `<usermedia>` element.
+ * the user clicked its `<usermedia>`, `<camera>` or `<microphone>` element.
  */
 export function requestMediaPermission(
   guest: WebContents,

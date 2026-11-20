@@ -197,7 +197,8 @@ describe("installBrowserPermissions", () => {
     const answer = mediaRequest.mock.calls[0]![2] as (granted: boolean) => void;
     answer(true);
     expect(callback).toHaveBeenCalledWith(true);
-    // A `<usermedia>` element's request names no media types, and goes there too.
+    // An element's request (`<usermedia>`, `<camera>`, `<microphone>`) names no media types, and
+    // goes there too.
     const element = { isMainFrame: true, requestingUrl: "https://meet.example/" };
     request(webContents, "media", callback, element);
     expect(mediaRequest).toHaveBeenLastCalledWith(webContents, element, expect.any(Function));

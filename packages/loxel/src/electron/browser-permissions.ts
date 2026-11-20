@@ -118,7 +118,7 @@ export function installBrowserPermissions(
       callback(granted);
     };
     // Every `media` request goes to the media module: getUserMedia()'s name their media types, a
-    // `<usermedia>` element's don't (browser-media.ts).
+    // `<usermedia>`, `<camera>` or `<microphone>` element's don't (browser-media.ts).
     if (permission === "media") {
       media.request(webContents, details, answer);
       return;

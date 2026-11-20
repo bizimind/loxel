@@ -404,15 +404,18 @@ describe("requests", () => {
   });
 });
 
-/** The browser session's request handler, wired to this module as `main.ts` wires it. */
-function sessionRequestHandler() {
+/** The browser session's check and request handlers, wired to this module as `main.ts` wires it. */
+function sessionHandlers() {
+  type CheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
   type RequestHandler = NonNullable<Parameters<Session["setPermissionRequestHandler"]>[0]>;
-  const installed: { handler?: RequestHandler } = {};
+  const installed: { check?: CheckHandler; request?: RequestHandler } = {};
   installBrowserPermissions(
     {
-      setPermissionCheckHandler: () => {},
+      setPermissionCheckHandler: (handler) => {
+        installed.check = handler ?? undefined;
+      },
       setPermissionRequestHandler: (handler) => {
-        installed.handler = handler ?? undefined;
+        installed.request = handler ?? undefined;
       },
     },
     {
@@ -420,8 +423,9 @@ function sessionRequestHandler() {
       openExternal: () => {},
     },
   );
-  if (!installed.handler) throw new Error("no request handler installed");
-  return installed.handler;
+  const { check, request } = installed;
+  if (!check || !request) throw new Error("no permission handlers installed");
+  return { check, request };
 }
 
 /** Until the task that's running ends, as Electron's own tasks do. */
@@ -430,17 +434,26 @@ const nextTask = () =>
     setImmediate(resolve);
   });
 
-describe("the <usermedia> element", () => {
+describe("the <usermedia>, <camera> and <microphone> elements", () => {
   /**
-   * A click on the page's `<usermedia>` element: Electron calls the session's handler once per
-   * device it asks for (`calls`), in one task, with no media types. Resolves with each answer.
+   * The browser session's handlers for one of the page's elements asking for `mediaTypes`, in one
+   * task: Chromium checks each device (Electron names its media type), then Electron calls the
+   * request handler once per device, with no media types. `requests: false` is the element's
+   * registration, which checks without asking. Resolves with each request's answer.
    */
-  async function clickElement(guest: WebContents, calls = 2) {
-    const request = sessionRequestHandler();
-    const details = { isMainFrame: true, requestingUrl: `${guest.mainFrame.origin}/` };
+  async function elementAsks(
+    guest: WebContents,
+    mediaTypes: ("video" | "audio")[],
+    { requests = true } = {},
+  ) {
+    const { check, request } = sessionHandlers();
+    const origin = `${guest.mainFrame.origin}/`;
+    for (const mediaType of mediaTypes) {
+      check(guest, "media", origin, { isMainFrame: true, requestingUrl: origin, mediaType });
+    }
+    const details = { isMainFrame: true, requestingUrl: origin };
     const answers = Promise.all(
-      Array.from(
-        { length: calls },
+      (requests ? mediaTypes : []).map(
         () =>
           new Promise<boolean>((resolve) => {
             request(guest, "media", resolve, details);
@@ -451,10 +464,10 @@ describe("the <usermedia> element", () => {
     return { answers };
   }
 
-  test("asks for the camera and microphone in one prompt, and Allow lets getUserMedia in", async () => {
+  test("<usermedia> asks for the camera and microphone in one prompt, and Allow lets getUserMedia in", async () => {
     const window = fakeHost();
     const { guest } = fakeGuest(window.host);
-    const { answers } = await clickElement(guest);
+    const { answers } = await elementAsks(guest, ["video", "audio"]);
     await nextRequest(window.requests, 1);
     const [request] = window.requests();
     expect(request!.devices).toEqual(["camera", "microphone"]);
@@ -466,10 +479,58 @@ describe("the <usermedia> element", () => {
     expect(window.requests()).toHaveLength(1);
   });
 
+  test("<camera> and <microphone> ask for their own device only", async () => {
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    const camera = await elementAsks(guest, ["video"]);
+    await nextRequest(window.requests, 1);
+    expect(window.requests()[0]!.devices).toEqual(["camera"]);
+    window.respond(window.requests()[0]!.id, "allow");
+    expect(await camera.answers).toEqual([true]);
+    expect(await getUserMedia(guest, ["video"])).toBe(true);
+    const microphone = await elementAsks(guest, ["audio"]);
+    await nextRequest(window.requests, 2);
+    expect(window.requests()[1]!.devices).toEqual(["microphone"]);
+    window.respond(window.requests()[1]!.id, "block");
+    expect(await microphone.answers).toEqual([false]);
+    expect(await getUserMedia(guest, ["audio"])).toBe(false);
+    expect(window.requests()).toHaveLength(2);
+  });
+
+  test("checks made earlier in the same turn don't add to the element's devices", async () => {
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    const { check } = sessionHandlers();
+    // The page's click listener asks `navigator.permissions.query()` about the microphone.
+    const origin = "https://meet.example/";
+    check(guest, "media", origin, { isMainFrame: true, requestingUrl: origin, mediaType: "audio" });
+    const { answers } = await elementAsks(guest, ["video"]);
+    await nextRequest(window.requests, 1);
+    expect(window.requests()[0]!.devices).toEqual(["camera"]);
+    window.respond(window.requests()[0]!.id, "allow");
+    expect(await answers).toEqual([true]);
+  });
+
+  test("a click while the page's getUserMedia() prompt is up asks again under a new id", async () => {
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host);
+    const microphone = getUserMedia(guest, ["audio"]);
+    await nextRequest(window.requests, 1);
+    const { answers } = await elementAsks(guest, ["video", "audio"]);
+    await nextRequest(window.requests, 2);
+    const [first, second] = window.requests();
+    expect(first!.devices).toEqual(["microphone"]);
+    expect(second!.devices).toEqual(["camera", "microphone"]);
+    expect(second!.id).not.toBe(first!.id);
+    window.respond(second!.id, "allow");
+    expect(await answers).toEqual([true, true]);
+    expect(await microphone).toBe(true);
+  });
+
   test("Allow this time also covers the getUserMedia call that follows", async () => {
     const window = fakeHost();
     const { guest } = fakeGuest(window.host);
-    const { answers } = await clickElement(guest);
+    const { answers } = await elementAsks(guest, ["video", "audio"]);
     await nextRequest(window.requests, 1);
     window.respond(window.requests()[0]!.id, "allow-once");
     expect(await answers).toEqual([true, true]);
@@ -480,7 +541,7 @@ describe("the <usermedia> element", () => {
   test("Block refuses the element and getUserMedia", async () => {
     const window = fakeHost();
     const { guest } = fakeGuest(window.host);
-    const { answers } = await clickElement(guest);
+    const { answers } = await elementAsks(guest, ["video", "audio"]);
     await nextRequest(window.requests, 1);
     window.respond(window.requests()[0]!.id, "block");
     expect(await answers).toEqual([false, false]);
@@ -489,17 +550,31 @@ describe("the <usermedia> element", () => {
     expect(window.requests()).toHaveLength(1);
   });
 
-  test("a lone request that names no device is refused without asking", async () => {
+  test("a request with no device checked in its task is refused without asking", async () => {
     const window = fakeHost();
     const { guest } = fakeGuest(window.host);
-    const { answers } = await clickElement(guest, 1);
-    expect(await answers).toEqual([false]);
+    const other = fakeGuest(window.host).guest;
+    const { check, request } = sessionHandlers();
+    const details = { isMainFrame: true, requestingUrl: "https://meet.example/" };
+    const asks = () =>
+      new Promise<boolean>((resolve) => {
+        request(guest, "media", resolve, details);
+      });
+    const warn = mock((..._args: unknown[]) => {});
+    const consoleWarn = console.warn;
+    console.warn = warn;
+    try {
+      // The element registered in an earlier task: its checks name no later request's devices.
+      await elementAsks(guest, ["video", "audio"], { requests: false });
+      expect(await asks()).toBe(false);
+      // Another guest's checks don't name this one's devices either.
+      check(other, "media", "https://meet.example/", { ...details, mediaType: "video" });
+      expect(await asks()).toBe(false);
+    } finally {
+      console.warn = consoleWarn;
+    }
+    expect(warn).toHaveBeenCalledTimes(2);
     expect(window.requests()).toHaveLength(0);
-    // The next click is counted on its own.
-    const again = await clickElement(guest);
-    await nextRequest(window.requests, 1);
-    window.respond(window.requests()[0]!.id, "dismiss");
-    expect(await again.answers).toEqual([false, false]);
   });
 });
 
