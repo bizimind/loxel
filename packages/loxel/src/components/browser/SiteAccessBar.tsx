@@ -60,6 +60,7 @@ export function SiteAccessBar({
   const once = access.kind === "file-system";
   return (
     <SitePermissionBar
+      requestKey={JSON.stringify(request)}
       icon={iconOf(access)}
       onAllow={() => onAnswer(once ? "allow-once" : "allow")}
       onAllowOnce={once ? undefined : () => onAnswer("allow-once")}
