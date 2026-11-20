@@ -336,7 +336,7 @@ const layoutWindows = new LayoutWindows();
 
 /**
  * Whether a quit is closing the windows: Squirrel's update install, or a quit `before-quit` let
- * through. Their layouts are promoted together at `will-quit`.
+ * through. Their layouts are promoted together once the last of them has closed.
  */
 let quitClosingWindows = false;
 
@@ -370,7 +370,7 @@ async function createWindow(): Promise<BrowserWindow> {
   // A window opening means no quit is closing the windows (one was cancelled): promote the ones
   // it closed now rather than with a quit that will not come.
   quitClosingWindows = false;
-  promoteLayouts(layoutWindows.takeQuitPromotes());
+  promoteLayouts(layoutWindows.takeHeld());
   // Drain any in-flight promotes so the new window's first read sees fresh canonical state.
   if (pendingPromotes.size > 0) {
     await Promise.allSettled(pendingPromotes);
@@ -1226,13 +1226,13 @@ app.on("before-quit", (event) => {
   askThenQuit();
 });
 
-// The server lives as long as the app. Windows are closed by now: the ones the quit closed are
-// promoted here in one request, the one used last at the end (`LayoutWindows`). Quitting waits for
-// the promotes before stopping the server, which then finishes the API requests it has received
+// The server lives as long as the app. Windows are closed by now, and the ones the quit closed were
+// promoted in one request as the last of them closed, the one used last at the end
+// (`LayoutWindows`); any still held go now. Quitting waits for the promotes before stopping the server, which then finishes the API requests it has received
 // before exiting. Not while Squirrel quits to install an update: a promote that did not land is
 // recovered when the next server starts.
 app.on("will-quit", (event) => {
-  promoteLayouts(layoutWindows.takeQuitPromotes());
+  promoteLayouts(layoutWindows.takeHeld());
   const installing = isInstallingUpdate();
   if (promotesSettledForQuit || pendingPromotes.size === 0 || installing) {
     const plan = planAtWillQuit(

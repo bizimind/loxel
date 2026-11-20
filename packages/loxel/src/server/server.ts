@@ -184,17 +184,16 @@ function holdPortWhileStopping(): boolean {
   }
 }
 
-/** The app's session secret, from its channel: requests over TCP must carry it. */
-const appSecret = Promise.withResolvers<string>();
-/** The app's open windows, from the same message: null without the app, which no one can say. */
-const appWindowIds = Promise.withResolvers<string[] | null>();
+/**
+ * The app's session secret, from its channel: requests over TCP must carry it. With it, the app's
+ * open windows, whose layout session rows recovery keeps: null without the app, which no one can
+ * say.
+ */
+const appSession = Promise.withResolvers<{ secret: string; windowIds: string[] | null }>();
 
 if (config.parentPid !== null) {
   listenToParent(parentChannelInput(), {
-    session: (secret, windowIds) => {
-      appSecret.resolve(secret);
-      appWindowIds.resolve(windowIds);
-    },
+    session: (secret, windowIds) => appSession.resolve({ secret, windowIds }),
     shutdown: (terminals) => {
       log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
       leaveWithApp(terminals);
@@ -216,8 +215,7 @@ if (config.parentPid !== null) {
   }, PARENT_CHECK_MS).unref();
 } else {
   // Started without the app: its own secret, which its token file gives the tools that drive it.
-  appSecret.resolve(newSessionSecret());
-  appWindowIds.resolve(null);
+  appSession.resolve({ secret: newSessionSecret(), windowIds: null });
 }
 
 // --- Multi-project state (no "active" or "focused" concept) ---
@@ -1612,7 +1610,7 @@ await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 // The app sends its secret as soon as it has started this server, so it is here long before
 // startup is done. Nothing is served over TCP without it. An app that is gone by now closed the
 // channel, which stops this server instead.
-const sessionSecret = await appSecret.promise;
+const { secret: sessionSecret, windowIds: appWindowIds } = await appSession.promise;
 
 // Stopped during startup: the server exits once it has left the hosts, and never serves. Nothing
 // from here to `serving = true` waits, so a stop cannot arrive in between.
@@ -1840,8 +1838,8 @@ logger.setBroadcast((entries) => {
 logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count", delta }));
 
 // Recover layout-session rows orphaned by previous renderer/server crashes, and drop those of
-// windows the app no longer has. The session message arrived before the secret was awaited above.
-recoverOrphanLayoutSessions(await appWindowIds.promise);
+// windows the app no longer has.
+recoverOrphanLayoutSessions(appWindowIds);
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
 // the last window closes gives them time to. Ones the open inbox holds wait for their requests.

@@ -4,9 +4,8 @@
  * The first message is always `session`, with the app's session secret (app-session.ts), which the
  * server waits for before it serves the app over TCP, and the IDs of the app's open windows, whose
  * layout session rows the server keeps (none at launch; the surviving ones on a restart after a
- * crash); a `shutdown` may follow. The pipe closing
- * without a `shutdown` means the app is gone. Electron main writes it,
- * `src/server/parent-channel.ts` reads it.
+ * crash); a `shutdown` may follow. The pipe closing without a `shutdown` means the app is gone.
+ * Electron main writes it, `src/server/parent-channel.ts` reads it.
  *
  * Not stdin, which carries only the data encryption key and is closed after it: children the
  * server starts with `Bun.$`, or with Bun.spawn's `stdin: "inherit"`, get the server's stdin, so
