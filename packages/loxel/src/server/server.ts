@@ -186,10 +186,15 @@ function holdPortWhileStopping(): boolean {
 
 /** The app's session secret, from its channel: requests over TCP must carry it. */
 const appSecret = Promise.withResolvers<string>();
+/** The app's open windows, from the same message: null without the app, which no one can say. */
+const appWindowIds = Promise.withResolvers<string[] | null>();
 
 if (config.parentPid !== null) {
   listenToParent(parentChannelInput(), {
-    session: (secret) => appSecret.resolve(secret),
+    session: (secret, windowIds) => {
+      appSecret.resolve(secret);
+      appWindowIds.resolve(windowIds);
+    },
     shutdown: (terminals) => {
       log.info(`The desktop app asked this server to shut down (terminals: ${terminals})`);
       leaveWithApp(terminals);
@@ -212,6 +217,7 @@ if (config.parentPid !== null) {
 } else {
   // Started without the app: its own secret, which its token file gives the tools that drive it.
   appSecret.resolve(newSessionSecret());
+  appWindowIds.resolve(null);
 }
 
 // --- Multi-project state (no "active" or "focused" concept) ---
@@ -1833,9 +1839,9 @@ logger.setBroadcast((entries) => {
 });
 logger.setErrorCountBroadcast((delta) => broadcastAll({ type: "log_error_count", delta }));
 
-// Recover layout-session rows orphaned by previous renderer/server crashes.
-// Server start implies no live renderers — any session rows are leftovers.
-recoverOrphanLayoutSessions();
+// Recover layout-session rows orphaned by previous renderer/server crashes, and drop those of
+// windows the app no longer has. The session message arrived before the secret was awaited above.
+recoverOrphanLayoutSessions(await appWindowIds.promise);
 
 // Terminals from before a restart are orphans until their windows reattach: the same rule as when
 // the last window closes gives them time to. Ones the open inbox holds wait for their requests.

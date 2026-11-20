@@ -6,6 +6,7 @@ import {
   LAYOUT_SESSION_PREFIX,
   layoutCanonicalKeyFromSuffix,
   layoutSessionSuffix,
+  layoutSessionWindowId,
 } from "@/lib/layout-key-schema";
 
 import { config } from "./config";
@@ -76,18 +77,15 @@ export function listStoreKeys(): string[] {
 }
 
 /**
- * Promote all `layout:session:<windowId>:*` rows to `layout:canonical:*`, atomically.
- * Called when a window closes (orderly) — its session-scoped layout becomes the
- * canonical "last closed window" layout that the next solo window will restore.
+ * Promote the `layout:session:<windowId>:*` rows of each window in `windowIds` to
+ * `layout:canonical:*` and delete them, atomically. Called when windows close (orderly): their
+ * session-scoped layouts become the canonical "last closed window" layout that the next solo window
+ * will restore. The windows apply in order, so where several have a row for one worktree the last
+ * one wins: a quit closing every window passes them least recently focused first.
  */
-export function promoteLayoutSession(windowId: string): void {
-  const sessionPrefix = `${LAYOUT_SESSION_PREFIX}${windowId}:`;
+export function promoteLayoutSessions(windowIds: readonly string[]): void {
   const db = getDb();
-  const rows = db
-    .prepare("SELECT key, value FROM stores WHERE key LIKE ? || '%'")
-    .all(sessionPrefix) as { key: string; value: string }[];
-  if (rows.length === 0) return;
-
+  const select = db.prepare("SELECT key, value FROM stores WHERE key LIKE ? || '%'");
   const promote = db.transaction(() => {
     const now = new Date().toISOString();
     const upsert = db.prepare(
@@ -95,10 +93,14 @@ export function promoteLayoutSession(windowId: string): void {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     );
     const del = db.prepare("DELETE FROM stores WHERE key = ?");
-    for (const row of rows) {
-      const suffix = row.key.slice(sessionPrefix.length); // "<scope>:<worktreePath>"
-      upsert.run(layoutCanonicalKeyFromSuffix(suffix), row.value, now);
-      del.run(row.key);
+    for (const windowId of windowIds) {
+      const sessionPrefix = `${LAYOUT_SESSION_PREFIX}${windowId}:`;
+      const rows = select.all(sessionPrefix) as { key: string; value: string }[];
+      for (const row of rows) {
+        const suffix = row.key.slice(sessionPrefix.length); // "<scope>:<worktreePath>"
+        upsert.run(layoutCanonicalKeyFromSuffix(suffix), row.value, now);
+        del.run(row.key);
+      }
     }
   });
   promote();
@@ -116,7 +118,8 @@ function timeOf(updatedAt: string): number {
 /**
  * Recover orphan `layout:session:*` rows on server boot. For each
  * (scope, worktreePath) group, promote the most-recently-updated row to canonical,
- * but only when it is newer than the canonical row already there.
+ * but only when it is newer than the canonical row already there. Then delete the
+ * rows of every window not in `liveWindowIds`, in the same transaction.
  *
  * Every path stamps `updated_at` with the time of its write: a session write when
  * the renderer saves, promotion when the window closes, recovery at boot. So a
@@ -128,19 +131,20 @@ function timeOf(updatedAt: string): number {
  * to a later close or recovery, and promoting it would replace the layout that
  * close saved with a stale one.
  *
- * We deliberately do NOT delete session rows here, not even ones older than their
- * canonical. After a server crash, the health-check reload re-creates the same
- * renderers (with their original windowIds, baked into additionalArguments at
- * BrowserWindow creation). Wiping sessions would strand non-first windows: they'd
- * find no session row, their pre-baked `IS_FIRST_WINDOW=false` blocks the
- * canonical fallback, and they'd drop to the default layout, losing the user's
- * customization. A surviving window's row can be older than its canonical when
- * another window closed after its last write, so age alone does not mark a row
- * as dead. Leaving session rows in place lets every surviving renderer restore
- * its pre-crash state. Rows of windows that did not survive stay until their
- * worktree is removed.
+ * Only Electron main knows which windows are alive, so `liveWindowIds` comes from
+ * it: every window it has not seen close, a reloading one included. That is none
+ * at launch, and the surviving windows after a server crash, whose health-check
+ * reload re-creates the same renderers (with their original windowIds, baked into
+ * additionalArguments at BrowserWindow creation). Their rows must stay: a non-first
+ * window that found none would drop to the default layout, since its pre-baked
+ * `IS_FIRST_WINDOW=false` blocks the canonical fallback. Age cannot tell them
+ * apart, since a surviving window's row can be older than its canonical when
+ * another window closed after its last write. Any other window's rows are dead
+ * once recovery has run: their window is gone, and recovery has already promoted
+ * them where they held the latest layout. A server main did not start has no one
+ * to say which windows live (`null`) and deletes nothing.
  */
-export function recoverOrphanLayoutSessions(): void {
+export function recoverOrphanLayoutSessions(liveWindowIds: readonly string[] | null): void {
   const db = getDb();
   const rows = db
     .prepare("SELECT key, value, updated_at FROM stores WHERE key LIKE ? || '%'")
@@ -159,7 +163,8 @@ export function recoverOrphanLayoutSessions(): void {
     }
   }
 
-  const promote = db.transaction(() => {
+  const live = liveWindowIds === null ? null : new Set(liveWindowIds);
+  const recover = db.transaction(() => {
     const now = new Date().toISOString();
     const canonicalUpdatedAt = db.prepare("SELECT updated_at FROM stores WHERE key = ?");
     const upsert = db.prepare(
@@ -172,6 +177,12 @@ export function recoverOrphanLayoutSessions(): void {
       if (canonical && winner.updatedAt <= timeOf(canonical.updated_at)) continue;
       upsert.run(canonicalKey, winner.value, now);
     }
+    if (live === null) return;
+    const del = db.prepare("DELETE FROM stores WHERE key = ?");
+    for (const row of rows) {
+      const windowId = layoutSessionWindowId(row.key);
+      if (windowId !== null && !live.has(windowId)) del.run(row.key);
+    }
   });
-  promote();
+  recover();
 }

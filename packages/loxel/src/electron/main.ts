@@ -72,6 +72,7 @@ const SERVER_STABLE_UPTIME_MS = 60_000;
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
+import type { PromoteLayoutBody } from "../api/layout-promote-model";
 import { type OpenRequest, requestOpen } from "../open-request";
 import {
   PARENT_CHANNEL_FD,
@@ -118,6 +119,7 @@ import {
   WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
 import { installJavaScriptDialogs, trackWebviewDialogs } from "./javascript-dialogs";
+import { LayoutWindows } from "./layout-windows";
 import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
@@ -218,7 +220,14 @@ function startServer(): void {
   setServerStartedByHand(false);
   channel.on("error", () => {});
   // First on the channel: the server serves nothing over TCP until it has the secret.
-  channel.write(encodeParentMessage({ type: "session", secret: APP_SESSION_SECRET }));
+  // The open windows too: a server restarting after a crash keeps their layout session rows.
+  channel.write(
+    encodeParentMessage({
+      type: "session",
+      secret: APP_SESSION_SECRET,
+      windowIds: layoutWindows.openWindowIds(),
+    }),
+  );
   // A binary that cannot be run (missing, not executable) fails here, after the spawn returned.
   child.on("error", (err) => {
     console.error("[electron] Could not start the server:", err);
@@ -322,21 +331,35 @@ function isLocal(url: string): boolean {
  */
 const pendingPromotes = new Set<Promise<unknown>>();
 
-/** Tell the server this window's session-scoped layouts are now canonical. */
-function promoteLayoutForWindow(windowId: string): void {
+/** Which windows are open, and in what order closed windows' layouts are promoted. */
+const layoutWindows = new LayoutWindows();
+
+/**
+ * Whether a quit is closing the windows: Squirrel's update install, or a quit `before-quit` let
+ * through. Their layouts are promoted together at `will-quit`.
+ */
+let quitClosingWindows = false;
+
+/**
+ * Tell the server these windows' session-scoped layouts are now canonical, applied in order so
+ * the last one wins.
+ */
+function promoteLayouts(windowIds: string[]): void {
+  if (windowIds.length === 0) return;
+  const body: PromoteLayoutBody = { windowIds };
   const p = (async () => {
     try {
       const res = await serverFetch("/api/layout/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ windowId }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        console.warn(`[electron] Layout promote returned HTTP ${res.status} for ${windowId}`);
+        console.warn(`[electron] Layout promote returned HTTP ${res.status} for ${windowIds}`);
       }
     } catch (err) {
       // Server's orphan recovery on next boot will clean this up.
-      console.warn(`[electron] Layout promote failed for ${windowId}:`, err);
+      console.warn(`[electron] Layout promote failed for ${windowIds}:`, err);
     }
   })();
   pendingPromotes.add(p);
@@ -344,12 +367,18 @@ function promoteLayoutForWindow(windowId: string): void {
 }
 
 async function createWindow(): Promise<BrowserWindow> {
+  // A window opening means no quit is closing the windows (one was cancelled): promote the ones
+  // it closed now rather than with a quit that will not come.
+  quitClosingWindows = false;
+  promoteLayouts(layoutWindows.takeQuitPromotes());
   // Drain any in-flight promotes so the new window's first read sees fresh canonical state.
   if (pendingPromotes.size > 0) {
     await Promise.allSettled(pendingPromotes);
   }
 
   const windowId = crypto.randomUUID();
+  // Open from here on, before anything awaits: a server started from now on keeps its rows.
+  layoutWindows.opened(windowId);
   // Whether *no other* loxel windows are alive at the moment of creation.
   // The renderer uses this to decide whether to restore the canonical layout
   // (first window) or start with the default (additional window).
@@ -391,9 +420,10 @@ async function createWindow(): Promise<BrowserWindow> {
   }
 
   // When the BrowserWindow is gone, ask the server to promote this window's
-  // session-scoped layout to canonical so the next solo window restores it.
+  // session-scoped layout to canonical so the next solo window restores it: at once, or with the
+  // other windows a quit closes.
   win.on("closed", () => {
-    promoteLayoutForWindow(windowId);
+    promoteLayouts(layoutWindows.closed(windowId, quitClosingWindows || isInstallingUpdate()));
   });
 
   // Reset meta key tracking when the window loses focus (e.g. Cmd+Tab away).
@@ -403,6 +433,7 @@ async function createWindow(): Promise<BrowserWindow> {
     win.webContents.send(WINDOW_FOCUS_CHANGE, false);
   });
   win.on("focus", () => {
+    layoutWindows.focused(windowId);
     win.webContents.send(WINDOW_FOCUS_CHANGE, true);
   });
   win.on("enter-full-screen", () => {
@@ -1188,17 +1219,20 @@ app.on("before-quit", (event) => {
     // Decided another way (Quit and Keep Terminals while asked): the question is moot.
     quitQuestion?.abort();
     quitQuestion = null;
+    quitClosingWindows = true;
     return;
   }
   event.preventDefault();
   askThenQuit();
 });
 
-// The server lives as long as the app. Windows are closed by now, and each sent its layout promote
-// on close; quitting waits for those before stopping the server, which then finishes the API
-// requests it has received before exiting. Not while Squirrel quits to install an update: a promote
-// that did not land is recovered when the next server starts.
+// The server lives as long as the app. Windows are closed by now: the ones the quit closed are
+// promoted here in one request, the one used last at the end (`LayoutWindows`). Quitting waits for
+// the promotes before stopping the server, which then finishes the API requests it has received
+// before exiting. Not while Squirrel quits to install an update: a promote that did not land is
+// recovered when the next server starts.
 app.on("will-quit", (event) => {
+  promoteLayouts(layoutWindows.takeQuitPromotes());
   const installing = isInstallingUpdate();
   if (promotesSettledForQuit || pendingPromotes.size === 0 || installing) {
     const plan = planAtWillQuit(

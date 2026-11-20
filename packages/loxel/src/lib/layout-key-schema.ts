@@ -22,6 +22,22 @@ export function layoutCanonicalKey(scope: string, worktreeKey: string): string {
 }
 
 /**
+ * Whether `id` has the shape of a window ID: a UUID, as Electron main assigns. The shape also keeps
+ * `LIKE` wildcards (`%`, `_`) out of a session-key prefix built from it.
+ */
+export function isWindowId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+/** The window ID of a session key, or null if the input doesn't match the session-key shape. */
+export function layoutSessionWindowId(sessionKey: string): string | null {
+  if (!sessionKey.startsWith(LAYOUT_SESSION_PREFIX)) return null;
+  const rest = sessionKey.slice(LAYOUT_SESSION_PREFIX.length);
+  const colonIdx = rest.indexOf(":");
+  return colonIdx < 0 ? null : rest.slice(0, colonIdx);
+}
+
+/**
  * Extract the `<scope>:<worktreePath>` suffix from a session key, or null if
  * the input doesn't match the session-key shape. Used by the server when
  * promoting session rows to canonical without re-parsing the windowId.

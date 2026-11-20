@@ -2,7 +2,9 @@
  * The private channel from the desktop app to the server it started: a pipe on the server's file
  * descriptor `PARENT_CHANNEL_FD`, one `ParentMessage` per line, open for the server's whole life.
  * The first message is always `session`, with the app's session secret (app-session.ts), which the
- * server waits for before it serves the app over TCP; a `shutdown` may follow. The pipe closing
+ * server waits for before it serves the app over TCP, and the IDs of the app's open windows, whose
+ * layout session rows the server keeps (none at launch; the surviving ones on a restart after a
+ * crash); a `shutdown` may follow. The pipe closing
  * without a `shutdown` means the app is gone. Electron main writes it,
  * `src/server/parent-channel.ts` reads it.
  *
@@ -13,6 +15,7 @@
 import { z } from "zod";
 
 import { SessionSecretSchema } from "./app-session";
+import { isWindowId } from "./lib/layout-key-schema";
 
 /** The server's descriptor for the channel: the first one after stdin, stdout and stderr. */
 export const PARENT_CHANNEL_FD = 3;
@@ -28,7 +31,11 @@ export const ShutdownTerminalsSchema = z.enum(["end", "keep"]);
 export type ShutdownTerminals = z.infer<typeof ShutdownTerminalsSchema>;
 
 export const ParentMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session"), secret: SessionSecretSchema }),
+  z.object({
+    type: z.literal("session"),
+    secret: SessionSecretSchema,
+    windowIds: z.array(z.string().refine(isWindowId)),
+  }),
   z.object({ type: z.literal("shutdown"), terminals: ShutdownTerminalsSchema }),
 ]);
 export type ParentMessage = z.infer<typeof ParentMessageSchema>;

@@ -11,7 +11,7 @@ import { listenToParent } from "./parent-channel";
 /** A channel over a pipe the test writes to, and what its listener got. */
 function openChannel() {
   const input = new PassThrough();
-  const events: (ShutdownTerminals | "closed" | { session: string })[] = [];
+  const events: (ShutdownTerminals | "closed" | { session: string; windowIds: string[] })[] = [];
   let onEvent = () => {};
   /** Resolves once the listener has had `count` events. */
   const eventsReached = (count: number) =>
@@ -22,8 +22,8 @@ function openChannel() {
       onEvent();
     });
   listenToParent(input, {
-    session: (secret) => {
-      events.push({ session: secret });
+    session: (secret, windowIds) => {
+      events.push({ session: secret, windowIds });
       onEvent();
     },
     shutdown: (terminals) => {
@@ -47,18 +47,27 @@ describe("listenToParent", () => {
     expect(events).toEqual(["keep", "closed"]);
   });
 
-  test("delivers the app's session secret, then its shutdown", async () => {
+  test("delivers the app's session secret and windows, then its shutdown", async () => {
     const { input, events, eventsReached } = openChannel();
     const secret = newSessionSecret();
-    input.write(encodeParentMessage({ type: "session", secret }));
+    const windowIds = [crypto.randomUUID()];
+    input.write(encodeParentMessage({ type: "session", secret, windowIds }));
     input.end(encodeParentMessage({ type: "shutdown", terminals: "end" }));
     await eventsReached(3);
-    expect(events).toEqual([{ session: secret }, "end", "closed"]);
+    expect(events).toEqual([{ session: secret, windowIds }, "end", "closed"]);
   });
 
   test("ignores a session message whose secret is not one", async () => {
     const { input, events, eventsReached } = openChannel();
-    input.end(`${JSON.stringify({ type: "session", secret: "short" })}\n`);
+    input.end(`${JSON.stringify({ type: "session", secret: "short", windowIds: [] })}\n`);
+    await eventsReached(1);
+    expect(events).toEqual(["closed"]);
+  });
+
+  test("ignores a session message with a window ID that is not one", async () => {
+    const { input, events, eventsReached } = openChannel();
+    const secret = newSessionSecret();
+    input.end(`${JSON.stringify({ type: "session", secret, windowIds: ["%"] })}\n`);
     await eventsReached(1);
     expect(events).toEqual(["closed"]);
   });
