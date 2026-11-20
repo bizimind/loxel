@@ -105,46 +105,72 @@ export function promoteLayoutSession(windowId: string): void {
 }
 
 /**
+ * An `updated_at` as milliseconds, so rows compare as times rather than strings. One that does not
+ * parse (never written today) counts as oldest instead of comparing false both ways.
+ */
+function timeOf(updatedAt: string): number {
+  const time = Date.parse(updatedAt);
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+}
+
+/**
  * Recover orphan `layout:session:*` rows on server boot. For each
- * (scope, worktreePath) group, promote the most-recently-updated row to canonical.
+ * (scope, worktreePath) group, promote the most-recently-updated row to canonical,
+ * but only when it is newer than the canonical row already there.
  *
- * We deliberately do NOT delete session rows here. After a server crash, the
- * health-check reload re-creates the same renderers (with their original
- * windowIds, baked into additionalArguments at BrowserWindow creation). Wiping
- * sessions would strand non-first windows: they'd find no session row, their
- * pre-baked `IS_FIRST_WINDOW=false` blocks the canonical fallback, and they'd
- * drop to the default layout, losing the user's customization. Leaving session
- * rows in place lets every surviving renderer restore its pre-crash state.
+ * Every path stamps `updated_at` with the time of its write: a session write when
+ * the renderer saves, promotion when the window closes, recovery at boot. So a
+ * canonical row is never older than the session row it came from, and a session
+ * row newer than its canonical was written after the last promote or recovery of
+ * that key: by a window that never closed cleanly (a crash, or an update install
+ * that did not wait for its promote), or by a closing window's last write landing
+ * after its own promote. Either way it holds the latest layout. An older row lost
+ * to a later close or recovery, and promoting it would replace the layout that
+ * close saved with a stale one.
  *
- * Stale rows (from windows whose renderer didn't survive) accumulate slowly but
- * are bounded by (windows × worktrees); promote-on-close cleans them naturally
- * when the user next closes those windows.
+ * We deliberately do NOT delete session rows here, not even ones older than their
+ * canonical. After a server crash, the health-check reload re-creates the same
+ * renderers (with their original windowIds, baked into additionalArguments at
+ * BrowserWindow creation). Wiping sessions would strand non-first windows: they'd
+ * find no session row, their pre-baked `IS_FIRST_WINDOW=false` blocks the
+ * canonical fallback, and they'd drop to the default layout, losing the user's
+ * customization. A surviving window's row can be older than its canonical when
+ * another window closed after its last write, so age alone does not mark a row
+ * as dead. Leaving session rows in place lets every surviving renderer restore
+ * its pre-crash state. Rows of windows that did not survive stay until their
+ * worktree is removed.
  */
 export function recoverOrphanLayoutSessions(): void {
   const db = getDb();
   const rows = db
-    .prepare(
-      "SELECT key, value, updated_at FROM stores WHERE key LIKE ? || '%' ORDER BY updated_at DESC",
-    )
+    .prepare("SELECT key, value, updated_at FROM stores WHERE key LIKE ? || '%'")
     .all(LAYOUT_SESSION_PREFIX) as { key: string; value: string; updated_at: string }[];
   if (rows.length === 0) return;
 
-  // Group by suffix `<scope>:<worktreePath>`, keep first (most recent) per group.
-  const winners = new Map<string, string>();
+  // Group by suffix `<scope>:<worktreePath>`, keep the most recent per group.
+  const winners = new Map<string, { value: string; updatedAt: number }>();
   for (const row of rows) {
     const suffix = layoutSessionSuffix(row.key);
     if (suffix === null) continue;
-    if (!winners.has(suffix)) winners.set(suffix, row.value);
+    const updatedAt = timeOf(row.updated_at);
+    const current = winners.get(suffix);
+    if (!current || updatedAt > current.updatedAt) {
+      winners.set(suffix, { value: row.value, updatedAt });
+    }
   }
 
   const promote = db.transaction(() => {
     const now = new Date().toISOString();
+    const canonicalUpdatedAt = db.prepare("SELECT updated_at FROM stores WHERE key = ?");
     const upsert = db.prepare(
       `INSERT INTO stores (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     );
-    for (const [suffix, value] of winners) {
-      upsert.run(layoutCanonicalKeyFromSuffix(suffix), value, now);
+    for (const [suffix, winner] of winners) {
+      const canonicalKey = layoutCanonicalKeyFromSuffix(suffix);
+      const canonical = canonicalUpdatedAt.get(canonicalKey) as { updated_at: string } | null;
+      if (canonical && winner.updatedAt <= timeOf(canonical.updated_at)) continue;
+      upsert.run(canonicalKey, winner.value, now);
     }
   });
   promote();
