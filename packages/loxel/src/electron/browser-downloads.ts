@@ -279,6 +279,16 @@ const fileExists = (path: string) =>
   Object.assign(new Error(`File exists: ${path}`), { code: "EEXIST" });
 
 /**
+ * A hidden name beside `to` for a copy on its way there, cut so it fits the file system too: the
+ * readable part makes room for the random tag.
+ */
+export function stagingPath(to: string): string {
+  const tag = `${randomUUID()}.download`;
+  const stem = truncateUtf8(basename(to), NAME_MAX_BYTES - utf8Bytes(`..${tag}`));
+  return join(dirname(to), `.${stem}.${tag}`);
+}
+
+/**
  * Put a copy of `from` at `to`, for another volume or a file system without hard links. It is
  * copied to a hidden name beside `to` (which copies no extended attributes) and given `from`'s mark
  * there first, so it is never at `to` unmarked.
@@ -289,7 +299,7 @@ async function placeMarkedCopy(
   replace: boolean,
   quarantine: Quarantine,
 ): Promise<void> {
-  const copy = join(dirname(to), `.${basename(to)}.${randomUUID()}.download`);
+  const copy = stagingPath(to);
   await copyFile(from, copy, constants.COPYFILE_EXCL);
   try {
     await quarantine(copy, from);

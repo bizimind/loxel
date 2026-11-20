@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, rmSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { $ } from "bun";
 import type { DownloadItem, Session, WebContents } from "electron";
@@ -23,6 +23,7 @@ const {
   quarantineFile,
   quarantineValue,
   saveCompletedDownload,
+  stagingPath,
   trackQuarantine,
 } = await import("./browser-downloads");
 
@@ -414,6 +415,20 @@ describe("moveDownload", () => {
       expect((await lstat(link)).isFile()).toBe(true);
       expect(await readFile(target, "utf8")).toBe("a link's target");
     }));
+});
+
+describe("stagingPath", () => {
+  test("is a hidden name beside the target that fits the file system", () => {
+    const bytes = (name: string) => Buffer.byteLength(name, "utf8");
+    expect(stagingPath("/Volumes/Disk/tool.sh")).toMatch(
+      /^\/Volumes\/Disk\/\.tool\.sh\.[0-9a-f-]{36}\.download$/,
+    );
+    for (const name of [`${"a".repeat(252)}.sh`, `${"文".repeat(83)}.sh`]) {
+      const staged = basename(stagingPath(`/Volumes/Disk/${name}`));
+      expect(staged.startsWith(".")).toBe(true);
+      expect(bytes(staged)).toBeLessThanOrEqual(255);
+    }
+  });
 });
 
 describe("moveDownload numbering", () => {
