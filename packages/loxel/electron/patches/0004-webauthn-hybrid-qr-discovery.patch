@@ -4,6 +4,17 @@ Date: Tue, 10 Nov 2026 21:44:13 +0200
 Subject: [PATCH] fix: only offer a hybrid QR code when the request runs hybrid
  discovery
 
+'webauthn-hybrid-request' was emitted from ConfigureDiscoveries(),
+before the request's transports are known. A request whose allow list
+excludes hybrid (for example every credential lists only "internal"),
+or one for which Chromium couldn't create the hybrid discovery, still
+showed a QR code that a phone could scan but never complete.
+
+Generate the QR key there as before, but emit the event from
+OnTransportAvailabilityEnumerated(), once, and only when the available
+transports include hybrid. A restart from StartOver() keeps the code
+already shown.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  ...n_authenticator_request_client_delegate.cc | 49 ++++++++++++++-----

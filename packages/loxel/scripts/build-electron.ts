@@ -13,8 +13,8 @@
  *
  * `--testing` builds Electron's `testing` configuration for this Mac's architecture only, into its
  * own output directory, incrementally and without uploading, and prints the
- * ELECTRON_OVERRIDE_DIST_PATH to run Loxel on it. A checkout already prepared for this build ID
- * isn't checked out, patched or synced again (--force redoes it).
+ * ELECTRON_OVERRIDE_DIST_PATH to run Loxel on it. A checkout left as it was prepared for this
+ * build ID isn't checked out, patched or synced again (--force redoes it).
  *
  * Needs Electron's build tools (`npm i -g @electron/build-tools`), Xcode with its Metal toolchain,
  * about 150 GB of disk, and the R2 credentials fetch-electron.ts uses. See
@@ -113,10 +113,19 @@ async function ensureConfig(arch: ElectronArch): Promise<void> {
   }
 }
 
-/** What the checkout was last prepared for: the release tag it synced and the build ID applied. */
+/**
+ * What a testing checkout was last prepared for: the tag it synced, and once patched, the build ID
+ * and the commit that left it at. Release builds always prepare from scratch.
+ */
 const preparedMarker = path.join(root, "loxel-prepared.json");
 
-function readPrepared(): { tag?: unknown; id?: unknown } {
+interface Prepared {
+  tag?: unknown;
+  id?: unknown;
+  head?: unknown;
+}
+
+function readPrepared(): Prepared {
   try {
     const parsed: unknown = JSON.parse(readFileSync(preparedMarker, "utf8"));
     return typeof parsed === "object" && parsed !== null ? parsed : {};
@@ -125,44 +134,75 @@ function readPrepared(): { tag?: unknown; id?: unknown } {
   }
 }
 
+const writePrepared = (prepared: Prepared) =>
+  Bun.write(preparedMarker, `${JSON.stringify(prepared)}\n`);
+
+/** Paths a patch can change that `e sync` reads: Chromium's patches, DEPS, the npm deps. */
+const SYNC_INPUTS = /^diff --git a\/(?:patches\/|DEPS |package\.json |yarn\.lock )/m;
+
+/** The checkout's commit, and whether it has changes or untracked files (or git failed). */
+async function checkoutState(dir: string): Promise<{ head: string; dirty: boolean }> {
+  const status = await $`git status --porcelain --untracked-files=normal`
+    .cwd(dir)
+    .nothrow()
+    .quiet();
+  const head = await $`git rev-parse HEAD`.cwd(dir).nothrow().quiet();
+  return {
+    head: head.text().trim(),
+    dirty: status.exitCode !== 0 || head.exitCode !== 0 || status.text().trim() !== "",
+  };
+}
+
 /**
- * Check out the pinned release with the patches on top, and sync its dependencies. A checkout
- * already prepared for this build ID is left as it is, and one already synced for this tag isn't
- * synced again, unless --force; patching rewrites only the patched files, so an incremental build
- * recompiles little.
+ * Check out the pinned release with the patches on top, and sync its dependencies. Uncommitted
+ * changes in the Electron checkout stop it, unless --force discards them.
+ *
+ * For --testing, a checkout left exactly as it was prepared for this build ID (same commit, no
+ * changes) is used as it is, and one already synced for this tag isn't synced again unless a patch
+ * changes what the sync reads, so an incremental build recompiles only what the patches touch.
  */
 async function prepareSource(arch: ElectronArch): Promise<void> {
   const electronSrc = path.join(root, "src", "electron");
   await $`e use ${configName(arch)}`;
-  const prepared = values.force ? {} : readPrepared();
-  // A checkout someone changed since (to try a fix in it) is prepared again.
-  const unchanged =
-    existsSync(electronSrc) &&
-    (await $`git status --porcelain`.cwd(electronSrc).nothrow().text()).trim() === "";
-  if (unchanged && prepared.id === id) {
-    log(`checkout already prepared for ${id}`);
-    return;
-  }
-  rmSync(preparedMarker, { force: true });
-  if (!existsSync(electronSrc)) {
+  const prepared = testing && !values.force ? readPrepared() : {};
+  if (existsSync(electronSrc)) {
+    const state = await checkoutState(electronSrc);
+    if (!state.dirty && prepared.id === id && prepared.head === state.head) {
+      log(`checkout already prepared for ${id}`);
+      return;
+    }
+    if (state.dirty && !values.force) {
+      throw new Error(
+        `${electronSrc} has uncommitted changes or untracked files, which preparing it would ` +
+          "discard. Commit or remove them, or pass --force.",
+      );
+    }
+  } else {
     log("first sync: cloning Electron and Chromium (about 30 GB)");
     await $`e sync`;
   }
+  // Until the patches apply, the checkout is only known to be synced for its tag.
+  await writePrepared(prepared.tag === tag ? { tag } : {});
   await $`git am --abort`.cwd(electronSrc).nothrow().quiet();
   await $`git fetch --no-tags origin refs/tags/${tag}:refs/tags/${tag}`.cwd(electronSrc);
   await $`git checkout --detach --force ${tag}`.cwd(electronSrc);
   log(`applying patches from ${PATCHES_DIR}`);
-  const patchFiles = readPatches().map((patch) => path.join(PATCHES_DIR, patch.name));
+  const patches = readPatches();
+  const patchFiles = patches.map((patch) => path.join(PATCHES_DIR, patch.name));
   await $`git -c user.name=loxel-build -c user.email=loxel-build@invalid am --3way ${patchFiles}`.cwd(
     electronSrc,
   );
-  if (prepared.tag === tag) {
+  const changesSync = patches.some((patch) =>
+    SYNC_INPUTS.test(new TextDecoder().decode(patch.contents)),
+  );
+  if (prepared.tag === tag && !changesSync) {
     log(`dependencies already synced for ${tag}`);
   } else {
     log(`syncing dependencies for ${tag}`);
     await $`e sync`;
   }
-  await Bun.write(preparedMarker, `${JSON.stringify({ tag, id })}\n`);
+  const head = (await $`git rev-parse HEAD`.cwd(electronSrc).text()).trim();
+  await writePrepared({ tag, id, head });
 }
 
 /** Check that the app bundle's `Contents` at `app` is the pinned version, built for `arch`. */

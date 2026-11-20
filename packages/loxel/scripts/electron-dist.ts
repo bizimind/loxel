@@ -69,6 +69,11 @@ export function readPatches(dir = PATCHES_DIR): Patch[] {
   if (misnamed.length > 0) {
     throw new Error(`Name each patch <nnnn>-<name>.patch, not ${misnamed.join(", ")}`);
   }
+  const numbers = names.map((name) => name.slice(0, 4));
+  const repeated = names.filter((_, i) => numbers.indexOf(numbers[i]!) !== i);
+  if (repeated.length > 0) {
+    throw new Error(`Each patch needs its own number: ${repeated.join(", ")}`);
+  }
   return names.toSorted().map((name) => ({ name, contents: readFileSync(path.join(dir, name)) }));
 }
 

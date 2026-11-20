@@ -103,6 +103,12 @@ describe("readPatches", () => {
     );
   });
 
+  test("refuses two patches with the same number", () => {
+    withDir({ "0001-a.patch": "one", "0001-b.patch": "two" }, (dir) =>
+      expect(() => readPatches(dir)).toThrow(/0001-b\.patch/),
+    );
+  });
+
   test("refuses a patch without a four-digit number", () => {
     withDir({ "1-a.patch": "one" }, (dir) => expect(() => readPatches(dir)).toThrow(/1-a\.patch/));
   });

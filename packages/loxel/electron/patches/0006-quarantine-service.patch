@@ -4,19 +4,21 @@ Date: Sat, 21 Nov 2026 00:12:03 +0200
 Subject: [PATCH] fix: give Chromium a quarantine service for downloads and
  saved files
 
-Chromium marks a completed download, and a file the File System Access
-API writes, through the embedder's quarantine service connection
+Chromium marks a completed download, a page saved with
+webContents.savePage(), and a file the File System Access API writes or
+moves, through the embedder's quarantine service connection
 (DownloadManagerDelegate and ContentBrowserClient
-GetQuarantineConnectionCallback). Electron overrode neither, so outside
-Windows, where Chromium writes the Mark of the Web itself without one,
-such files got no quarantine attribute: on macOS no
-com.apple.quarantine, so Gatekeeper never checked them when opened.
+GetQuarantineConnectionCallback). Electron overrode neither. On Windows
+Chromium then writes the Mark of the Web itself, but on macOS it writes
+nothing, so such files got no com.apple.quarantine attribute and
+Gatekeeper never checked them when opened.
 
 Connect both to a quarantine service in the browser process, as Chrome
 does outside Windows (ChromeDownloadManagerDelegate::
 ConnectToQuarantineService). On macOS that also records where the file
 came from (kMDItemWhereFroms and the quarantine event's URLs). Windows
-keeps Chromium's direct Mark of the Web.
+keeps Chromium's direct Mark of the Web; on Linux the service does
+nothing.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
@@ -25,8 +27,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  shell/browser/electron_browser_client.h       |  2 ++
  .../electron_download_manager_delegate.cc     | 22 +++++++++++++++++++
  .../electron_download_manager_delegate.h      |  9 ++++++++
- spec/api-session.spec.ts                      | 15 +++++++++++++
- 6 files changed, 55 insertions(+)
+ spec/api-session.spec.ts                      | 17 ++++++++++++++
+ 6 files changed, 57 insertions(+)
 
 diff --git a/BUILD.gn b/BUILD.gn
 index fdc47087c5..58b91dbd54 100644
@@ -41,17 +43,17 @@ index fdc47087c5..58b91dbd54 100644
      "//components/upload_list",
      "//components/user_prefs",
 diff --git a/shell/browser/electron_browser_client.cc b/shell/browser/electron_browser_client.cc
-index 6592976876..53e1210175 100644
+index 6592976876..bec4a01e0d 100644
 --- a/shell/browser/electron_browser_client.cc
 +++ b/shell/browser/electron_browser_client.cc
-@@ -94,6 +94,7 @@
- #include "shell/browser/electron_autofill_driver_factory.h"
+@@ -95,6 +95,7 @@
  #include "shell/browser/electron_browser_context.h"
  #include "shell/browser/electron_browser_main_parts.h"
-+#include "shell/browser/electron_download_manager_delegate.h"
  #include "shell/browser/electron_child_process_host_flags.h"
++#include "shell/browser/electron_download_manager_delegate.h"
  #include "shell/browser/electron_navigation_throttle.h"
  #include "shell/browser/electron_plugin_info_host_impl.h"
+ #include "shell/browser/electron_speech_recognition_manager_delegate.h"
 @@ -2008,6 +2009,11 @@ std::string ElectronBrowserClient::GetApplicationLocale() {
               : *g_application_locale;
  }
@@ -147,10 +149,10 @@ index 74c590b235..4ea44ae900 100644
   private:
    // Get the save path set on the associated api::DownloadItem object
 diff --git a/spec/api-session.spec.ts b/spec/api-session.spec.ts
-index cb725c7e36..687d9ffe38 100644
+index cb725c7e36..8e62a98354 100644
 --- a/spec/api-session.spec.ts
 +++ b/spec/api-session.spec.ts
-@@ -1493,6 +1493,21 @@ describe('session module', { retry: 0 }, () => {
+@@ -1493,6 +1493,23 @@ describe('session module', { retry: 0 }, () => {
          assertDownload(state, item);
        });
  
@@ -162,8 +164,10 @@ index cb725c7e36..687d9ffe38 100644
 +        const [, state] = await once(item, 'done');
 +        expect(state).toBe('completed');
 +        try {
-+          const quarantine = ChildProcess.execFileSync('/usr/bin/xattr', ['-p', 'com.apple.quarantine', downloadFilePath]);
-+          expect(quarantine.toString().trim()).not.toBe('');
++          const attribute = (name: string) =>
++            ChildProcess.execFileSync('/usr/bin/xattr', ['-p', name, downloadFilePath]).toString().trim();
++          expect(attribute('com.apple.quarantine')).not.toBe('');
++          expect(attribute('com.apple.metadata:kMDItemWhereFroms')).not.toBe('');
 +        } finally {
 +          fs.unlinkSync(downloadFilePath);
 +        }
