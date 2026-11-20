@@ -43,6 +43,7 @@ describe("secureWebviewAttach", () => {
     });
     expect(webPreferences.preload).toEndWith("/webview-preload.cjs");
     expect(webPreferences).not.toHaveProperty("enableBlinkFeatures");
+    expect(webPreferences.disableBlinkFeatures).toBe("CameraAndMicrophoneElements");
   });
 
   test("attaches webviews that start blank or on a web page only", () => {

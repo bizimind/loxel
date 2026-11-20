@@ -117,7 +117,9 @@ export function installBrowserPermissions(
       if (granted) onGranted?.(webContents, permission, details.requestingUrl);
       callback(granted);
     };
-    if (permission === "media" && "mediaTypes" in details) {
+    // Every `media` request goes to the media module: getUserMedia()'s name their media types, a
+    // `<usermedia>` element's don't (browser-media.ts).
+    if (permission === "media") {
       media.request(webContents, details, answer);
       return;
     }
