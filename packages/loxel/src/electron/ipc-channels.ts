@@ -78,6 +78,11 @@ export const PASSKEY_QR_HIDE = "passkey:qr-hide";
 export const EXCLUSIVE_ACCESS_SHOW = "exclusive-access:show";
 /** Main → renderer: the page of a webview (by webContents ID) left fullscreen; hide its notice. */
 export const EXCLUSIVE_ACCESS_HIDE = "exclusive-access:hide";
+/**
+ * Webview preload → main: the sender frame's `pointerlockchange`, with whether it now holds the
+ * pointer lock. See `exclusive-access.ts`.
+ */
+export const POINTER_LOCK_CHANGE = "exclusive-access:pointer-lock-change";
 /** Renderer → main (invoke): whether Loxel is the default web browser (`DefaultBrowserStatus`). */
 export const DEFAULT_BROWSER_GET = "default-browser:get";
 /** Renderer → main (invoke): ask macOS to make Loxel the default web browser. */

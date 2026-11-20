@@ -106,7 +106,11 @@ import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installSiteAccess, trackWebviewSiteAccess } from "./browser-site-access";
 import { installDefaultBrowser } from "./default-browser";
-import { noteExclusiveAccessGrant, trackWebviewExclusiveAccess } from "./exclusive-access";
+import {
+  installPointerLockReports,
+  noteExclusiveAccessGrant,
+  trackWebviewExclusiveAccess,
+} from "./exclusive-access";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
@@ -914,6 +918,7 @@ installNativeTheme();
 installBrowserNotifications();
 installBrowserMedia();
 installSiteAccess();
+installPointerLockReports();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 onAppWindowMessage(GET_WINDOW_FULL_SCREEN, (event) => {
