@@ -32,7 +32,7 @@ export const IDLE_RESHOW_MS = 15 * 60 * 1000;
 
 /** The webContents of a browser panel page, as far as this module uses it. */
 export type ExclusiveAccessPage = Pick<WebContents, "id" | "getType" | "getURL" | "on"> & {
-  hostWebContents: Pick<WebContents, "send" | "isDestroyed"> | null;
+  hostWebContents: Pick<WebContents, "id" | "send" | "isDestroyed"> | null;
   mainFrame: { framesInSubtree: Array<ExclusiveAccessFrame> };
 };
 
@@ -54,6 +54,7 @@ interface PointerLock {
 }
 
 interface PageState {
+  page: ExclusiveAccessPage;
   /** The origin of the frame whose fullscreen request was just granted, until the page enters. */
   requester: string | null;
   /** The origin of the frame that is fullscreen, while the page is. */
@@ -72,7 +73,14 @@ const pages = new Map<number, PageState>();
 function stateOf(page: ExclusiveAccessPage): PageState {
   let state = pages.get(page.id);
   if (!state) {
-    state = { requester: null, fullscreen: null, pointerLock: null, lastInput: 0, now: Date.now };
+    state = {
+      page,
+      requester: null,
+      fullscreen: null,
+      pointerLock: null,
+      lastInput: 0,
+      now: Date.now,
+    };
     pages.set(page.id, state);
   }
   return state;
@@ -142,8 +150,8 @@ function frameKey({ processId, routingId }: Pick<WebFrameMain, "processId" | "ro
 
 /**
  * Show a notice in the page's panel each time it goes fullscreen, again on the first input after
- * the user was away for `IDLE_RESHOW_MS` while it is fullscreen or holds the pointer lock, and drop
- * it when the page leaves fullscreen.
+ * the user was away for `IDLE_RESHOW_MS` while it is fullscreen or holds the pointer lock (or when
+ * its window gains focus, `noteWindowFocused`), and drop it when the page leaves fullscreen.
  */
 export function trackWebviewExclusiveAccess(
   page: ExclusiveAccessPage,
@@ -179,6 +187,19 @@ export function trackWebviewExclusiveAccess(
   page.on("before-input-event", onInput);
   page.on("before-mouse-event", onInput);
   page.on("destroyed", () => pages.delete(page.id));
+}
+
+/**
+ * Show the notice again for each page in the window hosting `host` that is fullscreen or holds the
+ * pointer lock, as the window just gained focus: the user is back from another window or app.
+ */
+export function noteWindowFocused(host: Pick<WebContents, "id">): void {
+  for (const state of pages.values()) {
+    if (state.page.hostWebContents?.id !== host.id) continue;
+    if (!state.fullscreen && !state.pointerLock) continue;
+    state.lastInput = state.now();
+    showAgain(state.page, state);
+  }
 }
 
 /**

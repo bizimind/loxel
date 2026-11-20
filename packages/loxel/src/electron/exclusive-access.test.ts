@@ -16,6 +16,7 @@ const {
   installPointerLockReports,
   noteExclusiveAccessGrant,
   notePointerLockReport,
+  noteWindowFocused,
   trackWebviewExclusiveAccess,
 } = await import("./exclusive-access");
 
@@ -37,7 +38,7 @@ function fakePage(url: string, { type = "webview", frames = [] as ExclusiveAcces
       listeners.set(event, listener);
       return page;
     },
-    hostWebContents: { send, isDestroyed: () => false },
+    hostWebContents: { id: 1000, send, isDestroyed: () => false },
     mainFrame: { framesInSubtree: frames },
   } as unknown as ExclusiveAccessPage;
   const emit = (event: string) => listeners.get(event)?.();
@@ -141,7 +142,7 @@ describe("pointer lock", () => {
 
   test("nothing goes to a host that is gone", () => {
     const { page, send } = fakePage("https://game.example/");
-    page.hostWebContents = { send, isDestroyed: () => true };
+    page.hostWebContents = { id: 1000, send, isDestroyed: () => true };
     noteExclusiveAccessGrant(page, "pointerLock", "https://game.example/");
     expect(send).not.toHaveBeenCalled();
   });
@@ -265,6 +266,25 @@ describe("pointer lock after the user was away", () => {
     expect(showsOnReturn()).toBe(true);
     send("webview", false, false);
     expect(showsOnReturn()).toBe(false);
+  });
+
+  test("shows again when the window hosting it gains focus", () => {
+    const { page, send } = lockedPage();
+    // Fullscreen in another window, and a page holding nothing in this one.
+    const other = fakePage("https://news.example/");
+    other.page.hostWebContents = { id: 2000, send: other.send, isDestroyed: () => false };
+    other.track();
+    other.emit("enter-html-full-screen");
+    other.send.mockClear();
+    fakePage("https://docs.example/").track();
+    noteWindowFocused({ id: 1000 });
+    expect(send.mock.calls).toEqual([shown(page.id, "https://game.example", false, true)]);
+    expect(other.send).not.toHaveBeenCalled();
+
+    notePointerLockReport(page, frame(1), false);
+    send.mockClear();
+    noteWindowFocused({ id: 1000 });
+    expect(send).not.toHaveBeenCalled();
   });
 
   test("reports about pages without a lock are ignored", () => {

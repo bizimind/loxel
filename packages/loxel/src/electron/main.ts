@@ -109,6 +109,7 @@ import { installDefaultBrowser } from "./default-browser";
 import {
   installPointerLockReports,
   noteExclusiveAccessGrant,
+  noteWindowFocused,
   trackWebviewExclusiveAccess,
 } from "./exclusive-access";
 import {
@@ -439,6 +440,7 @@ async function createWindow(): Promise<BrowserWindow> {
   win.on("focus", () => {
     layoutWindows.focused(windowId);
     win.webContents.send(WINDOW_FOCUS_CHANGE, true);
+    noteWindowFocused(win.webContents);
   });
   win.on("enter-full-screen", () => {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, true);
