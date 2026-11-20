@@ -117,7 +117,7 @@ When a page goes full screen or hides your pointer, Loxel names the site at the 
 
 ### Camera and microphone
 
-Video calls such as Google Meet work in a browser panel as they do in a browser. When a site first wants your camera or microphone, a bar under its address bar asks: **Allow** lets it use them on every visit, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good. Close the bar to turn down just this request, so the site can ask again. A site that asks for the camera and then the microphone gets one question for both. Only sites on `https` or on your own machine (such as `http://localhost`) can ask.
+Video calls such as Google Meet work in a browser panel as they do in a browser. When a site first wants your camera or microphone, a bar under its address bar asks: **Allow** lets it use them on every visit, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good. Close the bar to turn down just this request, so the site can ask again. A site that asks for the camera and then the microphone gets one question for both. Clicking a site's own button for your camera or microphone, such as Meet's **Use microphone and camera**, shows the same bar for just the devices that button is for. Only sites on `https` or on your own machine (such as `http://localhost`) can ask.
 
 The first time a site you allowed uses one, macOS asks whether Loxel may use your camera or microphone. If Loxel's access is turned off in **System Settings > Privacy & Security**, the bar says so and opens the right pane; macOS may ask you to quit and reopen Loxel before the change applies.
 
