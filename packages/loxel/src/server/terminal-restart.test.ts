@@ -106,7 +106,7 @@ describe("terminals across server restarts", () => {
     if (asApp) {
       // What the app sends first: the server serves nothing over TCP until it has it.
       const secret = newSessionSecret();
-      writeSync(appChannel!, encodeParentMessage({ type: "session", secret }));
+      writeSync(appChannel!, encodeParentMessage({ type: "session", secret, windowIds: [] }));
       auth = { Authorization: bearer(secret) };
     }
     return started;

@@ -39,6 +39,7 @@ import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import { HOME_KEY } from "@/api/home-model";
+import { PromoteLayoutBodySchema } from "@/api/layout-promote-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
@@ -3993,19 +3994,15 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
     }
   }
 
-  // Promote a window's session-scoped layouts to canonical (called on window close)
+  // Promote closed windows' session-scoped layouts to canonical, in order (called on window close)
   if (pathname === "/api/layout/promote" && method === "POST") {
     try {
       const body = await parseBody(req);
-      // Strict UUID-v4 shape: prevents LIKE-pattern wildcards (% / _) from a malformed
-      // windowId from matching unrelated session rows.
-      if (
-        typeof body.windowId !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.windowId)
-      ) {
-        return error("Invalid 'windowId' — expected UUID", 400);
-      }
-      storeDb.promoteLayoutSession(body.windowId);
+      // Window IDs only: a malformed one could carry LIKE-pattern wildcards (% / _) matching
+      // unrelated session rows.
+      const parsed = PromoteLayoutBodySchema.safeParse(body);
+      if (!parsed.success) return error("Invalid 'windowIds': expected an array of UUIDs", 400);
+      storeDb.promoteLayoutSessions(parsed.data.windowIds);
       return json({ success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

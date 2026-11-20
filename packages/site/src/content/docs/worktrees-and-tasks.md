@@ -138,7 +138,7 @@ Every task has its own saved layout. When you switch tasks, Loxel saves the curr
 
 **Across windows and restarts:**
 
-Each window keeps its own layout for every worktree, saved as you work, so two windows open on the same worktree don't overwrite each other. When you close a window, its layout becomes the one a new window starts from. A worktree you have never opened starts with the default layout from **Settings > Layout**. Layouts are saved in `stores.db` in the [state directory](/docs/reference-env-files-cli-settings#file-locations), so they survive app restarts.
+Each window keeps its own layout for every worktree, saved as you work, so two windows open on the same worktree don't overwrite each other. When you close a window, its layout becomes the one a new window starts from. When you quit with several windows open, the window you used last wins for each worktree it showed. A worktree you have never opened starts with the default layout from **Settings > Layout**. Layouts are saved in `stores.db` in the [state directory](/docs/reference-env-files-cli-settings#file-locations), so they survive app restarts.
 
 ---
 
