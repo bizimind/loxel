@@ -62,6 +62,50 @@ describe.if(process.platform === "darwin")("quarantineFile", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("gives a copy its original's quarantine attribute", () =>
+    withDir(async (dir) => {
+      const original = join(dir, "tool.sh");
+      const copy = join(dir, "copy.sh");
+      await writeFile(original, "#!/bin/sh\n");
+      await writeFile(copy, "#!/bin/sh\n");
+      const chromiums = "0083;6b00c416;Chrome;8F7C1A2E-0000-4000-8000-000000000000";
+      await $`xattr -w com.apple.quarantine ${chromiums} ${original}`;
+      await quarantineFile(copy, original);
+      expect((await $`xattr -p com.apple.quarantine ${copy}`.text()).trim()).toBe(chromiums);
+    }));
+
+  test("keeps the mark on a download that completes before any progress event finds it", () =>
+    withDir(async (dir) => {
+      const session = new EventEmitter();
+      const { shown, saveAs } = fakeSaveAs();
+      const { calls, quarantine, untilCalls } = fakeQuarantine();
+      installBrowserDownloads(session as unknown as Session, {
+        quarantine: async (path, like) => {
+          await quarantineFile(path, like);
+          await quarantine(path);
+        },
+        saveAs,
+        downloadsFolder: () => dir,
+      });
+      const item = new FakeDownload();
+      session.emit("will-download", { preventDefault: () => {} }, item, page());
+      // Chromium writes the whole file and marks it itself before Loxel hears of it.
+      await writeFile(item.savePath, "#!/bin/sh\n");
+      const chromiums = "0083;6b00c416;Chrome;8F7C1A2E-0000-4000-8000-000000000000";
+      await $`xattr -w com.apple.quarantine ${chromiums} ${item.savePath}`;
+      item.finish("completed");
+      await untilCalls(1);
+      expect((await $`xattr -p com.apple.quarantine ${item.savePath}`.text()).trim()).toBe(
+        chromiums,
+      );
+      // And once moved where the user chose.
+      const chosen = join(dir, "chosen.sh");
+      shown[0]?.answer(chosen);
+      await untilCalls(2);
+      expect(calls).toEqual([item.savePath, chosen]);
+      expect((await $`xattr -p com.apple.quarantine ${chosen}`.text()).trim()).toBe(chromiums);
+    }));
 });
 
 /** A download as Chromium runs it: written to its save path on `progress`. */

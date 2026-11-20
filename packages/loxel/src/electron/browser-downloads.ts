@@ -3,8 +3,9 @@
  * with Loxel's own Save dialog beside it (at most one per page at a time), and macOS's quarantine
  * attribute on every downloaded file from the moment it is there.
  *
- * Chromium on macOS quarantines downloads through a quarantine service that Electron doesn't give
- * it, so without this a downloaded app or script would open without Gatekeeper checking it.
+ * Chromium marks a download only once it is complete (with patched Electron; stock Electron gives
+ * it no quarantine service), so Loxel marks the file while it downloads, and keeps a mark already
+ * there. Without this a downloaded app or script would open without Gatekeeper checking it.
  *
  * Why a free name of Loxel's own: Electron downloads straight to the save path (no `.crdownload`),
  * and when a file is already there Chromium downloads to `name (1).ext` beside it instead, a path
@@ -47,32 +48,38 @@ export function quarantineValue(now: Date, eventId: string = randomUUID().toUppe
   return `${QUARANTINE_FLAGS};${seconds};${QUARANTINE_AGENT};${eventId}`;
 }
 
+/** Mark `path` as downloaded; with `like`, as that file is marked when it is. */
+export type Quarantine = (path: string, like?: string) => Promise<void>;
+
+/** The quarantine attribute of `path` itself (never a link's target); null if it has none. */
+async function quarantineOf(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("/usr/bin/xattr", [
+      "-s",
+      "-p",
+      QUARANTINE_ATTRIBUTE,
+      path,
+    ]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Mark `path` as downloaded, so Gatekeeper checks it when it is opened (macOS only). A mark already
- * there is kept: Chromium's own, where it has its quarantine service, also records the download's
- * URLs.
+ * there is kept: Chromium's own, where it has its quarantine service, links to the quarantine event
+ * that records the download's URLs. With `like`, `path` gets that file's mark when it has one, so a
+ * copy keeps its original's.
  */
-export async function quarantineFile(path: string): Promise<void> {
+export const quarantineFile: Quarantine = async (path, like) => {
   if (process.platform !== "darwin") return;
+  if ((await quarantineOf(path)) !== null) return;
+  const value =
+    (like === undefined ? null : await quarantineOf(like)) ?? quarantineValue(new Date());
   // `-s`: a symbolic link itself, never the file it points to.
-  const marked = await execFileAsync("/usr/bin/xattr", [
-    "-s",
-    "-p",
-    QUARANTINE_ATTRIBUTE,
-    path,
-  ]).then(
-    () => true,
-    () => false,
-  );
-  if (marked) return;
-  await execFileAsync("/usr/bin/xattr", [
-    "-s",
-    "-w",
-    QUARANTINE_ATTRIBUTE,
-    quarantineValue(new Date()),
-    path,
-  ]);
-}
+  await execFileAsync("/usr/bin/xattr", ["-s", "-w", QUARANTINE_ATTRIBUTE, value, path]);
+};
 
 /**
  * How much older than its download a file must look to be someone else's. File systems store
@@ -108,7 +115,7 @@ async function regularFile(path: string): Promise<{ inode: bigint; birthtimeMs: 
  * complete, the regular file at the path is the download, whatever its creation time says. A link
  * at the path is never followed.
  */
-export function trackQuarantine(item: DownloadItem, quarantine: (path: string) => Promise<void>) {
+export function trackQuarantine(item: DownloadItem, quarantine: Quarantine) {
   const startedMs = item.getStartTime() * 1000;
   let complete = false;
   let markedInode: bigint | null = null;
@@ -250,18 +257,19 @@ const fileExists = (path: string) =>
 
 /**
  * Put a copy of `from` at `to`, for another volume or a file system without hard links. It is
- * copied to a hidden name beside `to` and marked there first, so it is never at `to` unmarked.
+ * copied to a hidden name beside `to` (which copies no extended attributes) and given `from`'s mark
+ * there first, so it is never at `to` unmarked.
  */
 async function placeMarkedCopy(
   from: string,
   to: string,
   replace: boolean,
-  quarantine: (path: string) => Promise<void>,
+  quarantine: Quarantine,
 ): Promise<void> {
   const copy = join(dirname(to), `.${basename(to)}.${randomUUID()}.download`);
   await copyFile(from, copy, constants.COPYFILE_EXCL);
   try {
-    await quarantine(copy);
+    await quarantine(copy, from);
     if (replace) {
       await rename(copy, to);
       return;
@@ -280,11 +288,7 @@ async function placeMarkedCopy(
 }
 
 /** Move a new file to `to` without ever replacing what is there. */
-async function moveToNew(
-  from: string,
-  to: string,
-  quarantine: (path: string) => Promise<void>,
-): Promise<void> {
+async function moveToNew(from: string, to: string, quarantine: Quarantine): Promise<void> {
   try {
     await link(from, to);
   } catch (err) {
@@ -295,11 +299,7 @@ async function moveToNew(
 }
 
 /** Move a file onto `to`, replacing what is there (a link itself, never what it points to). */
-async function moveReplacing(
-  from: string,
-  to: string,
-  quarantine: (path: string) => Promise<void>,
-): Promise<void> {
+async function moveReplacing(from: string, to: string, quarantine: Quarantine): Promise<void> {
   try {
     await rename(from, to);
     return;
@@ -325,7 +325,7 @@ export interface SaveChoice {
 export async function moveDownload(
   from: string,
   { path, replace }: SaveChoice,
-  quarantine: (path: string) => Promise<void>,
+  quarantine: Quarantine,
   taken: TakenPaths = new Set(),
 ): Promise<string> {
   if (replace) {
@@ -360,7 +360,7 @@ export async function saveCompletedDownload({
   savePath: string;
   chosen: SaveChoice | null;
   startedMs: number;
-  quarantine: (path: string) => Promise<void>;
+  quarantine: Quarantine;
   /** Other downloads' paths, which the download doesn't move to. */
   taken?: TakenPaths;
 }): Promise<void> {
@@ -396,7 +396,7 @@ const showSaveAs: SaveAsPrompt = async (contents, options) => {
 };
 
 export interface BrowserDownloadsOptions {
-  quarantine?: (path: string) => Promise<void>;
+  quarantine?: Quarantine;
   saveAs?: SaveAsPrompt;
   /** The folder downloads go to until the user's choice; read for each download. */
   downloadsFolder?: () => string;
