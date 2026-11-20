@@ -114,14 +114,28 @@ describe("file access requests", () => {
     expect(site.requests()).toHaveLength(1);
   });
 
-  test("allowing a read doesn't answer a write", async () => {
+  test("a read then a write of the same file become one prompt to write", async () => {
     const site = panel("https://editor.example");
-    void site.request("/Users/me/a.txt");
-    const write = site.request("/Users/me/a.txt", { write: true });
+    const read = site.request("/Users/me/project", { directory: true });
+    await afterMicrotasks(() => site.requests().length === 1, "the read prompt");
+    const write = site.request("/Users/me/project", { directory: true, write: true });
+    await afterMicrotasks(() => site.requests().length === 2, "the write prompt");
+    expect(site.withdrawn()).toHaveLength(1);
+    const prompt = site.requests()[1]!;
+    expect(prompt.access).toMatchObject({ directory: true, write: true });
+    site.respond(prompt.id, "allow-once");
+    expect(await answered(read)).toBe(true);
+    expect(await answered(write)).toBe(true);
+  });
+
+  test("another file's write doesn't take over a read prompt", async () => {
+    const site = panel("https://editor.example");
+    const read = site.request("/Users/me/a.txt");
+    void site.request("/Users/me/b.txt", { write: true });
     await afterMicrotasks(() => site.requests().length === 2, "two prompts");
+    expect(site.withdrawn()).toEqual([]);
     site.respond(site.requests()[0]!.id, "allow-once");
-    await afterMicrotasks(() => site.withdrawn().length === 1, "the read prompt to go");
-    expect(write.granted()).toBeUndefined();
+    expect(await answered(read)).toBe(true);
   });
 
   test("are refused without asking from a popup or a page that moved on", async () => {

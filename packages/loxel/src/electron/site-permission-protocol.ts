@@ -118,8 +118,8 @@ export type SiteAccess = z.infer<typeof siteAccessSchema>;
 /**
  * Main → window renderer: ask the user whether to let a site have `access`. Allow this time opens
  * this one link, or lets the page reach the local network while the panel stays on the site. File
- * access is never saved: its prompt offers Allow (`allow-once`: the page keeps the access while it
- * stays on the site) and Block (`dismiss`: this request only).
+ * access is never saved: its prompt offers Allow (`allow-once`) and Block (`dismiss`), and Chromium
+ * keeps either answer for as long as the page holds the file or folder.
  */
 export const siteAccessRequestSchema = z.object({
   id: z.number().int(),

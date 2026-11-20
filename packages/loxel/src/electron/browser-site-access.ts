@@ -7,8 +7,9 @@
  * A site without a decision gets a bar in the panel of the page that asked: Allow and Block are
  * saved for the site (and, for apps, the link's scheme) in Loxel's settings, which window renderers
  * send here on load and on every change. Allow this time opens that one link, or lets the page
- * reach the local network while the panel stays on the site. File access is asked about each time,
- * as Chrome does, and answers only its request. Requests from the same page for the same access
+ * reach the local network while the panel stays on the site. File access is never saved: the answer
+ * lasts as long as the page holds the file or folder (Chromium keeps it), and a later visit asks
+ * again, as in Chrome. Requests from the same page for the same access
  * share one prompt and one answer.
  */
 import type { IpcMainEvent, WebContents } from "electron";
@@ -157,10 +158,18 @@ export function askSiteAccess(guest: WebContents, access: SiteAccess): Promise<b
   return new Promise((resolve) => {
     // Asking again while the prompt is up (each held request, or another click on the link)
     // waits for the same answer.
-    for (const [, pending] of prompts.entries()) {
-      if (pending.guestId !== guest.id || !answersAccess(pending.access, access)) continue;
-      pending.waiters.push(resolve);
-      return;
+    for (const [id, pending] of prompts.entries()) {
+      if (pending.guestId !== guest.id) continue;
+      if (answersAccess(pending.access, access)) {
+        pending.waiters.push(resolve);
+        return;
+      }
+      // `requestPermission({ mode: "readwrite" })` asks to read, then to write, at once: one
+      // prompt asks to write, and its answer covers both.
+      if (answersAccess(access, pending.access)) {
+        prompts.reprompt(id, { ...pending, access, waiters: [...pending.waiters, resolve] });
+        return;
+      }
     }
     prompts.show({ guestId: guest.id, host, origin: access.origin, access, waiters: [resolve] });
   });

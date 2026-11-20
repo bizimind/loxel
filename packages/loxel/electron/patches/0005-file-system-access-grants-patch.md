@@ -4,18 +4,18 @@
 
 With a session permission check handler set, Electron decided each File System Access grant's status from the handler alone: `true` meant granted and `false` denied, so no grant was ever "ask". An app has to answer `true` for `fileSystem`, or files the user picks stop working, and that answer also covered access the user never gave: writing to a file picked only for reading, and reading and writing through handles a site kept in IndexedDB on a later visit. Chrome asks the user in both cases.
 
-The patch makes the handler a veto in `PermissionGrantImpl::GetStatus`: `false` still denies, and `true` returns the grant's own status, which a picker, a drop, an ancestor directory or a permission request set. A grant still to be asked for stays "ask", so the page must request it, which calls the session's permission request handler, where Chrome would prompt. With no check handler, nothing changes.
+The patch makes the handler a veto in `PermissionGrantImpl::GetStatus`: `false` still denies, and `true` returns the grant's own status, which a picker, a drop, an ancestor directory or a permission request set. A grant still to be asked for stays "ask", so the page must request it, which calls the session's permission request handler, where Chrome would prompt. With no check handler, nothing changes. For an app whose check handler answers `true`, the request handler now also decides, as Chrome asks the user, a picked folder's read access, writing or creating entries in a file or folder picked for reading, and `move()` onto a sibling.
 
-Loxel's side: `browser-permissions.ts` still answers `true` to the `fileSystem` check, and hands each `fileSystem` request to `browser-file-access.ts`, which asks the user in the panel's bar.
+Loxel's side: `browser-permissions.ts` still answers `true` to the `fileSystem` check, and hands each `fileSystem` request to `browser-file-access.ts`, which asks the user in the panel's bar, one prompt for a read and write of the same file or folder.
 
 ## Files
 
 - Electron: `shell/browser/file_system_access/file_system_access_permission_context.cc`, `docs/api/session.md` (the check handler's `fileSystem` entry), `spec/chromium.spec.ts` (File System API specs).
-- Chromium (read, not changed): `content/browser/file_system_access/file_system_access_handle_base.cc` (`DoRequestPermission`, which requests only an "ask" grant), `content/browser/file_system_access/file_system_access_manager_impl.cc` (picker grants), `chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc` (Chrome's behavior).
+- Chromium (read, not changed): `content/browser/file_system_access/file_system_access_handle_base.cc` (`DoRequestPermission`, which requests only an "ask" grant), `content/browser/file_system_access/file_system_access_manager_impl.cc` (the access trigger each picker, drop or restore passes, and the folder picker's own request), `chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc` (Chrome's behavior).
 
 ## Testing
 
-- Electron specs: `e test --files spec/chromium.spec.ts -g "File System"` on a testing build. "asks the request handler before writing a readable file whose checks are allowed" covers the change; "calls twice when trying to query a read/write file handle permissions" now expects `prompt` for read and write, since pasting grants read only.
+- Electron specs: `e test --files spec/chromium.spec.ts -g "File System"` on a testing build. "asks the request handler before writing a readable file whose checks are allowed" covers the change; "calls twice when trying to query a read/write file handle permissions" now expects `prompt` from `queryPermission({ mode: "readwrite" })`, since pasting grants read only.
 - In Loxel, in a hidden demo: a page opens a file with `showOpenFilePicker()` (or a dropped file), and `createWritable()` on it shows the panel's file access bar before anything is written; Block leaves the file unchanged.
 
 ## Rebase notes

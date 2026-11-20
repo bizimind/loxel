@@ -47,8 +47,7 @@ function iconOf(access: SiteAccess) {
 /**
  * A site asks to open a link in another app (the launch waits), to reach this Mac or the local
  * network (its requests wait), or to read or write a file or folder the user gave it. File access
- * is never saved: Allow lets the page have it while it stays on the site, and Block refuses this
- * request.
+ * is never saved: Allow and Block last as long as the page holds the file or folder.
  */
 export function SiteAccessBar({
   request,
