@@ -15,6 +15,7 @@ void mock.module("electron", () => ({ app: {}, BrowserWindow: {}, dialog: {} }))
 
 const {
   freePath,
+  ReservedPaths,
   installBrowserDownloads,
   moveDownload,
   numberedName,
@@ -277,6 +278,11 @@ describe("numberedName", () => {
     expect(numberedName("tool.sh", 0)).toBe("tool.sh");
     expect(numberedName("tool.sh", 2)).toBe("tool (2).sh");
     expect(numberedName("archive.tar.gz", 1)).toBe("archive (1).tar.gz");
+    expect(numberedName("image.svg.gz", 1)).toBe("image (1).svg.gz");
+    expect(numberedName("script.user.js", 1)).toBe("script (1).user.js");
+    // Only a known compression suffix after a short part is a double extension.
+    expect(numberedName("notes.tar.foo", 1)).toBe("notes.tar (1).foo");
+    expect(numberedName("db.backup.gz", 1)).toBe("db.backup (1).gz");
     expect(numberedName("README", 1)).toBe("README (1)");
   });
 });
@@ -290,16 +296,29 @@ describe("freePath", () => {
       expect(freePath(dir, "tool.sh", taken)).toBe(join(dir, "tool (3).sh"));
       expect(freePath(dir, "other.sh", taken)).toBe(join(dir, "other.sh"));
     }));
+
+  test("takes reserved paths that differ only in case or normalization as one", () => {
+    const reserved = new ReservedPaths();
+    reserved.add("/Downloads/Tool.sh");
+    reserved.add("/Downloads/caf\u00e9.txt");
+    expect(freePath("/nonexistent", "tool.sh", reserved)).toBe("/nonexistent/tool.sh");
+    expect(reserved.has("/Downloads/tool.SH")).toBe(true);
+    expect(reserved.has("/Downloads/cafe\u0301.txt")).toBe(true);
+    reserved.delete("/Downloads/TOOL.sh");
+    expect(reserved.has("/Downloads/Tool.sh")).toBe(false);
+  });
 });
 
 describe("moveDownload", () => {
+  const noMark = async () => {};
+
   test("moves to a free path", () =>
     withDir(async (dir) => {
       const from = join(dir, "tool.sh");
       await writeFile(from, "download");
       await mkdir(join(dir, "elsewhere"));
       const to = join(dir, "elsewhere", "tool.sh");
-      expect(await moveDownload(from, to, false)).toBe(to);
+      expect(await moveDownload(from, { path: to, replace: false }, noMark)).toBe(to);
       expect(await readFile(to, "utf8")).toBe("download");
       expect(existsSync(from)).toBe(false);
     }));
@@ -313,7 +332,9 @@ describe("moveDownload", () => {
       const target = join(dir, "elsewhere.sh");
       await writeFile(target, "a link's target");
       await symlink(target, join(dir, "tool (1).sh"));
-      expect(await moveDownload(from, to, false)).toBe(join(dir, "tool (2).sh"));
+      expect(await moveDownload(from, { path: to, replace: false }, noMark)).toBe(
+        join(dir, "tool (2).sh"),
+      );
       expect(await readFile(to, "utf8")).toBe("the user's own file");
       expect(await readFile(target, "utf8")).toBe("a link's target");
     }));
@@ -323,7 +344,7 @@ describe("moveDownload", () => {
       const to = join(dir, "tool.sh");
       await writeFile(to, "the user's own file");
       await writeFile(join(dir, "a.sh"), "download");
-      expect(await moveDownload(join(dir, "a.sh"), to, true)).toBe(to);
+      expect(await moveDownload(join(dir, "a.sh"), { path: to, replace: true }, noMark)).toBe(to);
       expect(await readFile(to, "utf8")).toBe("download");
 
       const target = join(dir, "elsewhere.sh");
@@ -331,9 +352,23 @@ describe("moveDownload", () => {
       const link = join(dir, "link.sh");
       await symlink(target, link);
       await writeFile(join(dir, "b.sh"), "download");
-      await moveDownload(join(dir, "b.sh"), link, true);
+      await moveDownload(join(dir, "b.sh"), { path: link, replace: true }, noMark);
       expect((await lstat(link)).isFile()).toBe(true);
       expect(await readFile(target, "utf8")).toBe("a link's target");
+    }));
+});
+
+describe("moveDownload numbering", () => {
+  test("skips other downloads' paths, and stays put on its own", () =>
+    withDir(async (dir) => {
+      const noMark = async () => {};
+      await writeFile(join(dir, "tool.sh"), "a running download");
+      const from = join(dir, "tool (2).sh");
+      await writeFile(from, "download");
+      const taken = new Set([join(dir, "tool.sh"), join(dir, "tool (1).sh")]);
+      const chosen = { path: join(dir, "tool.sh"), replace: false };
+      expect(await moveDownload(from, chosen, noMark, taken)).toBe(from);
+      expect(await readFile(from, "utf8")).toBe("download");
     }));
 });
 
@@ -346,7 +381,12 @@ describe("saveCompletedDownload", () => {
       const from = join(dir, "tool.sh");
       await writeFile(from, "download");
       const to = join(dir, "chosen.sh");
-      await saveCompletedDownload(from, { path: to, replace: false }, startedMs, quarantine);
+      await saveCompletedDownload({
+        savePath: from,
+        chosen: { path: to, replace: false },
+        startedMs,
+        quarantine,
+      });
       expect(await readFile(to, "utf8")).toBe("download");
       expect(calls).toEqual([to]);
     }));
@@ -356,7 +396,7 @@ describe("saveCompletedDownload", () => {
       const { calls, quarantine } = fakeQuarantine();
       const from = join(dir, "tool.sh");
       await writeFile(from, "download");
-      await saveCompletedDownload(from, null, startedMs, quarantine);
+      await saveCompletedDownload({ savePath: from, chosen: null, startedMs, quarantine });
       expect(existsSync(from)).toBe(false);
       expect(calls).toEqual([]);
     }));
@@ -367,11 +407,16 @@ describe("saveCompletedDownload", () => {
       const older = join(dir, "older.sh");
       await writeFile(older, "the user's own file");
       // The download started well after the file was made.
-      await saveCompletedDownload(older, null, Date.now() + 5 * 60_000, quarantine);
+      await saveCompletedDownload({
+        savePath: older,
+        chosen: null,
+        startedMs: Date.now() + 5 * 60_000,
+        quarantine,
+      });
       expect(existsSync(older)).toBe(true);
       const link = join(dir, "link.sh");
       await symlink(older, link);
-      await saveCompletedDownload(link, null, startedMs, quarantine);
+      await saveCompletedDownload({ savePath: link, chosen: null, startedMs, quarantine });
       expect(existsSync(link)).toBe(true);
       expect(calls).toEqual([]);
     }));
@@ -384,14 +429,56 @@ describe("installBrowserDownloads", () => {
       await writeFile(join(dir, "tool.sh"), "the user's own file");
       const first = download(page()).item;
       const second = download(page()).item;
-      expect(first.getSavePath()).toBe(join(dir, "tool (1).sh"));
+      // The dialog suggests a free name the download isn't at, so macOS doesn't ask to replace it.
+      expect(shown.map((s) => s.defaultPath)).toEqual([
+        join(dir, "tool (1).sh"),
+        join(dir, "tool (1).sh"),
+      ]);
+      expect(first.getSavePath()).toBe(join(dir, "tool (2).sh"));
       // Before the first's file is there.
-      expect(second.getSavePath()).toBe(join(dir, "tool (2).sh"));
-      // The dialog suggests the download's own name.
-      expect(shown.map((s) => s.defaultPath)).toEqual([join(dir, "tool.sh"), join(dir, "tool.sh")]);
-      // Once a download is done, its name is free again unless its file is there.
+      expect(second.getSavePath()).toBe(join(dir, "tool (3).sh"));
+      // Once a download is cancelled, its name is free again.
       second.cancel();
-      expect(download(page()).item.getSavePath()).toBe(join(dir, "tool (2).sh"));
+      expect(download(page()).item.getSavePath()).toBe(join(dir, "tool (3).sh"));
+    }));
+
+  test("a completed download keeps its path while its dialog is open", () =>
+    withDir(async (dir) => {
+      const { download, shown, untilCalls } = setup(dir);
+      const first = download(page()).item;
+      await first.progress("first");
+      first.finish("completed");
+      await untilCalls(1);
+      const second = download(page()).item;
+      expect(second.getSavePath()).not.toBe(first.getSavePath());
+      // Choosing the first's file in the second's dialog doesn't replace it.
+      shown[1]?.answer(first.getSavePath());
+      await second.progress("second");
+      second.finish("completed");
+      await untilCalls(3);
+      expect(await readFile(first.getSavePath(), "utf8")).toBe("first");
+    }));
+
+  test("the next dialog starts in the folder last saved to", () =>
+    withDir(async (dir) => {
+      const { download, shown } = setup(dir);
+      download(page());
+      shown[0]?.answer(join(dir, "elsewhere", "saved.sh"));
+      await settle();
+      download(page());
+      expect(shown[1]?.defaultPath).toBe(join(dir, "elsewhere", "tool.sh"));
+    }));
+
+  test("cancels a download it can't pick a path for", () =>
+    withDir(async (dir) => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const notAFolder = join(dir, "file");
+        await writeFile(notAFolder, "");
+        expect(setup(notAFolder).download(page()).started).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
     }));
 
   test("marks the file as soon as it is at its save path", () =>
@@ -400,7 +487,7 @@ describe("installBrowserDownloads", () => {
       const { item } = download(page());
       await item.progress();
       await untilCalls(1);
-      expect(calls).toEqual([join(dir, "tool.sh")]);
+      expect(calls).toEqual([item.savePath]);
     }));
 
   test("retries a mark that failed", () =>

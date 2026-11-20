@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync } from "node:fs";
 import { constants, copyFile, link, lstat, rename, unlink } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -173,15 +173,66 @@ function confirmedReplacing(path: string): boolean {
   }
 }
 
+/** Last parts that make a double extension with a short part before them (`.tar.gz`), as Chrome's. */
+const DOUBLE_EXTENSION_SUFFIXES = new Set([
+  "bz",
+  "bz2",
+  "gz",
+  "lz",
+  "lzma",
+  "lzo",
+  "xz",
+  "z",
+  "zst",
+]);
+
+/** `name`'s extension as Chrome reads it (`FilePath::Extension`): `.tar.gz` and `.user.js` whole. */
+function extensionOf(name: string): string {
+  const last = name.lastIndexOf(".");
+  if (last <= 0) return "";
+  const penultimate = name.lastIndexOf(".", last - 1);
+  if (penultimate > 0) {
+    if (name.slice(penultimate + 1).toLowerCase() === "user.js") return name.slice(penultimate);
+    const short = last - penultimate > 1 && last - penultimate <= 5;
+    if (short && DOUBLE_EXTENSION_SUFFIXES.has(name.slice(last + 1).toLowerCase())) {
+      return name.slice(penultimate);
+    }
+  }
+  return name.slice(last);
+}
+
 /** `name` numbered as Chrome numbers a download beside a file: `name (n).ext`, `a (n).tar.gz`. */
 export function numberedName(name: string, n: number): string {
   if (n === 0) return name;
-  const ext = /\.tar\.[^.]+$/i.exec(name)?.[0] ?? extname(name);
+  const ext = extensionOf(name);
   return `${name.slice(0, name.length - ext.length)} (${n})${ext}`;
 }
 
+/** Paths to skip when picking one, besides those something is at. */
+export type TakenPaths = Pick<ReadonlySet<string>, "has">;
+
+/**
+ * Paths held by downloads, compared as macOS's default file system compares names: ignoring case
+ * and Unicode normalization, so `Tool.sh` and `tool.sh` are one path.
+ */
+export class ReservedPaths implements TakenPaths {
+  readonly #keys = new Set<string>();
+  static #key(path: string): string {
+    return path.normalize("NFC").toLowerCase();
+  }
+  add(path: string): void {
+    this.#keys.add(ReservedPaths.#key(path));
+  }
+  delete(path: string): void {
+    this.#keys.delete(ReservedPaths.#key(path));
+  }
+  has(path: string): boolean {
+    return this.#keys.has(ReservedPaths.#key(path));
+  }
+}
+
 /** The first of `name`, `name (1)`, ... in `dir` that nothing is at and `taken` doesn't hold. */
-export function freePath(dir: string, name: string, taken: ReadonlySet<string>): string {
+export function freePath(dir: string, name: string, taken: TakenPaths): string {
   for (let n = 0; ; n++) {
     const path = join(dir, numberedName(name, n));
     if (!taken.has(path) && nothingAt(path)) return path;
@@ -194,57 +245,69 @@ function downloadFileName(item: DownloadItem): string {
   return name === "" || name === "." || name === ".." ? "download" : name;
 }
 
+const fileExists = (path: string) =>
+  Object.assign(new Error(`File exists: ${path}`), { code: "EEXIST" });
+
+/**
+ * Put a copy of `from` at `to`, for another volume or a file system without hard links. It is
+ * copied to a hidden name beside `to` and marked there first, so it is never at `to` unmarked.
+ */
+async function placeMarkedCopy(
+  from: string,
+  to: string,
+  replace: boolean,
+  quarantine: (path: string) => Promise<void>,
+): Promise<void> {
+  const copy = join(dirname(to), `.${basename(to)}.${randomUUID()}.download`);
+  await copyFile(from, copy, constants.COPYFILE_EXCL);
+  try {
+    await quarantine(copy);
+    if (replace) {
+      await rename(copy, to);
+      return;
+    }
+    try {
+      await link(copy, to);
+    } catch (err) {
+      if (errorCode(err) === "EEXIST") throw err;
+      // No hard links here: checked just before instead.
+      if (!nothingAt(to)) throw fileExists(to);
+      await rename(copy, to);
+    }
+  } finally {
+    await unlink(copy).catch(() => {});
+  }
+}
+
 /** Move a new file to `to` without ever replacing what is there. */
-async function moveToNew(from: string, to: string): Promise<void> {
+async function moveToNew(
+  from: string,
+  to: string,
+  quarantine: (path: string) => Promise<void>,
+): Promise<void> {
   try {
     await link(from, to);
   } catch (err) {
     if (errorCode(err) === "EEXIST") throw err;
-    // Another volume, or a file system without hard links.
-    await copyFile(from, to, constants.COPYFILE_EXCL);
+    await placeMarkedCopy(from, to, false, quarantine);
   }
   await unlink(from);
 }
 
 /** Move a file onto `to`, replacing what is there (a link itself, never what it points to). */
-async function moveReplacing(from: string, to: string): Promise<void> {
+async function moveReplacing(
+  from: string,
+  to: string,
+  quarantine: (path: string) => Promise<void>,
+): Promise<void> {
   try {
     await rename(from, to);
     return;
   } catch (err) {
     if (errorCode(err) !== "EXDEV") throw err;
   }
-  // Another volume: copy beside `to`, then swap it in.
-  const copy = join(dirname(to), `.${basename(to)}.${randomUUID()}.download`);
-  await copyFile(from, copy, constants.COPYFILE_EXCL);
-  try {
-    await rename(copy, to);
-  } catch (err) {
-    await unlink(copy).catch(() => {});
-    throw err;
-  }
+  await placeMarkedCopy(from, to, true, quarantine);
   await unlink(from);
-}
-
-/**
- * Move a completed download to where the user chose, and return where it went. It replaces a file
- * there only when `replace` (the user confirmed it); otherwise a file that turned up there since
- * keeps it, and the download takes the next free number beside it.
- */
-export async function moveDownload(from: string, to: string, replace: boolean): Promise<string> {
-  if (replace) {
-    await moveReplacing(from, to);
-    return to;
-  }
-  for (let n = 0; ; n++) {
-    const target = join(dirname(to), numberedName(basename(to), n));
-    try {
-      await moveToNew(from, target);
-      return target;
-    } catch (err) {
-      if (errorCode(err) !== "EEXIST") throw err;
-    }
-  }
 }
 
 /** Where the user chose to save a download, and whether they confirmed replacing a file there. */
@@ -254,16 +317,53 @@ export interface SaveChoice {
 }
 
 /**
+ * Move a completed download to where the user chose, and return where it went. It replaces a file
+ * there only when the user confirmed it; otherwise a file that turned up there since keeps it, and
+ * the download takes the next free number beside it, skipping `taken` (other downloads' paths). A
+ * numbered name that is `from` itself leaves the download where it is.
+ */
+export async function moveDownload(
+  from: string,
+  { path, replace }: SaveChoice,
+  quarantine: (path: string) => Promise<void>,
+  taken: TakenPaths = new Set(),
+): Promise<string> {
+  if (replace) {
+    await moveReplacing(from, path, quarantine);
+    return path;
+  }
+  for (let n = 0; ; n++) {
+    const target = join(dirname(path), numberedName(basename(path), n));
+    if (target === from) return from;
+    if (taken.has(target)) continue;
+    try {
+      await moveToNew(from, target, quarantine);
+      return target;
+    } catch (err) {
+      if (errorCode(err) !== "EEXIST") throw err;
+    }
+  }
+}
+
+/**
  * Move the completed download at `savePath` to where the user chose, and mark it there again; or
  * remove it when they cancelled (`chosen` null). Only a regular file the download could have made
  * is moved or removed: a link, or a file provably older than the download, is left alone.
  */
-export async function saveCompletedDownload(
-  savePath: string,
-  chosen: SaveChoice | null,
-  startedMs: number,
-  quarantine: (path: string) => Promise<void>,
-): Promise<void> {
+export async function saveCompletedDownload({
+  savePath,
+  chosen,
+  startedMs,
+  quarantine,
+  taken,
+}: {
+  savePath: string;
+  chosen: SaveChoice | null;
+  startedMs: number;
+  quarantine: (path: string) => Promise<void>;
+  /** Other downloads' paths, which the download doesn't move to. */
+  taken?: TakenPaths;
+}): Promise<void> {
   if (chosen?.path === savePath) return;
   try {
     const file = await regularFile(savePath);
@@ -272,8 +372,8 @@ export async function saveCompletedDownload(
       await unlink(savePath);
       return;
     }
-    const moved = await moveDownload(savePath, chosen.path, chosen.replace);
-    if (await regularFile(moved)) await quarantine(moved);
+    const moved = await moveDownload(savePath, chosen, quarantine, taken);
+    if (moved !== savePath && (await regularFile(moved))) await quarantine(moved);
   } catch (err) {
     console.warn("[electron] Could not save a download where the user chose:", err);
   }
@@ -318,8 +418,8 @@ export function installBrowserDownloads(
 ): void {
   /** Each page's download whose Save dialog is open. */
   const asking = new Map<WebContents, DownloadItem>();
-  /** Save paths of downloads still running, which a file may not be at yet. */
-  const reserved = new Set<string>();
+  /** Save paths of downloads not yet moved or deleted, which a file may not be at yet. */
+  const reserved = new ReservedPaths();
   /** Where the user last saved a download, for the next dialog to start in. */
   let lastFolder: string | null = null;
 
@@ -332,10 +432,18 @@ export function installBrowserDownloads(
     }
     const name = downloadFileName(item);
     let savePath: string;
+    let suggested: string;
     try {
       const folder = downloadsFolder();
       mkdirSync(folder, { recursive: true });
-      savePath = freePath(folder, name, reserved);
+      // The dialog suggests a name the download isn't at, or macOS would ask to replace it.
+      suggested =
+        lastFolder === null || lastFolder === folder
+          ? freePath(folder, name, reserved)
+          : join(lastFolder, name);
+      savePath = freePath(folder, name, {
+        has: (path) => path === suggested || reserved.has(path),
+      });
     } catch (err) {
       console.warn("[electron] Could not pick a path for a download:", err);
       event.preventDefault();
@@ -344,6 +452,7 @@ export function installBrowserDownloads(
     // A path set during this event is where Chromium writes, and Electron shows no dialog.
     item.setSavePath(savePath);
     reserved.add(savePath);
+    const release = () => reserved.delete(savePath);
     const startedMs = item.getStartTime() * 1000;
 
     const tracked = trackQuarantine(item, quarantine);
@@ -352,13 +461,14 @@ export function installBrowserDownloads(
     const finished = new Promise<{ state: string; marked: Promise<void> }>((resolve) => {
       item.once("done", (_event, state) => {
         item.off("updated", onUpdated);
-        reserved.delete(savePath);
+        // A completed download keeps its path until it is moved or deleted.
+        if (state !== "completed") release();
         resolve({ state, marked: state === "completed" ? tracked.completed() : Promise.resolve() });
       });
     });
 
     if (contents) asking.set(contents, item);
-    const choice = saveAs(contents, { defaultPath: join(lastFolder ?? dirname(savePath), name) })
+    const choice = saveAs(contents, { defaultPath: suggested })
       .catch((err: unknown) => {
         console.warn("[electron] Could not ask where to save a download:", err);
         return null;
@@ -370,14 +480,20 @@ export function installBrowserDownloads(
           return null;
         }
         lastFolder = dirname(path);
-        // Another running download's path isn't the user's to replace, though the dialog asked.
+        // Another download's path isn't the user's to replace, though the dialog asked.
         return { path, replace: !reserved.has(path) && confirmedReplacing(path) };
       });
 
-    void Promise.all([choice, finished]).then(async ([chosen, { state, marked }]) => {
-      if (state !== "completed") return;
-      await marked;
-      await saveCompletedDownload(savePath, chosen, startedMs, quarantine);
-    });
+    void Promise.all([choice, finished])
+      .then(async ([chosen, { state, marked }]) => {
+        if (state !== "completed") return;
+        await marked;
+        await saveCompletedDownload({ savePath, chosen, startedMs, quarantine, taken: reserved });
+      })
+      .catch((err: unknown) => {
+        // Such as the download being gone once Loxel quits.
+        console.warn("[electron] Could not finish a download:", err);
+      })
+      .finally(release);
   });
 }
