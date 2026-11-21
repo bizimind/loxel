@@ -17,7 +17,7 @@ The toolbar lets you toggle between two layouts.
 
 **Unified** shows a traditional hunk-based diff with `+` and `-` lines interleaved. Use unified when you want a compact, top-to-bottom read of the changes.
 
-Characters that wouldn't otherwise show, such as right-to-left overrides and zero-width spaces, appear as highlighted escapes like `\u202e`, in the changed lines and in file names. That way you read the change as it is stored, not as it displays. In split view the editors mark them with a box.
+Characters that wouldn't otherwise show, such as right-to-left overrides and zero-width spaces, appear as highlighted escapes like `\u202e`, in the changed lines and in file names. That way you read the change as it is stored, not as it displays. Emoji, and the joiners that Persian or Hindi words are spelled with, stay as they are. In split view the editors mark them with a box.
 
 ---
 

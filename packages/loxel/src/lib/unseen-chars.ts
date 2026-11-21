@@ -32,6 +32,8 @@ export function hasKeyControl(text: string): boolean {
 export interface TextRun {
   text: string;
   unseen: boolean;
+  /** How many UTF-16 units of the source text the run stands for. */
+  length: number;
 }
 
 const NAMED_ESCAPES: Record<number, string> = { 0x09: "\\t", 0x0d: "\\r", 0x1b: "\\e" };
@@ -46,17 +48,40 @@ function escapeFor(code: number): string {
 
 export interface RevealOptions {
   /**
-   * Leave tabs and carriage returns as they are, for code, where they are indentation and line
-   * endings that display as whitespace rather than hide anything.
+   * The text is content (code, file names) rather than a command, so what is ordinary writing in
+   * it stays as it is: tabs and carriage returns (indentation and line endings), the joiners and
+   * selectors inside an emoji sequence (a family emoji, a check mark with its emoji presentation
+   * selector), and a zero-width joiner or non-joiner
+   * between letters of a script other than Latin, Greek or Cyrillic, where it is spelling (Persian,
+   * Hindi). Bidirectional controls, and joiners anywhere else, are still revealed.
    */
-  keepWhitespace?: boolean;
+  content?: boolean;
+}
+
+const EMOJI = /\p{RGI_Emoji}/gv;
+const JOINERS = new Set(["\u200c", "\u200d"]);
+const SPELLED_WITH_JOINERS =
+  /^[[\p{L}\p{M}]--[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Common}\p{Script=Inherited}]]$/v;
+
+/** Whether the unseen `char` at `index` of `text` is part of its writing (see `content`). */
+function isWriting(text: string, char: string, index: number, emoji: [number, number][]): boolean {
+  if (char === "\t" || char === "\r") return true;
+  if (emoji.some(([start, end]) => index > start && index < end)) return true;
+  return (
+    JOINERS.has(char) &&
+    SPELLED_WITH_JOINERS.test(text[index - 1] ?? "") &&
+    SPELLED_WITH_JOINERS.test(text[index + 1] ?? "")
+  );
 }
 
 /** Each unseen character of `text`, with its index and escape; newlines are never unseen. */
-function* unseenChars(text: string, { keepWhitespace = false }: RevealOptions) {
+function* unseenChars(text: string, { content = false }: RevealOptions) {
+  const emoji: [number, number][] = content
+    ? [...text.matchAll(EMOJI)].map((match) => [match.index, match.index + match[0].length])
+    : [];
   for (const match of text.matchAll(UNSEEN)) {
     const char = match[0];
-    if (char === "\n" || (keepWhitespace && (char === "\t" || char === "\r"))) continue;
+    if (char === "\n" || (content && isWriting(text, char, match.index, emoji))) continue;
     yield { index: match.index, length: char.length, escape: escapeFor(char.codePointAt(0)!) };
   }
 }
@@ -66,12 +91,33 @@ export function revealUnseen(text: string, options: RevealOptions = {}): TextRun
   const runs: TextRun[] = [];
   let start = 0;
   for (const { index, length, escape } of unseenChars(text, options)) {
-    if (index > start) runs.push({ text: text.slice(start, index), unseen: false });
-    runs.push({ text: escape, unseen: true });
+    if (index > start) runs.push(plainRun(text.slice(start, index)));
+    runs.push({ text: escape, unseen: true, length });
     start = index + length;
   }
-  if (start < text.length) runs.push({ text: text.slice(start), unseen: false });
+  if (start < text.length) runs.push(plainRun(text.slice(start)));
   return runs;
+}
+
+const plainRun = (text: string): TextRun => ({ text, unseen: false, length: text.length });
+
+/**
+ * The part of `runs` (of some source text) that stands for the source between offsets `from` and
+ * `to`, so a slice of a text reveals exactly as it does within the whole text.
+ */
+export function sliceRuns(runs: TextRun[], from: number, to: number): TextRun[] {
+  const sliced: TextRun[] = [];
+  let offset = 0;
+  for (const run of runs) {
+    const end = offset + run.length;
+    if (run.unseen) {
+      if (offset >= from && offset < to) sliced.push(run);
+    } else if (end > from && offset < to) {
+      sliced.push(plainRun(run.text.slice(Math.max(from - offset, 0), Math.min(to, end) - offset)));
+    }
+    offset = end;
+  }
+  return sliced;
 }
 
 /**

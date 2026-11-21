@@ -7,7 +7,8 @@ import {
   createInlineChangeBudget,
   rangesByLine,
 } from "@/components/diff/inline-changes";
-import { RevealedText, revealUnseenInHtml } from "@/components/ui/revealed-text";
+import { RevealedRuns, revealUnseenInHtml } from "@/components/ui/revealed-text";
+import { revealUnseen, sliceRuns } from "@/lib/unseen-chars";
 
 /** A line of a hunk as rendered by the hunk-based diff views, optionally syntax-highlighted */
 export type HunkLine = DiffLine & { html?: string };
@@ -102,12 +103,14 @@ interface HunkLineContentProps {
  */
 export function HunkLineContent({ line, highlighted, segments }: HunkLineContentProps) {
   // Characters that would not show (bidirectional controls, zero-width characters) are spelled as
-  // escapes in both layers, so the line reads as its bytes and the layers stay aligned.
+  // escapes in both layers, so the line reads as its bytes and the layers stay aligned. The ghost
+  // slices the whole line's runs, so a span boundary cannot change what is revealed.
+  const runs = revealUnseen(line.content, { content: true });
   const text =
     highlighted && line.html ? (
       <span dangerouslySetInnerHTML={{ __html: revealUnseenInHtml(line.html) }} />
     ) : (
-      <RevealedText text={line.content} keepWhitespace />
+      <RevealedRuns runs={runs} />
     );
 
   if (!segments || segments.length === 0) return text;
@@ -117,16 +120,21 @@ export function HunkLineContent({ line, highlighted, segments }: HunkLineContent
   let cursor = 1;
   for (const [i, span] of segments.entries()) {
     if (span.startColumn > cursor) {
-      ghost.push(ghostText(`${i}-before`, line.content.slice(cursor - 1, span.startColumn - 1)));
+      ghost.push(
+        <RevealedRuns
+          key={`${i}-before`}
+          runs={sliceRuns(runs, cursor - 1, span.startColumn - 1)}
+        />,
+      );
     }
     ghost.push(
       <span key={i} className={className}>
-        {ghostText(i, line.content.slice(span.startColumn - 1, span.endColumn - 1))}
+        <RevealedRuns runs={sliceRuns(runs, span.startColumn - 1, span.endColumn - 1)} />
       </span>,
     );
     cursor = span.endColumn;
   }
-  ghost.push(ghostText("rest", line.content.slice(cursor - 1)));
+  ghost.push(<RevealedRuns key="rest" runs={sliceRuns(runs, cursor - 1, line.content.length)} />);
 
   return (
     <span className="relative">
@@ -139,8 +147,4 @@ export function HunkLineContent({ line, highlighted, segments }: HunkLineContent
       <span className="relative">{text}</span>
     </span>
   );
-}
-
-function ghostText(key: string | number, text: string) {
-  return <RevealedText key={key} text={text} keepWhitespace />;
 }

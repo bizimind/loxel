@@ -43,6 +43,20 @@ describe("HunkLineContent", () => {
   });
 });
 
+describe("HunkLineContent in emoji", () => {
+  test("keeps an emoji sequence whole, even with a change span ending inside it", () => {
+    const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}";
+    const { container } = render(
+      <HunkLineContent
+        line={{ type: "add", content: `x ${family}`, newLineNumber: 1 }}
+        highlighted={false}
+        segments={[{ startColumn: 1, endColumn: 6 }]}
+      />,
+    );
+    expect(escapes(container)).toEqual([]);
+  });
+});
+
 describe("FileDiffHeader", () => {
   test("spells unseen characters in the path as escapes", () => {
     const file: FileDiff = {

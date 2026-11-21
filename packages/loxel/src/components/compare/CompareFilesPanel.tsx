@@ -91,8 +91,8 @@ export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPan
 
     const title = (
       <>
-        <RevealedText text={getDisplayFilename(oldPath)} /> ↔{" "}
-        <RevealedText text={getDisplayFilename(newPath)} />
+        <RevealedText text={getDisplayFilename(oldPath)} content /> ↔{" "}
+        <RevealedText text={getDisplayFilename(newPath)} content />
         {diff.hunks.length === 0 && (
           <span className="text-muted-foreground ml-2 font-normal">Files are identical</span>
         )}
@@ -174,7 +174,7 @@ function toDiffSide(
     modelUri,
     label: (
       <span className="text-foreground ml-1" title={side.filePath}>
-        <RevealedText text={label} />
+        <RevealedText text={label} content />
       </span>
     ),
     ...editableDiffSideProps(side),
