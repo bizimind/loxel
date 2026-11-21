@@ -29,6 +29,7 @@ if [[ "${2:-}" == "--wait" ]]; then
   done
 fi
 
+here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 owner="${repo%/*}"
 name="${repo#*/}"
@@ -50,18 +51,22 @@ clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
     | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
-# last: 100 because unresolved threads are usually the newest.
+# last: 100 because unresolved threads are usually the newest. Threads opened by someone outside the
+# project (see trusted.jq) are listed apart, without their text, and never block the PR.
 # shellcheck disable=SC2016 # GraphQL variables, not shell expansions
 threads_json="$(gh api graphql \
   -f query='query($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
       reviewThreads(last: 100) { nodes { id isResolved isOutdated path line
-        comments(first: 1) { nodes { databaseId url author { login } createdAt body } } } } } } }' \
+        comments(first: 1) { nodes { databaseId url author { login __typename } authorAssociation createdAt body } } } } } } }' \
   -f owner="$owner" -f name="$name" -F number="$pr" |
-  jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)
-      | {threadId: .id, path, line, isOutdated, commentId: .comments.nodes[0].databaseId,
-         author: .comments.nodes[0].author.login, createdAt: .comments.nodes[0].createdAt,
-         url: .comments.nodes[0].url, body: (.comments.nodes[0].body | .[0:300])}]')"
+  jq -L "$here" 'include "trusted";
+    [.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)
+      | .comments.nodes[0] as $c
+      | {threadId: .id, path, line, isOutdated, commentId: $c.databaseId, author: ($c.author.login // "ghost"),
+         createdAt: $c.createdAt, url: $c.url, trusted: ($c | trusted), body: ($c.body | .[0:300])}]
+    | {trusted: map(select(.trusted) | del(.trusted)),
+       outside: map(select(.trusted | not) | {threadId, path, line, author, url})}')"
 
 # With --json, gh pr checks exits 0 even when checks fail or are pending; its one non-zero case is
 # "no checks reported", which prints nothing on stdout — hence the || true and the array guard below.
@@ -123,14 +128,15 @@ jq -n \
        elif $reviewDone and $run.conclusion != "success" and $run.conclusion != "skipped" then "review run \($run.conclusion): rerun it \($run.url)"
        elif $reviewDone and $clean == null then "review of head reported findings: push fixes for a new review, or stop if every finding was declined"
        else empty end),
-      (if ($threads | length) > 0 then "\($threads | length) unresolved review thread(s)" else empty end),
+      (if ($threads.trusted | length) > 0 then "\($threads.trusted | length) unresolved review thread(s)" else empty end),
       ($failed[] | "check \(.bucket): \(.workflow) / \(.name) \(.link)"),
       (if $pr.mergeable == "CONFLICTING" then "conflicts with main" else empty end)
     ]) as $blockers
   | {
       pr: ($pr | {number, url, state, isDraft, headRefName, head: .headRefOid, mergeable, mergeStateStatus}),
       review: {run: $run, cleanComment: $clean, done: $reviewDone},
-      unresolvedThreads: $threads,
+      unresolvedThreads: $threads.trusted,
+      outsideThreads: $threads.outside,
       failedChecks: $failed,
       pendingChecks: ($pending | map("\(.workflow) / \(.name)")),
       blockers: $blockers,

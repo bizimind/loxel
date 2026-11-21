@@ -9,7 +9,8 @@
 # whatever changed while no watch was running. Reports head moves (new commits, or rewritten
 # history from a force-push, amend, rebase or squash), every force-push in the PR timeline, review
 # runs, new threads, replies, comments and reviews, check results, conflicts, the end of a round and
-# verdict changes. Exits when the PR is merged or closed.
+# verdict changes. Comments, replies and reviews count only from the project's own people and review
+# bots (trusted.jq); pr-state.sh lists threads from anyone else apart. Exits when the PR is merged or closed.
 set -euo pipefail
 
 pr="${1:?usage: pr-events.sh <pr> [watcher-id]}"
@@ -41,15 +42,18 @@ activity() {
         timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT, ISSUE_COMMENT, PULL_REQUEST_REVIEW], last: 100) { nodes {
           __typename
           ... on HeadRefForcePushedEvent { id actor { login } beforeCommit { abbreviatedOid } afterCommit { abbreviatedOid } }
-          ... on IssueComment { id author { login } }
-          ... on PullRequestReview { id author { login } state body } } }
-        reviewThreads(last: 100) { nodes { id path line comments(last: 1) { nodes { id author { login } } } } } } } }' \
-    --jq '.data as $d | {viewer: $d.viewer.login,
+          ... on IssueComment { id author { login __typename } authorAssociation }
+          ... on PullRequestReview { id author { login __typename } authorAssociation state body } } }
+        reviewThreads(last: 100) { nodes { id path line
+          root: comments(first: 1) { nodes { author { login __typename } authorAssociation } }
+          comments(last: 1) { nodes { id author { login __typename } authorAssociation } } } } } } }' |
+    jq -L "$here" 'include "trusted"; .data as $d | {viewer: $d.viewer.login,
       items: [$d.repository.pullRequest.timelineItems.nodes[] | {
-        id, type: .__typename, who: ((.actor // .author).login // "unknown"),
+        id, type: .__typename, who: ((.actor // .author).login // "unknown"), trusted: trusted,
         before: .beforeCommit.abbreviatedOid, after: .afterCommit.abbreviatedOid, state, body}],
-      threads: [$d.repository.pullRequest.reviewThreads.nodes[]
-        | {id, path, line, lastComment: .comments.nodes[0].id, who: (.comments.nodes[0].author.login // "unknown")}]}'
+      threads: [$d.repository.pullRequest.reviewThreads.nodes[] | .comments.nodes[0] as $c
+        | {id, path, line, lastComment: $c.id, who: ($c.author.login // "unknown"),
+           trusted: (($c | trusted) and (.root.nodes[0] | trusted))}]}'
 }
 
 failures=0
@@ -110,10 +114,12 @@ while true; do
         (($o.unresolvedThreads | map(.threadId)) as $seen
           | [$n.unresolvedThreads[] | select(.threadId as $t | $seen | index($t) | not)]
           | if length > 0 then "threads: \(length) new: \(map("\(.path):\(.line // "file")") | join(", "))" else empty end),
-        ($a.threads[] | select(($lastComment[.id] // null) != null and $lastComment[.id] != .lastComment and .who != $a.viewer)
+        ($a.threads[] | select(($lastComment[.id] // null) != null and $lastComment[.id] != .lastComment
+            and .who != $a.viewer and .trusted)
           | "reply by \(.who) on \(.path):\(.line // "file")"),
-        ($new[] | select(.type == "IssueComment" and .who != $a.viewer) | "comment by \(.who)"),
-        ($new[] | select(.type == "PullRequestReview" and .who != $a.viewer and (.state != "COMMENTED" or (.body // "") != ""))
+        ($new[] | select(.type == "IssueComment" and .who != $a.viewer and .trusted) | "comment by \(.who)"),
+        ($new[] | select(.type == "PullRequestReview" and .who != $a.viewer and .trusted
+            and (.state != "COMMENTED" or (.body // "") != ""))
           | "review by \(.who): \(.state | ascii_downcase)"),
         (($o.failedChecks | map(.link)) as $seen
           | $n.failedChecks[] | select(.link as $c | $seen | index($c) | not) | "check failed: \(.workflow) / \(.name)"),

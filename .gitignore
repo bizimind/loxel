@@ -52,3 +52,6 @@ packages/site/.astro/
 # Treemap skill per-use generated inputs (user writes these per invocation)
 .agents/skills/treemap/resources/data.json
 .agents/skills/treemap/resources/config.json
+
+# Personal Claude Code settings
+.claude/settings.local.json

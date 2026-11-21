@@ -62,7 +62,7 @@ cat > "$RESOURCES/config.json" <<'EOF'
 EOF
 
 # 3. Start vite once — leave running.
-bun x vite "$RESOURCES" --port 5173 &
+bun x vite@8.3.8 "$RESOURCES" --port 5173 &
 until curl -fsS http://localhost:5173 >/dev/null 2>&1; do sleep 1; done
 loxel http://localhost:5173
 ```
@@ -80,7 +80,7 @@ You almost never need to restart vite. Never kill it unless you're done.
 If you don't want any file on disk, pipe the JSON into vite's stdin. It's read once at config load and injected inline — no hot-reload path for stdin-driven data.
 
 ```bash
-<your-generator> | bun x vite "$RESOURCES" --port 5173
+<your-generator> | bun x vite@8.3.8 "$RESOURCES" --port 5173
 ```
 
 ## Examples
@@ -174,12 +174,13 @@ Any tool producing `{path: "pkg/subpkg/leaf", size: N}` — the `path` encodes t
 
 ## Customizing the HTML
 
-Only fork when JSON config can't express what you need (custom color scheme, extra panels, different aggregation). **Copy to `/tmp/` — never into the project root:**
+Only fork when JSON config can't express what you need (custom color scheme, extra panels, different aggregation). **Copy to a fresh private temp directory — never into the project root or a fixed `/tmp` path:**
 
 ```bash
-cp -r .agents/skills/treemap/resources /tmp/treemap-custom
-# edit /tmp/treemap-custom/index.html
-bun x vite /tmp/treemap-custom --port 5173
+FORK="$(mktemp -d)/treemap"
+cp -r .agents/skills/treemap/resources "$FORK"
+# edit "$FORK/index.html"
+bun x vite@8.3.8 "$FORK" --port 5173
 ```
 
 ## What this skill doesn't do
@@ -194,8 +195,8 @@ bun x vite /tmp/treemap-custom --port 5173
 Resources are read in place under `.agents/skills/treemap/resources/`. When done:
 
 ```bash
-pkill -f "bun x vite"
+pkill -f "bun x vite@"
 rm .agents/skills/treemap/resources/{data,config}.json
 ```
 
-If you forked into `/tmp/`, remove that directory too.
+If you forked, remove the fork's temp directory too.
