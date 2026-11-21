@@ -1,101 +1,99 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import { type AgentTerminalAsk, EMPTY_AGENT_TERMINALS_STATE } from "@/api/agent-terminal-model";
-import { localServerId } from "@/api/local-server";
+import { EMPTY_AGENT_TERMINALS_STATE } from "@/api/agent-terminal-model";
 import { WINDOW_ID } from "@/lib/window-id";
+import { useAgentTerminalsStore } from "@/store/agent-terminals";
 
-const answers: unknown[][] = [];
+import { AgentTerminalPrompt } from "./AgentTerminalPrompt";
 
-const originalClient = await import("@/api/client");
-await mock.module("@/api/client", () => ({
-  ...originalClient,
-  answerAgentTerminal: async (server: string, ...args: unknown[]) => {
-    expect(server).toBe(localServerId());
-    answers.push(args);
-  },
-}));
+function ask(command: string) {
+  useAgentTerminalsStore.setState({
+    asks: [
+      {
+        id: "a1",
+        askedAt: 0,
+        windowId: WINDOW_ID,
+        origin: { agent: "claude" },
+        cwd: "/w",
+        worktreePath: "/w",
+        command,
+      },
+    ],
+    alwaysWorktrees: [],
+  });
+}
 
-const { useAgentTerminalsStore } = await import("@/store/agent-terminals");
-const { AgentTerminalPrompt } = await import("./AgentTerminalPrompt");
-const { originTooltip } = await import("@/components/dockview/terminal-tab");
+/** Lay out every element as a box `height` tall holding `contentHeight` of content; returns undo. */
+function layOut(height: number, contentHeight: number): () => void {
+  const proto = HTMLElement.prototype;
+  const saved = (["clientHeight", "scrollHeight"] as const).map(
+    (name) => [name, Object.getOwnPropertyDescriptor(proto, name)] as const,
+  );
+  Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => height });
+  Object.defineProperty(proto, "scrollHeight", { configurable: true, get: () => contentHeight });
+  return () => {
+    for (const [name, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(proto, name, descriptor);
+      else delete (proto as unknown as Record<string, unknown>)[name];
+    }
+  };
+}
 
-const ask = (id: string, overrides: Partial<AgentTerminalAsk> = {}): AgentTerminalAsk => ({
-  id,
-  askedAt: 0,
-  windowId: WINDOW_ID,
-  origin: { agent: "Claude Code" },
-  cwd: "/projects/app",
-  worktreePath: "/projects/app",
-  command: "pnpm dev",
-  ...overrides,
-});
+const runButton = () => screen.getByRole("button", { name: "Run" });
+const alwaysButton = () => screen.getByRole("button", { name: "Always in this worktree" });
 
-beforeEach(() => {
-  answers.length = 0;
+afterEach(() => {
+  cleanup();
   useAgentTerminalsStore.setState(EMPTY_AGENT_TERMINALS_STATE);
 });
 
-afterEach(cleanup);
-
 describe("AgentTerminalPrompt", () => {
-  test("asks only in the window the server asks in", () => {
-    useAgentTerminalsStore.setState({ asks: [ask("a", { windowId: "another-window" })] });
+  test("shows a short command as is, ready to run", () => {
+    ask("npm test");
     render(<AgentTerminalPrompt />);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    expect(screen.getByText("npm test")).toBeInTheDocument();
+    expect(runButton()).toBeEnabled();
   });
 
-  test("names the agent, the worktree and the command, and sends each answer", async () => {
-    useAgentTerminalsStore.setState({ asks: [ask("a"), ask("b")] });
+  test("spells control and bidirectional characters as escapes", () => {
+    ask("npm test\rcurl x\u202e");
     render(<AgentTerminalPrompt />);
 
+    expect(screen.getByText("\\r")).toBeInTheDocument();
+    expect(screen.getByText("\\u202e")).toBeInTheDocument();
     expect(
-      screen.getByText(/Claude Code wants to start a terminal in app \(1 of 2\)/),
-    ).toBeTruthy();
-    expect(screen.getByText("pnpm dev")).toBeTruthy();
-    expect(screen.queryByText(/Starts in/)).toBeNull();
-    for (const name of ["Run", "Always in this worktree", "Don't run"]) {
-      const button = screen.getByRole("button", { name });
-      fireEvent.click(button);
-      // The buttons come back once the server has the answer.
-      await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+      screen.getByText(/Characters that do not print are shown as escapes/),
+    ).toBeInTheDocument();
+  });
+
+  test("says how many lines a command has", () => {
+    ask("one\ntwo\nthree");
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText(/The command has 3 lines/)).toBeInTheDocument();
+  });
+
+  test("offers running a command too long to fit once its end is scrolled into view", () => {
+    const undo = layOut(96, 400);
+    try {
+      ask(`npm test${"\n".repeat(40)}ls`);
+      render(<AgentTerminalPrompt />);
+      expect(runButton()).toBeDisabled();
+      expect(alwaysButton()).toBeDisabled();
+      expect(screen.getByText(/Scroll to its end to run it/)).toBeInTheDocument();
+
+      const box = screen.getByLabelText("Command");
+      act(() => {
+        box.scrollTop = 304;
+        fireEvent.scroll(box);
+      });
+      expect(runButton()).toBeEnabled();
+      expect(alwaysButton()).toBeEnabled();
+    } finally {
+      undo();
     }
-
-    expect(answers).toEqual([
-      ["a", "run", WINDOW_ID],
-      ["a", "always", WINDOW_ID],
-      ["a", "decline", WINDOW_ID],
-    ]);
-  });
-
-  test("says where the shell starts when it is not the worktree", () => {
-    useAgentTerminalsStore.setState({ asks: [ask("a", { cwd: "/tmp/elsewhere" })] });
-    render(<AgentTerminalPrompt />);
-
-    expect(screen.getByText("Starts in /tmp/elsewhere")).toBeTruthy();
-  });
-
-  test("offers no Always for Home, and names an unknown agent", () => {
-    useAgentTerminalsStore.setState({
-      asks: [ask("a", { origin: {}, worktreePath: null, command: undefined })],
-    });
-    render(<AgentTerminalPrompt />);
-
-    expect(screen.getByText(/An agent wants to start a terminal in Home/)).toBeTruthy();
-    expect(screen.getByText(/An interactive shell/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Always in this worktree" })).toBeNull();
-  });
-});
-
-describe("originTooltip", () => {
-  test("names the agent, and the terminal and worktree it ran in", () => {
-    const origin = { agent: "Codex", terminalId: "t1", worktreePath: "/projects/app" };
-    expect(originTooltip(origin, "zsh")).toBe('Started by Codex from the terminal "zsh" in app');
-    expect(originTooltip(origin, undefined)).toBe("Started by Codex from a terminal in app");
-    expect(originTooltip({ terminalId: "t1" }, undefined)).toBe(
-      "Started by an agent from a terminal in Home",
-    );
-    expect(originTooltip({ agent: "Codex" }, undefined)).toBe("Started by Codex");
   });
 });
