@@ -51,7 +51,7 @@ Local packaged builds (`build:app`, `build:app:local`) use the patched zip in `b
 ## Updating
 
 - **A new Electron patch release** carries Chromium security fixes, and browser panels load arbitrary sites, so take each one promptly. Dependabot ignores `electron`, so nobody gets a bump that skips these steps:
-  1. Bump the exact version in `package.json` (pnpm's `minimumReleaseAge` accepts a release a week after it is published).
+  1. Bump the exact version in `package.json` (pnpm's `minimumReleaseAge` accepts a release a week after it is published; for an urgent security release, add it to `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` until then).
   2. Rebase the patches onto the new tag: in a checkout of Electron, check out the tag, `git am --3way` the `.patch` files in order, fix any conflict with the patch's doc's rebase notes, and regenerate each, keeping its file name: `git format-patch -1 <commit> --stdout --zero-commit --no-signature --no-numbered > <nnnn>-<name>.patch`. Update a doc whose files or notes changed.
   3. Build with `--testing`, run each patch's specs, and check the behavior below in a hidden demo ([ELECTRON.md](ELECTRON.md#demo-mode)) on `ELECTRON_OVERRIDE_DIST_PATH`.
   4. Build and upload the release for both architectures, then merge.

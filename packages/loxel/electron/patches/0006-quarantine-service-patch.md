@@ -24,4 +24,4 @@ Chromium marks a download only once it is complete (`DownloadFile::RenameAndAnno
 
 ## Upstream
 
-Reported to Electron privately. Delete the patch once an Electron release carries an equivalent fix.
+No public upstream PR. Delete the patch once an Electron release carries an equivalent fix.

@@ -24,4 +24,4 @@ Electron copies Chrome's permission context into this file now and then (45.4.1 
 
 ## Upstream
 
-Reported to Electron privately. Delete the patch once an Electron release carries an equivalent fix.
+No public upstream PR. Delete the patch once an Electron release carries an equivalent fix.
