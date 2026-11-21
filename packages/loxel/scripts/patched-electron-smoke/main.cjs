@@ -3,23 +3,23 @@
  * each behavior Loxel takes from its patches (docs/PATCHED_ELECTRON.md), and prints one
  * `SMOKE {name, ok, detail}` line per check, then `SMOKE_DONE`. Its windows are never seen: shown
  * inactive at zero opacity and ignoring the mouse, as Loxel's hidden demo does, with no Dock icon.
- * The runner passes the servers' URLs in SMOKE_CONFIG.
+ * The runner passes the servers' URLs and a scratch directory in SMOKE_CONFIG.
  */
 const { execFileSync } = require("node:child_process");
 const events = require("node:events");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const { BrowserWindow, app, session } = require("electron");
 
-/** @type {{ page: string, publicPage: string, lanPage: string | null, target: string, targetCount: string, download: string }} */
+/** @type {{ page: string, publicPage: string, lanPage: string | null, target: string, targetCount: string, download: string, scratch: string }} */
 const config = JSON.parse(process.env.SMOKE_CONFIG ?? "{}");
 /** How long clicking the `<usermedia>` element may take to reach the handlers before it fails. */
 const NO_ANSWER_MS = 10_000;
 const CLICK_INTERVAL_MS = 250;
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "loxel-patched-electron-smoke-"));
+/** The runner's scratch directory; it removes it once this app has exited. */
+const { scratch } = config;
 
 function report(name, ok, detail = "") {
   console.log(`SMOKE ${JSON.stringify({ name, ok, detail })}`);
@@ -380,7 +380,8 @@ const checks = [
 ];
 
 if (process.platform === "darwin") app.setActivationPolicy("accessory");
-// Persistent sessions keep their data in the scratch directory, removed at the end.
+// Persistent sessions keep their data in the scratch directory, which Chromium writes until the
+// process exits; the runner removes it then.
 app.setPath("userData", path.join(scratch, "user-data"));
 // Each check closes its windows; the app quits once all checks are done, not before.
 app.on("window-all-closed", () => {});
@@ -393,7 +394,6 @@ app.whenReady().then(async () => {
       report(check.name, false, error instanceof Error ? error.message : String(error));
     }
   }
-  fs.rmSync(scratch, { recursive: true, force: true });
   console.log("SMOKE_DONE");
   app.quit();
 });

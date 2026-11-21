@@ -11,6 +11,7 @@
  * it needs a patched build.
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -72,7 +73,10 @@ function lanAddress(): string | null {
 }
 
 const lan = lanAddress();
+/** The app's files and Chromium profile; removed once the app has exited, as Chromium writes it until then. */
+const scratch = mkdtempSync(path.join(os.tmpdir(), "loxel-patched-electron-smoke-"));
 const config = {
+  scratch,
   page: `http://localhost:${dev.port}/`,
   publicPage: `http://127.0.0.1:${publicSite.port}/`,
   lanPage: lan ? `http://${lan}:${dev.port}/` : null,
@@ -123,6 +127,7 @@ for await (const chunk of app.stdout.pipeThrough(new TextDecoderStream())) {
   }
 }
 await app.exited;
+rmSync(scratch, { recursive: true, force: true });
 clearTimeout(hung);
 for (const server of [target, dev, publicSite]) void server.stop(true);
 
