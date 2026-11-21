@@ -83,7 +83,9 @@ const TRUSTED_QUERY_DRIVER_WITHOUT_STUBS = [
  * `-Xclang` before them and their values too. `-Xclang` itself stays, since real builds rely on it
  * (CMake's precompiled headers do). `-Xpreprocessor`, `-Wp,` and `/clang:` also pass flags on, and
  * a `--config` file adds them. clangd passes GCC spec files on to the compiler it asks for include
- * paths, and a spec file can name programs for that compiler to run.
+ * paths, and a spec file can name programs for that compiler to run. Their entries are prefixes, which
+ * clangd matches as text in every position, `-Xclang` included; an option name would only match
+ * where clang's driver reads it. A separate value left behind is no longer passed on.
  */
 const REMOVED_COMPILE_FLAGS = [
   "--serialize-diagnostics",
@@ -97,9 +99,8 @@ const REMOVED_COMPILE_FLAGS = [
   "-Xpreprocessor",
   "-Wp,*",
   "/clang:*",
-  "--specs=*",
-  "-specs=*",
-  "--specs",
+  "--specs*",
+  "-specs*",
   // Not output flags: clangd never finishes a file compiled with these, and ignores SIGTERM then.
   "-traditional-cpp",
   "-fincremental-extensions",

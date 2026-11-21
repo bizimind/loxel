@@ -999,7 +999,17 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
           const compiler = join(compilers, "gcc");
           await writeFile(compiler, `#!/bin/sh\necho "$*" >> "${log}"\n`);
           await chmod(compiler, 0o755);
-          const specs = ["--specs=a", "-specs=b", "--specs", "c", "-specs", "d"];
+          const specs = [
+            "--specs=a",
+            "-specs=b",
+            "--specs",
+            "c",
+            "-specs",
+            "d",
+            "-Xclang",
+            "--specs",
+            "-Ie",
+          ];
           const file = await writeProject(root, compiler, specs);
           await runWith(compilers, root, file);
           const args = await readFile(log, "utf8");
