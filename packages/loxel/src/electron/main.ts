@@ -25,6 +25,7 @@ import {
 } from "../lib/quit-terminals";
 import {
   APP_ORIGIN,
+  APP_URL,
   SERVER_PORT,
   SERVER_URL,
   serverAuthorization,
@@ -39,7 +40,6 @@ import { getDek, initDek } from "./dek";
 import {
   DEMO_INSTANCE,
   DEMO_WINDOW_SIZE,
-  DEV_RENDERER_URL,
   IS_DEMO,
   IS_DEMO_HIDDEN,
   IS_DEV,
@@ -86,6 +86,7 @@ import {
 } from "../parent-channel-protocol";
 import { persistedWhenQuitting } from "../server/persisted-settings";
 import { isHttpUrl } from "../url-utils";
+import { guardAppNavigation } from "./app-navigation";
 import {
   installAppUpdater,
   isInstallingUpdate,
@@ -162,6 +163,15 @@ import { handleWebviewWindowOpens } from "./webview-new-tabs";
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
   BrowserWindow.getFocusedWindow()?.webContents.send(OPEN_IN_BROWSER_TAB, url);
+}
+
+/** Open a web link outside Loxel's windows: the system browser, or a browser panel with Cmd held. */
+function openLinkOutside(url: string): void {
+  if (metaKeyHeld) {
+    openInBrowserTab(url);
+  } else {
+    void shell.openExternal(url);
+  }
 }
 
 const VersionSchema = z.object({
@@ -435,64 +445,7 @@ async function createWindow(): Promise<BrowserWindow> {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, false);
   });
 
-  const loadUrl = DEV_RENDERER_URL ?? SERVER_URL;
-  win.loadURL(loadUrl);
-
-  // Intercept external link clicks at the document level. Chromium 134+ blocks
-  // <a target="_blank" rel="noopener"> before setWindowOpenHandler fires when the
-  // opener can't be cleared ("Opening link blocked as opener could not be cleared").
-  // Converting clicks into same-window navigations routes them through will-navigate
-  // which opens them in the system browser.
-  win.webContents.on("dom-ready", () => {
-    win.webContents.executeJavaScript(`
-      if (!window.__externalLinkHandlerInstalled) {
-        window.__externalLinkHandlerInstalled = true;
-        document.addEventListener('click', (e) => {
-          const link = e.target.closest('a[href]');
-          if (!link) return;
-          try {
-            const url = new URL(link.href, window.location.href);
-            if (url.origin !== window.location.origin) {
-              e.preventDefault();
-              e.stopPropagation();
-              window.location.assign(url.href);
-            }
-          } catch { /* best-effort cleanup */ }
-        }, true);
-      }
-    `);
-  });
-
-  // Open external URLs in system browser (or browser panel tab when Cmd is held).
-  // Allow local URLs as new Electron windows.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isLocal(url)) {
-      return { action: "allow" };
-    }
-    if (isHttpUrl(url)) {
-      if (metaKeyHeld) {
-        openInBrowserTab(url);
-      } else {
-        shell.openExternal(url);
-      }
-    }
-    return { action: "deny" };
-  });
-
-  // Prevent the window from navigating away — open external URLs in the browser instead.
-  // When Cmd is held, open in a browser panel tab instead of the system browser.
-  win.webContents.on("will-navigate", (event, url) => {
-    if (!isLocal(url)) {
-      event.preventDefault();
-      if (isHttpUrl(url)) {
-        if (metaKeyHeld) {
-          openInBrowserTab(url);
-        } else {
-          shell.openExternal(url);
-        }
-      }
-    }
-  });
+  win.loadURL(APP_URL);
 
   return win;
 }
@@ -815,18 +768,19 @@ app.on("web-contents-created", (_, contents) => {
     // popups child windows. Each webview gets its own webContents, so mainWindow's handler
     // doesn't cover them.
     handleWebviewWindowOpens(contents);
+  } else if (contents.getType() === "window" && contents.session === session.defaultSession) {
+    // Loxel's windows, and any other window of their session, stay on the app's page. DevTools
+    // (type "remote") keeps the deny-all handler below.
+    guardAppNavigation(contents, APP_URL, {
+      openAppWindow: openNewWindow,
+      openOutside: openLinkOutside,
+    });
   } else {
     // Never let other web contents create windows: open their links in the system browser
-    // (or a browser panel tab when Cmd is held). createWindow replaces this for app windows, and
-    // webview-new-tabs.ts for browser panel popups.
+    // (or a browser panel tab when Cmd is held). webview-new-tabs.ts replaces this for browser
+    // panel popups.
     contents.setWindowOpenHandler(({ url }) => {
-      if (!isLocal(url) && isHttpUrl(url)) {
-        if (metaKeyHeld) {
-          openInBrowserTab(url);
-        } else {
-          shell.openExternal(url);
-        }
-      }
+      if (!isLocal(url) && isHttpUrl(url)) openLinkOutside(url);
       return { action: "deny" };
     });
   }

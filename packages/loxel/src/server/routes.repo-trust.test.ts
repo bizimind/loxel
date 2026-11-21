@@ -50,6 +50,31 @@ describe("/api/file-raw", () => {
   });
 });
 
+describe("/api/media-frame", () => {
+  async function frameCsp(name: string, content: string): Promise<string[]> {
+    await Bun.write(join(wt, name), content);
+    const url = `http://x/api/media-frame?path=${name}&wt=${encodeURIComponent(wt)}`;
+    const response = await handleRequest(new Request(url), ctx);
+    expect(response.ok).toBe(true);
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    return (response.headers.get("Content-Security-Policy") ?? "").split("; ");
+  }
+
+  test("an SVG's page is sandboxed into an opaque origin wherever it loads", async () => {
+    const csp = await frameCsp("drawing.svg", '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    expect(csp).toContain("sandbox allow-scripts");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("base-uri 'none'");
+  });
+
+  test("an image's and a video's pages are sandboxed and keep the server's origin", async () => {
+    for (const name of ["photo.png", "clip.mp4"]) {
+      const csp = await frameCsp(name, "");
+      expect(csp).toContain("sandbox allow-scripts allow-same-origin");
+    }
+  });
+});
+
 describe("/api/repo-trust", () => {
   test("reads, sets and revokes a worktree's repository trust", async () => {
     const read = await handleRequest(
