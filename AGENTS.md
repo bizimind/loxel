@@ -28,7 +28,7 @@ pnpm install                                   # Install all dependencies
 pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
-pnpm run lint                                  # Run oxlint
+pnpm run lint                                  # Run oxlint and check every compile uses bun-compile
 pnpm run lint:fix                              # Fix lint issues
 pnpm run fmt                                   # Format with oxfmt
 pnpm run fmt:check                             # Check formatting
@@ -96,7 +96,7 @@ Each package README is the authoritative doc for that package; this list only or
 
 **Privacy and Licensing**: Loxel never collects data about users without consent and does not require an account today. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
 
-**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
+**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`, always through cli-common's `bun-compile` helper so the binaries never read `bunfig.toml` or `.env` from the directory they run in (`pnpm run lint` rejects a `--compile` anywhere else). Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
 ## Bun Guidelines
 

@@ -8,6 +8,8 @@
 
 import path from "node:path";
 
+import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
+
 import { resolvePackage } from "./resolve-package";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
@@ -68,10 +70,10 @@ console.log("Step 2: Compiling to standalone binary...");
 const intermediateJs = path.join(OUTDIR, ".yaml-lsp-intermediate/server.js");
 const outfile = path.join(OUTDIR, "yaml-language-server");
 
-const compile = Bun.spawn(["bun", "build", intermediateJs, "--compile", "--outfile", outfile], {
-  stdout: "inherit",
-  stderr: "inherit",
-});
+const compile = Bun.spawn(
+  ["bun", "build", intermediateJs, ...BUN_COMPILE_FLAGS, "--outfile", outfile],
+  { stdout: "inherit", stderr: "inherit" },
+);
 const exitCode = await compile.exited;
 if (exitCode !== 0) {
   console.error("Compile step failed");

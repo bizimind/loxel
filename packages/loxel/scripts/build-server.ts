@@ -9,6 +9,7 @@
  */
 import path from "node:path";
 
+import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
 import { $ } from "bun";
 
 import { computeHostBuildId } from "../src/terminal-host/host-build-id";
@@ -29,10 +30,10 @@ const define = `LOXEL_TERMINAL_HOST_BUILD_ID=${JSON.stringify(hostBuildId)}`;
 console.log(`[build-server] terminal host build ${hostBuildId}`);
 
 if (mode === "compile") {
-  await $`bun build ${SERVER_ENTRIES} --compile --define ${define} --outfile build/loxel-server`.cwd(
+  await $`bun build ${SERVER_ENTRIES} ${BUN_COMPILE_FLAGS} --define ${define} --outfile build/loxel-server`.cwd(
     packageRoot,
   );
-  await $`bun build ${HOST_ENTRY} --compile --define ${define} --outfile ${`build/${TERMINAL_HOST_BINARY}`}`.cwd(
+  await $`bun build ${HOST_ENTRY} ${BUN_COMPILE_FLAGS} --define ${define} --outfile ${`build/${TERMINAL_HOST_BINARY}`}`.cwd(
     packageRoot,
   );
 } else {

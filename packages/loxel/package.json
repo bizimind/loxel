@@ -24,7 +24,7 @@
     "build:app:local": "pnpm run build:server:standalone && ELECTRON=1 vite build && bun scripts/build-app.ts --mac --dir --arm64",
     "build:language-servers": "bun scripts/language-server-binaries.ts build",
     "pin-hashes": "bun scripts/pin-hashes.ts",
-    "build:cli": "bun build src/cli.ts --compile --outfile build/loxel",
+    "build:cli": "bun-compile src/cli.ts --outfile build/loxel",
     "build:server:standalone": "bun scripts/build-server.ts compile && pnpm run build:cli && pnpm run build:language-servers",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
@@ -110,6 +110,7 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "@bizimind/cli-common": "workspace:*",
     "@happy-dom/global-registrator": "^21.0.4",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.5",
