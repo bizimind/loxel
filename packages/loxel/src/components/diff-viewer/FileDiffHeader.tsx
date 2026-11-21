@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
+import { RevealedText } from "@/components/ui/revealed-text";
 import { FileTypeIcon } from "@/lib/file-icons";
 
 /** Header title naming both paths of a renamed or copied file; undefined for the plain path. */
@@ -17,7 +18,13 @@ export function FileDiffHeader({ file, title }: { file: FileDiff; title?: ReactN
   return (
     <div className="bg-muted/50 border-border sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs">
       <FileTypeIcon filename={path.split("/").pop() ?? ""} className="size-3.5" />
-      <span className="text-foreground min-w-0 truncate font-medium">{title ?? path}</span>
+      <span className="text-foreground min-w-0 truncate font-medium">
+        {typeof title === "string" ? (
+          <RevealedText text={title} />
+        ) : (
+          (title ?? <RevealedText text={path} />)
+        )}
+      </span>
       <span className="text-muted-foreground ml-auto flex gap-2 text-xs font-medium dark:text-[10px] dark:font-normal">
         {file.additions > 0 && <span className="text-diff-add-text">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-diff-del-text">-{file.deletions}</span>}

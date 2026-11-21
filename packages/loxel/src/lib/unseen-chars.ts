@@ -44,24 +44,50 @@ function escapeFor(code: number): string {
   return code <= 0xffff ? `\\u${hex.padStart(4, "0")}` : `\\u{${hex}}`;
 }
 
+export interface RevealOptions {
+  /**
+   * Leave tabs and carriage returns as they are, for code, where they are indentation and line
+   * endings that display as whitespace rather than hide anything.
+   */
+  keepWhitespace?: boolean;
+}
+
 /** Each unseen character of `text`, with its index and escape; newlines are never unseen. */
-function* unseenChars(text: string) {
+function* unseenChars(text: string, { keepWhitespace = false }: RevealOptions) {
   for (const match of text.matchAll(UNSEEN)) {
     const char = match[0];
-    if (char === "\n") continue;
+    if (char === "\n" || (keepWhitespace && (char === "\t" || char === "\r"))) continue;
     yield { index: match.index, length: char.length, escape: escapeFor(char.codePointAt(0)!) };
   }
 }
 
 /** Split `text` into runs, spelling each unseen character as an escape of its own. */
-export function revealUnseen(text: string): TextRun[] {
+export function revealUnseen(text: string, options: RevealOptions = {}): TextRun[] {
   const runs: TextRun[] = [];
   let start = 0;
-  for (const { index, length, escape } of unseenChars(text)) {
+  for (const { index, length, escape } of unseenChars(text, options)) {
     if (index > start) runs.push({ text: text.slice(start, index), unseen: false });
     runs.push({ text: escape, unseen: true });
     start = index + length;
   }
   if (start < text.length) runs.push({ text: text.slice(start), unseen: false });
   return runs;
+}
+
+/**
+ * Replace each unseen character of `text` with `render(escape)`: for markup such as highlighted
+ * code, whose attributes hold no text of the source.
+ */
+export function replaceUnseen(
+  text: string,
+  render: (escape: string) => string,
+  options: RevealOptions = {},
+): string {
+  let result = "";
+  let start = 0;
+  for (const { index, length, escape } of unseenChars(text, options)) {
+    result += text.slice(start, index) + render(escape);
+    start = index + length;
+  }
+  return result + text.slice(start);
 }
