@@ -542,6 +542,12 @@ describe("cargoConfigFor", () => {
     process.env.CARGO_HOME = join(home, ".cargo");
     try {
       expect(cargoConfigFor(join(home, "crate/Cargo.toml"))).toBeNull();
+      // Named through a link, as a home on another volume often is.
+      const link = join(await makeDir("rust-link-"), "home");
+      await symlink(home, link);
+      process.env.CARGO_HOME = join(link, ".cargo");
+      expect(cargoConfigFor(join(link, "crate/Cargo.toml"))).toBeNull();
+      expect(cargoConfigFor(join(home, "crate/Cargo.toml"))).toBeNull();
     } finally {
       if (CARGO_HOME === undefined) delete process.env.CARGO_HOME;
       else process.env.CARGO_HOME = CARGO_HOME;

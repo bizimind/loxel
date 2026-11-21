@@ -84,10 +84,13 @@ export function isCargoConfigPath(file: string): boolean {
  */
 export function cargoConfigFor(manifest: string): string | null {
   const env = buildSpawnEnv();
-  const cargoHome = path.resolve(env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo"));
+  // Both sides by real path, so a home reached through a link is still recognized.
+  const cargoHomePath = env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo");
+  const cargoHome = realPathOf(cargoHomePath) ?? path.resolve(cargoHomePath);
   const start = path.dirname(manifest);
   for (let dir = realPathOf(start) ?? path.resolve(start); ; dir = path.dirname(dir)) {
-    if (path.join(dir, ".cargo") !== cargoHome) {
+    const cargoDir = path.join(dir, ".cargo");
+    if ((realPathOf(cargoDir) ?? cargoDir) !== cargoHome) {
       for (const name of CARGO_CONFIG_NAMES) {
         const config = path.join(dir, ".cargo", name);
         if (entryExists(config)) return config;
