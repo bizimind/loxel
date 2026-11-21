@@ -48,40 +48,59 @@ function escapeFor(code: number): string {
 
 export interface RevealOptions {
   /**
-   * The text is content (code, file names) rather than a command, so what is ordinary writing in
-   * it stays as it is: tabs and carriage returns (indentation and line endings), the joiners and
-   * selectors inside an emoji sequence (a family emoji, a check mark with its emoji presentation
-   * selector), and a zero-width joiner or non-joiner
-   * between letters of a script other than Latin, Greek or Cyrillic, where it is spelling (Persian,
-   * Hindi). Bidirectional controls, and joiners anywhere else, are still revealed.
+   * What the text is, when it is not a command: a name (a file path) or code. Then what is
+   * ordinary writing stays as it is: the joiners and selectors inside an emoji sequence (a family
+   * emoji, a check mark with its emoji presentation selector), and a zero-width joiner or
+   * non-joiner between letters of a script spelled with it (`SPELLED_WITH_JOINERS`, such as
+   * Persian or Hindi). Code also keeps tabs and carriage returns, its indentation and line
+   * endings. Bidirectional controls, and joiners anywhere else, are still revealed.
    */
-  content?: boolean;
+  as?: "code" | "name";
 }
 
 const EMOJI = /\p{RGI_Emoji}/gv;
 const JOINERS = new Set(["\u200c", "\u200d"]);
-const SPELLED_WITH_JOINERS =
-  /^[[\p{L}\p{M}]--[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Common}\p{Script=Inherited}]]$/v;
 
-/** Whether the unseen `char` at `index` of `text` is part of its writing (see `content`). */
-function isWriting(text: string, char: string, index: number, emoji: [number, number][]): boolean {
-  if (char === "\t" || char === "\r") return true;
-  if (emoji.some(([start, end]) => index > start && index < end)) return true;
-  return (
+/**
+ * Characters of the scripts whose words are spelled with a zero-width joiner or non-joiner: the
+ * cursive-joining ones, where it selects a letter's joining form, and the Brahmic ones, where a
+ * joiner after a virama chooses between a conjunct and a half-form. Script extensions include the
+ * marks those scripts share, such as Arabic vowel signs.
+ */
+const SPELLED_WITH_JOINERS =
+  /^[\p{Script_Extensions=Arabic}\p{Script_Extensions=Syriac}\p{Script_Extensions=Thaana}\p{Script_Extensions=Nko}\p{Script_Extensions=Mongolian}\p{Script_Extensions=Adlam}\p{Script_Extensions=Devanagari}\p{Script_Extensions=Bengali}\p{Script_Extensions=Gurmukhi}\p{Script_Extensions=Gujarati}\p{Script_Extensions=Oriya}\p{Script_Extensions=Tamil}\p{Script_Extensions=Telugu}\p{Script_Extensions=Kannada}\p{Script_Extensions=Malayalam}\p{Script_Extensions=Sinhala}\p{Script_Extensions=Myanmar}\p{Script_Extensions=Khmer}\p{Script_Extensions=Tibetan}]$/u;
+
+/** Whether the unseen `char` at `index` of `text` is part of its writing (see `as`). */
+function isWriting(
+  text: string,
+  char: string,
+  index: number,
+  { as, emoji }: { as: "code" | "name"; emoji: () => [number, number][] },
+): boolean {
+  if (char === "\t" || char === "\r") return as === "code";
+  if (
     JOINERS.has(char) &&
     SPELLED_WITH_JOINERS.test(text[index - 1] ?? "") &&
     SPELLED_WITH_JOINERS.test(text[index + 1] ?? "")
-  );
+  ) {
+    return true;
+  }
+  return emoji().some(([start, end]) => index > start && index < end);
 }
 
 /** Each unseen character of `text`, with its index and escape; newlines are never unseen. */
-function* unseenChars(text: string, { content = false }: RevealOptions) {
-  const emoji: [number, number][] = content
-    ? [...text.matchAll(EMOJI)].map((match) => [match.index, match.index + match[0].length])
-    : [];
+function* unseenChars(text: string, { as }: RevealOptions) {
+  // Emoji are found only once an unseen character turns up: V8 matches `\p{RGI_Emoji}` slowly
+  // over strings that hold any non-Latin-1 character, hundreds of times slower than `UNSEEN`.
+  let ranges: [number, number][] | null = null;
+  const emoji = () =>
+    (ranges ??= [...text.matchAll(EMOJI)].map((match) => [
+      match.index,
+      match.index + match[0].length,
+    ]));
   for (const match of text.matchAll(UNSEEN)) {
     const char = match[0];
-    if (char === "\n" || (content && isWriting(text, char, match.index, emoji))) continue;
+    if (char === "\n" || (as && isWriting(text, char, match.index, { as, emoji }))) continue;
     yield { index: match.index, length: char.length, escape: escapeFor(char.codePointAt(0)!) };
   }
 }
@@ -118,22 +137,4 @@ export function sliceRuns(runs: TextRun[], from: number, to: number): TextRun[] 
     offset = end;
   }
   return sliced;
-}
-
-/**
- * Replace each unseen character of `text` with `render(escape)`: for markup such as highlighted
- * code, whose attributes hold no text of the source.
- */
-export function replaceUnseen(
-  text: string,
-  render: (escape: string) => string,
-  options: RevealOptions = {},
-): string {
-  let result = "";
-  let start = 0;
-  for (const { index, length, escape } of unseenChars(text, options)) {
-    result += text.slice(start, index) + render(escape);
-    start = index + length;
-  }
-  return result + text.slice(start);
 }

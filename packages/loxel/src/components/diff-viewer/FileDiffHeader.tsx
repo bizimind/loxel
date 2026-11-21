@@ -20,9 +20,9 @@ export function FileDiffHeader({ file, title }: { file: FileDiff; title?: ReactN
       <FileTypeIcon filename={path.split("/").pop() ?? ""} className="size-3.5" />
       <span className="text-foreground min-w-0 truncate font-medium">
         {typeof title === "string" ? (
-          <RevealedText text={title} content />
+          <RevealedText text={title} as="name" />
         ) : (
-          (title ?? <RevealedText text={path} content />)
+          (title ?? <RevealedText text={path} as="name" />)
         )}
       </span>
       <span className="text-muted-foreground ml-auto flex gap-2 text-xs font-medium dark:text-[10px] dark:font-normal">

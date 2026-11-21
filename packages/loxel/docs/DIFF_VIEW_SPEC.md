@@ -282,12 +282,12 @@ There is no fixed word or character granularity. Each modification block (a run 
 ### Rendering
 
 - Side-by-side (Monaco) view: `inlineClassName` decorations on the text layer, above the whole-line background.
-- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so no highlight markup enters the real layer, whose HTML is rewritten only to spell unseen characters as escapes (which the copy spells the same way). Tabs align only when the line content is the first content of its table cell, because the absolutely positioned copy measures tab stops from its own edge; the `+`/`-` markers therefore live in their own cell.
+- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so no highlight markup enters the real layer, whose HTML is rewritten only to put the source line's escapes for unseen characters in place, the same escapes the copy spells. Tabs align only when the line content is the first content of its table cell, because the absolutely positioned copy measures tab stops from its own edge; the `+`/`-` markers therefore live in their own cell.
 
 ### Key Files
 
 - `src/components/diff/inline-changes.ts` - Adapter over Monaco's `DefaultLinesDiffComputer` producing per-side ranges
-- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views; both layers spell unseen characters as escapes (`RevealedText`, `revealUnseenInHtml` in `src/components/ui/revealed-text.tsx`), so they stay aligned
+- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views. It reveals the line's unseen characters once, from the source line (`revealUnseen` in `src/lib/unseen-chars.ts`). The ghost renders slices of those runs (`sliceRuns`, `RevealedRuns`), and the highlighted HTML gets the same escapes by source offset (`revealUnseenInHtml` in `src/components/ui/revealed-text.tsx`), so both layers spell the same escapes and stay aligned
 
 ---
 

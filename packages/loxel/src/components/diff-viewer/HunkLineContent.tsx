@@ -94,7 +94,8 @@ interface HunkLineContentProps {
  * The highlights are drawn by a transparent copy of the line positioned underneath the real
  * (possibly syntax-highlighted) text. Both layers share the same font and whitespace handling,
  * so span positions match exactly, and no highlight markup enters the highlighter's HTML; it is
- * rewritten only to spell unseen characters as escapes, which the copy spells the same way.
+ * rewritten only to put in the source line's escapes for unseen characters, which the copy spells
+ * from the same runs.
  *
  * Tab alignment constraint: the absolutely positioned ghost is its own block container, so its
  * tab stops are measured from its own left edge, while the real text's tab stops are measured
@@ -103,15 +104,16 @@ interface HunkLineContentProps {
  */
 export function HunkLineContent({ line, highlighted, segments }: HunkLineContentProps) {
   // Characters that would not show (bidirectional controls, zero-width characters) are spelled as
-  // escapes in both layers, so the line reads as its bytes and the layers stay aligned. The ghost
-  // slices the whole line's runs, so a span boundary cannot change what is revealed.
-  const runs = revealUnseen(line.content, { content: true });
-  const text =
-    highlighted && line.html ? (
-      <span dangerouslySetInnerHTML={{ __html: revealUnseenInHtml(line.html) }} />
-    ) : (
-      <RevealedRuns runs={runs} />
-    );
+  // escapes in both layers, so the line reads as its bytes and the layers stay aligned. Both take
+  // them from the source line's runs: the highlighted markup gets them by source offset, and the
+  // ghost slices them, so neither a token nor a span boundary can change what is revealed.
+  const runs = revealUnseen(line.content, { as: "code" });
+  const html = highlighted ? line.html : undefined;
+  const text = html ? (
+    <span dangerouslySetInnerHTML={{ __html: revealUnseenInHtml(html, runs) }} />
+  ) : (
+    <RevealedRuns runs={runs} />
+  );
 
   if (!segments || segments.length === 0) return text;
 

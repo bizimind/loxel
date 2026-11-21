@@ -43,6 +43,41 @@ describe("HunkLineContent", () => {
   });
 });
 
+describe("HunkLineContent in highlighted lines", () => {
+  test("reveals what the source line reveals, however the markup splits the text", () => {
+    const persian = "\u0645\u06cc\u200c\u062e\u0648\u0627\u0646\u0645";
+    const { container } = render(
+      <HunkLineContent
+        line={{
+          type: "add",
+          content: `${persian}()`,
+          html: "<span>\u0645\u06cc</span><span>\u200c</span><span>\u062e\u0648\u0627\u0646\u0645</span><span>()</span>",
+          newLineNumber: 1,
+        }}
+        highlighted
+        segments={[{ startColumn: 1, endColumn: 3 }]}
+      />,
+    );
+    expect(escapes(container)).toEqual([]);
+  });
+
+  test("places escapes by source offset across tags and entities", () => {
+    const { container } = render(
+      <HunkLineContent
+        line={{
+          type: "add",
+          content: "a<b\u202ec",
+          html: "<span>a&lt;</span><span>b\u202ec</span>",
+          newLineNumber: 1,
+        }}
+        highlighted
+      />,
+    );
+    expect(escapes(container)).toEqual(["\\u202e"]);
+    expect(container.textContent).toBe("a<b\\u202ec");
+  });
+});
+
 describe("HunkLineContent in emoji", () => {
   test("keeps an emoji sequence whole, even with a change span ending inside it", () => {
     const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}";
@@ -58,6 +93,20 @@ describe("HunkLineContent in emoji", () => {
 });
 
 describe("FileDiffHeader", () => {
+  test("spells a tab in the path as an escape", () => {
+    const file: FileDiff = {
+      oldPath: "src/a\tb.ts",
+      newPath: "src/a\tb.ts",
+      status: "modified",
+      hunks: [],
+      isBinary: false,
+      additions: 0,
+      deletions: 0,
+    };
+    const { container } = render(<FileDiffHeader file={file} />);
+    expect(escapes(container)).toEqual(["\\t"]);
+  });
+
   test("spells unseen characters in the path as escapes", () => {
     const file: FileDiff = {
       oldPath: "src/a\u202eb.ts",
