@@ -4,7 +4,8 @@
   "description": "Local SQLite-backed structured database SDK with Notion-like schema and view management",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./validation": "./src/validation/schemas.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

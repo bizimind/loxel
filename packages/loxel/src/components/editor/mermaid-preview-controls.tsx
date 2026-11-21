@@ -278,7 +278,10 @@ export function attachMermaidPreviewControls(
     }
     const pressed = press;
     press = null;
-    if (!parts.viewport.contains(event.target) || pressed?.dragged) return;
+    if (!parts.viewport.contains(event.target)) return;
+    // A click on the diagram opens the viewer (or ends a drag), never anything inside the diagram.
+    event.preventDefault();
+    if (pressed?.dragged) return;
     runAction("open", parts);
   };
 

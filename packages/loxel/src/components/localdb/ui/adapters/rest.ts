@@ -7,6 +7,7 @@ import type {
   UpdateResult,
   ViewMeta,
 } from "@bizimind/localdb-sdk";
+import { identifierSchema } from "@bizimind/localdb-sdk/validation";
 
 import { localConnection } from "@/api/local-server";
 import { connectionOf } from "@/api/server-connection";
@@ -25,6 +26,26 @@ export function localDbApiUrl(project: WorktreeRef | null | undefined): string {
 }
 
 /**
+ * Whether `name` can name a table: the SDK's identifier rule. Names come from documents (a
+ * `:::localdb` block's `table:`) and from server responses, and each one is a single segment of a
+ * request path.
+ */
+export function isTableName(name: string): boolean {
+  return identifierSchema.safeParse(name).success;
+}
+
+/** The path of table `name`'s routes, followed by `rest`. */
+function tablePath(name: string, rest = ""): string {
+  if (!isTableName(name)) throw new Error(`Invalid table name: ${JSON.stringify(name)}`);
+  return `/tables/${encodeURIComponent(name)}${rest}`;
+}
+
+/** One request path segment for a row or view id. */
+function idSegment(id: number): string {
+  return encodeURIComponent(String(id));
+}
+
+/**
  * Creates a DataAdapter that calls a REST API.
  * The server must expose endpoints matching the localdb REST route convention.
  *
@@ -33,17 +54,16 @@ export function localDbApiUrl(project: WorktreeRef | null | undefined): string {
 export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null): DataAdapter {
   const base = baseUrl.replace(/\/$/, "");
   const project = projectRef?.path;
-  const projectSuffix = project ? `?project=${encodeURIComponent(project)}` : "";
 
-  function url(path: string): string {
-    if (!projectSuffix) return `${base}${path}`;
-    // Append project param — handle paths that already have a query string (e.g. /views?tableId=N)
-    const sep = path.includes("?") ? "&" : "?";
-    return `${base}${path}${sep}project=${encodeURIComponent(project!)}`;
+  function url(path: string, query: Record<string, string> = {}): string {
+    const params = new URLSearchParams(query);
+    if (project) params.set("project", project);
+    const search = params.toString();
+    return `${base}${path}${search ? `?${search}` : ""}`;
   }
 
-  async function get<T>(path: string): Promise<T> {
-    const res = await fetch(url(path));
+  async function get<T>(path: string, query?: Record<string, string>): Promise<T> {
+    const res = await fetch(url(path, query));
     if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
     return res.json() as Promise<T>;
   }
@@ -79,33 +99,36 @@ export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null
     if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
   }
 
+  // Table methods are async so an invalid table name rejects like a failed request.
   return {
     queryKey: queryKeys.localdb(projectRef ?? null),
     listTables: () => get<TableMeta[]>("/tables"),
-    getSchema: (tableName) => get<TableSchema>(`/tables/${tableName}/schema`),
+    getSchema: async (tableName) => get<TableSchema>(tablePath(tableName, "/schema")),
 
-    query: <T extends Record<string, unknown>>(tableName: string, opts?: QueryOptions) =>
-      post<Page<T>>(`/tables/${tableName}/query`, opts ?? {}),
+    query: async <T extends Record<string, unknown>>(tableName: string, opts?: QueryOptions) =>
+      post<Page<T>>(tablePath(tableName, "/query"), opts ?? {}),
 
-    get: <T extends Record<string, unknown>>(tableName: string, id: number) =>
-      get<T | null>(`/tables/${tableName}/rows/${id}`),
+    get: async <T extends Record<string, unknown>>(tableName: string, id: number) =>
+      get<T | null>(tablePath(tableName, `/rows/${idSegment(id)}`)),
 
-    insert: <T extends Record<string, unknown>>(tableName: string, row: Partial<T>) =>
-      post<InsertResult<T>>(`/tables/${tableName}/rows`, row),
+    insert: async <T extends Record<string, unknown>>(tableName: string, row: Partial<T>) =>
+      post<InsertResult<T>>(tablePath(tableName, "/rows"), row),
 
-    update: <T extends Record<string, unknown>>(
+    update: async <T extends Record<string, unknown>>(
       tableName: string,
       id: number,
       patchData: Partial<T>,
-    ) => patch<UpdateResult<T>>(`/tables/${tableName}/rows/${id}`, patchData),
+    ) => patch<UpdateResult<T>>(tablePath(tableName, `/rows/${idSegment(id)}`), patchData),
 
-    delete: (tableName, id) => del(`/tables/${tableName}/rows/${id}`),
+    delete: async (tableName, id) => del(tablePath(tableName, `/rows/${idSegment(id)}`)),
 
-    listViews: (tableId) => get<ViewMeta[]>(`/views?tableId=${tableId}`),
+    listViews: (tableId) => get<ViewMeta[]>("/views", { tableId: String(tableId) }),
 
     upsertView: (view) =>
-      view.id ? patch<ViewMeta>(`/views/${view.id}`, view) : post<ViewMeta>("/views", view),
+      view.id
+        ? patch<ViewMeta>(`/views/${idSegment(view.id)}`, view)
+        : post<ViewMeta>("/views", view),
 
-    deleteView: (id) => del(`/views/${id}`),
+    deleteView: (id) => del(`/views/${idSegment(id)}`),
   };
 }

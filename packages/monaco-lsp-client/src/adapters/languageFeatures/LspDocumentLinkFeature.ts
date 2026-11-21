@@ -34,6 +34,14 @@ export class LspDocumentLinkFeature extends Disposable {
   }
 }
 
+/**
+ * Whether a link target is a `command:` URI. A document link names a location to open; Monaco
+ * would run a `command:` target as an editor command instead, so such links are not shown.
+ */
+function isCommandTarget(target: string | undefined): boolean {
+  return target !== undefined && /^\s*command:/i.test(target);
+}
+
 class LspDocumentLinkProvider implements monaco.languages.LinkProvider {
   constructor(
     private readonly _client: LspConnection,
@@ -56,11 +64,13 @@ class LspDocumentLinkProvider implements monaco.languages.LinkProvider {
     }
 
     return {
-      links: result.map((link) => ({
-        range: this._client.bridge.translateBackRange(translated.textDocument, link.range).range,
-        url: link.target,
-        tooltip: link.tooltip,
-      })),
+      links: result
+        .filter((link) => !isCommandTarget(link.target))
+        .map((link) => ({
+          range: this._client.bridge.translateBackRange(translated.textDocument, link.range).range,
+          url: link.target,
+          tooltip: link.tooltip,
+        })),
     };
   }
 
