@@ -34,8 +34,8 @@ function xattr(file, name) {
   }
 }
 
-/** A window nobody sees, in its own session, loaded on `url`. */
-async function hiddenWindow(url, { partition, webPreferences = {} } = {}) {
+/** A window nobody sees, in its own session, loaded on `url`; `beforeLoad` runs before it loads. */
+async function hiddenWindow(url, { partition, webPreferences = {}, beforeLoad = () => {} } = {}) {
   const win = new BrowserWindow({
     show: false,
     opacity: 0,
@@ -45,6 +45,7 @@ async function hiddenWindow(url, { partition, webPreferences = {} } = {}) {
   });
   win.setIgnoreMouseEvents(true);
   win.showInactive();
+  beforeLoad(win);
   await win.loadURL(url);
   return win;
 }
@@ -144,7 +145,8 @@ async function fileSavedBySiteIsQuarantined() {
 }
 
 async function downloadIsQuarantined() {
-  const ses = session.fromPartition("smoke-download");
+  // A persistent session: Chromium leaves an in-memory session's download URLs out of the mark.
+  const ses = session.fromPartition("persist:smoke-download");
   const file = path.join(scratch, "downloaded.bin");
   const item = events.once(ses, "will-download").then(([, downloadItem]) => {
     downloadItem.setSavePath(file);
@@ -258,6 +260,44 @@ async function exitExclusiveAccess() {
   }
 }
 
+async function exitExclusiveAccessInGuest() {
+  // Neither the window nor the guest resizes for fullscreen, so the window stays unseen.
+  const webPreferences = { webviewTag: true, disableHtmlFullscreenWindowResize: true };
+  const html = `<webview webpreferences="disableHtmlFullscreenWindowResize=yes" src="${config.page}" style="width:600px;height:400px"></webview>`;
+  let attached;
+  const win = await hiddenWindow(`data:text/html,${encodeURIComponent(html)}`, {
+    partition: "smoke-guest",
+    webPreferences,
+    beforeLoad: (w) => {
+      attached = events.once(w.webContents, "did-attach-webview");
+    },
+  });
+  try {
+    const [, guest] = await attached;
+    if (guest.isLoading()) await events.once(guest, "did-finish-load");
+    const entered = events.once(guest, "enter-html-full-screen");
+    await guest.mainFrame.executeJavaScript(
+      'new Promise((resolve) => { document.addEventListener("fullscreenchange", resolve, { once: true }); document.body.requestFullscreen(); })',
+      true,
+    );
+    await entered;
+    await guest.executeJavaScript(
+      'window.pageLeft = new Promise((resolve) => document.addEventListener("fullscreenchange", () => resolve(document.fullscreenElement), { once: true })); null',
+    );
+    const leaving = events.once(guest, "leave-html-full-screen");
+    guest.exitExclusiveAccess();
+    await leaving;
+    const element = await guest.executeJavaScript("window.pageLeft");
+    report(
+      "0008 exitExclusiveAccess() on a <webview> guest ends its fullscreen",
+      element === null,
+      `fullscreenElement=${element}`,
+    );
+  } finally {
+    win.destroy();
+  }
+}
+
 async function userMediaElement() {
   const ses = session.fromPartition("smoke-usermedia");
   const events = [];
@@ -335,10 +375,13 @@ const checks = [
   downloadIsQuarantined,
   localNetworkAccess,
   exitExclusiveAccess,
+  exitExclusiveAccessInGuest,
   userMediaElement,
 ];
 
 if (process.platform === "darwin") app.setActivationPolicy("accessory");
+// Persistent sessions keep their data in the scratch directory, removed at the end.
+app.setPath("userData", path.join(scratch, "user-data"));
 // Each check closes its windows; the app quits once all checks are done, not before.
 app.on("window-all-closed", () => {});
 
