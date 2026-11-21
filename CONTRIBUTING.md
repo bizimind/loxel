@@ -6,11 +6,9 @@
 # Install dependencies
 pnpm install
 
-# Set up git hooks (runs automatically via prepare script; rerun after a hook changes)
+# Set up git hooks (runs automatically via prepare script)
 pnpm run prepare
 ```
-
-The committed `.claude/settings.json` pre-approves only lint and read-only commands for Claude Code. Put personal allowances, such as commands that run arbitrary code or download files, in your untracked `.claude/settings.local.json`.
 
 Copy `.env.example` to `.env` and fill in the required values. The repo uses [direnv](https://direnv.net/) to load it (`direnv allow` once); see Environment Setup in [AGENTS.md](AGENTS.md).
 

@@ -3,7 +3,7 @@
   "private": true,
   "license": "FSL-1.1-ALv2",
   "scripts": {
-    "prepare": "scripts/install-hooks.sh",
+    "prepare": "git config core.hooksPath .githooks",
     "lint": "oxlint --ignore-pattern '**/deps/**'",
     "lint:fix": "oxlint --fix --ignore-pattern '**/deps/**'",
     "fmt": "oxfmt --write .",

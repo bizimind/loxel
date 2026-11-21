@@ -15,14 +15,16 @@
 
 import { $ } from "bun";
 
-import { checkRelations, commentText, type IssueRecord, mayCloseInFavorOf } from "./policy.ts";
 import {
-  type DedupeResult,
+  checkRelations,
+  commentText,
+  type IssueRecord,
   MAX_REASONING_LENGTH,
   MAX_UNIQUE_VALUE_LENGTH,
-  parseDedupeResult,
-  type Relation,
-} from "./schema.ts";
+  mayCloseInFavorOf,
+} from "./policy.ts";
+import type { DedupeResult, Relation } from "./schema.ts";
+import { validateDedupeResult } from "./schema.ts";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -189,25 +191,21 @@ async function main() {
 
   const file = Bun.file(`results/${issueNumber}.json`);
   if (!(await file.exists())) {
-    // check-issue.ts failed for this issue; the workflow logged it and moves on.
-    console.log(`No result for #${issueNumber}, skipping`);
-    return;
+    console.error(`Result file not found: results/${issueNumber}.json`);
+    process.exit(1);
   }
 
-  let result: DedupeResult;
+  const result: DedupeResult = await file.json();
   try {
-    result = parseDedupeResult(await file.json());
+    validateDedupeResult(result);
   } catch (err) {
     console.error(`Invalid result format: ${err}`);
     process.exit(1);
   }
 
-  const { accepted, rejected } = checkRelations(result, target, await knownIssues());
+  const accepted = checkRelations(result, target, await knownIssues());
   console.log(`Processing results for issue #${issueNumber}`);
-  console.log(`Acting on ${accepted.length} relation(s), skipping ${rejected.length}`);
-  for (const { relation, reason } of rejected) {
-    console.log(`Skipped #${relation.related_issue} (${relation.relationship}): ${reason}`);
-  }
+  console.log(`Acting on ${accepted.length} of ${result.relations.length} relation(s)`);
 
   if (DRY_RUN) {
     console.log("\n=== DRY RUN MODE - No changes will be made ===\n");

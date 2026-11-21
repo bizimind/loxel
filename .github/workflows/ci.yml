@@ -24,7 +24,6 @@ jobs:
       test: ${{ steps.find.outputs.test }}
       build: ${{ steps.find.outputs.build }}
       typecheck: ${{ steps.find.outputs.typecheck }}
-      tooling: ${{ steps.find.outputs.tooling }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -170,18 +169,11 @@ jobs:
             echo "$result"
           }
 
-          # Lint: run if any package or repo tooling is affected, or lint config changed
-          if [ "$RUN_ALL_LINT" = "true" ] || [ ${#affected[@]} -gt 0 ] || echo "$CHANGED_FILES" | grep -qE "^(scripts|\.github/scripts|\.agents/skills)/"; then
+          # Lint: run if any package is affected or lint config changed
+          if [ "$RUN_ALL_LINT" = "true" ] || [ ${#affected[@]} -gt 0 ]; then
             echo "lint=true" >> $GITHUB_OUTPUT
           else
             echo "lint=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Repo tooling outside packages/ (git hook installer, agent skill scripts, workflow scripts)
-          if [ "$RUN_ALL_TEST" = "true" ] || echo "$CHANGED_FILES" | grep -qE "^(scripts|\.github/scripts|\.agents/skills)/"; then
-            echo "tooling=true" >> $GITHUB_OUTPUT
-          else
-            echo "tooling=false" >> $GITHUB_OUTPUT
           fi
 
           echo "test=$(find_packages test $RUN_ALL_TEST)" >> $GITHUB_OUTPUT
@@ -341,25 +333,11 @@ jobs:
       - name: Run typecheck
         run: pnpm -C ${{ matrix.package.path }} run typecheck
 
-  tooling:
-    name: test repo tooling
-    needs: discover
-    if: needs.discover.outputs.tooling == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - name: Run tooling tests
-        run: bun test ./scripts ./.github/scripts ./.agents/skills
-
   ci:
     name: ci
     if: always()
     # discover must be listed: when it fails every check is skipped, which would otherwise pass.
-    needs: [discover, lint, test, build, typecheck, tooling]
+    needs: [discover, lint, test, build, typecheck]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Verify CI results

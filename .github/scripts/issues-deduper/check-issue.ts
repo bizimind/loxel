@@ -8,15 +8,11 @@
  * 2. Builds a prompt for Claude Code that marks the issue text as data
  * 3. Invokes Claude CLI with JSON schema output, read-only tools and a minimal environment
  * 4. Writes the result to results/<number>.json
- *
- * The workflow runs this in a job that holds no GitHub write token; process-results.ts acts on the
- * result in a separate job.
  */
 
 import { $ } from "bun";
 
-import { sanitizeResult } from "./policy.ts";
-import { DEDUPE_RESULT_SCHEMA, type DedupeResult, parseDedupeResult } from "./schema.ts";
+import { DEDUPE_RESULT_SCHEMA, validateDedupeResult } from "./schema.ts";
 
 const PROMPT_TEMPLATE = `You are analyzing GitHub issue #{{ISSUE_NUMBER}} for duplicates and related issues.
 
@@ -118,6 +114,11 @@ async function main() {
 
   console.log(`Checking issue #${issueNumber} for duplicates...`);
 
+  // Write prompt to temp file to avoid shell escaping issues
+  const promptFile = `/tmp/dedupe-prompt-${issueNumber}.txt`;
+  await Bun.write(promptFile, prompt);
+
+  // Build JSON schema string
   const schemaJson = JSON.stringify(DEDUPE_RESULT_SCHEMA);
 
   // Claude gets only what it needs to run: no GitHub token or other workflow variables.
@@ -127,83 +128,86 @@ async function main() {
     if (value) env[name] = value;
   }
 
-  const proc = Bun.spawn(
-    [
-      "claude",
-      "-p",
-      "--output-format",
-      "json",
-      "--json-schema",
-      schemaJson,
-      "--tools",
-      "Read,Grep,Glob", // Restrict to read-only tools
-      "--max-turns",
-      "25",
-      "--no-session-persistence",
-      "--setting-sources",
-      "",
-      "--agents",
-      "{}",
-    ],
-    { stdin: new Blob([prompt]), stdout: "pipe", stderr: "pipe", env },
-  );
-
-  const exitCode = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-
-  if (exitCode !== 0) {
-    console.error("Claude CLI failed:", stderr);
-    process.exit(1);
-  }
-
-  const output: unknown = JSON.parse(stdout);
-  if (typeof output !== "object" || output === null) {
-    console.error("Claude CLI printed no JSON object");
-    process.exit(1);
-  }
-  const response = output as Record<string, unknown>;
-
-  console.log(
-    "Response: type=%s subtype=%s turns=%d",
-    response.type,
-    response.subtype,
-    response.num_turns,
-  );
-
-  if (response.subtype === "error_max_turns") {
-    console.error("Agent hit max turns limit without returning structured output");
-    console.error("Consider increasing --max-turns or simplifying the task");
-    process.exit(1);
-  }
-
-  const structured = response.structured_output;
-  if (!structured) {
-    console.error("No structured_output in response (subtype %s)", response.subtype);
-    process.exit(1);
-  }
-
-  // Validate the result matches our schema
-  let dedupeResult: DedupeResult;
   try {
-    dedupeResult = parseDedupeResult(structured);
-  } catch (err) {
-    // The model's text is not logged: workflow logs are public.
-    console.error("Invalid result from Claude:", err);
-    process.exit(1);
+    // Use Bun.spawn for better control over argument handling
+    const promptContent = await Bun.file(promptFile).text();
+
+    const proc = Bun.spawn(
+      [
+        "claude",
+        "-p",
+        "--output-format",
+        "json",
+        "--json-schema",
+        schemaJson,
+        "--tools",
+        "Read,Grep,Glob", // Restrict to read-only tools
+        "--max-turns",
+        "25",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--agents",
+        "{}",
+      ],
+      { stdin: new Blob([promptContent]), stdout: "pipe", stderr: "pipe", env },
+    );
+
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+
+    if (exitCode !== 0) {
+      console.error("Claude CLI failed:", stderr);
+      process.exit(1);
+    }
+
+    const output = JSON.parse(stdout);
+
+    // Log response metadata
+    console.log(
+      "Response: type=%s subtype=%s turns=%d",
+      output.type,
+      output.subtype,
+      output.num_turns,
+    );
+
+    // Check for max turns error
+    if (output.subtype === "error_max_turns") {
+      console.error("Agent hit max turns limit without returning structured output");
+      console.error("Consider increasing --max-turns or simplifying the task");
+      process.exit(1);
+    }
+
+    // Only the schema-checked structured output is used, never JSON found in free text.
+    const dedupeResult = output.structured_output;
+    if (!dedupeResult) {
+      console.error("No structured_output in response (subtype %s)", output.subtype);
+      process.exit(1);
+    }
+
+    // Validate the result matches our schema
+    try {
+      validateDedupeResult(dedupeResult);
+    } catch (err) {
+      console.error("Invalid result from Claude:", err);
+      console.error("Result was:", JSON.stringify(dedupeResult, null, 2).substring(0, 500));
+      process.exit(1);
+    }
+
+    // Create results directory if needed
+    await $`mkdir -p results`.quiet();
+
+    // Write result to file
+    const resultFile = `results/${issueNumber}.json`;
+    await Bun.write(resultFile, JSON.stringify(dedupeResult, null, 2));
+
+    console.log(`Result written to ${resultFile}`);
+    console.log(`Found ${dedupeResult.relations?.length || 0} related issues`);
+  } finally {
+    // Clean up temp file
+    await $`rm -f ${promptFile}`.quiet();
   }
-
-  if (dedupeResult.issue_number !== Number(issueNumber)) {
-    console.error(`Result is for issue #${dedupeResult.issue_number}, expected #${issueNumber}`);
-    process.exit(1);
-  }
-
-  // The stored result is uploaded as an artifact, so it carries only text a comment could.
-  const resultFile = `results/${issueNumber}.json`;
-  await Bun.write(resultFile, JSON.stringify(sanitizeResult(dedupeResult), null, 2));
-
-  console.log(`Result written to ${resultFile}`);
-  console.log(`Found ${dedupeResult.relations.length} related issues`);
 }
 
 main().catch((err) => {

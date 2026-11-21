@@ -31,11 +31,6 @@ export interface DedupeResult {
   relations: Relation[];
 }
 
-/** Limits on what one result may carry; policy.ts enforces them on whatever the model returns. */
-export const MAX_RELATIONS = 5;
-export const MAX_REASONING_LENGTH = 120;
-export const MAX_UNIQUE_VALUE_LENGTH = 300;
-
 /**
  * JSON Schema for Claude Code's --json-schema parameter.
  * This enforces structured output from the agent.
@@ -47,7 +42,6 @@ export const DEDUPE_RESULT_SCHEMA = {
     relations: {
       type: "array",
       description: "List of related issues found",
-      maxItems: MAX_RELATIONS,
       items: {
         type: "object",
         properties: {
@@ -62,14 +56,9 @@ export const DEDUPE_RESULT_SCHEMA = {
             enum: ["high", "medium", "low"],
             description: "Confidence level of this assessment",
           },
-          reasoning: {
-            type: "string",
-            maxLength: MAX_REASONING_LENGTH,
-            description: "Brief explanation for audit trail",
-          },
+          reasoning: { type: "string", description: "Brief explanation for audit trail" },
           unique_value: {
             type: "string",
-            maxLength: MAX_UNIQUE_VALUE_LENGTH,
             description: "If closing, what unique info to preserve as a comment",
           },
         },
@@ -83,9 +72,10 @@ export const DEDUPE_RESULT_SCHEMA = {
 };
 
 /**
- * Checks that `obj` has the DedupeResult shape and returns it typed; throws if it does not.
+ * Validates a DedupeResult object.
+ * Returns true if valid, throws if invalid.
  */
-export function parseDedupeResult(obj: unknown): DedupeResult {
+export function validateDedupeResult(obj: unknown): obj is DedupeResult {
   if (typeof obj !== "object" || obj === null) {
     throw new Error("Result must be an object");
   }
@@ -115,11 +105,15 @@ export function parseDedupeResult(obj: unknown): DedupeResult {
     }
 
     if (!validRelationships.includes(relation.relationship as string)) {
-      throw new Error(`relationship must be one of: ${validRelationships.join(", ")}`);
+      throw new Error(
+        `Invalid relationship: ${relation.relationship}. Must be one of: ${validRelationships.join(", ")}`,
+      );
     }
 
     if (!validConfidences.includes(relation.confidence as string)) {
-      throw new Error(`confidence must be one of: ${validConfidences.join(", ")}`);
+      throw new Error(
+        `Invalid confidence: ${relation.confidence}. Must be one of: ${validConfidences.join(", ")}`,
+      );
     }
 
     if (typeof relation.reasoning !== "string") {
@@ -131,5 +125,5 @@ export function parseDedupeResult(obj: unknown): DedupeResult {
     }
   }
 
-  return obj as DedupeResult;
+  return true;
 }

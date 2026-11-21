@@ -36,7 +36,7 @@ wt add feat/part-two --base feat/part-one --meta 'loxel-title=Part Two' -j
 
 ## 3. Write the prompt to a file
 
-Write the prompt with the Write tool (no shell quoting involved), one file per PR in the private directory that `.agents/skills/quick-pr/scripts/handoff-dir.sh` prints, named after the worktree: `<handoff-dir>/quick-pr-feat-code-analysis-loc-json.md`, with `<handoff-dir>` the absolute path the script printed. Never use the shared `/tmp`, where other local users could read or replace the prompt. Keep it a file rather than piping a heredoc: `loxel terminal` types its command into the new shell as keystrokes, so the typed command must stay a one-liner.
+Write the prompt with the Write tool (no shell quoting involved), one file per PR under `/tmp`, named after the worktree: `/tmp/quick-pr-feat-code-analysis-loc-json.md`. Keep it a file rather than piping a heredoc: `loxel terminal` types its command into the new shell as keystrokes, so the typed command must stay a one-liner.
 
 ```markdown
 Feat: add a `--json` flag to `code-analysis loc` that prints its results as JSON.
@@ -60,7 +60,7 @@ Pass a single shell command line so the pipe is typed into the shell as-is:
 ```bash
 loxel terminal --cwd <path from wt add> \
   --title "Claude - Quick PR - Loc JSON" \
-  'cat <handoff-dir>/quick-pr-feat-code-analysis-loc-json.md | claude'
+  'cat /tmp/quick-pr-feat-code-analysis-loc-json.md | claude'
 ```
 
 Title the tab `Claude - Quick PR - <worktree title>`, so the user can tell agent terminals apart from their own. `loxel terminal` returns as soon as the panel opens; it does not wait for claude. Add `--permission-mode` or other `claude` flags after `claude` when the user asks for them.

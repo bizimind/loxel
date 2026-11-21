@@ -7,7 +7,7 @@ argument-hint: "What will the next session be used for?"
 disable-model-invocation: true
 ---
 
-Write a handoff document summarizing the current conversation so a fresh agent can continue the work. Save to `handoff-$(node -e 'process.stdout.write(crypto.randomUUID())').md` in the private directory that `.agents/skills/quick-pr/scripts/handoff-dir.sh` prints.
+Write a handoff document summarizing the current conversation so a fresh agent can continue the work. Save to `/tmp/handoff-$(node -e 'process.stdout.write(crypto.randomUUID())').md`.
 
 Do not duplicate content already captured in other artifacts (PRDs, plans, ADRs, issues, commits, diffs). Reference them by path or URL instead. If relevant skills are used in the conversation include a "suggested skills" section in the document, which suggests skills that the agent should invoke.
 
