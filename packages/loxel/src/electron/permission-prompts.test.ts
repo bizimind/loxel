@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { IpcMainEvent, WebContents } from "electron";
 
+import { exclusiveAccessHeld } from "./exclusive-access-holds";
 import { createPermissionPrompts, createSettingsMirror } from "./permission-prompts";
 
 function fakeHost({ destroyed = false } = {}) {
@@ -48,6 +49,17 @@ describe("createPermissionPrompts", () => {
     expect(sent.slice(1).map((m) => m.channel)).toEqual([channels.withdrawn, channels.request]);
     expect(prompts.answered({ sender: host } as IpcMainEvent, first)).toBeUndefined();
     expect(prompts.answered({ sender: host } as IpcMainEvent, second)).toBe(prompt);
+  });
+
+  test("a page holds neither fullscreen nor the pointer lock while a prompt of its is open", () => {
+    const { host } = fakeHost();
+    const prompts = promptsOf();
+    const prompt = { guestId: 51, host, origin: "https://a.example", asks: "x" };
+    const first = prompts.show(prompt);
+    const second = prompts.reprompt(first, prompt);
+    expect(exclusiveAccessHeld(51)).toBe(true);
+    prompts.withdraw(second);
+    expect(exclusiveAccessHeld(51)).toBe(false);
   });
 
   test("takes answers only from the window the prompt was shown in", () => {

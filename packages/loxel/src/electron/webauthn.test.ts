@@ -11,6 +11,7 @@ import type {
   WebFrameMain,
 } from "electron";
 
+import { exclusiveAccessHeld } from "./exclusive-access-holds";
 import { PASSKEY_QR_HIDE, PASSKEY_QR_SHOW } from "./ipc-channels";
 import {
   APP_BUNDLE_ID,
@@ -285,7 +286,7 @@ describe("installHybridQrCode", () => {
         },
       };
     };
-    installHybridQrCode(browserSession, locate);
+    const { codeHidden } = installHybridQrCode(browserSession, locate);
     const request = (details: Record<string, unknown>) =>
       browserSession.emit("webauthn-hybrid-request", {}, details);
     const get = (f: FakeFrame | null, relyingPartyId = "example.com") =>
@@ -294,7 +295,7 @@ describe("installHybridQrCode", () => {
       browserSession.emit("webauthn-hybrid-request-completed", {}, { relyingPartyId, frame: f });
     const hidden = () => sent.filter((m) => m.channel === PASSKEY_QR_HIDE).map((m) => m.payload);
     const watchers = (webContentsId: number) => goneListeners.get(webContentsId)?.size ?? 0;
-    return { sent, frame, destroy, request, get, completed, hidden, watchers };
+    return { sent, frame, destroy, request, get, completed, hidden, watchers, codeHidden };
   }
 
   test("shows the QR code in the panel that made the request", () => {
@@ -311,6 +312,29 @@ describe("installHybridQrCode", () => {
         },
       },
     ]);
+  });
+
+  test("the panel's page holds neither fullscreen nor the pointer lock while its code shows", () => {
+    const { frame, get, completed } = setup();
+    const first = frame(41);
+    get(first);
+    expect(exclusiveAccessHeld(41)).toBe(true);
+    // A newer request from the same webview takes the older one's place.
+    const second = frame(41);
+    get(second);
+    completed(second);
+    expect(exclusiveAccessHeld(41)).toBe(false);
+  });
+
+  test("the page is no longer held once the user hides the code", () => {
+    const { frame, get, codeHidden, completed, hidden } = setup();
+    const f = frame(42);
+    get(f);
+    codeHidden(42);
+    expect(exclusiveAccessHeld(42)).toBe(false);
+    // The request carries on, and ends as before.
+    completed(f);
+    expect(hidden()).toEqual([42]);
   });
 
   test("ignores frames outside the browser panels and malformed details", () => {

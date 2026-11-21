@@ -2,6 +2,7 @@ import type { Session } from "electron";
 
 import type { requestExternalApp } from "./browser-external-apps";
 import type { checkMediaPermission, requestMediaPermission } from "./browser-media";
+import { exclusiveAccessHeld, noteRefusedWhileHeld } from "./exclusive-access-holds";
 
 type PermissionCheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
 type PermissionRequestHandler = NonNullable<Parameters<Session["setPermissionRequestHandler"]>[0]>;
@@ -14,11 +15,17 @@ export interface PermissionAsker {
   isMainFrame: boolean;
   /** It is in a browser panel's page, not a popup window (or no page, such as a worker). */
   inBrowserPanel: boolean;
+  /**
+   * A Loxel prompt is showing over its page (exclusive-access-holds.ts), which took the screen and
+   * the pointer back for it and keeps them until it closes.
+   */
+  underPrompt: boolean;
 }
 
 /**
  * Permissions that take the screen or the pointer. Only a browser panel can say which site has
- * them (exclusive-access.ts), so popup windows don't get them.
+ * them (exclusive-access.ts), so popup windows don't get them, and a page under a Loxel prompt
+ * doesn't either, or it could cover the prompt again.
  */
 const EXCLUSIVE_ACCESS: ReadonlySet<BrowserPermission> = new Set<BrowserPermission>([
   "fullscreen",
@@ -79,7 +86,9 @@ export function browserPermissionGranted(
   if (permission === "notifications") return false;
   // Links to other apps are only ever requested, and asked about (browser-external-apps.ts).
   if (permission === "openExternal") return false;
-  if (EXCLUSIVE_ACCESS.has(permission) && !asker.inBrowserPanel) return false;
+  if (EXCLUSIVE_ACCESS.has(permission) && (!asker.inBrowserPanel || asker.underPrompt)) {
+    return false;
+  }
   return GRANTED.has(permission);
 }
 
@@ -109,6 +118,7 @@ export function installBrowserPermissions(
     return browserPermissionGranted(permission, {
       isMainFrame: details.isMainFrame,
       inBrowserPanel: webContents?.getType() === "webview",
+      underPrompt: webContents ? exclusiveAccessHeld(webContents.id) : false,
     });
   };
   const request: PermissionRequestHandler = (webContents, permission, callback, details) => {
@@ -127,12 +137,16 @@ export function installBrowserPermissions(
       openExternal(webContents, details, answer);
       return;
     }
-    answer(
-      browserPermissionGranted(permission, {
-        isMainFrame: details.isMainFrame,
-        inBrowserPanel: webContents.getType() === "webview",
-      }),
-    );
+    const asker = {
+      isMainFrame: details.isMainFrame,
+      inBrowserPanel: webContents.getType() === "webview",
+      underPrompt: exclusiveAccessHeld(webContents.id),
+    };
+    const granted = browserPermissionGranted(permission, asker);
+    if (!granted && asker.inBrowserPanel && asker.underPrompt && EXCLUSIVE_ACCESS.has(permission)) {
+      noteRefusedWhileHeld(webContents.id);
+    }
+    answer(granted);
   };
   browserSession.setPermissionCheckHandler(check);
   browserSession.setPermissionRequestHandler(request);

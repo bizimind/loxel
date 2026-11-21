@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { IpcMainEvent, WebContents, WebFrameMain, WebPreferences } from "electron";
 
+import { exclusiveAccessHeld } from "./exclusive-access-holds";
 import {
   JAVASCRIPT_DIALOG_CLOSED,
   JAVASCRIPT_DIALOG_LISTEN,
@@ -264,6 +265,26 @@ describe("page dialogs", () => {
     old.emit("destroyed");
     expect(old.listenerCount("did-navigate")).toBe(0);
     expect(old.listenerCount("destroyed")).toBe(0);
+  });
+});
+
+describe("exclusive access", () => {
+  test("a page holds neither fullscreen nor the pointer lock while its dialogs are open", () => {
+    const { guest } = fakeGuest(host.host);
+    run(guest, { type: "alert" });
+    run(guest, { type: "confirm" });
+    expect(exclusiveAccessHeld(guest.id)).toBe(true);
+    respond(host.host, { id: host.requests()[0]!.id });
+    expect(exclusiveAccessHeld(guest.id)).toBe(true);
+    respond(host.host, { id: host.requests()[1]!.id, suppress: true });
+    expect(exclusiveAccessHeld(guest.id)).toBe(false);
+  });
+
+  test("dismissing a page's dialogs releases it", () => {
+    const { guest, emit } = fakeGuest(host.host);
+    run(guest, { type: "alert" });
+    emit("did-start-navigation", mainFrameNavigation);
+    expect(exclusiveAccessHeld(guest.id)).toBe(false);
   });
 });
 

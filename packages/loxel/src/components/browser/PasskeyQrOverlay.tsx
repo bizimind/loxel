@@ -40,7 +40,10 @@ function subscribe(listener: () => void): () => void {
 }
 
 function dismiss(webContentsId: number): void {
-  if (requests.delete(webContentsId)) notify();
+  if (!requests.delete(webContentsId)) return;
+  notify();
+  // Main stops keeping the page out of fullscreen for the code.
+  window.electronAPI?.passkeyQrCodeHidden(webContentsId);
 }
 
 /** One SVG path drawing every dark module of the code. */

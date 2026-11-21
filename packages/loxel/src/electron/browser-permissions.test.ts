@@ -7,6 +7,8 @@ import {
   browserPermissionGranted,
   installBrowserPermissions,
 } from "./browser-permissions";
+import { holdExclusiveAccess, trackHoldablePage } from "./exclusive-access-holds";
+import { EXCLUSIVE_ACCESS_REFUSED } from "./ipc-channels";
 
 type CheckHandler = Parameters<Session["setPermissionCheckHandler"]>[0];
 type RequestHandler = Parameters<Session["setPermissionRequestHandler"]>[0];
@@ -100,7 +102,7 @@ const PERMISSIONS = Object.keys(MAIN_FRAME) as BrowserPermission[];
 const decisions = (isMainFrame: boolean) =>
   PERMISSIONS.map((permission) => [
     permission,
-    browserPermissionGranted(permission, { isMainFrame, inBrowserPanel: true }),
+    browserPermissionGranted(permission, { isMainFrame, inBrowserPanel: true, underPrompt: false }),
   ]);
 
 describe("browserPermissionGranted", () => {
@@ -113,7 +115,7 @@ describe("browserPermissionGranted", () => {
   });
 
   test("popup windows get neither fullscreen nor pointer lock, having no panel to name the site", () => {
-    const popup = { isMainFrame: true, inBrowserPanel: false };
+    const popup = { isMainFrame: true, inBrowserPanel: false, underPrompt: false };
     expect(browserPermissionGranted("fullscreen", popup)).toBe(false);
     expect(browserPermissionGranted("pointerLock", popup)).toBe(false);
     expect(browserPermissionGranted("clipboard-sanitized-write", popup)).toBe(true);
@@ -121,9 +123,13 @@ describe("browserPermissionGranted", () => {
 
   test("refuses a permission name a newer Electron adds", () => {
     const added = "some-new-permission" as BrowserPermission;
-    expect(browserPermissionGranted(added, { isMainFrame: true, inBrowserPanel: true })).toBe(
-      false,
-    );
+    expect(
+      browserPermissionGranted(added, {
+        isMainFrame: true,
+        inBrowserPanel: true,
+        underPrompt: false,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -146,6 +152,35 @@ describe("installBrowserPermissions", () => {
     request(webContents, "geolocation", callback, page);
     request(webContents, "clipboard-sanitized-write", callback, page);
     expect(callback.mock.calls).toEqual([[false], [true]]);
+  });
+
+  test("a page under a Loxel prompt gets neither fullscreen nor pointer lock until it closes", () => {
+    const hostSend = mock((_channel: string, _payload: unknown) => {});
+    const page = {
+      id: 9001,
+      getType: () => "webview",
+      isDestroyed: () => false,
+      once: () => {},
+      hostWebContents: { id: 9000, send: hostSend, isDestroyed: () => false },
+    };
+    trackHoldablePage(page);
+    const panel = page as unknown as Parameters<typeof request>[0];
+    const frame = { isMainFrame: true, requestingUrl: "https://video.example/" };
+    const callback = mock((_granted: boolean) => {});
+    const release = holdExclusiveAccess(panel.id);
+    request(panel, "fullscreen", callback, frame);
+    request(panel, "pointerLock", callback, frame);
+    request(panel, "clipboard-sanitized-write", callback, frame);
+    expect(check(panel, "fullscreen", "https://video.example/", { isMainFrame: true })).toBe(false);
+    // Each refused request highlights the prompt holding the page; checks don't.
+    expect(hostSend.mock.calls).toEqual([
+      [EXCLUSIVE_ACCESS_REFUSED, 9001],
+      [EXCLUSIVE_ACCESS_REFUSED, 9001],
+    ]);
+    release();
+    request(panel, "fullscreen", callback, frame);
+    expect(callback.mock.calls).toEqual([[false], [false], [true], [true]]);
+    expect(hostSend).toHaveBeenCalledTimes(2);
   });
 
   test("links to other apps are decided by their module, and their grants reported first", () => {

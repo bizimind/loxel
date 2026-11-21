@@ -80,6 +80,8 @@ interface Window {
       onShow: (request: unknown) => void,
       onHide: (webContentsId: unknown) => void,
     ) => () => void;
+    /** The user hid the QR code of the webview with this webContents ID. */
+    passkeyQrCodeHidden: (webContentsId: number) => void;
     /**
      * Fullscreen and pointer lock notices for this window's browser panels: `onShow` gets an
      * `ExclusiveAccessNotice` payload, `onHide` the webContents ID whose page left fullscreen.
@@ -89,6 +91,16 @@ interface Window {
       onShow: (notice: unknown) => void,
       onHide: (webContentsId: unknown) => void,
     ) => () => void;
+    /**
+     * Whether the window shows a modal over its browser panels: while it does, their pages leave
+     * fullscreen and release the pointer lock, and can take neither back.
+     */
+    setExclusiveAccessHold: (held: boolean) => void;
+    /**
+     * A page of this window's browser panels (the webContents ID) was refused fullscreen or
+     * pointer lock while a prompt holds it. Returns an unsubscribe function.
+     */
+    onExclusiveAccessRefused: (callback: (webContentsId: unknown) => void) => () => void;
     /** The app update's current state, kept by Electron main. */
     getUpdateStatus: () => Promise<import("@/api/update-model").UpdateState>;
     /** Check the release manifest for a newer version; the result arrives as a status change. */

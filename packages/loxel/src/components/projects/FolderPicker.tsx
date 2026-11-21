@@ -6,6 +6,7 @@ import * as api from "@/api/client";
 import { localServerId } from "@/api/local-server";
 import type { BrowseEntry } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
+import { useExclusiveAccessHold } from "@/hooks/useExclusiveAccessHold";
 import { cn } from "@/lib/utils";
 
 interface FolderPickerContentProps {
@@ -170,6 +171,7 @@ interface FolderPickerProps {
 }
 
 export function FolderPicker({ open, onSelect, onClose }: FolderPickerProps) {
+  useExclusiveAccessHold(open);
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {

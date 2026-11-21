@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { Session, WebAuthnAccount, WebFrameMain } from "electron";
 
+import { holdExclusiveAccess } from "./exclusive-access-holds";
 import { PASSKEY_QR_HIDE, PASSKEY_QR_SHOW } from "./ipc-channels";
 import { FIDO_QR_PREFIX, type PasskeyQrCode, isRecord } from "./passkey-qr-code";
 
@@ -159,6 +160,8 @@ interface PendingRequest {
   relyingPartyId: string;
   frame: WebFrameMain;
   panel: BrowserPanelFrame;
+  /** Ends the code's hold on its page's exclusive access (once). */
+  release: () => void;
   stopWatchingPanel: () => void;
 }
 
@@ -180,7 +183,7 @@ function endedWithoutFrame(candidates: PendingRequest[]): PendingRequest[] {
 export function installHybridQrCode(
   browserSession: NodeJS.EventEmitter,
   locate: (frame: WebFrameMain) => BrowserPanelFrame | null,
-): void {
+): { codeHidden: (webContentsId: number) => void } {
   // Requests showing a QR code, by webContents ID (one WebAuthn request per page at a time).
   const pending = new Map<number, PendingRequest>();
 
@@ -189,6 +192,7 @@ export function installHybridQrCode(
     if (pending.get(webContentsId) !== request) return;
     pending.delete(webContentsId);
     request.stopWatchingPanel();
+    request.release();
     request.panel.send(PASSKEY_QR_HIDE, webContentsId);
   }
 
@@ -202,11 +206,15 @@ export function installHybridQrCode(
     const panel = frame && locate(frame);
     if (!frame || !panel) return;
 
-    pending.get(panel.webContentsId)?.stopWatchingPanel();
+    const replaced = pending.get(panel.webContentsId);
+    replaced?.stopWatchingPanel();
+    replaced?.release();
     const request: PendingRequest = {
       relyingPartyId,
       frame,
       panel,
+      // The code shows over the page, which leaves fullscreen and the pointer lock for it.
+      release: holdExclusiveAccess(panel.webContentsId),
       stopWatchingPanel: panel.onGone(() => end(request)),
     };
     pending.set(panel.webContentsId, request);
@@ -236,4 +244,7 @@ export function installHybridQrCode(
     );
     for (const request of endedWithoutFrame(candidates)) end(request);
   });
+  // The user hid the code of the panel's request (PASSKEY_QR_HIDDEN), which still runs: its page
+  // may take the screen or the pointer again.
+  return { codeHidden: (webContentsId) => pending.get(webContentsId)?.release() };
 }

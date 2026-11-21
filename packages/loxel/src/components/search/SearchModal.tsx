@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import * as api from "@/api/client";
 import { formatWorktreeRef } from "@/api/worktree-ref";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import { useExclusiveAccessHold } from "@/hooks/useExclusiveAccessHold";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { FileTypeIcon } from "@/lib/file-icons";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -23,6 +24,7 @@ const MAX_VISIBLE = 200;
 
 export function SearchModal() {
   const isOpen = useSearchStore((s) => s.isOpen);
+  useExclusiveAccessHold(isOpen);
   const query = useSearchStore((s) => s.query);
   const regex = useSearchStore((s) => s.regex);
   const caseSensitive = useSearchStore((s) => s.caseSensitive);
