@@ -17,12 +17,12 @@ import {
   goBehindShim,
   goVersion,
   isExecutableFile,
-  isShim,
   isTrustedBinary,
   realpathOr,
   trustedOnPath,
 } from "./go-env";
 import { buildSpawnEnv } from "./shell-env";
+import { isShim } from "./version-manager-link";
 
 /** The names in `dir`, none when it cannot be read: most of these directories do not exist. */
 function entriesOf(dir: string): string[] {

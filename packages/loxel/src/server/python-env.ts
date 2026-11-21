@@ -13,7 +13,7 @@ import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
-import { runsThroughVersionManager, shimEntry } from "./version-manager-link";
+import { isShim } from "./version-manager-link";
 
 const log = logger.child("server");
 
@@ -824,12 +824,13 @@ export async function untrustedInterpreter(
     return real && (await isOutside(real)) ? real : null;
   };
   const real = await outside(env.pythonPath);
-  if (!real || !runsThroughVersionManager(env.pythonPath)) return real;
-  // Started by a path inside the environment, the interpreter could take it for its own.
-  const entry = shimEntry(env.pythonPath);
-  if (!(await isOutside(entry))) return null;
-  const behind = await outside(await interpreterBehindShim(entry));
-  return behind && !runsThroughVersionManager(behind) ? behind : null;
+  if (!real || !isShim(env.pythonPath)) return real;
+  // By its own path, as mise's shims are links to mise, which reads the name it was started by;
+  // and only from outside the environment, which the interpreter could otherwise take for its own.
+  const shim = path.resolve(env.pythonPath);
+  if (!(await isOutside(shim))) return null;
+  const behind = await outside(await interpreterBehindShim(shim));
+  return behind && !isShim(behind) ? behind : null;
 }
 
 const shimAnswers = new Map<string, { at: number; answer: Promise<string | null> }>();

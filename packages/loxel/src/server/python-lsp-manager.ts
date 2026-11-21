@@ -25,7 +25,7 @@ import {
   WorktreeSessionLspManager,
 } from "./stdio-lsp-manager";
 import { readToml, recordAt } from "./toml-file";
-import { runsThroughVersionManager } from "./version-manager-link";
+import { isShim } from "./version-manager-link";
 
 /** Another type checker that owns type checking for some files (mypy, see `mypy-lsp-manager.ts`). */
 export interface ExternalTypeChecker {
@@ -63,7 +63,7 @@ export function pathWithoutPythonShims(PATH: string): string {
   const hasShim = (dir: string) =>
     ["python3", "python"].some((name) => {
       const found = Bun.which(name, { PATH: dir });
-      return found !== null && runsThroughVersionManager(found);
+      return found !== null && isShim(found);
     });
   return PATH.split(path.delimiter)
     .filter((dir) => path.isAbsolute(dir) && !hasShim(dir))
