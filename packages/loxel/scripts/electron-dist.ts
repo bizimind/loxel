@@ -69,12 +69,14 @@ export function readPatches(dir = PATCHES_DIR): Patch[] {
   if (misnamed.length > 0) {
     throw new Error(`Name each patch <nnnn>-<name>.patch, not ${misnamed.join(", ")}`);
   }
-  const numbers = names.map((name) => name.slice(0, 4));
-  const repeated = names.filter((_, i) => numbers.indexOf(numbers[i]!) !== i);
-  if (repeated.length > 0) {
-    throw new Error(`Each patch needs its own number: ${repeated.join(", ")}`);
+  const sorted = names.toSorted();
+  const shared = sorted.filter((name, i) =>
+    sorted.some((other, j) => j !== i && other.slice(0, 4) === name.slice(0, 4)),
+  );
+  if (shared.length > 0) {
+    throw new Error(`Each patch needs its own number: ${shared.join(", ")}`);
   }
-  return names.toSorted().map((name) => ({ name, contents: readFileSync(path.join(dir, name)) }));
+  return sorted.map((name) => ({ name, contents: readFileSync(path.join(dir, name)) }));
 }
 
 /**

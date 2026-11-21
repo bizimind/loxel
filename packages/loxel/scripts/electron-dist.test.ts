@@ -105,7 +105,7 @@ describe("readPatches", () => {
 
   test("refuses two patches with the same number", () => {
     withDir({ "0001-a.patch": "one", "0001-b.patch": "two" }, (dir) =>
-      expect(() => readPatches(dir)).toThrow(/0001-b\.patch/),
+      expect(() => readPatches(dir)).toThrow("0001-a.patch, 0001-b.patch"),
     );
   });
 
