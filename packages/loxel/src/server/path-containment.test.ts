@@ -26,10 +26,4 @@ describe("pathOutsideWorktree", () => {
       "/usr/bin:/wt-other/bin:/opt/bin",
     );
   });
-
-  test("drops relative and empty entries, including ones that lead out of the worktree", () => {
-    expect(pathOutsideWorktree("./bin::../tools:node_modules/.bin:.:/usr/bin", "/wt")).toBe(
-      "/usr/bin",
-    );
-  });
 });

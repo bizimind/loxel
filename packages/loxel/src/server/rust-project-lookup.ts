@@ -1,11 +1,11 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
 import { isInside } from "./path-containment";
-import { isRepoTrusted, repoTrustId } from "./repo-trust";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { parseToml, recordAt } from "./toml-file";
 
@@ -66,41 +66,43 @@ export function untrustedNestedRepo(manifest: string, wtPath: string): string | 
   return nested.find((dir) => existsSync(path.join(dir, ".git")) && !isRepoTrusted(dir)) ?? null;
 }
 
-/** Where Cargo reads a folder's configuration from, newest name first. */
-const CARGO_CONFIG_FILES = [".cargo/config.toml", ".cargo/config"];
+/** The files Cargo reads a folder's configuration from, under its `.cargo` directory. */
+const CARGO_CONFIG_NAMES: ReadonlySet<string> = new Set(["config.toml", "config"]);
 
-/**
- * The folder above the worktree whose Cargo configuration belongs to a repository that is not
- * trusted, or null. Cargo applies the configuration of every folder up to the filesystem root, so
- * the worktree's trust alone would also run what that repository configures (wrappers, linkers,
- * environment). The user's own Cargo home is theirs, whichever folder holds it.
- */
-export function untrustedCargoConfigAbove(wtPath: string): string | null {
-  const env = buildSpawnEnv();
-  const cargoHome = path.resolve(env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo"));
-  // A folder holding the worktree's own repository, as a bare clone's container does, is its own.
-  const id = repoTrustId(wtPath);
-  const repoDir = id.startsWith("git:") ? id.slice("git:".length) : null;
-  const realWt = realPathOf(wtPath) ?? path.resolve(wtPath);
-  const ownRepo = repoDir !== null && !isInside(repoDir, realWt) ? repoDir : null;
-  let dir = path.resolve(wtPath);
-  while (path.dirname(dir) !== dir) {
-    dir = path.dirname(dir);
-    const config = CARGO_CONFIG_FILES.map((file) => path.join(dir, file)).find(existsSync);
-    if (!config || isInside(config, cargoHome)) continue;
-    const realDir = realPathOf(dir) ?? dir;
-    if (ownRepo !== null && (realDir === ownRepo || realDir === path.dirname(ownRepo))) continue;
-    const repo = enclosingRepo(dir);
-    if (repo !== null && !isRepoTrusted(repo)) return dir;
-  }
-  return null;
+/** Whether `file` is a Cargo configuration file by its place: `.cargo/config.toml` or `.cargo/config`. */
+export function isCargoConfigPath(file: string): boolean {
+  return (
+    CARGO_CONFIG_NAMES.has(path.basename(file)) && path.basename(path.dirname(file)) === ".cargo"
+  );
 }
 
-/** The nearest folder from `dir` up that holds a `.git`, or null. */
-function enclosingRepo(dir: string): string | null {
-  for (let current = dir; ; current = path.dirname(current)) {
-    if (existsSync(path.join(current, ".git"))) return current;
-    if (path.dirname(current) === current) return null;
+/**
+ * The first Cargo configuration file cargo would read for the project of `manifest`, or null: cargo
+ * reads one from the folder it runs in, which for a project is its manifest's folder, and every folder
+ * above it up to the filesystem root, by the real path. The user's own Cargo home is not counted.
+ * Any entry counts, a link that leads nowhere included, so whether cargo can read it never decides.
+ */
+export function cargoConfigFor(manifest: string): string | null {
+  const env = buildSpawnEnv();
+  const cargoHome = path.resolve(env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo"));
+  const start = path.dirname(manifest);
+  for (let dir = realPathOf(start) ?? path.resolve(start); ; dir = path.dirname(dir)) {
+    if (path.join(dir, ".cargo") !== cargoHome) {
+      for (const name of CARGO_CONFIG_NAMES) {
+        const config = path.join(dir, ".cargo", name);
+        if (entryExists(config)) return config;
+      }
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+function entryExists(file: string): boolean {
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
   }
 }
 

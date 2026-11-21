@@ -23,7 +23,6 @@ import {
 import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
-import { pathOutsideWorktree } from "./path-containment";
 import { PrettierLibBackend } from "./prettier-lib-backend";
 import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
@@ -409,10 +408,6 @@ export class FormatService {
     ].filter(Boolean);
 
     const env = { ...buildSpawnEnv(), ...options.env };
-    // The formatter runs in the worktree, where a relative entry would find the repository's programs.
-    if (worktreePath && !isRepoTrusted(worktreePath)) {
-      env.PATH = pathOutsideWorktree(env.PATH ?? "", worktreePath);
-    }
     // Project-local formatters win over global installs.
     if (options.binDirs?.length)
       env.PATH = [...options.binDirs, env.PATH].filter(Boolean).join(":");

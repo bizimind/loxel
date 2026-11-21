@@ -19,7 +19,6 @@ import { isInside, pathOutsideWorktree } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
 import { isShippedByRepo } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
-import { pathWithoutShims } from "./version-manager-link";
 
 const log = logger.child("server");
 
@@ -239,7 +238,9 @@ export function goSpawnEnv(
   wtPath: string,
   env: Pick<GoEnv, "binary" | "goroot" | "source"> | null,
 ): Record<string, string> {
-  const dirs = pathWithoutShims(goToolPath(wtPath)).split(path.delimiter).filter(Boolean);
+  const dirs = goToolPath(wtPath)
+    .split(path.delimiter)
+    .filter((dir) => path.basename(dir) !== "shims" && path.basename(realpathOr(dir)) !== "shims");
   const goroot = env?.goroot;
   const own: Record<string, string> = goroot && env.source !== "path" ? { GOROOT: goroot } : {};
   const first = goroot && (env.source !== "path" || isShim(env.binary));

@@ -184,7 +184,7 @@ function unusableNotice(toolchain: Exclude<RustToolchain, { status: "active" }>)
     return `Format on save skipped: the Rust toolchain "${toolchain.name}" is not installed. To install it, run \`rustup toolchain install\` in the project's folder.`;
   }
   if (toolchain.status === "refused") {
-    return 'Format on save skipped: Loxel runs no Rust toolchain the repository ships or selects by path. Choose an installed one with "Rust: Select Toolchain".';
+    return 'Format on save skipped: Loxel uses toolchains from outside the worktree. Choose an installed one with "Rust: Select Toolchain".';
   }
   const reason =
     toolchain.detail ??

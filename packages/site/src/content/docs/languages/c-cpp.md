@@ -98,7 +98,7 @@ Diagnostics:
 
 See clangd's [configuration reference](https://clangd.llvm.org/config) for every option. Your own config at `~/Library/Preferences/clangd/config.yaml` on macOS, or `~/.config/clangd/config.yaml` on Linux, applies to every project.
 
-In a repository you haven't trusted, Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,`, `--config` and GCC spec files (`--specs`). This does not affect how your project builds, only what clangd sees.
+In a repository you haven't trusted, Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
 
 ## clang-tidy
 

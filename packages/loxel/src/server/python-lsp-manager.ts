@@ -25,7 +25,6 @@ import {
   WorktreeSessionLspManager,
 } from "./stdio-lsp-manager";
 import { readToml, recordAt } from "./toml-file";
-import { pathWithoutShims } from "./version-manager-link";
 
 /** Another type checker that owns type checking for some files (mypy, see `mypy-lsp-manager.ts`). */
 export interface ExternalTypeChecker {
@@ -72,8 +71,7 @@ export const PYTHON_REPO_TRUST_RESTRICTION =
  * Settings answered for the `python` section: the resolved interpreter. Without one,
  * basedpyright would run a root `.venv/bin/python` it finds itself, even one the repository
  * commits, which the resolver refuses. A `venvPath` with no `venv` turns that detection off
- * without selecting an environment, so it falls back to `python3` on its PATH, which holds no
- * worktree directory and, in an untrusted repository, no version manager's shims.
+ * without selecting an environment, so it falls back to `python3` on its (worktree-free) PATH.
  *
  * basedpyright runs `pythonPath` to ask it for its search paths, which starts the environment and
  * so its packages' startup hooks. In an untrusted repository `pythonPath` is only the interpreter
@@ -142,14 +140,9 @@ export class PythonLspManager extends WorktreeSessionLspManager<PythonLspSession
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     // Without a resolved interpreter basedpyright runs `python3` / `python` from its PATH; keep the
-    // worktree's own directories out of it, matching the resolver's refusal of committed ones, and
-    // in an untrusted repository version managers' shims too, which would run what the worktree's
-    // files select.
+    // worktree's own directories out of it, matching the resolver's refusal of committed ones.
     const PATH = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", context.wtPath);
-    return {
-      cwd: context.wtPath,
-      env: { PATH: context.repoTrusted ? PATH : pathWithoutShims(PATH) },
-    };
+    return { cwd: context.wtPath, env: { PATH } };
   }
 
   protected buildSession(

@@ -16,7 +16,6 @@ import { FileChangeType } from "./lsp-watched-files";
 import {
   SERVER_STOP_GRACE_MS,
   StdioLspManager,
-  WorktreeLspManager,
   type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
@@ -1077,34 +1076,5 @@ describe("StdioLspManager handing a server to a new socket", () => {
 
     handover.releaseClient(client.ws);
     expect(handover.sessionCloses).toBe(1);
-  });
-});
-
-describe("WorktreeLspManager spawn environment", () => {
-  class EnvLspManager extends WorktreeLspManager {
-    constructor() {
-      super("python-lsp");
-    }
-
-    protected resolveBinary(): string {
-      return process.execPath;
-    }
-
-    envFor(repoTrusted: boolean, PATH: string): Record<string, string | undefined> {
-      return this.restrictSpawnEnv({ wtPath: "/wt", repoTrusted }, { PATH, OTHER: "kept" });
-    }
-  }
-
-  const PATH = "bin:./tools::/wt/node_modules/.bin:../up:/usr/bin:/opt/bin";
-
-  test("an untrusted repository's server gets only absolute PATH entries outside the worktree", () => {
-    expect(new EnvLspManager().envFor(false, PATH)).toEqual({
-      PATH: "/usr/bin:/opt/bin",
-      OTHER: "kept",
-    });
-  });
-
-  test("a trusted repository's server keeps PATH as it is", () => {
-    expect(new EnvLspManager().envFor(true, PATH)).toEqual({ PATH, OTHER: "kept" });
   });
 });

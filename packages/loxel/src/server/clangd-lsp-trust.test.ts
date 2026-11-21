@@ -11,8 +11,7 @@ import { FakeClient } from "./clangd-test-client";
 // Before the imports that read it: trust is stored in the state directory.
 const stateDir = await mkdtemp(join(tmpdir(), "clangd-trust-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
-const { checkClangd, ClangdLspManager, prepareClangdUserConfig } =
-  await import("./clangd-lsp-manager");
+const { checkClangd, ClangdLspManager } = await import("./clangd-lsp-manager");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 const TEST_TIMEOUT_MS = 60_000;
@@ -362,47 +361,3 @@ describe.skipIf(REAL_CLANGD === null || process.platform === "win32")("real clan
     TEST_TIMEOUT_MS,
   );
 });
-
-describe.skipIf(REAL_CLANGD === null || process.platform === "win32")(
-  "real clangd's compile flags in an untrusted repository",
-  () => {
-    test(
-      "a compiler asked for include paths gets none of the project's spec files",
-      async () => {
-        const root = await makeDir();
-        const log = join(root, "driver.log");
-        const compiler = join(root, "bin", "cc-gcc");
-        await mkdir(join(root, "bin"));
-        await writeFile(
-          compiler,
-          `#!/bin/sh\necho "$*" >> "${log}"\necho "#include <...> search starts here:" >&2\necho "End of search list." >&2\n`,
-        );
-        await chmod(compiler, 0o755);
-        await writeFile(join(root, "a.c"), "int x;\n");
-        const specs = ["--specs=a.specs", "-specs=b.specs", "--specs", "c.specs"];
-        const entry = {
-          directory: root,
-          file: "a.c",
-          arguments: [compiler, ...specs, "-c", "a.c"],
-        };
-        await writeFile(join(root, "compile_commands.json"), JSON.stringify([entry]));
-        const env = prepareClangdUserConfig(await makeDir(), process.platform, process.env);
-
-        const proc = Bun.spawn(
-          [
-            REAL_CLANGD ?? "",
-            "--check=a.c",
-            `--query-driver=${join(root, "bin", "*gcc*")}`,
-            `--compile-commands-dir=${root}`,
-          ],
-          { cwd: root, env: { ...process.env, ...env }, stdout: "ignore", stderr: "ignore" },
-        );
-        await proc.exited;
-        const queries = await readFile(log, "utf8");
-        expect(queries).toContain("-E -v");
-        expect(queries).not.toContain("specs");
-      },
-      TEST_TIMEOUT_MS,
-    );
-  },
-);

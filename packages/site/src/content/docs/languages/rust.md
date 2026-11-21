@@ -24,7 +24,7 @@ Your project is analyzed the way it builds:
 
 Loxel still doesn't download or install anything: it runs your tools offline. Build scripts and proc macros are your project's own code, though, and run with your permissions, so what they do is up to them, as it is when you run `cargo build`. That includes those of path dependencies outside the repository.
 
-A repository inside the one you trust, including a submodule, has its own answer. The reverse holds too: Cargo applies `.cargo/config.toml` from every folder above your project, so when a repository around it that you haven't trusted has one, Rust runs as in a repository you don't trust, and a notification names the folder. Its crates don't load until you open it as a project and trust it, and a notification says so when you open one of its files. A dependency your `Cargo.toml` names there does build, as it does in a terminal.
+A repository inside the one you trust, including a submodule, has its own answer. Its crates don't load until you open it as a project and trust it, and a notification says so when you open one of its files. A dependency your `Cargo.toml` names there does build, as it does in a terminal.
 
 `rust-project.json` isn't read in any repository, so projects without a `Cargo.toml` work like single files.
 
@@ -34,8 +34,8 @@ Language features run without building your project:
 
 - **Build scripts and proc macros don't run**, so macros they generate aren't expanded and items that only exist after a build, such as `include!` of generated code, are unknown.
 - **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's. **No marker doesn't mean no error.** You see syntax errors, wrong argument counts, missing struct fields, non-exhaustive matches and, in recent versions of rust-analyzer, mismatched types. Only `cargo check` in a terminal reports unknown names, types, methods, fields and macros, unimported items (the Import quick fix is still offered), unresolved `use` and `mod`, unmet trait bounds, and borrow checker errors such as use after move.
-- **Dependencies aren't loaded.** rust-analyzer reads your workspace's own crates and the standard library, so items from crates.io or git dependencies are unknown, and unresolved imports and extern crates show no marker.
 - **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target.
+- **A project with a `.cargo/config.toml` or `.cargo/config` in its folder or a folder above it doesn't load**, since Cargo would apply that configuration to the compiler it runs. A notification names the file, and the project loads once you trust the repository. Your own configuration in your Cargo home doesn't count.
 
 ### In every repository
 
@@ -65,7 +65,7 @@ With [rustup](https://rustup.rs), Loxel uses the first of:
 
 Loxel never downloads or installs a toolchain or component. If the project pins a toolchain you don't have, the status bar says so and tells you what to run; installing it is up to you, from a terminal.
 
-Loxel uses toolchains from outside the worktree that the repository doesn't pick by path. If a toolchain file names one inside it, one the repository contains, or any toolchain by its `path`, the status bar item shows this in the warning color, and you can choose an installed toolchain instead.
+Loxel uses toolchains from outside the worktree. If a toolchain file names one inside it, or one the repository contains, the status bar item shows this in the warning color, and you can choose an installed toolchain instead.
 
 Loxel doesn't run version-manager shims, such as asdf's or mise's, or other script wrappers. Install Rust with rustup or a package to use it here.
 

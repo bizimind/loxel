@@ -23,9 +23,8 @@ import {
   WatchedFilesForwarder,
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
-import { pathOutsideWorktree } from "./path-containment";
 import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
-import { buildSpawnEnv, type Env, refreshLoginShellEnv } from "./shell-env";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import {
   createStderrThrottle,
@@ -243,11 +242,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   protected spawnOptions(_context: TContext): SpawnOptions {
     return {};
-  }
-
-  /** The environment the server finally runs with, after {@link spawnOptions}'s is applied. */
-  protected restrictSpawnEnv(_context: TContext, env: Env): Env {
-    return env;
   }
 
   protected abstract buildSession(
@@ -698,7 +692,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         // Login-shell environment, so servers that run user tools (basedpyright's
         // interpreter probe, terraform-ls's `terraform`) find the user's PATH
         // even when Loxel was launched from Finder.
-        env: this.restrictSpawnEnv(context, { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env }),
+        env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
       }),
     );
 
@@ -1207,13 +1201,6 @@ export abstract class WorktreeSessionLspManager<
    * answered as a server with no features, and the server starts once the repository is trusted.
    */
   protected readonly runsOnlyWhenTrusted: boolean = false;
-  /**
-   * Whether a session for `wtPath` runs as trusted: the repository's trust, which a server whose
-   * tools also read files from outside the worktree can narrow. Asked again on every change of trust.
-   */
-  protected isTrusted(wtPath: string): boolean {
-    return isRepoTrusted(wtPath);
-  }
   /** The worktree of each connection answered without a server, by socket. */
   private readonly heldUntilTrusted = new Map<ServerWebSocket<unknown>, string>();
   private unsubscribeRepoTrust: (() => void) | null = null;
@@ -1227,7 +1214,7 @@ export abstract class WorktreeSessionLspManager<
     if (this.runsOnlyWhenTrusted && !this.repoTrustRestriction) {
       throw new Error(`${this.name} sets runsOnlyWhenTrusted without a repoTrustRestriction`);
     }
-    const repoTrusted = this.isTrusted(wtPath);
+    const repoTrusted = isRepoTrusted(wtPath);
     if (this.repoTrustRestriction) {
       this.unsubscribeRepoTrust ??= onRepoTrustChange(() => this.followRepoTrust());
       if (!repoTrusted && this.reportsRestrictionAtStart) {
@@ -1262,7 +1249,7 @@ export abstract class WorktreeSessionLspManager<
   private followRepoTrust(): void {
     for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
     for (const [ws, wtPath] of [...this.heldUntilTrusted]) {
-      if (!this.isTrusted(wtPath)) continue;
+      if (!isRepoTrusted(wtPath)) continue;
       this.log.info("Starting for a change of repository trust", { wtPath });
       this.detach(ws);
       ws.close(LSP_RESTART_CLOSE_CODE, "Repository trust changed; reconnect");
@@ -1271,12 +1258,12 @@ export abstract class WorktreeSessionLspManager<
 
   // A server must not start on an answer the user has just taken back.
   protected override isContextOutdated({ wtPath, repoTrusted }: WtLspContext): boolean {
-    return this.repoTrustRestriction !== null && this.isTrusted(wtPath) !== repoTrusted;
+    return this.repoTrustRestriction !== null && isRepoTrusted(wtPath) !== repoTrusted;
   }
 
   private restartIfTrustChanged(session: TSession): void {
     if (!this.isSessionLive(session)) return;
-    if (this.isTrusted(session.wtPath) === session.repoTrusted) return;
+    if (isRepoTrusted(session.wtPath) === session.repoTrusted) return;
     const { ws } = session;
     this.log.info("Restarting for a change of repository trust", { wtPath: session.wtPath });
     this.detach(ws);
@@ -1304,16 +1291,6 @@ export abstract class WorktreeSessionLspManager<
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
-  }
-
-  /**
-   * In an untrusted repository, whatever a subclass set, `PATH` keeps only absolute directories
-   * outside the worktree: the server runs there, so a relative entry would find the repository's
-   * programs.
-   */
-  protected override restrictSpawnEnv(context: WtLspContext, env: Env): Env {
-    if (context.repoTrusted) return env;
-    return { ...env, PATH: pathOutsideWorktree(env.PATH ?? "", context.wtPath) };
   }
 
   protected override getSessionKey(context: WtLspContext): string {
