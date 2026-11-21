@@ -41,7 +41,7 @@ export type {
 } from "./init.ts";
 export { INIT_ACTION_ORDER } from "./checks.ts";
 export type { Check, CheckId, CheckStatus, InitAction, InitActionId } from "./checks.ts";
-export { shellArg, shellQuote } from "./shell-quote.ts";
+export { shellQuote } from "./shell-quote.ts";
 
 export { silentProgress } from "../progress.ts";
 export type { ProgressHandler } from "../progress.ts";

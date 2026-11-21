@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -32,11 +32,6 @@ export function AgentTerminalPrompt() {
 
 function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
   const [busy, setBusy] = useState(false);
-  // Running is offered once the whole command has been in view.
-  const [seenAll, setSeenAll] = useState(!ask.command);
-  const blocked = busy || !seenAll;
-  const markSeen = useCallback(() => setSeenAll(true), []);
-  const noteId = useId();
   const where = ask.worktreePath === null ? "Home" : pathName(ask.worktreePath);
 
   const answer = (choice: AgentTerminalAnswer) => {
@@ -67,12 +62,7 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
         </span>
       )}
       {ask.command ? (
-        <CommandPreview
-          command={ask.command}
-          seenAll={seenAll}
-          onSeenAll={markSeen}
-          noteId={noteId}
-        />
+        <CommandPreview command={ask.command} />
       ) : (
         <span className="text-muted-foreground text-xs">
           An interactive shell, with no command.
@@ -83,22 +73,11 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
           Don&apos;t run
         </Button>
         {ask.worktreePath !== null && (
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={blocked}
-            aria-describedby={noteId}
-            onClick={() => answer("always")}
-          >
+          <Button variant="outline" size="xs" disabled={busy} onClick={() => answer("always")}>
             Always in this worktree
           </Button>
         )}
-        <Button
-          size="xs"
-          disabled={blocked}
-          aria-describedby={noteId}
-          onClick={() => answer("run")}
-        >
+        <Button size="xs" disabled={busy} onClick={() => answer("run")}>
           Run
         </Button>
       </div>
@@ -109,59 +88,20 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
 /**
  * The command as the shell will receive it: every line, its line count when there are several, and
  * characters that would not show (controls, bidirectional and zero-width characters) spelled as
- * escapes. `onSeenAll` fires once its end has been in view; until then a note (`noteId`) says to
- * scroll to it.
+ * escapes.
  */
-function CommandPreview({
-  command,
-  seenAll,
-  onSeenAll,
-  noteId,
-}: {
-  command: string;
-  seenAll: boolean;
-  onSeenAll: () => void;
-  noteId: string;
-}) {
-  const box = useRef<HTMLElement>(null);
+function CommandPreview({ command }: { command: string }) {
   const lineCount = command.split("\n").length;
   const hasUnseen = revealUnseen(command).some((run) => run.unseen);
-
-  const checkEnd = useCallback(() => {
-    const el = box.current;
-    if (el && el.scrollTop + el.clientHeight >= el.scrollHeight - 1) onSeenAll();
-  }, [onSeenAll]);
-  useLayoutEffect(() => {
-    checkEnd();
-    const el = box.current;
-    if (!el) return undefined;
-    // A wider window or a smaller zoom can bring the end into view without a scroll.
-    const observer = new ResizeObserver(checkEnd);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [checkEnd]);
-
   const notes = [
     lineCount > 1 ? `The command has ${lineCount} lines.` : null,
     hasUnseen ? "Characters that do not print are shown as escapes." : null,
-    seenAll ? null : "Scroll to its end to run it.",
   ].filter((note) => note !== null);
 
   return (
     <>
-      {notes.length > 0 && (
-        <span id={noteId} className="text-warning text-xs">
-          {notes.join(" ")}
-        </span>
-      )}
-      <code
-        ref={box}
-        // Focusable, so the command can be scrolled from the keyboard.
-        tabIndex={0}
-        aria-label="Command"
-        onScroll={checkEnd}
-        className="text-foreground bg-muted max-h-24 overflow-y-auto rounded px-1.5 py-1 text-[11px] break-all whitespace-pre-wrap"
-      >
+      {notes.length > 0 && <span className="text-warning text-xs">{notes.join(" ")}</span>}
+      <code className="text-foreground bg-muted max-h-24 overflow-y-auto rounded px-1.5 py-1 text-[11px] break-all whitespace-pre-wrap">
         <RevealedText text={command} />
       </code>
     </>
