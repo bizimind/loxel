@@ -5,7 +5,7 @@
  * own account can open it. See docs/TERMINAL_HOST.md#files-on-disk and docs/ARCHITECTURE.md.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,13 +45,13 @@ export function socketDir(
 }
 
 /**
- * Create a directory for sockets, or check an existing one: it must be a directory of this user's,
- * and is made private (0700), since anyone who can reach a socket in it controls what listens
- * there.
+ * Create a private directory, or check an existing one: it must be a directory of this user's,
+ * and is made private (0700). A socket directory must be, since anyone who can reach a socket in
+ * it controls what listens there, and must not be a link (`followLink` false, the default).
  */
-export function ensurePrivateDir(dir: string): void {
+export function ensurePrivateDir(dir: string, { followLink = false } = {}): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const stat = lstatSync(dir);
+  const stat = followLink ? statSync(dir) : lstatSync(dir);
   if (!stat.isDirectory() || stat.uid !== process.getuid?.()) {
     throw new Error(`${dir} is not a directory of this user's`);
   }

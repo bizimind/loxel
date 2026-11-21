@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "../app-ports";
 import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
 import { cliSocketPath } from "../socket-paths";
-import { STATE_BASE_DIR, stateDirFor } from "../state-dir";
+import { STATE_BASE_DIR, ensurePrivateStateDir, stateDirFor } from "../state-dir";
 
 const isDev = process.env.LOXEL_DEV === "1";
+/** A compiled server (the app's `loxel-server`, the standalone bundle) runs from Bun's own filesystem. */
+const isCompiled = Bun.main.startsWith("/$bunfs/");
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
 // `LOXEL_DEMO_INSTANCE=<n>` runs several demos side by side, each with its own port and state.
 const isDemo = process.env.LOXEL_DEMO === "1";
@@ -15,6 +17,8 @@ const demoInstance = isDemo ? parseDemoInstance(process.env.LOXEL_DEMO_INSTANCE)
 const stateDir = isDemo
   ? (process.env.LOXEL_STATE_DIR ?? join(STATE_BASE_DIR, demoStateName(demoInstance)))
   : stateDirFor(isDev ? "dev" : "production");
+// Before any module writes there: everything under it is the user's alone, whatever its mode.
+ensurePrivateStateDir(stateDir);
 const port =
   parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
   (isDemo
@@ -57,6 +61,7 @@ export function getHomeDraftsDir(): string {
 export const config = {
   isDev,
   isDemo,
+  isCompiled,
   stateDir,
   commentsDir: join(stateDir, "comments"),
   /** Tombi's `TOMBI_CACHE_HOME`; see `SchemaDownloads`. */

@@ -63,9 +63,9 @@ pnpm run e2e              # Playwright tests against an isolated server
 pnpm run typecheck
 ```
 
-Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server's `/api` and `/ws` take only requests that carry its session secret: a server you start yourself writes it to `<stateDir>/run/session-token`, which the Vite dev proxy adds to what it forwards, so open the app through Vite (port 5173), not the server's port; a script that calls the server sends it as `Authorization: Bearer <secret>`. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
+Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory and port and shows a red "DEV" badge in the top bar. The server's `/api` and `/ws` take only requests that carry its session secret: a server you start yourself writes it to `<stateDir>/run/session-token`. Open the app through Vite with the "Open Loxel" link it prints at startup (port 5173, not the server's port): the link lets that browser in, and the Vite dev proxy then adds the secret to what that browser sends, and nothing to anyone else's requests. A script that calls the server, directly or through Vite, sends the secret itself as `Authorization: Bearer <secret>`. The server takes an optional repo path to register as a project: `bun src/server/index.ts /path/to/repo`.
 
-To run a second web dev instance beside one already on the default ports (for example from another worktree), give it its own ports and state directory: `LOXEL_SERVE_PORT=7444 LOXEL_VITE_PORT=5183 LOXEL_STATE_DIR=~/.local/state/loxel/loxel-dev-2 pnpm run dev`, then open `http://127.0.0.1:5183`.
+To run a second web dev instance beside one already on the default ports (for example from another worktree), give it its own ports and state directory: `LOXEL_SERVE_PORT=7444 LOXEL_VITE_PORT=5183 LOXEL_STATE_DIR=~/.local/state/loxel/loxel-dev-2 pnpm run dev`, then open the link it prints on port 5183.
 
 Demo mode (`LOXEL_DEMO=1`, set by the demo scripts) runs beside the installed app with its own port, state and data directories, and shows no badge; it stages the site's screenshots from generated demo projects. See [scripts/demo/shots.md](scripts/demo/shots.md) for the shot list and [docs/ELECTRON.md](docs/ELECTRON.md#demo-mode) for how it differs from dev mode.
 
@@ -82,7 +82,7 @@ Demo mode (`LOXEL_DEMO=1`, set by the demo scripts) runs beside the installed ap
 | `LOXEL_VITE_PORT`     | Vite dev server port (default 5173), also the origin a dev server admits                                          |
 | `LOXEL_STATIC_DIR`    | Directory of the built renderer the server serves (from source: `dist/`; compiled: `renderer/` beside the binary) |
 
-Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the renderer inside the installed app. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_SOCKET`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
+These variables are for running Loxel from source and in tests. The installed app ignores them, and shells opened in a Loxel terminal do not inherit the ones the app or server was started with, so a dev server, demo or test started in one runs as it would anywhere else: when testing a local build there, use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_SOCKET`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 
 ### Releases
 
@@ -90,7 +90,7 @@ Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which po
 
 ## Data storage
 
-Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.local/state/loxel/loxel-dev/` (dev mode):
+Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.local/state/loxel/loxel-dev/` (dev mode), each readable only by your account:
 
 - `stores.db` — UI state and panel layouts per project + worktree, settings, and other client stores (SQLite)
 - `projects.db` — registered projects

@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 
 import { chromium } from "@playwright/test";
 
+import { bunWebSocket } from "@/session-client";
 import { useSettingsStore } from "@/store/settings-store";
 
 import type { PanelShot, ShotContext } from "./lib";
@@ -17,7 +18,9 @@ import {
   assertThemeStack,
   fixturePath,
   settle,
+  stackAuthorization,
   trackRequests,
+  targetThemeStack,
   waitForLoxel,
 } from "./lib";
 
@@ -33,11 +36,12 @@ const mod = (await import(resolve(import.meta.dirname, "panels", `${panel}.ts`))
 };
 const shot = mod.default;
 const fixture = fixturePath(workDir);
+targetThemeStack(workDir);
 await assertThemeStack(workDir);
 
 /** Notifications live on the server; drop leftovers from earlier shots so no bell badge shows. */
 async function clearNotifications(): Promise<void> {
-  const ws = new WebSocket(`${BASE_URL.replace(/^http/, "ws")}/ws`);
+  const ws = bunWebSocket(`${BASE_URL.replace(/^http/, "ws")}/ws`, stackAuthorization());
   await new Promise<void>((res, rej) => {
     ws.addEventListener("open", () => {
       ws.send(JSON.stringify({ type: "notifications_clear" }));

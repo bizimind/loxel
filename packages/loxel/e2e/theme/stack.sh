@@ -31,7 +31,8 @@ bun e2e/theme/fixture.ts "$FIXTURE" >/dev/null
   done
 ) &
 SERVER=$!
-# Vite's proxy adds the session secret from the stack server's token file, in its state dir.
+# seed.ts and shoot.ts send the session secret from the stack server's token file, in its state
+# dir, which Vite's proxy forwards; their pages open the access link Vite prints to vite.log.
 LOXEL_STATE_DIR="$WORK/state" VITE_SCREENSHOT=1 node_modules/.bin/vite --mode development >"$WORK/vite.log" 2>&1 &
 VITE=$!
 trap 'pkill -P $SERVER; kill $SERVER $VITE 2>/dev/null' EXIT INT TERM

@@ -11,6 +11,7 @@ import { $ } from "bun";
 import type { RepoTrustDecision } from "../../src/api/repo-trust-model";
 import { withoutAgentEnv } from "../../src/coding-agent-env";
 import { demoPort, demoStateName } from "../../src/demo-instance";
+import { withoutLoxelOverrides } from "../../src/loxel-overrides";
 import { sessionAuthorization } from "../../src/session-client";
 import { DEMO_PROJECTS, DEMO_ROOT, demoWorktree } from "./demo-projects";
 
@@ -39,21 +40,12 @@ export const DEMO_PID_FILE = resolve(demoStateDir(0), "demo-app.pid");
 export const DEMO_SERVER = demoServer(0);
 
 /**
- * Variables that would point a demo at another Loxel: a dev Loxel's renderer (`VITE_DEV_SERVER_URL`,
- * `LOXEL_DEV`), or the state, port and renderer of the Loxel whose terminal started the demo.
+ * The environment of demo app `instance`: this one's, cut loose from any agent or Loxel, without
+ * the variables that would point it at another Loxel (a dev Loxel's renderer, or the state, port
+ * and renderer of the Loxel whose terminal started the demo).
  */
-const OTHER_LOXEL_ENV_VARS = [
-  "VITE_DEV_SERVER_URL",
-  "LOXEL_DEV",
-  "LOXEL_STATE_DIR",
-  "LOXEL_SERVE_PORT",
-  "LOXEL_STATIC_DIR",
-];
-
-/** The environment of demo app `instance`: this one's, cut loose from any agent or Loxel. */
 export function demoEnv(instance: number, hidden: boolean): Record<string, string> {
-  const env = withoutAgentEnv(process.env);
-  for (const name of OTHER_LOXEL_ENV_VARS) delete env[name];
+  const env = withoutLoxelOverrides(withoutAgentEnv(process.env));
   return {
     ...env,
     LOXEL_DEMO: "1",

@@ -44,7 +44,7 @@ import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
 import { OpenInbox, deliveredNotices, sweepOrphans } from "./open-inbox";
-import { listenToParent, parentChannelInput } from "./parent-channel";
+import { listenToParent, parentChannelInput, tellParent } from "./parent-channel";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
@@ -1495,7 +1495,7 @@ for (let i = 0; i < initResults.length; i++) {
 function findDistDir(): string | null {
   if (process.env.LOXEL_STATIC_DIR) return process.env.LOXEL_STATIC_DIR;
   // A compiled server, as in the standalone server bundle: the renderer beside the binary.
-  if (Bun.main.startsWith("/$bunfs/")) {
+  if (config.isCompiled) {
     const besideBinary = join(dirname(process.execPath), "renderer");
     if (existsSync(join(besideBinary, "index.html"))) return besideBinary;
   }
@@ -2011,6 +2011,9 @@ process.on("SIGTERM", () => shutdown());
 
 // Only now can a shutdown tear the server down: see `leaveWithApp`.
 serving = true;
+
+// The app trusts no other answer on the port: it waits for this before it sends the secret there.
+if (config.parentPid !== null) tellParent({ type: "listening" });
 
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });

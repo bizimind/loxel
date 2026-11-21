@@ -1,14 +1,16 @@
 /**
- * Reading the desktop app's messages to the server it started, from the channel described in
- * [parent-channel-protocol.ts](../parent-channel-protocol.ts).
+ * Reading the desktop app's messages to the server it started, and answering them, on the channel
+ * described in [parent-channel-protocol.ts](../parent-channel-protocol.ts).
  */
-import { createReadStream } from "node:fs";
+import { createReadStream, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 
 import {
   PARENT_CHANNEL_FD,
+  type ServerMessage,
   type ShutdownTerminals,
+  encodeServerMessage,
   parseParentMessage,
 } from "@/parent-channel-protocol";
 
@@ -43,4 +45,13 @@ export function listenToParent(input: Readable, listener: ParentListener): void 
 /** The app's channel, in a server the app started. */
 export function parentChannelInput(): Readable {
   return createReadStream("", { fd: PARENT_CHANNEL_FD });
+}
+
+/** Tell the app `message` on its channel; an app that is gone has closed it, which is logged. */
+export function tellParent(message: ServerMessage): void {
+  try {
+    writeSync(PARENT_CHANNEL_FD, encodeServerMessage(message));
+  } catch (err) {
+    log.warn(`Could not tell the app ${message.type} on its channel`, { error: err });
+  }
 }

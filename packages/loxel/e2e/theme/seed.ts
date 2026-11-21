@@ -5,10 +5,11 @@
  */
 import { useSettingsStore } from "@/store/settings-store";
 
-import { api, fixturePath, STACK_TOKEN_KEY, stackTokenPath } from "./lib";
+import { api, fixturePath, STACK_TOKEN_KEY, stackTokenPath, targetThemeStack } from "./lib";
 
 const workDir = process.argv[2];
 if (!workDir) throw new Error("usage: bun e2e/theme/seed.ts <work-dir>");
+targetThemeStack(workDir);
 
 await api("/api/projects", { body: { path: fixturePath(workDir), name: "orbit-shop" } });
 const { version } = useSettingsStore.persist.getOptions();

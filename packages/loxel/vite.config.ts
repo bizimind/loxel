@@ -7,7 +7,7 @@ import { type Plugin, type ProxyOptions, defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 
 import { DEFAULT_SERVER_PORT, parsePortEnv, vitePort } from "./src/app-ports";
-import { bearer, readSessionToken } from "./src/app-session";
+import { type DevAccess, authorizeProxyRequest, devAccessFor } from "./src/dev-proxy";
 import { stateDirFor } from "./src/state-dir";
 
 const isElectron = !!process.env.ELECTRON;
@@ -150,22 +150,15 @@ function xtermWebglPatches(): Plugin {
 }
 
 /**
- * Proxy `/api` and `/ws` to the server at `serverPort`. For a browser (`pnpm run dev`,
- * `dev:client`), with the secret from the token file of a server started without the desktop app,
- * read on every request, since such a server makes a new one each time it restarts: dev only, and
- * while it runs, whatever reaches this port reaches the dev server's API. Under the dev app
- * (`dev:app`) it adds nothing: the app's main process adds the secret of the server it uses to its
- * windows' requests.
+ * Proxy `/api` and `/ws` to the server at `serverPort`, adding its secret for the browser `access`
+ * admits (src/dev-proxy.ts); null under the dev app, whose main process adds it.
  */
-function serverProxy(serverPort: number, stateDir: string, ws: boolean): ProxyOptions {
-  const authorize = (proxyReq: {
-    getHeader: (name: string) => unknown;
-    setHeader: (name: string, value: string) => void;
-  }) => {
-    if (isElectron || proxyReq.getHeader("authorization") !== undefined) return;
-    const secret = readSessionToken(stateDir);
-    if (secret) proxyReq.setHeader("Authorization", bearer(secret));
-  };
+function serverProxy(
+  serverPort: number,
+  stateDir: string,
+  ws: boolean,
+  access: DevAccess | null,
+): ProxyOptions {
   return {
     target: `${ws ? "ws" : "http"}://127.0.0.1:${serverPort}`,
     ws,
@@ -173,8 +166,26 @@ function serverProxy(serverPort: number, stateDir: string, ws: boolean): ProxyOp
     // Host names any other port (src/server/request-origin.ts).
     changeOrigin: true,
     configure: (proxy) => {
-      proxy.on("proxyReq", authorize);
-      proxy.on("proxyReqWs", authorize);
+      proxy.on("proxyReq", (proxyReq, req) =>
+        authorizeProxyRequest(proxyReq, req, access, stateDir),
+      );
+      proxy.on("proxyReqWs", (proxyReq, req) =>
+        authorizeProxyRequest(proxyReq, req, access, stateDir),
+      );
+    },
+  };
+}
+
+/** Let a browser through the proxy with the access link, which Vite prints once it listens. */
+function devAccessLink(access: DevAccess): Plugin {
+  return {
+    name: "loxel-dev-access",
+    configureServer(server) {
+      server.middlewares.use(access.middleware);
+      server.httpServer?.once("listening", () => {
+        const base = `http://${server.config.server.host}:${server.config.server.port}/`;
+        server.config.logger.info(`  ➜  Open Loxel: ${access.link(base)}`);
+      });
     },
   };
 }
@@ -185,12 +196,15 @@ export default defineConfig(({ mode }) => {
     parsePortEnv("LOXEL_SERVE_PORT", process.env.LOXEL_SERVE_PORT) ??
     (isDevMode ? DEFAULT_SERVER_PORT.dev : DEFAULT_SERVER_PORT.production);
   const stateDir = stateDirFor(isDevMode ? "dev" : "production");
+  const devPort = vitePort(process.env);
+  const access = isElectron ? null : devAccessFor(devPort);
 
   return {
     plugins: [
       react(),
       tailwindcss(),
       xtermWebglPatches(),
+      ...(access ? [devAccessLink(access)] : []),
       ...(isElectron
         ? electron([
             {
@@ -251,12 +265,12 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       // The server only admits this origin in dev (src/server/request-origin.ts), so fail
       // loudly instead of silently moving to another port.
-      port: vitePort(process.env),
+      port: devPort,
       strictPort: true,
       proxy: {
-        "/api": serverProxy(serverPort, stateDir, false),
+        "/api": serverProxy(serverPort, stateDir, false, access),
         // Every language server's socket too (`/ws/<lsp>`), by prefix.
-        "/ws": serverProxy(serverPort, stateDir, true),
+        "/ws": serverProxy(serverPort, stateDir, true, access),
       },
     },
   };

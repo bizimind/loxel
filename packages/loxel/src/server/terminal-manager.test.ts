@@ -208,6 +208,30 @@ describe("TerminalManager commands", () => {
       }
     }
   });
+
+  test("shells don't inherit how the server was started: its mode, state, renderer or key", async () => {
+    process.env.SHELL = "/bin/sh";
+    // The tests' own state directory is one of them (src/test/temp-state-dir.ts).
+    const overrides = { LOXEL_DEV: "1", LOXEL_STATIC_DIR: "/app/renderer", LOXEL_DEK_FILE: "/k" };
+    const original = Object.fromEntries(Object.keys(overrides).map((n) => [n, process.env[n]]));
+    Object.assign(process.env, overrides);
+    try {
+      const manager = createManager();
+      const id = crypto.randomUUID();
+      const sink = createRecordingSink();
+      await manager.attach(id, sink.sink, {
+        ...attachOptions,
+        command:
+          "echo env-marker-[${LOXEL_DEV-unset}:${LOXEL_STATE_DIR-unset}:${LOXEL_STATIC_DIR-unset}:${LOXEL_DEK_FILE-unset}]",
+      });
+      await until(() => sink.outputText().includes("env-marker-[unset:unset:unset:unset]"));
+    } finally {
+      for (const [name, value] of Object.entries(original)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });
 
 describe("TerminalManager toolchain environments", () => {
