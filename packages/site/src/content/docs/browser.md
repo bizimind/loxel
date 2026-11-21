@@ -105,7 +105,7 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ## Downloads
 
-When a page downloads a file, Loxel asks where to save it. While it asks, further downloads from that page are cancelled, so a site can't pile up save dialogs. Every file you download is marked as downloaded from the internet, as files from Safari or Chrome are, so macOS checks a downloaded app, script or installer when you first open it.
+When a page downloads a file, the download starts right away in your Downloads folder while Loxel asks where to save it, and once both are done Loxel moves the file where you chose. A file already in Downloads keeps its place: the download takes a numbered name beside it, such as `report (1).pdf`. Loxel replaces a file where you chose to save only when you confirmed replacing it in the dialog. Cancelling the dialog cancels the download, or deletes it if it already finished. While Loxel asks, further downloads from that page are cancelled, so a site can't pile up save dialogs. Every file you download is marked as downloaded from the internet, as files from Safari or Chrome are, from the moment it starts arriving, so macOS checks a downloaded app, script or installer when you first open it, even one whose download never finished.
 
 ---
 
