@@ -333,3 +333,21 @@ contextBridge.executeInMainWorld({
   },
   args: [() => ipcRenderer.sendSync(BROWSER_MEDIA_PERMISSION)],
 });
+
+// Reports each pointer lock change of this frame to main, which shows the pointer lock notice
+// again when the user comes back after being away while the page still holds the lock. Main gets
+// no signal of its own when the lock ends. Listens in the preload's isolated world, ahead of any
+// listener the page adds, and reads the frame's own state there: a pointerlockchange the page
+// dispatches itself is not trusted and reports nothing. See exclusive-access.ts.
+
+// Must match POINTER_LOCK_CHANGE in ipc-channels.ts.
+const POINTER_LOCK_CHANGE = "exclusive-access:pointer-lock-change";
+
+window.addEventListener(
+  "pointerlockchange",
+  (event) => {
+    if (!event.isTrusted) return;
+    ipcRenderer.send(POINTER_LOCK_CHANGE, document.pointerLockElement !== null);
+  },
+  { capture: true },
+);

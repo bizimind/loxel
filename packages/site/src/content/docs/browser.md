@@ -113,7 +113,7 @@ When a page downloads a file, the download starts right away in your Downloads f
 
 Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. A site that wants your camera or microphone, to send notifications, to open a link in another app, or to reach your dev servers and devices on your network asks you first (see [Camera and microphone](#camera-and-microphone), [Other apps](#other-apps), [Local network](#local-network) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
 
-When a page goes full screen or hides your pointer, Loxel names the site at the top of the page for a few seconds, every time, and again when you come back to a full screen page after a while away, so a page can't pass itself off as Loxel or as your Mac asking for a password. Press Esc to leave full screen or get your pointer back. Popup windows that sites open can't go full screen or hide your pointer.
+When a page goes full screen or hides your pointer, Loxel names the site at the top of the page for a few seconds, every time, and again when you come back, after a while away or from another app or window, to a page that is still full screen or still has your pointer, so a page can't pass itself off as Loxel or as your Mac asking for a password. Press Esc to leave full screen or get your pointer back. Popup windows that sites open can't go full screen or hide your pointer.
 
 ### Camera and microphone
 

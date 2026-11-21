@@ -1,8 +1,9 @@
-import type { WebContents, WebFrameMain } from "electron";
+import { ipcMain, type WebContents, type WebFrameMain } from "electron";
 
 import type { BrowserPermission } from "./browser-permissions";
 import type { ExclusiveAccessNotice } from "./exclusive-access-notice";
-import { EXCLUSIVE_ACCESS_HIDE, EXCLUSIVE_ACCESS_SHOW } from "./ipc-channels";
+import { EXCLUSIVE_ACCESS_HIDE, EXCLUSIVE_ACCESS_SHOW, POINTER_LOCK_CHANGE } from "./ipc-channels";
+import { webviewSenderFrame } from "./webview-sender";
 
 /**
  * Tells a browser panel when its page goes fullscreen or locks the pointer, so the panel can show
@@ -17,23 +18,52 @@ import { EXCLUSIVE_ACCESS_HIDE, EXCLUSIVE_ACCESS_SHOW } from "./ipc-channels";
  * and which the page cannot route around (the webview preload, by contrast, doesn't run in
  * `about:blank` frames). Both requests name the frame that asked, so the notice names that frame's
  * origin, as Chrome's does: an embedded frame that goes fullscreen is not shown as its host.
+ *
+ * Main gets no signal when the pointer is unlocked, so for the notice shown again after the user
+ * was away, the webview preload reports each `pointerlockchange` of its frame. A page could lie in
+ * that report, or send it late, so it only ever ends tracking a lock in favour of the notice: main
+ * tracks a granted lock until the frame that asked for it reports taking it and then losing it
+ * (see `PointerLock`), and any other lock, as one an `about:blank` frame took, until the page
+ * navigates.
  */
 
-/** How long without input before the next input shows a fullscreen page's notice again (Chrome's). */
+/** How long without input before the next input shows a page's notice again (Chrome's). */
 export const IDLE_RESHOW_MS = 15 * 60 * 1000;
 
 /** The webContents of a browser panel page, as far as this module uses it. */
 export type ExclusiveAccessPage = Pick<WebContents, "id" | "getType" | "getURL" | "on"> & {
-  hostWebContents: Pick<WebContents, "send" | "isDestroyed"> | null;
-  mainFrame: { framesInSubtree: Array<Pick<WebFrameMain, "url" | "origin">> };
+  hostWebContents: Pick<WebContents, "id" | "send" | "isDestroyed"> | null;
+  mainFrame: { framesInSubtree: Array<ExclusiveAccessFrame> };
 };
 
+/** A frame of a browser panel page, as far as this module uses it. */
+export type ExclusiveAccessFrame = Pick<WebFrameMain, "url" | "origin" | "processId" | "routingId">;
+
+/** A pointer lock granted to one of the page's frames, until it is known to have ended. */
+interface PointerLock {
+  /** The origin of the frame whose request was granted. */
+  origin: string;
+  /**
+   * The frame that asked (`frameKey`), when the page had exactly one frame at the requesting URL:
+   * Electron names the requester only by its URL. Only this frame's reports end the lock, never
+   * another frame's, which may describe a lock its renderer hasn't yet learned it lost.
+   */
+  requester: string | null;
+  /** The requester reported taking the lock since the grant, so its report of losing it counts. */
+  taken: boolean;
+}
+
 interface PageState {
+  page: ExclusiveAccessPage;
   /** The origin of the frame whose fullscreen request was just granted, until the page enters. */
   requester: string | null;
   /** The origin of the frame that is fullscreen, while the page is. */
   fullscreen: string | null;
+  /** The page's pointer lock, while it may hold one. */
+  pointerLock: PointerLock | null;
   lastInput: number;
+  /** The page's clock, which `trackWebviewExclusiveAccess` sets. */
+  now: () => number;
 }
 
 // By webContents ID. Electron grants a fullscreen request, then emits `enter-html-full-screen`
@@ -43,7 +73,14 @@ const pages = new Map<number, PageState>();
 function stateOf(page: ExclusiveAccessPage): PageState {
   let state = pages.get(page.id);
   if (!state) {
-    state = { requester: null, fullscreen: null, lastInput: 0 };
+    state = {
+      page,
+      requester: null,
+      fullscreen: null,
+      pointerLock: null,
+      lastInput: 0,
+      now: Date.now,
+    };
     pages.set(page.id, state);
   }
   return state;
@@ -63,9 +100,17 @@ export function noteExclusiveAccessGrant(
   const state = stateOf(page);
   const origin = frameOrigin(requestingUrl, page);
   if (permission === "pointerLock") {
-    // Locked from the page that is fullscreen: one notice says both, as Chrome's does.
-    const fullscreen = state.fullscreen === origin;
-    show(page, { origin, fullscreen, pointerLock: true });
+    const requesters = page.mainFrame.framesInSubtree.filter(
+      (frame) => frame.url === requestingUrl,
+    );
+    const [requester] = requesters;
+    state.pointerLock = {
+      origin,
+      requester: requesters.length === 1 && requester ? frameKey(requester) : null,
+      taken: false,
+    };
+    state.lastInput = state.now();
+    showPointerLock(page, state.pointerLock, state);
   } else if (state.fullscreen === null) {
     state.requester = origin;
   } else {
@@ -76,14 +121,44 @@ export function noteExclusiveAccessGrant(
 }
 
 /**
+ * Note a frame's report (`POINTER_LOCK_CHANGE`) that it took (`locked`) or lost the pointer lock.
+ * `frame` is the sender frame as Chromium knows it, never what the page says about itself.
+ */
+export function notePointerLockReport(
+  page: Pick<ExclusiveAccessPage, "id">,
+  frame: Pick<WebFrameMain, "processId" | "routingId">,
+  locked: boolean,
+): void {
+  const state = pages.get(page.id);
+  const lock = state?.pointerLock;
+  if (!state || !lock || lock.requester !== frameKey(frame)) return;
+  if (locked) lock.taken = true;
+  else if (lock.taken) state.pointerLock = null;
+}
+
+/** Listen for the webview preload's pointer lock reports. */
+export function installPointerLockReports(): void {
+  ipcMain.on(POINTER_LOCK_CHANGE, (event, locked: unknown) => {
+    const frame = webviewSenderFrame(event);
+    if (frame && typeof locked === "boolean") notePointerLockReport(event.sender, frame, locked);
+  });
+}
+
+function frameKey({ processId, routingId }: Pick<WebFrameMain, "processId" | "routingId">) {
+  return `${processId}:${routingId}`;
+}
+
+/**
  * Show a notice in the page's panel each time it goes fullscreen, again on the first input after
- * the user was away for `IDLE_RESHOW_MS`, and drop it when the page leaves fullscreen.
+ * the user was away for `IDLE_RESHOW_MS` while it is fullscreen or holds the pointer lock (or when
+ * its window gains focus, `noteWindowFocused`), and drop it when the page leaves fullscreen.
  */
 export function trackWebviewExclusiveAccess(
   page: ExclusiveAccessPage,
   now: () => number = Date.now,
 ): void {
   if (page.getType() !== "webview") return;
+  stateOf(page).now = now;
   page.on("enter-html-full-screen", () => {
     const state = stateOf(page);
     const origin = state.requester ?? frameOrigin(page.getURL(), page);
@@ -97,18 +172,58 @@ export function trackWebviewExclusiveAccess(
     stateOf(page).fullscreen = null;
     send(page, EXCLUSIVE_ACCESS_HIDE, page.id);
   });
+  // A new document holds no lock: navigating releases the old one's.
+  page.on("did-navigate", () => {
+    const state = pages.get(page.id);
+    if (state) state.pointerLock = null;
+  });
   const onInput = () => {
     const state = pages.get(page.id);
-    if (!state?.fullscreen) return;
+    if (!state || (!state.fullscreen && !state.pointerLock)) return;
     const time = now();
-    if (time - state.lastInput >= IDLE_RESHOW_MS) {
-      show(page, { origin: state.fullscreen, fullscreen: true, pointerLock: false });
-    }
+    if (time - state.lastInput >= IDLE_RESHOW_MS) showAgain(page, state);
     state.lastInput = time;
   };
   page.on("before-input-event", onInput);
   page.on("before-mouse-event", onInput);
   page.on("destroyed", () => pages.delete(page.id));
+}
+
+/**
+ * Show the notice again for each page in the window hosting `host` that is fullscreen or holds the
+ * pointer lock, as the window just gained focus: the user is back from another window or app.
+ */
+export function noteWindowFocused(host: Pick<WebContents, "id">): void {
+  for (const state of pages.values()) {
+    if (state.page.hostWebContents?.id !== host.id) continue;
+    if (!state.fullscreen && !state.pointerLock) continue;
+    state.lastInput = state.now();
+    showAgain(state.page, state);
+  }
+}
+
+/**
+ * The notice for what the page holds now. Locked by a frame other than the fullscreen one, it names
+ * the frame that has the screen.
+ */
+function showAgain(page: ExclusiveAccessPage, state: PageState) {
+  const lock = state.pointerLock;
+  if (lock && (state.fullscreen === null || state.fullscreen === lock.origin)) {
+    showPointerLock(page, lock, state);
+    return;
+  }
+  if (state.fullscreen) {
+    show(page, { origin: state.fullscreen, fullscreen: true, pointerLock: false });
+  }
+}
+
+/** Locked from the frame that is fullscreen, one notice says both, as Chrome's does. */
+function showPointerLock(page: ExclusiveAccessPage, lock: PointerLock, state: PageState) {
+  show(page, {
+    origin: lock.origin,
+    fullscreen: state.fullscreen === lock.origin,
+    pointerLock: true,
+  });
 }
 
 function show(page: ExclusiveAccessPage, notice: Omit<ExclusiveAccessNotice, "webContentsId">) {
@@ -128,7 +243,12 @@ function send(page: ExclusiveAccessPage, channel: string, payload: unknown): voi
  * With none, it is the page's origin, as Chrome falls back to, or for a page without one, such as a
  * local file, its scheme.
  */
-export function frameOrigin(url: string, page: Pick<ExclusiveAccessPage, "getURL" | "mainFrame">) {
+export function frameOrigin(
+  url: string,
+  page: Pick<ExclusiveAccessPage, "getURL"> & {
+    mainFrame: { framesInSubtree: Array<Pick<ExclusiveAccessFrame, "url" | "origin">> };
+  },
+) {
   const own = originOf(url);
   if (own) return own;
   const pageUrl = page.getURL();

@@ -8,6 +8,7 @@ import {
   BROWSER_NOTIFICATION_REQUEST_PERMISSION,
   BROWSER_NOTIFICATION_SHOW,
   JAVASCRIPT_DIALOG_RUN,
+  POINTER_LOCK_CHANGE,
   REGISTRATION_NOTIFICATION_CLOSE,
   REGISTRATION_NOTIFICATION_LIST,
   REGISTRATION_NOTIFICATION_SHOW,
@@ -44,7 +45,18 @@ void mock.module("electron", () => ({
       ipcListeners.set(channel, listener),
   },
 }));
+// The frame's own listeners, added in the preload's world as it loads.
+type FrameListener = (event: { isTrusted: boolean }) => void;
+const frameListeners = new Map<string, { listener: FrameListener; options: unknown }>();
+const environmentWindow = globalThis.window;
+Object.assign(globalThis, {
+  window: {
+    addEventListener: (type: string, listener: FrameListener, options: unknown) =>
+      frameListeners.set(type, { listener, options }),
+  },
+});
 await import("./webview-preload.cjs");
+globalThis.window = environmentWindow;
 const [dialogScript, notificationScript, mediaScript] = scripts;
 if (!dialogScript || !notificationScript || !mediaScript) {
   throw new Error("the preload did not install its main-world scripts");
@@ -365,5 +377,31 @@ describe("webview preload camera and microphone permission", () => {
     sendSync.mockClear();
     expect((await permissions.query({ name: "geolocation" })).state).toBe("denied");
     expect(sendSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("pointer lock reports", () => {
+  const pointerLockChange = frameListeners.get("pointerlockchange");
+
+  test("tell main whether the frame holds the lock, ahead of the page's listeners", () => {
+    expect(pointerLockChange?.options).toEqual({ capture: true });
+    const environmentDocument = globalThis.document;
+    try {
+      Object.assign(globalThis, { document: { pointerLockElement: {} } });
+      pointerLockChange?.listener({ isTrusted: true });
+      Object.assign(globalThis, { document: { pointerLockElement: null } });
+      pointerLockChange?.listener({ isTrusted: true });
+    } finally {
+      globalThis.document = environmentDocument;
+    }
+    expect(send.mock.calls).toEqual([
+      [POINTER_LOCK_CHANGE, true],
+      [POINTER_LOCK_CHANGE, false],
+    ]);
+  });
+
+  test("ignore a change the page dispatched itself", () => {
+    pointerLockChange?.listener({ isTrusted: false });
+    expect(send).not.toHaveBeenCalled();
   });
 });

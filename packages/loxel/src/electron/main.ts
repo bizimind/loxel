@@ -106,7 +106,12 @@ import { BROWSER_PARTITION } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installSiteAccess, trackWebviewSiteAccess } from "./browser-site-access";
 import { installDefaultBrowser } from "./default-browser";
-import { noteExclusiveAccessGrant, trackWebviewExclusiveAccess } from "./exclusive-access";
+import {
+  installPointerLockReports,
+  noteExclusiveAccessGrant,
+  noteWindowFocused,
+  trackWebviewExclusiveAccess,
+} from "./exclusive-access";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
@@ -435,6 +440,7 @@ async function createWindow(): Promise<BrowserWindow> {
   win.on("focus", () => {
     layoutWindows.focused(windowId);
     win.webContents.send(WINDOW_FOCUS_CHANGE, true);
+    noteWindowFocused(win.webContents);
   });
   win.on("enter-full-screen", () => {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, true);
@@ -914,6 +920,7 @@ installNativeTheme();
 installBrowserNotifications();
 installBrowserMedia();
 installSiteAccess();
+installPointerLockReports();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 onAppWindowMessage(GET_WINDOW_FULL_SCREEN, (event) => {
