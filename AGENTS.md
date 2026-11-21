@@ -50,6 +50,8 @@ bun test --cwd packages/wt src/git/name.test.ts
 bun test --cwd packages/wt --test-name-pattern "validates"
 ```
 
+Repo tooling outside `packages/` (`scripts/`, `.github/scripts/`, `.agents/skills/*/scripts/`) keeps its tests next to it: `bun test ./scripts ./.github/scripts ./.agents/skills`.
+
 Tests must not depend on timing: wait for the event, callback or condition the code signals (or use fake timers) instead of sleeps, fixed timeouts or wall-clock assertions. A test that only passes on a fast, idle machine is a flaky test.
 
 ## Architecture
@@ -233,7 +235,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. The root `prepare` script (`scripts/install-hooks.sh`, run by `pnpm install`) copies `.githooks/` into the git directory and points `core.hooksPath` there, so checking out a branch never runs hooks that branch adds; rerun `pnpm run prepare` after changing a hook.
 
 ## Type Checking
 
@@ -241,7 +243,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 
 ## CI & Releases
 
-**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Installs run pnpm 12, which rejects a lockfile holding any version (transitive ones included) published inside the 7-day `minimumReleaseAge` window set in `pnpm-workspace.yaml`; wait for it to age out rather than adding a `minimumReleaseAgeExclude` entry, which is only for urgent security fixes. Automated code review runs Claude Code's CLI (`claude -p`, version pinned in `claude-code-review.yml`) with the `ci-code-review` skill, only on PRs whose branch is in this repo (never forks or Dependabot), using the PR's own `CLAUDE.md`, `.claude` and skills, and posts as `github-actions[bot]`. One review runs per PR at a time: pushes during a review are taken in by the running review or queue the next run, which resumes the same review session (kept in a private R2 bucket) when the previous run posted its summary. A run that finishes without posting its summary fails so it gets rerun, and Claude's output goes to a file on the runner, never to the public log.
+**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs, and the repo tooling tests run when `scripts/`, `.github/scripts/` or `.agents/skills/` change. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Installs run pnpm 12, which rejects a lockfile holding any version (transitive ones included) published inside the 7-day `minimumReleaseAge` window set in `pnpm-workspace.yaml`; wait for it to age out rather than adding a `minimumReleaseAgeExclude` entry, which is only for urgent security fixes. Automated code review runs Claude Code's CLI (`claude -p`, version pinned in `claude-code-review.yml`) with the `ci-code-review` skill, only on PRs whose branch is in this repo (never forks or Dependabot), using the PR's own `CLAUDE.md`, `.claude` and skills, and posts as `github-actions[bot]`. One review runs per PR at a time: pushes during a review are taken in by the running review or queue the next run, which resumes the same review session (kept in a private R2 bucket) when the previous run posted its summary. A run that finishes without posting its summary fails so it gets rerun, and Claude's output goes to a file on the runner, never to the public log.
 
 **Dependency updates**: Dependabot (`.github/dependabot.yml`) bumps npm packages and GitHub Actions. Renovate, self-hosted in `renovate.yml` and limited to custom managers (`renovate.json`), bumps what Dependabot cannot read (the language-server manifests, the Go toolchain and Bun) and pins each new version's SHA256s with `pin-hashes.ts`; see `packages/loxel/docs/LANGUAGE_SERVERS.md`.
 

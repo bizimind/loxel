@@ -3,21 +3,26 @@
  *
  * Usage: bun run process-results.ts <issue_number> [--dry-run]
  *
- * Actions based on relationship type and confidence:
- * - duplicate (high): Close as duplicate of older issue
- * - duplicate (medium/low): Comment linking, don't close
- * - subset (high): Close, add unique_value as comment to superset
- * - subset (medium/low): Comment "May be covered by #X"
- * - superset (high): Comment on related issue suggesting closure
- * - superset (medium/low): Link bidirectionally
- * - overlapping: Link bidirectionally
- * - related: Link bidirectionally
+ * Runs in the issues branch checkout, with results/<issue_number>.json from check-issue.ts. Only
+ * relations that pass policy.ts are acted on, and model text reaches comments only through
+ * commentText():
+ * - duplicate / subset: comment on this issue; at high confidence, close it when the related issue
+ *   is an open issue filed by the project's own people (otherwise a maintainer decides), and copy
+ *   unique_value to the related issue
+ * - superset: comment on both issues
+ * - overlapping, related: link both issues
  */
 
 import { $ } from "bun";
 
-import type { DedupeResult, Relation } from "./schema.ts";
-import { validateDedupeResult } from "./schema.ts";
+import { checkRelations, commentText, type IssueRecord, mayCloseInFavorOf } from "./policy.ts";
+import {
+  type DedupeResult,
+  MAX_REASONING_LENGTH,
+  MAX_UNIQUE_VALUE_LENGTH,
+  parseDedupeResult,
+  type Relation,
+} from "./schema.ts";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -58,70 +63,93 @@ async function closeIssue(
   }
 }
 
+async function fetchIssue(issueNumber: number): Promise<IssueRecord | null> {
+  try {
+    // Passed as one argument so the shell leaves gh's {owner}/{repo} placeholders alone.
+    const endpoint = `repos/{owner}/{repo}/issues/${issueNumber}`;
+    const record: unknown = await $`gh api ${endpoint}`.quiet().json();
+    if (
+      typeof record === "object" &&
+      record !== null &&
+      "state" in record &&
+      typeof record.state === "string" &&
+      "author_association" in record &&
+      typeof record.author_association === "string"
+    ) {
+      return {
+        state: record.state,
+        author_association: record.author_association,
+        pull_request: "pull_request" in record ? record.pull_request : undefined,
+      };
+    }
+    console.error(`Unexpected record for #${issueNumber}`);
+  } catch (err) {
+    console.error(`Failed to look up #${issueNumber}:`, err);
+  }
+  return null;
+}
+
+const TYPE_LABELS: Record<Relation["relationship"], string> = {
+  duplicate: "Duplicate",
+  subset: "Covered by",
+  superset: "Covers",
+  overlapping: "Overlaps",
+  related: "Related",
+};
+
+async function closeInFavorOf(
+  targetIssue: number,
+  relatedIssue: number,
+  verb: string,
+  uniqueValue: string | null,
+): Promise<void> {
+  const related = DRY_RUN ? null : await fetchIssue(relatedIssue);
+  if (!DRY_RUN && !(related && mayCloseInFavorOf(related))) {
+    console.log(
+      `Not closing #${targetIssue}: #${relatedIssue} is not an open issue filed by the project; left to a maintainer`,
+    );
+    return;
+  }
+  const closeComment = uniqueValue
+    ? `Closing as ${verb} #${relatedIssue}.\n\n**Preserved context:** ${uniqueValue}`
+    : `Closing as ${verb} #${relatedIssue}.`;
+  await closeIssue(targetIssue, closeComment, relatedIssue);
+  if (uniqueValue) {
+    await commentOnIssue(relatedIssue, `Context from #${targetIssue}: ${uniqueValue}`);
+  }
+}
+
 async function processRelation(targetIssue: number, relation: Relation): Promise<void> {
-  const { related_issue, relationship, confidence, reasoning, unique_value } = relation;
+  const { related_issue: relatedIssue, relationship, confidence } = relation;
+  const reasoning = commentText(relation.reasoning, MAX_REASONING_LENGTH);
+  const uniqueValue = commentText(relation.unique_value, MAX_UNIQUE_VALUE_LENGTH);
+  const link = (label: string, issue: number) =>
+    reasoning ? `${label}: #${issue} - ${reasoning}` : `${label}: #${issue}`;
 
-  console.log(`Processing: #${targetIssue} -> #${related_issue} (${relationship}, ${confidence})`);
-
-  // Build concise one-line comment format: "Type: #issue - reason"
-  const typeLabels: Record<string, string> = {
-    duplicate: "Duplicate",
-    subset: "Covered by",
-    superset: "Covers",
-    overlapping: "Overlaps",
-    related: "Related",
-  };
-
-  const label = typeLabels[relationship];
+  console.log(`Processing: #${targetIssue} -> #${relatedIssue} (${relationship}, ${confidence})`);
+  const label = TYPE_LABELS[relationship];
 
   switch (relationship) {
-    case "duplicate": {
-      await commentOnIssue(targetIssue, `${label}: #${related_issue} - ${reasoning}`);
-
-      if (confidence === "high") {
-        const closeComment = unique_value
-          ? `Closing as duplicate of #${related_issue}.\n\n**Preserved context:** ${unique_value}`
-          : `Closing as duplicate of #${related_issue}.`;
-        await closeIssue(targetIssue, closeComment, related_issue);
-
-        if (unique_value) {
-          await commentOnIssue(related_issue, `Context from #${targetIssue}: ${unique_value}`);
-        }
-      }
-      break;
-    }
-
+    case "duplicate":
     case "subset": {
-      await commentOnIssue(targetIssue, `${label}: #${related_issue} - ${reasoning}`);
-
+      await commentOnIssue(targetIssue, link(label, relatedIssue));
       if (confidence === "high") {
-        const closeComment = unique_value
-          ? `Closing as covered by #${related_issue}.\n\n**Preserved context:** ${unique_value}`
-          : `Closing as covered by #${related_issue}.`;
-        await closeIssue(targetIssue, closeComment, related_issue);
-
-        if (unique_value) {
-          await commentOnIssue(related_issue, `Context from #${targetIssue}: ${unique_value}`);
-        }
+        const verb = relationship === "duplicate" ? "duplicate of" : "covered by";
+        await closeInFavorOf(targetIssue, relatedIssue, verb, uniqueValue);
       }
       break;
     }
 
     case "superset": {
-      await commentOnIssue(targetIssue, `${label}: #${related_issue} - ${reasoning}`);
-      await commentOnIssue(related_issue, `Covered by: #${targetIssue} - ${reasoning}`);
+      await commentOnIssue(targetIssue, link(label, relatedIssue));
+      await commentOnIssue(relatedIssue, link("Covered by", targetIssue));
       break;
     }
 
-    case "overlapping": {
-      await commentOnIssue(targetIssue, `${label}: #${related_issue} - ${reasoning}`);
-      await commentOnIssue(related_issue, `${label}: #${targetIssue} - ${reasoning}`);
-      break;
-    }
-
+    case "overlapping":
     case "related": {
-      await commentOnIssue(targetIssue, `${label}: #${related_issue} - ${reasoning}`);
-      await commentOnIssue(related_issue, `${label}: #${targetIssue} - ${reasoning}`);
+      await commentOnIssue(targetIssue, link(label, relatedIssue));
+      await commentOnIssue(relatedIssue, link(label, targetIssue));
       break;
     }
 
@@ -132,43 +160,52 @@ async function processRelation(targetIssue: number, relation: Relation): Promise
   }
 }
 
+/** Issue numbers stored on the issues branch (issues/<number>-<slug>.md). */
+async function knownIssues(): Promise<Set<number>> {
+  const numbers = new Set<number>();
+  for await (const file of new Bun.Glob("issues/*.md").scan(".")) {
+    const match = /^issues\/(\d+)-/.exec(file);
+    if (match) numbers.add(Number(match[1]));
+  }
+  return numbers;
+}
+
 async function main() {
   const issueNumber = process.argv[2];
 
-  if (!issueNumber || issueNumber === "--dry-run") {
+  if (!issueNumber || !/^\d+$/.test(issueNumber)) {
     console.error("Usage: bun run process-results.ts <issue_number> [--dry-run]");
     process.exit(1);
   }
+  const target = Number(issueNumber);
 
-  const resultFile = `results/${issueNumber}.json`;
-
-  // Check if result file exists
-  const file = Bun.file(resultFile);
+  const file = Bun.file(`results/${issueNumber}.json`);
   if (!(await file.exists())) {
-    console.error(`Result file not found: ${resultFile}`);
+    console.error(`Result file not found: results/${issueNumber}.json`);
     process.exit(1);
   }
 
-  // Read and validate result
-  const result: DedupeResult = await file.json();
-
+  let result: DedupeResult;
   try {
-    validateDedupeResult(result);
+    result = parseDedupeResult(await file.json());
   } catch (err) {
     console.error(`Invalid result format: ${err}`);
     process.exit(1);
   }
 
+  const { accepted, rejected } = checkRelations(result, target, await knownIssues());
   console.log(`Processing results for issue #${issueNumber}`);
-  console.log(`Found ${result.relations.length} relations`);
+  console.log(`Acting on ${accepted.length} relation(s), skipping ${rejected.length}`);
+  for (const { relation, reason } of rejected) {
+    console.log(`Skipped #${relation.related_issue} (${relation.relationship}): ${reason}`);
+  }
 
   if (DRY_RUN) {
     console.log("\n=== DRY RUN MODE - No changes will be made ===\n");
   }
 
-  // Process each relation
-  for (const relation of result.relations) {
-    await processRelation(parseInt(issueNumber, 10), relation);
+  for (const relation of accepted) {
+    await processRelation(target, relation);
   }
 
   console.log("\nDone processing results");
