@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ori Shalom <ori.100000@gmail.com>
+Date: Sat, 21 Nov 2026 00:10:30 +0200
+Subject: [PATCH] fix: let a permission check handler only take File System
+ Access away
+
+With a permission check handler set, a File System Access grant's status
+came from the handler alone: true meant GRANTED and false DENIED, so a
+grant still to be asked for could never be ASK. Returning true, which an
+app needs so that files the user picked keep working, also granted write
+access to a file the user picked only for reading, and read and write
+access to handles a site stored and restored on a later visit, without
+the permission request handler being called.
+
+Make the handler a veto: false still denies, and true keeps the grant's
+own status, set by the picker, a drop, an ancestor directory or a
+permission request. A grant to be asked for stays ASK, so the page must
+request it and the permission request handler decides, as Chrome asks
+the user.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/api/session.md                           |  2 +-
+ .../file_system_access_permission_context.cc  | 10 +++-
+ spec/chromium.spec.ts                         | 49 ++++++++++++++++++-
+ 3 files changed, 58 insertions(+), 3 deletions(-)
+
+diff --git a/docs/api/session.md b/docs/api/session.md
+index ec96dafe2a..f96b90de91 100644
+--- a/docs/api/session.md
++++ b/docs/api/session.md
+@@ -1320,7 +1320,7 @@ session.defaultSession.setPermissionRequestHandler((webContents, permission, cal
+     * `clipboard-sanitized-write` - Request access to write to the clipboard.
+     * `deprecated-sync-clipboard-read` _Deprecated_ - Request access to run `document.execCommand("paste")`
+     * `display-capture` - Capture the screen via the [Screen Capture API](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Capture_API).
+-    * `fileSystem` - Access to read, write, and file management capabilities using the [File System API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API).
++    * `fileSystem` - Access to read, write, and file management capabilities using the [File System API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API). The handler can only take access away: returning `true` keeps the access the page already has (a file the user picked, saved or dropped, or access granted by the permission request handler), and access the page doesn't have yet still has to be requested, which calls the permission request handler.
+     * `fullscreen` - Control of the app's fullscreen state via the [Fullscreen API](https://developer.mozilla.org/en-US/docs/Web/API/Fullscreen_API).
+     * `geolocation` - Access the user's geolocation data via the [Geolocation API](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API)
+     * `geolocation-approximate` - Access a coarse approximation of the user's location via the [Geolocation API](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API).
+diff --git a/shell/browser/file_system_access/file_system_access_permission_context.cc b/shell/browser/file_system_access/file_system_access_permission_context.cc
+index 5458785fbf..d829096b55 100644
+--- a/shell/browser/file_system_access/file_system_access_permission_context.cc
++++ b/shell/browser/file_system_access/file_system_access_permission_context.cc
+@@ -372,6 +372,12 @@ class FileSystemAccessPermissionContext::PermissionGrantImpl
+         path_info_{path_info} {}
+ 
+   // FileSystemAccessPermissionGrant:
++  //
++  // The session's permission check handler can only take access away: a
++  // grant is GRANTED when it was granted (by a picker, a drop, a parent
++  // directory or a permission request) and the handler allows it. A grant
++  // still to be asked for stays ASK, so the page has to request it and the
++  // session's permission request handler decides, as Chrome asks the user.
+   PermissionStatus GetStatus() override {
+     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+@@ -388,7 +394,9 @@ class FileSystemAccessPermissionContext::PermissionGrantImpl
+       bool granted = permission_manager->CheckPermissionWithDetails(
+           blink::PermissionType::FILE_SYSTEM, nullptr, origin_.GetURL(),
+           std::move(details));
+-      return granted ? PermissionStatus::GRANTED : PermissionStatus::DENIED;
++      if (!granted) {
++        return PermissionStatus::DENIED;
++      }
+     }
+ 
+     return status_;
+diff --git a/spec/chromium.spec.ts b/spec/chromium.spec.ts
+index 992221be97..12631820ea 100644
+--- a/spec/chromium.spec.ts
++++ b/spec/chromium.spec.ts
+@@ -1732,7 +1732,8 @@ describe('chromium features', () => {
+       `,
+         true
+       );
+-      expect(permission).toBe('granted');
++      // Pasting grants read access only; the check handler can't grant write.
++      expect(permission).toBe('prompt');
+       expect(permissionChecks).toHaveLength(2);
+       for (const { fileAccessType, isDirectory, filePath } of permissionChecks) {
+         expect(['writable', 'readable']).toContain(fileAccessType);
+@@ -1741,6 +1742,52 @@ describe('chromium features', () => {
+       }
+     });
+ 
++    it('asks the request handler before writing a readable file whose checks are allowed', async () => {
++      const writablePath = path.join(fixturesPath, 'file-system', 'test-perms.html');
++      const testFile = path.join(fixturesPath, 'file-system', 'test.txt');
++      const permissionRequests: unknown[] = [];
++
++      const w = new BrowserWindow({
++        show: false,
++        webPreferences: {
++          nodeIntegration: true,
++          session: ses,
++          contextIsolation: false,
++          sandbox: false
++        }
++      });
++
++      ses.setPermissionCheckHandler((_wc, permission) => permission === 'fileSystem');
++      ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
++        if (permission === 'fileSystem') permissionRequests.push(details);
++        callback(false);
++      });
++
++      await w.loadFile(writablePath);
++      expect(await pasteFileUri(w, testFile)).toBe('did-create-file-handle');
++      expect(await w.webContents.executeJavaScript('handle.queryPermission({ mode: "read" })')).toBe('granted');
++      expect(await w.webContents.executeJavaScript('handle.queryPermission({ mode: "readwrite" })')).toBe('prompt');
++      // webFrameMain.executeJavaScript(), so that the browser process knows of
++      // the user activation before the request (see above).
++      const writeError = await w.webContents.mainFrame.executeJavaScript(
++        `
++        (async () => {
++          try {
++            await handle.createWritable();
++            return null;
++          } catch (error) {
++            return error.name;
++          }
++        })()
++      `,
++        true
++      );
++      expect(writeError).toBe('NotAllowedError');
++      expect(permissionRequests).toEqual([
++        expect.objectContaining({ fileAccessType: 'writable', isDirectory: false, filePath: testFile })
++      ]);
++    });
++
+     it('correctly denies permissions after creating a readable directory handle', async () => {
+       const permPath = path.join(fixturesPath, 'file-system', 'test-perms.html');
+       const testDir = path.join(fixturesPath, 'file-system');

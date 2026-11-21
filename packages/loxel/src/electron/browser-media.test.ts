@@ -421,6 +421,8 @@ function sessionHandlers() {
     {
       media: { check: checkMediaPermission, request: requestMediaPermission },
       openExternal: () => {},
+      fileSystem: () => {},
+      localNetwork: () => false,
     },
   );
   const { check, request } = installed;
