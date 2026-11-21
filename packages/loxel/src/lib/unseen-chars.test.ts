@@ -1,0 +1,76 @@
+import { describe, expect, test } from "bun:test";
+
+import { hasKeyControl, replaceUnseen, revealUnseen } from "./unseen-chars";
+
+describe("hasKeyControl", () => {
+  test.each(["npm test", "claude 'line one\nline two'", "שלום", ""])(
+    "accepts plain text and newlines: %p",
+    (text) => {
+      expect(hasKeyControl(text)).toBe(false);
+    },
+  );
+
+  test.each(["a\tb", "a\rb", "a\u0015b", "a\u001bb", "a\u007fb", "a\u0085b", "\u0000"])(
+    "finds a control character: %p",
+    (text) => {
+      expect(hasKeyControl(text)).toBe(true);
+    },
+  );
+});
+
+describe("revealUnseen", () => {
+  test("leaves printable text and newlines as one run", () => {
+    expect(revealUnseen("npm test\nnpm run build")).toEqual([
+      { text: "npm test\nnpm run build", unseen: false },
+    ]);
+  });
+
+  test("spells control characters as escapes", () => {
+    expect(revealUnseen("a\rb\tc\u0015\u001b")).toEqual([
+      { text: "a", unseen: false },
+      { text: "\\r", unseen: true },
+      { text: "b", unseen: false },
+      { text: "\\t", unseen: true },
+      { text: "c", unseen: false },
+      { text: "\\x15", unseen: true },
+      { text: "\\e", unseen: true },
+    ]);
+  });
+
+  test("spells bidirectional controls and zero-width characters as escapes", () => {
+    expect(revealUnseen("x\u202ey\u200bz\u2066")).toEqual([
+      { text: "x", unseen: false },
+      { text: "\\u202e", unseen: true },
+      { text: "y", unseen: false },
+      { text: "\\u200b", unseen: true },
+      { text: "z", unseen: false },
+      { text: "\\u2066", unseen: true },
+    ]);
+  });
+
+  test("spells other invisible characters as escapes, astral ones included", () => {
+    expect(revealUnseen("a\u00adb\u{e0041}c").map((run) => run.text)).toEqual([
+      "a",
+      "\\xad",
+      "b",
+      "\\u{e0041}",
+      "c",
+    ]);
+  });
+
+  test("keeps tabs and carriage returns as they are when asked to", () => {
+    expect(revealUnseen("\ta\u202e\r", { keepWhitespace: true })).toEqual([
+      { text: "\ta", unseen: false },
+      { text: "\\u202e", unseen: true },
+      { text: "\r", unseen: false },
+    ]);
+  });
+});
+
+describe("replaceUnseen", () => {
+  test("renders each unseen character in place", () => {
+    expect(replaceUnseen("<b>a\u202eb</b>\t", (escape) => `[${escape}]`)).toBe(
+      "<b>a[\\u202e]b</b>[\\t]",
+    );
+  });
+});
