@@ -31,7 +31,8 @@ export async function getLog(
   if (all) {
     args.push("--all");
   } else if (branches.length > 0) {
-    args.push(...branches);
+    // Branch names come from the repository: they are revisions only, never options or paths.
+    args.push("--end-of-options", ...branches, "--");
   }
 
   const result = await gitText(args, { cwd, env: readOnlyGitEnv(cwd) });

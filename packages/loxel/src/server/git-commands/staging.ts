@@ -12,7 +12,7 @@ export async function stageFiles(cwd: string, files: string[]): Promise<void> {
   for (const file of files) {
     validatePath(file);
   }
-  await runGit(["add", "--", ...files], { cwd });
+  await runGit(["--literal-pathspecs", "add", "--", ...files], { cwd });
 }
 
 export async function unstageFiles(cwd: string, files: string[]): Promise<void> {
@@ -21,7 +21,7 @@ export async function unstageFiles(cwd: string, files: string[]): Promise<void> 
   for (const file of files) {
     validatePath(file);
   }
-  await runGit(["restore", "--staged", "--", ...files], { cwd });
+  await runGit(["--literal-pathspecs", "restore", "--staged", "--", ...files], { cwd });
 }
 
 export async function stageHunk(cwd: string, patch: string): Promise<void> {
@@ -52,7 +52,7 @@ export async function discardChanges(cwd: string, files: string[]): Promise<void
   for (const file of files) {
     validatePath(file);
   }
-  await runGit(["checkout", "--", ...files], { cwd });
+  await runGit(["--literal-pathspecs", "checkout", "--", ...files], { cwd });
 }
 
 /**

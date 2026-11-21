@@ -3,7 +3,7 @@ import { stat, utimes } from "node:fs/promises";
 
 import { $ } from "bun";
 
-import { revertToHead } from "./staging";
+import { discardChanges, revertToHead, stageFiles, unstageFiles } from "./staging";
 import type { TempRepo } from "./test-utils";
 import { commit, createRepo, deleteFile, renameFile, stageFile, writeFile } from "./test-utils";
 
@@ -127,5 +127,39 @@ describe("revertToHead", () => {
     await revertToHead(repo.path, ["gone.txt"]);
 
     expect((await stat(index)).mtimeMs).toBe(before);
+  });
+});
+
+describe("stageFiles, unstageFiles and discardChanges", () => {
+  async function editBoth(): Promise<void> {
+    await writeFile(repo.path, "lit/[t].txt", "literal edited\n");
+    await writeFile(repo.path, "lit/t.txt", "plain edited\n");
+  }
+
+  test("stage and unstage only the named path, never a glob match", async () => {
+    await editBoth();
+    await stageFiles(repo.path, ["lit/[t].txt"]);
+    expect(await status()).toBe("M  lit/[t].txt\n M lit/t.txt");
+    await stageFiles(repo.path, ["lit/t.txt"]);
+    await unstageFiles(repo.path, ["lit/[t].txt"]);
+    expect(await status()).toBe(" M lit/[t].txt\nM  lit/t.txt");
+  });
+
+  test("stage, unstage and discard a file whose name starts with dashes", async () => {
+    await commit(repo.path, "dash file", { "--draft.md": "draft\n" });
+    await writeFile(repo.path, "--draft.md", "edited\n");
+    await stageFiles(repo.path, ["--draft.md"]);
+    expect(await status()).toBe("M  --draft.md");
+    await unstageFiles(repo.path, ["--draft.md"]);
+    expect(await status()).toBe(" M --draft.md");
+    await discardChanges(repo.path, ["--draft.md"]);
+    expect(await read("--draft.md")).toBe("draft\n");
+  });
+
+  test("discards changes in the named path only", async () => {
+    await editBoth();
+    await discardChanges(repo.path, ["lit/[t].txt"]);
+    expect(await read("lit/[t].txt")).toBe("literal\n");
+    expect(await read("lit/t.txt")).toBe("plain edited\n");
   });
 });
