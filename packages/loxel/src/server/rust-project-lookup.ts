@@ -88,7 +88,8 @@ export function untrustedCargoConfigAbove(wtPath: string): string | null {
     dir = path.dirname(dir);
     const config = CARGO_CONFIG_FILES.map((file) => path.join(dir, file)).find(existsSync);
     if (!config || isInside(config, cargoHome)) continue;
-    if (ownRepo !== null && isInside(ownRepo, realPathOf(dir) ?? dir)) continue;
+    const realDir = realPathOf(dir) ?? dir;
+    if (ownRepo !== null && (realDir === ownRepo || realDir === path.dirname(ownRepo))) continue;
     const repo = enclosingRepo(dir);
     if (repo !== null && !isRepoTrusted(repo)) return dir;
   }

@@ -77,12 +77,14 @@ const TARGET_FOLDERS: ReadonlySet<string> = new Set(["bin", "tests", "examples",
 
 /**
  * Whether a file is one Cargo can take as a target of its own without a manifest naming it: a build
- * script, or a file in a target folder, or a folder's `main.rs` there.
+ * script, `src/lib.rs` or `src/main.rs`, or a file in a target folder, or a folder's `main.rs` there.
  */
 export function isCargoTargetPath(file: string): boolean {
   if (!file.endsWith(".rs")) return false;
-  if (path.basename(file) === "build.rs") return true;
+  const name = path.basename(file);
+  if (name === "build.rs") return true;
   const parent = path.dirname(file);
+  if (path.basename(parent) === "src" && (name === "lib.rs" || name === "main.rs")) return true;
   if (TARGET_FOLDERS.has(path.basename(parent))) return true;
   return (
     path.basename(file) === "main.rs" && TARGET_FOLDERS.has(path.basename(path.dirname(parent)))

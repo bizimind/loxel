@@ -588,6 +588,8 @@ describe("isCargoTargetPath", () => {
   test("takes what Cargo finds as a target by its place", () => {
     for (const file of [
       "/p/build.rs",
+      "/p/src/lib.rs",
+      "/p/src/main.rs",
       "/p/src/bin/tool.rs",
       "/p/src/bin/tool/main.rs",
       "/p/tests/it.rs",
@@ -597,7 +599,7 @@ describe("isCargoTargetPath", () => {
       expect(isCargoTargetPath(file)).toBe(true);
     }
     for (const file of [
-      "/p/src/lib.rs",
+      "/p/src/net/lib.rs",
       "/p/src/util.rs",
       "/p/tests/common/mod.rs",
       "/p/bin/x.txt",
@@ -632,6 +634,24 @@ describe("untrustedCargoConfigAbove", () => {
     const wt = join(container, "wt");
     expect(await Bun.file(join(wt, ".git")).exists()).toBe(true);
     expect(untrustedCargoConfigAbove(wt)).toBeNull();
+  });
+
+  test("still finds an untrusted repository's configuration above a bare clone's container", async () => {
+    const parent = await makeDir("rust-parent-");
+    await mkdir(join(parent, ".git"));
+    await mkdir(join(parent, ".cargo"));
+    await writeFile(join(parent, ".cargo/config.toml"), "");
+    const container = join(parent, "container");
+    await mkdir(container);
+    const git = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: container });
+    git("init", "-q", "--bare", ".bare");
+    await writeFile(join(container, ".git"), "gitdir: ./.bare\n");
+    git("--git-dir=.bare", "worktree", "add", "-q", "--orphan", "-b", "main", "wt");
+    git("--git-dir=.bare", "worktree", "add", "-q", "--orphan", "-b", "side", "../sibling");
+    const wt = join(container, "wt");
+    expect(await Bun.file(join(wt, ".git")).exists()).toBe(true);
+    expect(untrustedCargoConfigAbove(wt)).toBe(parent);
+    expect(untrustedCargoConfigAbove(join(parent, "sibling"))).toBe(parent);
   });
 
   test("finds none for configuration in no repository, or in the Cargo home", async () => {
