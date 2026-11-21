@@ -88,6 +88,26 @@ describe("getLog", () => {
     }
   });
 
+  test("reads branch names as revisions even when a file has the same name", async () => {
+    const repo = await template.copy();
+    try {
+      await Bun.write(`${repo.path}/feat`, "a file named like the branch\n");
+      const result = await getLog(repo.path, { branches: ["feat"] });
+      expect(result.map((c) => c.message)).toContain("feat-E");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("rejects a branch name that starts with a dash", async () => {
+    const repo = await template.copy();
+    try {
+      await expect(getLog(repo.path, { branches: ["--all"] })).rejects.toThrow("Invalid ref name");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("parses parent hashes correctly for merge commit", async () => {
     const repo = await template.copy();
     try {

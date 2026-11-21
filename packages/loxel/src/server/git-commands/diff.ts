@@ -25,7 +25,7 @@ const log = logger.child("git");
  */
 export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
   const spec = `${rev}^{commit}`;
-  const result = await gitText(["rev-parse", "--verify", "--quiet", spec], {
+  const result = await gitText(["rev-parse", "--verify", "--quiet", "--end-of-options", spec], {
     cwd,
     env: readOnlyGitEnv(cwd),
     nothrow: true,
@@ -38,7 +38,7 @@ export async function resolveMergeBase(
   left: string,
   right: string,
 ): Promise<string | null> {
-  const result = await gitText(["merge-base", left, right], {
+  const result = await gitText(["merge-base", "--end-of-options", left, right], {
     cwd,
     env: readOnlyGitEnv(cwd),
     nothrow: true,

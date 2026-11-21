@@ -21,8 +21,9 @@ export async function getFileContent(
   if (worktreePath) await validateWorktreePath(worktreePath, cwd);
 
   const gitCwd = worktreePath ?? cwd;
-  const refSpec = ref ? `${ref}:${filePath}` : filePath;
-  const result = await runGit(["show", refSpec], {
+  // Always `<rev>:<path>`: a path alone would show a commit, not the file.
+  const refSpec = `${ref ?? "HEAD"}:${filePath}`;
+  const result = await runGit(["show", "--end-of-options", refSpec], {
     cwd: gitCwd,
     env: readOnlyGitEnv(cwd),
     nothrow: true,

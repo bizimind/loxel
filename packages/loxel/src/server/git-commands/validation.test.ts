@@ -22,25 +22,32 @@ describe("validateCommitHash", () => {
 });
 
 describe("validateRefName", () => {
-  test.each(["main", "feature/foo", "refs/heads/main", "v1.0.0", "HEAD"])(
-    "accepts valid ref: %s",
-    (ref) => {
-      expect(() => validateRefName(ref)).not.toThrow();
-    },
-  );
+  test.each([
+    "main",
+    "feature/foo",
+    "refs/heads/main",
+    "v1.0.0",
+    "HEAD",
+    "topic,with,commas",
+    "fix-1",
+  ])("accepts valid ref: %s", (ref) => {
+    expect(() => validateRefName(ref)).not.toThrow();
+  });
 
   test.each([
     ["main; echo pwned", "injection"],
     ["branch name", "space"],
     ["", "empty"],
     ["ref\x00null", "null byte"],
+    ["-f", "leading dash"],
+    ["--output", "leading double dash"],
   ])("rejects %s (%s)", (ref) => {
     expect(() => validateRefName(ref)).toThrow("Invalid ref name");
   });
 });
 
 describe("validatePath", () => {
-  test.each(["src/main.ts", "file.txt", "deeply/nested/dir/file.js"])(
+  test.each(["src/main.ts", "file.txt", "deeply/nested/dir/file.js", "-draft.md", "--output=x"])(
     "accepts valid path: %s",
     (p) => {
       expect(() => validatePath(p)).not.toThrow();
@@ -52,6 +59,7 @@ describe("validatePath", () => {
     ["src/../../etc/passwd", "nested traversal"],
     ["file\x00.txt", "null byte"],
     ['file"|rm.txt', "pipe char"],
+    ["/etc/passwd", "absolute path"],
   ])("rejects %s (%s)", (p) => {
     expect(() => validatePath(p)).toThrow("Invalid path");
   });

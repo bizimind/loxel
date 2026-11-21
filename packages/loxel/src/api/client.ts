@@ -123,7 +123,7 @@ function buildLogParams(options?: LogQueryOptions): string {
   const params = new URLSearchParams();
   if (options?.limit) params.set("limit", String(options.limit));
   if (options?.all) params.set("all", "true");
-  if (options?.branches?.length) params.set("branches", options.branches.join(","));
+  if (options?.branches?.length) params.set("branches", JSON.stringify(options.branches));
   if (options?.since) params.set("since", options.since);
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -211,7 +211,7 @@ export async function getRefs(wt: WorktreeRef) {
 
 export async function getFileLines(
   wt: WorktreeRef,
-  options: { path: string; startLine: number; endLine: number; ref?: string },
+  options: { path: string; startLine: number; endLine: number; ref?: string; worktree?: string },
 ) {
   const params = new URLSearchParams();
   params.set("wt", wt.path);
@@ -219,6 +219,7 @@ export async function getFileLines(
   params.set("startLine", String(options.startLine));
   params.set("endLine", String(options.endLine));
   if (options.ref) params.set("ref", options.ref);
+  if (options.worktree) params.set("worktree", options.worktree);
 
   return on(wt).fetchJson<{ lines: string[] }>(`/file-lines?${params.toString()}`);
 }

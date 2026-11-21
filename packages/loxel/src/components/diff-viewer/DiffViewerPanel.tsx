@@ -290,7 +290,7 @@ function FileDiffView({
   const useTrueSideBySide = viewMode === "split" && (commitHash || worktreePath);
   const filePath = fileDiffPath(file);
 
-  // Context lines of the new side, read from git at the diff's commit (the working tree if none).
+  // Context lines of the new side, read from git at the diff's commit (the diff's worktree if none).
   const loadContextLines = useCallback(
     async (startLine: number, endLine: number) => {
       const wt = useWorktreeStore.getState().activeWorktree;
@@ -300,10 +300,11 @@ function FileDiffView({
         startLine,
         endLine,
         ref: commitHash,
+        worktree: commitHash ? undefined : worktreePath,
       });
       return result.lines;
     },
-    [filePath, commitHash],
+    [filePath, commitHash, worktreePath],
   );
 
   if (file.isBinary) return <BinaryFile />;
