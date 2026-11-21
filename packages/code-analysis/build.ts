@@ -154,6 +154,8 @@ try {
       "bun",
       "build",
       "--compile",
+      "--no-compile-autoload-bunfig",
+      "--no-compile-autoload-dotenv",
       "--minify",
       "src/cli.ts",
       "--outfile",
