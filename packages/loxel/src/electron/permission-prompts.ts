@@ -4,9 +4,12 @@
  *
  * A prompt lives in the window hosting the page's webview: main sends that window a request under
  * a new id, the window answers by id, and main withdraws the request once it is answered some
- * other way or its page goes away. Each kind of prompt keeps what waits on its answer itself.
+ * other way or its page goes away. Each kind of prompt keeps what waits on its answer itself. While
+ * a prompt is open, its page holds neither fullscreen nor the pointer lock (exclusive-access-holds.ts).
  */
 import type { IpcMainEvent, WebContents } from "electron";
+
+import { holdExclusiveAccess } from "./exclusive-access-holds";
 
 /** A prompt shown in the browser panel of guest webContents `guestId`, which `host` hosts. */
 export interface PanelPrompt {
@@ -44,11 +47,14 @@ export function createPermissionPrompts<P extends PanelPrompt>(
   message: (id: number, prompt: P) => unknown,
 ): PermissionPrompts<P> {
   const open = new Map<number, P>();
+  /** Each open prompt's hold on its page's exclusive access. */
+  const holds = new Map<number, () => void>();
   let nextId = 1;
 
   const show = (prompt: P): number => {
     const id = nextId++;
     open.set(id, prompt);
+    holds.set(id, holdExclusiveAccess(prompt.guestId));
     prompt.host.send(channels.request, message(id, prompt));
     return id;
   };
@@ -56,6 +62,8 @@ export function createPermissionPrompts<P extends PanelPrompt>(
     const prompt = open.get(id);
     if (!prompt) return undefined;
     open.delete(id);
+    holds.get(id)?.();
+    holds.delete(id);
     if (!prompt.host.isDestroyed()) {
       prompt.host.send(channels.withdrawn, { id, webContentsId: prompt.guestId });
     }

@@ -1,8 +1,15 @@
-import { ipcMain, type WebContents, type WebFrameMain } from "electron";
+import { ipcMain, type IpcMainEvent, type WebContents, type WebFrameMain } from "electron";
 
+import { onAppWindowMessage } from "./app-windows";
 import type { BrowserPermission } from "./browser-permissions";
+import { setWindowExclusiveAccessHold, trackHoldablePage } from "./exclusive-access-holds";
 import type { ExclusiveAccessNotice } from "./exclusive-access-notice";
-import { EXCLUSIVE_ACCESS_HIDE, EXCLUSIVE_ACCESS_SHOW, POINTER_LOCK_CHANGE } from "./ipc-channels";
+import {
+  EXCLUSIVE_ACCESS_HIDE,
+  EXCLUSIVE_ACCESS_HOLD,
+  EXCLUSIVE_ACCESS_SHOW,
+  POINTER_LOCK_CHANGE,
+} from "./ipc-channels";
 import { webviewSenderFrame } from "./webview-sender";
 
 /**
@@ -25,15 +32,22 @@ import { webviewSenderFrame } from "./webview-sender";
  * tracks a granted lock until the frame that asked for it reports taking it and then losing it
  * (see `PointerLock`), and any other lock, as one an `about:blank` frame took, until the page
  * navigates.
+ *
+ * Loxel's own prompts take both back while they show over a page (exclusive-access-holds.ts).
  */
 
 /** How long without input before the next input shows a page's notice again (Chrome's). */
 export const IDLE_RESHOW_MS = 15 * 60 * 1000;
 
 /** The webContents of a browser panel page, as far as this module uses it. */
-export type ExclusiveAccessPage = Pick<WebContents, "id" | "getType" | "getURL" | "on"> & {
+export type ExclusiveAccessPage = Pick<
+  WebContents,
+  "id" | "getType" | "getURL" | "on" | "once" | "isDestroyed"
+> & {
   hostWebContents: Pick<WebContents, "id" | "send" | "isDestroyed"> | null;
   mainFrame: { framesInSubtree: Array<ExclusiveAccessFrame> };
+  /** Patch 0008 (exclusive-access-holds.ts); missing on stock Electron. */
+  exitExclusiveAccess?: () => void;
 };
 
 /** A frame of a browser panel page, as far as this module uses it. */
@@ -144,6 +158,31 @@ export function installPointerLockReports(): void {
   });
 }
 
+/**
+ * Listen for windows showing a modal over their browser panels (`EXCLUSIVE_ACCESS_HOLD`). A window
+ * holds until it says it no longer does, or its document is replaced or destroyed.
+ */
+export function installWindowExclusiveAccessHolds(): void {
+  const forgetters = new Map<number, () => void>();
+  onAppWindowMessage(EXCLUSIVE_ACCESS_HOLD, (event: IpcMainEvent, held: unknown) => {
+    if (typeof held !== "boolean") return;
+    const host = event.sender;
+    forgetters.get(host.id)?.();
+    setWindowExclusiveAccessHold(host.id, held);
+    if (!held) return;
+    // A reload keeps the webContents, and its new document holds nothing.
+    const forget = () => {
+      forgetters.delete(host.id);
+      host.off("did-navigate", forget);
+      host.off("destroyed", forget);
+      setWindowExclusiveAccessHold(host.id, false);
+    };
+    forgetters.set(host.id, forget);
+    host.on("did-navigate", forget);
+    host.once("destroyed", forget);
+  });
+}
+
 function frameKey({ processId, routingId }: Pick<WebFrameMain, "processId" | "routingId">) {
   return `${processId}:${routingId}`;
 }
@@ -158,6 +197,7 @@ export function trackWebviewExclusiveAccess(
   now: () => number = Date.now,
 ): void {
   if (page.getType() !== "webview") return;
+  trackHoldablePage(page);
   stateOf(page).now = now;
   page.on("enter-html-full-screen", () => {
     const state = stateOf(page);

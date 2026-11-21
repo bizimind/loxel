@@ -74,6 +74,8 @@ export const UPDATE_STATUS_CHANGED = "update:status-changed";
 export const PASSKEY_QR_SHOW = "passkey:qr-show";
 /** Main → renderer: the passkey request of a webview (by webContents ID) ended; hide its QR code. */
 export const PASSKEY_QR_HIDE = "passkey:qr-hide";
+/** Renderer → main: the user hid the QR code of a webview (by webContents ID). */
+export const PASSKEY_QR_HIDDEN = "passkey:qr-hidden";
 /** Main → renderer: a panel's page went fullscreen or locked the pointer (`ExclusiveAccessNotice`). */
 export const EXCLUSIVE_ACCESS_SHOW = "exclusive-access:show";
 /** Main → renderer: the page of a webview (by webContents ID) left fullscreen; hide its notice. */
@@ -83,6 +85,16 @@ export const EXCLUSIVE_ACCESS_HIDE = "exclusive-access:hide";
  * pointer lock. See `exclusive-access.ts`.
  */
 export const POINTER_LOCK_CHANGE = "exclusive-access:pointer-lock-change";
+/**
+ * Renderer → main: whether the window shows a Loxel modal over its browser panels, whose pages
+ * leave fullscreen and release the pointer lock meanwhile. See `exclusive-access-holds.ts`.
+ */
+export const EXCLUSIVE_ACCESS_HOLD = "exclusive-access:hold";
+/**
+ * Main → renderer: the page of a webview (by webContents ID) was refused fullscreen or pointer lock
+ * because a prompt holds it; its panel highlights the prompt.
+ */
+export const EXCLUSIVE_ACCESS_REFUSED = "exclusive-access:refused";
 /** Renderer → main (invoke): whether Loxel is the default web browser (`DefaultBrowserStatus`). */
 export const DEFAULT_BROWSER_GET = "default-browser:get";
 /** Renderer → main (invoke): ask macOS to make Loxel the default web browser. */

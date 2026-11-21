@@ -108,16 +108,24 @@ import { installSiteAccess, trackWebviewSiteAccess } from "./browser-site-access
 import { installDefaultBrowser } from "./default-browser";
 import {
   installPointerLockReports,
+  installWindowExclusiveAccessHolds,
   noteExclusiveAccessGrant,
   noteWindowFocused,
   trackWebviewExclusiveAccess,
 } from "./exclusive-access";
+import {
+  noteFullscreenGranted,
+  whileHoldingExclusiveAccess,
+  windowSettled,
+} from "./exclusive-access-holds";
+import { hostedWebview } from "./hosted-webview";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
   APP_RESTART,
   GET_WINDOW_FULL_SCREEN,
   OPEN_IN_BROWSER_TAB,
+  PASSKEY_QR_HIDDEN,
   SET_DOCK_BADGE,
   SET_WHEN_QUITTING,
   WINDOW_FOCUS_CHANGE,
@@ -444,9 +452,11 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   win.on("enter-full-screen", () => {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, true);
+    windowSettled(win.webContents.id);
   });
   win.on("leave-full-screen", () => {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, false);
+    windowSettled(win.webContents.id);
   });
 
   const loadUrl = DEV_RENDERER_URL ?? SERVER_URL;
@@ -921,6 +931,7 @@ installBrowserNotifications();
 installBrowserMedia();
 installSiteAccess();
 installPointerLockReports();
+installWindowExclusiveAccessHolds();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 onAppWindowMessage(GET_WINDOW_FULL_SCREEN, (event) => {
@@ -1090,9 +1101,9 @@ async function promptForAccount(
     buttons: [...labels, "Cancel"],
     cancelId: labels.length,
   };
-  const { response } = win
-    ? await dialog.showMessageBox(win, options)
-    : await dialog.showMessageBox(options);
+  const page = frame ? webContents.fromFrame(frame) : undefined;
+  const ask = () => (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
+  const { response } = page ? await whileHoldingExclusiveAccess(page.id, ask) : await ask();
   return response < labels.length ? response : null;
 }
 
@@ -1169,7 +1180,11 @@ app.whenReady().then(async () => {
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
     const browserSession = session.fromPartition(BROWSER_PARTITION);
     installAccountChooser(browserSession, promptForAccount);
-    installHybridQrCode(browserSession, browserPanelFrame);
+    const passkeyQrCodes = installHybridQrCode(browserSession, browserPanelFrame);
+    onAppWindowMessage(PASSKEY_QR_HIDDEN, (event, id) => {
+      const guest = hostedWebview(event.sender, id);
+      if (guest) passkeyQrCodes.codeHidden(guest.id);
+    });
     // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
@@ -1179,7 +1194,13 @@ app.whenReady().then(async () => {
         media: { check: checkMediaPermission, request: requestMediaPermission },
         openExternal: requestExternalApp,
       },
-      noteExclusiveAccessGrant,
+      (contents, permission, requestingUrl) => {
+        noteExclusiveAccessGrant(contents, permission, requestingUrl);
+        // Before the grant takes effect, the window's fullscreen is still the page's starting point.
+        const host = contents.hostWebContents;
+        const win = host && BrowserWindow.fromWebContents(host);
+        if (permission === "fullscreen" && win) noteFullscreenGranted(host.id, win.isFullScreen());
+      },
     );
     installBrowserFavicons(browserSession);
     installLocalNetworkAccess(browserSession);

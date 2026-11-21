@@ -30,6 +30,8 @@ import {
   type WebContents,
 } from "electron";
 
+import { whileHoldingExclusiveAccess } from "./exclusive-access-holds";
+
 const execFileAsync = promisify(execFile);
 
 const QUARANTINE_ATTRIBUTE = "com.apple.quarantine";
@@ -418,13 +420,18 @@ export type SaveAsPrompt = (
   options: SaveDialogOptions,
 ) => Promise<string | null>;
 
-/** The Save dialog, attached to the window showing the page: a webview's host window, or the popup. */
+/**
+ * The Save dialog, attached to the window showing the page: a webview's host window, or the popup.
+ * The page holds neither fullscreen nor the pointer lock while it is open.
+ */
 const showSaveAs: SaveAsPrompt = async (contents, options) => {
-  const shown = contents && !contents.isDestroyed() ? (contents.hostWebContents ?? contents) : null;
+  const page = contents && !contents.isDestroyed() ? contents : null;
+  const shown = page ? (page.hostWebContents ?? page) : null;
   const win = shown && !shown.isDestroyed() ? BrowserWindow.fromWebContents(shown) : null;
-  const { canceled, filePath } = win
-    ? await dialog.showSaveDialog(win, options)
-    : await dialog.showSaveDialog(options);
+  const ask = () => (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options));
+  const { canceled, filePath } = page
+    ? await whileHoldingExclusiveAccess(page.id, ask)
+    : await ask();
   return canceled || !filePath ? null : filePath;
 };
 

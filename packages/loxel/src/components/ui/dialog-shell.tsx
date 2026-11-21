@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from "react";
 
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import { useExclusiveAccessHold } from "@/hooks/useExclusiveAccessHold";
 import { cn } from "@/lib/utils";
 
 interface DialogShellProps {
@@ -15,6 +16,7 @@ export function DialogShell({ open, onCancel, className, children }: DialogShell
   /** Whether the current press started on the backdrop. A drag that starts inside the dialog and
    *  ends on the backdrop also clicks the dialog element, and must not close it. */
   const pressedBackdropRef = useRef(false);
+  useExclusiveAccessHold(open);
 
   useEffect(() => {
     const dialog = dialogRef.current;

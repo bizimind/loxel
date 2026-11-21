@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import { useExclusiveAccessHold } from "@/hooks/useExclusiveAccessHold";
 import { syncSchemas } from "@/lib/schema-sync";
 import type { SettingsState } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -59,6 +60,7 @@ const SECTION_CLASS = "border-border mt-8 border-t pt-8 not-dark:-scroll-mt-px";
 
 export function SettingsModal() {
   const isOpen = useSettingsStore((s) => s.isOpen);
+  useExclusiveAccessHold(isOpen);
   const activeSection = useSettingsStore((s) => s.activeSection);
   const closeSettings = useSettingsStore((s) => s.closeSettings);
 

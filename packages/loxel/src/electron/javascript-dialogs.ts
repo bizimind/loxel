@@ -9,7 +9,9 @@
  * Only that page's renderer is blocked; the window and its other panels keep working.
  *
  * Abuse protection follows browsers: from a page's second dialog on, the user can block further
- * dialogs from it until it navigates, and a page being navigated away from gets no dialogs.
+ * dialogs from it until it navigates, and a page being navigated away from gets no dialogs. While a
+ * page's dialog is open, the page holds neither fullscreen nor the pointer lock
+ * (exclusive-access-holds.ts).
  */
 import path from "node:path";
 
@@ -22,6 +24,7 @@ import {
 } from "electron";
 
 import { onAppWindowMessage } from "./app-windows";
+import { holdExclusiveAccess } from "./exclusive-access-holds";
 import {
   JAVASCRIPT_DIALOG_CLOSED,
   JAVASCRIPT_DIALOG_LISTEN,
@@ -49,6 +52,8 @@ interface PendingDialog {
   guestId: number;
   /** The window renderer showing the dialog — the only one allowed to answer it. */
   host: WebContents;
+  /** Ends the dialog's hold on its page's exclusive access. */
+  release: () => void;
 }
 
 /** Dialog state per guest webContents, reset when its main frame commits a new document. */
@@ -118,6 +123,7 @@ function dismissDialogs(
   for (const [id, dialog] of pendingDialogs) {
     if (dialog.guestId !== guestId || !matching(dialog)) continue;
     pendingDialogs.delete(id);
+    dialog.release();
     dialog.event.returnValue = dismissedResult(dialog.type);
     if (dialog.host.isDestroyed()) continue;
     const closed: JavaScriptDialogClosed = { id, webContentsId: guestId };
@@ -150,7 +156,8 @@ function runDialog(event: IpcMainEvent, value: unknown): void {
   }
 
   const id = nextDialogId++;
-  pendingDialogs.set(id, { event, type, guestId: guest.id, host });
+  const release = holdExclusiveAccess(guest.id);
+  pendingDialogs.set(id, { event, type, guestId: guest.id, host, release });
   const request: JavaScriptDialogRequest = {
     id,
     webContentsId: guest.id,
@@ -173,6 +180,7 @@ function respondToDialog(event: IpcMainEvent, value: unknown): void {
     return;
   }
   pendingDialogs.delete(response.id);
+  dialog.release();
   dialog.event.returnValue = dialogResult(dialog.type, response);
   if (!response.suppress) return;
   pageState(dialog.guestId).suppressed = true;

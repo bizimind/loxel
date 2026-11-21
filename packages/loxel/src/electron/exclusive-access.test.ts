@@ -1,19 +1,30 @@
 import { describe, expect, mock, test } from "bun:test";
 
+import type { WebContents } from "electron";
+
 import type { ExclusiveAccessFrame, ExclusiveAccessPage } from "./exclusive-access";
-import { EXCLUSIVE_ACCESS_HIDE, EXCLUSIVE_ACCESS_SHOW, POINTER_LOCK_CHANGE } from "./ipc-channels";
+import { exclusiveAccessHeld, holdExclusiveAccess } from "./exclusive-access-holds";
+import {
+  EXCLUSIVE_ACCESS_HIDE,
+  EXCLUSIVE_ACCESS_HOLD,
+  EXCLUSIVE_ACCESS_SHOW,
+  POINTER_LOCK_CHANGE,
+} from "./ipc-channels";
 
 type PageChannelListener = (event: unknown, ...args: unknown[]) => void;
 const ipcListeners = new Map<string, PageChannelListener>();
 void mock.module("electron", () => ({
+  BrowserWindow: { fromWebContents: (contents: WebContents) => windowOf(contents) },
   ipcMain: {
     on: (channel: string, listener: PageChannelListener) => ipcListeners.set(channel, listener),
   },
 }));
+const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
 const {
   frameOrigin,
   IDLE_RESHOW_MS,
   installPointerLockReports,
+  installWindowExclusiveAccessHolds,
   noteExclusiveAccessGrant,
   notePointerLockReport,
   noteWindowFocused,
@@ -38,10 +49,19 @@ function fakePage(url: string, { type = "webview", frames = [] as ExclusiveAcces
       listeners.set(event, listener);
       return page;
     },
+    once: (event: string, listener: Listener) => {
+      listeners.set(`once ${event}`, listener);
+      return page;
+    },
+    isDestroyed: () => false,
+    exitExclusiveAccess: mock(() => {}),
     hostWebContents: { id: 1000, send, isDestroyed: () => false },
     mainFrame: { framesInSubtree: frames },
   } as unknown as ExclusiveAccessPage;
-  const emit = (event: string) => listeners.get(event)?.();
+  const emit = (event: string) => {
+    listeners.get(event)?.();
+    listeners.get(`once ${event}`)?.();
+  };
   const now = () => time;
   const track = () => trackWebviewExclusiveAccess(page, now);
   const advance = (ms: number) => {
@@ -294,6 +314,46 @@ describe("pointer lock after the user was away", () => {
     advance(IDLE_RESHOW_MS);
     emit("before-mouse-event");
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("Loxel prompts", () => {
+  test("a prompt over a tracked page takes the screen and the pointer back", () => {
+    const { page, track } = fakePage("https://video.example/");
+    track();
+    const release = holdExclusiveAccess(page.id);
+    expect(page.exitExclusiveAccess).toHaveBeenCalledTimes(1);
+    release();
+  });
+
+  test("a window holds its pages while it says it shows a modal, or until its document goes", () => {
+    installWindowExclusiveAccessHolds();
+    const hold = ipcListeners.get(EXCLUSIVE_ACCESS_HOLD);
+    if (!hold) throw new Error("no window hold listener");
+    const { page, track } = fakePage("https://video.example/");
+    track();
+    const hostListeners = new Map<string, () => void>();
+    const host = fakeWindow({
+      id: 1000,
+      on: (event: string, listener: () => void) => hostListeners.set(event, listener),
+      once: (event: string, listener: () => void) => hostListeners.set(event, listener),
+      off: (event: string) => hostListeners.delete(event),
+    });
+    const send = (held: unknown) => hold(mainFrameEvent(host), held);
+    send(true);
+    expect(page.exitExclusiveAccess).toHaveBeenCalledTimes(1);
+    expect(exclusiveAccessHeld(page.id)).toBe(true);
+    send(false);
+    expect(exclusiveAccessHeld(page.id)).toBe(false);
+    expect(hostListeners.size).toBe(0);
+
+    send(true);
+    send("yes");
+    expect(exclusiveAccessHeld(page.id)).toBe(true);
+    // The window reloaded: its new document shows no modal.
+    hostListeners.get("did-navigate")?.();
+    expect(exclusiveAccessHeld(page.id)).toBe(false);
+    expect(hostListeners.size).toBe(0);
   });
 });
 

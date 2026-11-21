@@ -15,6 +15,8 @@ import {
   dialog,
 } from "electron";
 
+import { whileHoldingExclusiveAccess } from "./exclusive-access-holds";
+
 /** After this many "Don't Use a Certificate" answers, a page is refused without asking until it navigates. */
 export const MAX_DECLINES_PER_PAGE = 2;
 
@@ -155,7 +157,10 @@ export function createClientCertificatePicker(prompt: CertificatePrompt): {
   return { pick, pageNavigated };
 }
 
-/** The dialog, attached to the window showing the page: a webview's host window, or the popup. */
+/**
+ * The dialog, attached to the window showing the page: a webview's host window, or the popup. The
+ * page holds neither fullscreen nor the pointer lock while it is open.
+ */
 const promptForCertificate: CertificatePrompt = async (contents, question, labels) => {
   const shown = contents.hostWebContents ?? contents;
   const win = shown.isDestroyed() ? null : BrowserWindow.fromWebContents(shown);
@@ -174,9 +179,9 @@ const promptForCertificate: CertificatePrompt = async (contents, question, label
     defaultId: labels.length,
     cancelId: labels.length,
   };
-  const { response } = win
-    ? await dialog.showMessageBox(win, options)
-    : await dialog.showMessageBox(options);
+  const { response } = await whileHoldingExclusiveAccess(contents.id, () =>
+    win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options),
+  );
   return response < labels.length ? response : null;
 };
 

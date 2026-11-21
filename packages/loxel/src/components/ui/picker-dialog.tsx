@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import { useExclusiveAccessHold } from "@/hooks/useExclusiveAccessHold";
 import { cn } from "@/lib/utils";
 
 interface PickerDialogProps<T> {
@@ -59,6 +60,7 @@ export function PickerDialog<T>({
   const listRef = useRef<HTMLDivElement>(null);
   // While the input has focus, Enter accepts the first item, so that item shows as the active row.
   const [inputFocused, setInputFocused] = useState(false);
+  useExclusiveAccessHold(isOpen);
 
   // Set while the dialog closes because `isOpen` turned false, so the `close` event that follows a
   // task later is not taken for a dismissal: by then the owner may have opened a follow-up request

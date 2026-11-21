@@ -59,6 +59,7 @@ import { SiteAccessBar } from "./SiteAccessBar";
 import { useBrowserMediaPermissions } from "./useBrowserMediaPermissions";
 import { useBrowserNotifications } from "./useBrowserNotifications";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
+import { usePromptNudge } from "./usePromptNudge";
 import { useSiteAccess } from "./useSiteAccess";
 import { addressBarUrl } from "./web-search";
 
@@ -190,6 +191,8 @@ export function BrowserPanel({
   // And so does a site asking to open another app or to reach the local network.
   const { request: siteAccessRequest, answer: answerSiteAccessRequest } =
     useSiteAccess(webContentsId);
+  const promptsRef = useRef<HTMLDivElement>(null);
+  usePromptNudge(webContentsId, promptsRef);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -592,29 +595,32 @@ export function BrowserPanel({
         </NavButton>
       </div>
 
-      {notificationRequest && (
-        <NotificationPermissionBar
-          key={notificationRequest.id}
-          request={notificationRequest}
-          onAnswer={answerNotificationRequest}
-        />
-      )}
+      {/* The page's prompts, highlighted when it is refused fullscreen because of them. */}
+      <div ref={promptsRef} className="shrink-0">
+        {notificationRequest && (
+          <NotificationPermissionBar
+            key={notificationRequest.id}
+            request={notificationRequest}
+            onAnswer={answerNotificationRequest}
+          />
+        )}
 
-      {mediaRequest && (
-        <MediaPermissionBar
-          key={mediaRequest.id}
-          request={mediaRequest}
-          onAnswer={answerMediaRequest}
-        />
-      )}
+        {mediaRequest && (
+          <MediaPermissionBar
+            key={mediaRequest.id}
+            request={mediaRequest}
+            onAnswer={answerMediaRequest}
+          />
+        )}
 
-      {siteAccessRequest && (
-        <SiteAccessBar
-          key={siteAccessRequest.id}
-          request={siteAccessRequest}
-          onAnswer={answerSiteAccessRequest}
-        />
-      )}
+        {siteAccessRequest && (
+          <SiteAccessBar
+            key={siteAccessRequest.id}
+            request={siteAccessRequest}
+            onAnswer={answerSiteAccessRequest}
+          />
+        )}
+      </div>
 
       {mediaSystemBlocked && (
         <MediaSystemBlockedBar notice={mediaSystemBlocked} onDismiss={dismissMediaSystemBlocked} />

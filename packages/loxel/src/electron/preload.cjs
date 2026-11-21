@@ -23,8 +23,11 @@ const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
 const UPDATE_GET_STATUS = "update:get-status";
 const PASSKEY_QR_SHOW = "passkey:qr-show";
 const PASSKEY_QR_HIDE = "passkey:qr-hide";
+const PASSKEY_QR_HIDDEN = "passkey:qr-hidden";
 const EXCLUSIVE_ACCESS_SHOW = "exclusive-access:show";
 const EXCLUSIVE_ACCESS_HIDE = "exclusive-access:hide";
+const EXCLUSIVE_ACCESS_HOLD = "exclusive-access:hold";
+const EXCLUSIVE_ACCESS_REFUSED = "exclusive-access:refused";
 const UPDATE_CHECK = "update:check";
 const UPDATE_DOWNLOAD = "update:download";
 const UPDATE_INSTALL = "update:install";
@@ -139,6 +142,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener(PASSKEY_QR_HIDE, hide);
     };
   },
+  passkeyQrCodeHidden: (webContentsId) => ipcRenderer.send(PASSKEY_QR_HIDDEN, webContentsId),
   onExclusiveAccessNotice: (onShow, onHide) => {
     const show = (_event, notice) => onShow(notice);
     const hide = (_event, webContentsId) => onHide(webContentsId);
@@ -148,6 +152,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener(EXCLUSIVE_ACCESS_SHOW, show);
       ipcRenderer.removeListener(EXCLUSIVE_ACCESS_HIDE, hide);
     };
+  },
+  setExclusiveAccessHold: (held) => ipcRenderer.send(EXCLUSIVE_ACCESS_HOLD, held),
+  onExclusiveAccessRefused: (callback) => {
+    const handler = (_event, webContentsId) => callback(webContentsId);
+    ipcRenderer.on(EXCLUSIVE_ACCESS_REFUSED, handler);
+    return () => ipcRenderer.removeListener(EXCLUSIVE_ACCESS_REFUSED, handler);
   },
   getUpdateStatus: () => ipcRenderer.invoke(UPDATE_GET_STATUS),
   checkForUpdates: () => ipcRenderer.invoke(UPDATE_CHECK),
