@@ -72,11 +72,22 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           PENDING: ${{ steps.pending.outputs.pending }}
+        # An issue that fails is skipped (and not retried) so one bad issue cannot hold up the rest;
+        # the step fails only when every issue failed, as with a broken token.
         run: |
+          checked=0
           for ISSUE in $PENDING; do
             echo "Checking issue #$ISSUE"
-            bun ../.github/scripts/issues-deduper/check-issue.ts "$ISSUE"
+            if bun ../.github/scripts/issues-deduper/check-issue.ts "$ISSUE"; then
+              checked=$((checked + 1))
+            else
+              echo "::warning::Could not check issue #$ISSUE; skipping it"
+            fi
           done
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::No issue could be checked"
+            exit 1
+          fi
 
       - name: Upload results
         if: steps.pending.outputs.pending != ''
@@ -129,7 +140,9 @@ jobs:
         run: |
           for ISSUE in $PENDING; do
             echo "Processing issue #$ISSUE"
-            bun ../.github/scripts/issues-deduper/process-results.ts "$ISSUE"
+            # Progress moves on either way, so a rerun never repeats comments already posted.
+            bun ../.github/scripts/issues-deduper/process-results.ts "$ISSUE" ||
+              echo "::warning::Could not act on issue #$ISSUE"
             echo "$ISSUE" > last-processed.txt
           done
 
@@ -148,11 +161,13 @@ jobs:
           # Retry push with rebase on conflict
           for i in 1 2 3; do
             if git push "$remote" HEAD:issues; then
-              break
+              exit 0
             fi
             echo "Push failed, attempt $i. Pulling and retrying..."
             git pull --rebase "$remote" issues
           done
+          echo "::error::Could not push last-processed"
+          exit 1
 
       - name: Summary
         env:

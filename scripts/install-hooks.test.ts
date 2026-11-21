@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 // Each test runs a handful of git commands, which are slow on some machines.
 setDefaultTimeout(30_000);
 
-const script = join(import.meta.dir, "install-hooks.sh");
+// Each test repo gets its own copy: the script acts on the checkout it lives in.
+const source = join(import.meta.dir, "install-hooks.sh");
 
 let repo: string;
 
@@ -21,9 +22,16 @@ function git(...args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-function install(): void {
-  const result = Bun.spawnSync([script], { cwd: repo });
+function install(checkout = repo): void {
+  const result = Bun.spawnSync([join(checkout, "scripts", "install-hooks.sh")], { cwd: checkout });
+  expect(result.stderr.toString()).toBe("");
   expect(result.exitCode).toBe(0);
+}
+
+function hooksPath(checkout: string): string {
+  return Bun.spawnSync(["git", "config", "core.hooksPath"], { cwd: checkout })
+    .stdout.toString()
+    .trim();
 }
 
 async function writeHook(name: string, marker: string): Promise<void> {
@@ -42,6 +50,8 @@ beforeEach(async () => {
   git("config", "user.name", "Test");
   await Bun.write(join(repo, ".gitignore"), "*.marker\n");
   await writeHook("pre-commit", "pre-commit.marker");
+  mkdirSync(join(repo, "scripts"));
+  copyFileSync(source, join(repo, "scripts", "install-hooks.sh"));
   git("add", "-A");
   git("commit", "-q", "--no-verify", "-m", "init");
 });
@@ -74,6 +84,39 @@ describe("install-hooks.sh", () => {
     git("commit", "-q", "--no-verify", "-m", "add hook");
     git("switch", "-q", "main");
     git("switch", "-q", "other");
+    expect(await exists("post-checkout.marker")).toBe(false);
+  });
+
+  test("with per-worktree config, installing in one worktree leaves another's hooks alone", async () => {
+    git("config", "extensions.worktreeConfig", "true");
+    install();
+    const mainHooks = git("config", "core.hooksPath");
+
+    const linked = join(repo, "linked");
+    git("worktree", "add", "-q", "-b", "other", linked);
+    await Bun.write(join(linked, ".githooks", "post-checkout"), "#!/bin/sh\nexit 0\n");
+    install(linked);
+
+    const linkedHooks = hooksPath(linked);
+    expect(linkedHooks).not.toBe(mainHooks);
+    expect(git("config", "core.hooksPath")).toBe(mainHooks);
+    expect(await Bun.file(join(mainHooks, "post-checkout")).exists()).toBe(false);
+    expect(await Bun.file(join(linkedHooks, "post-checkout")).exists()).toBe(true);
+  });
+
+  test("replaces a shared relative setting that worktrees without their own install fall back to", async () => {
+    git("config", "extensions.worktreeConfig", "true");
+    git("config", "core.hooksPath", ".githooks");
+    git("switch", "-q", "-c", "other");
+    await writeHook("post-checkout", "post-checkout.marker");
+    git("add", "-A");
+    git("commit", "-q", "--no-verify", "-m", "add hook");
+    git("switch", "-q", "main");
+    install();
+
+    const linked = join(repo, "linked");
+    git("worktree", "add", "-q", linked, "other");
+    expect(isAbsolute(hooksPath(linked))).toBe(true);
     expect(await exists("post-checkout.marker")).toBe(false);
   });
 

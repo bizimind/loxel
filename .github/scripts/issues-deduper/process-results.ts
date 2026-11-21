@@ -7,7 +7,7 @@
  * relations that pass policy.ts are acted on, and model text reaches comments only through
  * commentText():
  * - duplicate / subset: comment on this issue; at high confidence, close it when the related issue
- *   is an open issue filed by the project's own people (otherwise a maintainer decides), and copy
+ *   is an open issue filed by someone with write access (otherwise a maintainer decides), and copy
  *   unique_value to the related issue
  * - superset: comment on both issues
  * - overlapping, related: link both issues
@@ -63,30 +63,38 @@ async function closeIssue(
   }
 }
 
-async function fetchIssue(issueNumber: number): Promise<IssueRecord | null> {
+/** Read-only GitHub lookup; null when the response is not what was asked for. */
+async function getJson(endpoint: string): Promise<unknown> {
   try {
     // Passed as one argument so the shell leaves gh's {owner}/{repo} placeholders alone.
-    const endpoint = `repos/{owner}/{repo}/issues/${issueNumber}`;
-    const record: unknown = await $`gh api ${endpoint}`.quiet().json();
-    if (
-      typeof record === "object" &&
-      record !== null &&
-      "state" in record &&
-      typeof record.state === "string" &&
-      "author_association" in record &&
-      typeof record.author_association === "string"
-    ) {
-      return {
-        state: record.state,
-        author_association: record.author_association,
-        pull_request: "pull_request" in record ? record.pull_request : undefined,
-      };
-    }
-    console.error(`Unexpected record for #${issueNumber}`);
+    return await $`gh api ${endpoint}`.quiet().json();
   } catch (err) {
-    console.error(`Failed to look up #${issueNumber}:`, err);
+    console.error(`Failed to read ${endpoint}:`, err);
+    return null;
   }
-  return null;
+}
+
+function field(record: unknown, key: string): unknown {
+  return typeof record === "object" && record !== null && key in record
+    ? (record as Record<string, unknown>)[key]
+    : undefined;
+}
+
+async function fetchIssue(issueNumber: number): Promise<IssueRecord | null> {
+  const issue = await getJson(`repos/{owner}/{repo}/issues/${issueNumber}`);
+  const state = field(issue, "state");
+  const login = field(field(issue, "user"), "login");
+  if (typeof state !== "string" || typeof login !== "string") return null;
+
+  const permission = field(
+    await getJson(`repos/{owner}/{repo}/collaborators/${encodeURIComponent(login)}/permission`),
+    "permission",
+  );
+  return {
+    state,
+    isPullRequest: field(issue, "pull_request") !== undefined,
+    authorPermission: typeof permission === "string" ? permission : "none",
+  };
 }
 
 const TYPE_LABELS: Record<Relation["relationship"], string> = {
@@ -103,10 +111,10 @@ async function closeInFavorOf(
   verb: string,
   uniqueValue: string | null,
 ): Promise<void> {
-  const related = DRY_RUN ? null : await fetchIssue(relatedIssue);
-  if (!DRY_RUN && !(related && mayCloseInFavorOf(related))) {
+  const related = await fetchIssue(relatedIssue);
+  if (!(related && mayCloseInFavorOf(related))) {
     console.log(
-      `Not closing #${targetIssue}: #${relatedIssue} is not an open issue filed by the project; left to a maintainer`,
+      `Not closing #${targetIssue}: #${relatedIssue} is not an open issue filed by someone with write access; left to a maintainer`,
     );
     return;
   }
@@ -181,8 +189,9 @@ async function main() {
 
   const file = Bun.file(`results/${issueNumber}.json`);
   if (!(await file.exists())) {
-    console.error(`Result file not found: results/${issueNumber}.json`);
-    process.exit(1);
+    // check-issue.ts failed for this issue; the workflow logged it and moves on.
+    console.log(`No result for #${issueNumber}, skipping`);
+    return;
   }
 
   let result: DedupeResult;

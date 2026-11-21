@@ -170,8 +170,8 @@ jobs:
             echo "$result"
           }
 
-          # Lint: run if any package is affected or lint config changed
-          if [ "$RUN_ALL_LINT" = "true" ] || [ ${#affected[@]} -gt 0 ]; then
+          # Lint: run if any package or repo tooling is affected, or lint config changed
+          if [ "$RUN_ALL_LINT" = "true" ] || [ ${#affected[@]} -gt 0 ] || echo "$CHANGED_FILES" | grep -qE "^(scripts|\.github/scripts|\.agents/skills)/"; then
             echo "lint=true" >> $GITHUB_OUTPUT
           else
             echo "lint=false" >> $GITHUB_OUTPUT

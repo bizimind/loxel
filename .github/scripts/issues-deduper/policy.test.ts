@@ -92,6 +92,11 @@ describe("plainText", () => {
     expect(text?.endsWith("…")).toBe(true);
   });
 
+  test("keeps a long file path", () => {
+    const text = "both change packages/loxel/src/server/terminal handling";
+    expect(plainText(text, 120)).toBe(text);
+  });
+
   test.each([
     ["a long encoded run", `value ${"QUJD".repeat(10)}`],
     ["a token prefix", "ghs_abc123"],
@@ -137,17 +142,16 @@ describe("sanitizeResult", () => {
 });
 
 describe("mayCloseInFavorOf", () => {
-  test("allows an open issue filed by a member", () => {
-    expect(mayCloseInFavorOf({ state: "open", author_association: "MEMBER" })).toBe(true);
+  const open = { state: "open", isPullRequest: false };
+
+  test.each(["admin", "write"])("allows an open issue filed by someone with %s access", (p) => {
+    expect(mayCloseInFavorOf({ ...open, authorPermission: p })).toBe(true);
   });
 
   test.each([
-    ["a closed issue", { state: "closed", author_association: "OWNER" }],
-    [
-      "an issue filed by someone outside the project",
-      { state: "open", author_association: "NONE" },
-    ],
-    ["a pull request", { state: "open", author_association: "OWNER", pull_request: {} }],
+    ["a closed issue", { ...open, state: "closed", authorPermission: "admin" }],
+    ["an issue filed without write access", { ...open, authorPermission: "read" }],
+    ["a pull request", { ...open, isPullRequest: true, authorPermission: "admin" }],
   ])("refuses %s", (_, record) => {
     expect(mayCloseInFavorOf(record)).toBe(false);
   });

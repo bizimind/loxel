@@ -45,13 +45,15 @@ activity() {
           ... on IssueComment { id author { login __typename } authorAssociation }
           ... on PullRequestReview { id author { login __typename } authorAssociation state body } } }
         reviewThreads(last: 100) { nodes { id path line
+          root: comments(first: 1) { nodes { author { login __typename } authorAssociation } }
           comments(last: 1) { nodes { id author { login __typename } authorAssociation } } } } } } }' |
     jq -L "$here" 'include "trusted"; .data as $d | {viewer: $d.viewer.login,
       items: [$d.repository.pullRequest.timelineItems.nodes[] | {
         id, type: .__typename, who: ((.actor // .author).login // "unknown"), trusted: trusted,
         before: .beforeCommit.abbreviatedOid, after: .afterCommit.abbreviatedOid, state, body}],
       threads: [$d.repository.pullRequest.reviewThreads.nodes[] | .comments.nodes[0] as $c
-        | {id, path, line, lastComment: $c.id, who: ($c.author.login // "unknown"), trusted: ($c | trusted)}]}'
+        | {id, path, line, lastComment: $c.id, who: ($c.author.login // "unknown"),
+           trusted: (($c | trusted) and (.root.nodes[0] | trusted))}]}'
 }
 
 failures=0

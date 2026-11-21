@@ -157,27 +157,29 @@ async function main() {
     process.exit(1);
   }
 
-  const output = JSON.parse(stdout);
+  const output: unknown = JSON.parse(stdout);
+  if (typeof output !== "object" || output === null) {
+    console.error("Claude CLI printed no JSON object");
+    process.exit(1);
+  }
+  const response = output as Record<string, unknown>;
 
-  // Log response metadata
   console.log(
     "Response: type=%s subtype=%s turns=%d",
-    output.type,
-    output.subtype,
-    output.num_turns,
+    response.type,
+    response.subtype,
+    response.num_turns,
   );
 
-  // Check for max turns error
-  if (output.subtype === "error_max_turns") {
+  if (response.subtype === "error_max_turns") {
     console.error("Agent hit max turns limit without returning structured output");
     console.error("Consider increasing --max-turns or simplifying the task");
     process.exit(1);
   }
 
-  const structured: unknown = output.structured_output;
+  const structured = response.structured_output;
   if (!structured) {
-    console.error("No structured_output in response");
-    if (output.is_error) console.error("Claude returned an error (subtype %s)", output.subtype);
+    console.error("No structured_output in response (subtype %s)", response.subtype);
     process.exit(1);
   }
 

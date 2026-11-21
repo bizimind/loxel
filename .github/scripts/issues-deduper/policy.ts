@@ -11,8 +11,8 @@ import {
   type Relation,
 } from "./schema.ts";
 
-/** Author associations whose issues the deduper may close others as duplicates of. */
-const PROJECT_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/** Repository permissions of people whose issues the deduper may close others in favor of. */
+const PROJECT_PERMISSIONS = new Set(["admin", "write"]);
 
 export interface RejectedRelation {
   relation: Relation;
@@ -76,7 +76,8 @@ function rejectionReason(
 }
 
 /** Runs that look like a token, key or encoded blob rather than prose. */
-const SECRET_LIKE = /[A-Za-z0-9+/=_-]{32,}|\b(?:gh[oprsu]|github_pat)_[A-Za-z0-9_]+/;
+// Slashes are left out of the run so file paths in prose are kept.
+const SECRET_LIKE = /[A-Za-z0-9+=_-]{32,}|\b(?:gh[oprsu]|github_pat)_[A-Za-z0-9_]+/;
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/\S+|\bwww\.\S+/gi;
 
 /**
@@ -124,22 +125,23 @@ export function sanitizeResult(result: DedupeResult): DedupeResult {
   };
 }
 
-/** The parts of a related issue's GitHub record the deduper checks before acting on it. */
+/** What the deduper checks about a related issue before closing another in its favor. */
 export interface IssueRecord {
   state: string;
-  author_association: string;
-  pull_request?: unknown;
+  isPullRequest: boolean;
+  /** The issue author's permission on the repository, as the collaborator permission API reports it. */
+  authorPermission: string;
 }
 
 /**
  * Whether a high-confidence "duplicate" or "subset" may close the target in favor of `related`:
- * the related issue must be an open issue (not a pull request) filed by the project's own people.
+ * the related issue must be an open issue (not a pull request) filed by someone with write access.
  * Otherwise the deduper only comments and leaves closing to a maintainer.
  */
 export function mayCloseInFavorOf(related: IssueRecord): boolean {
   return (
-    related.pull_request === undefined &&
+    !related.isPullRequest &&
     related.state === "open" &&
-    PROJECT_ASSOCIATIONS.has(related.author_association)
+    PROJECT_PERMISSIONS.has(related.authorPermission)
   );
 }

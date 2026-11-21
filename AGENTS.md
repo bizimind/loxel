@@ -235,7 +235,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. The root `prepare` script (`scripts/install-hooks.sh`, run by `pnpm install`) copies `.githooks/` into the git directory and points `core.hooksPath` there, so checking out a branch never runs hooks that branch adds; rerun `pnpm run prepare` after changing a hook.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. The root `prepare` script (`scripts/install-hooks.sh`, run by `pnpm install`) copies `.githooks/` into the git directory (per worktree when worktree config is on, as `wt` sets up) and points `core.hooksPath` there, so checking out a branch never runs hooks that branch adds; rerun `pnpm run prepare` after changing a hook.
 
 ## Type Checking
 
