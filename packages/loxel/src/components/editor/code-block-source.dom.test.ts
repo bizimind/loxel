@@ -50,6 +50,7 @@ void mock.module("mermaid", () => ({
       isBroken(source)
         ? Promise.reject(new Error("Parse error"))
         : Promise.resolve({ svg: `<svg id="${id}" viewBox="0 0 100 50"></svg>` }),
+    mermaidAPI: { defaultConfig: { secure: [] } },
   },
 }));
 
