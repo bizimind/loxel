@@ -336,7 +336,16 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     beforeAll(async () => {
       wtBinDir = mkdtempSync(path.join(tmpdir(), "loxel-wt-bin-"));
       const built = Bun.spawnSync(
-        ["bun", "build", "--compile", "src/cli.ts", "--outfile", path.join(wtBinDir, "wt")],
+        [
+          "bun",
+          "build",
+          "--compile",
+          "--no-compile-autoload-bunfig",
+          "--no-compile-autoload-dotenv",
+          "src/cli.ts",
+          "--outfile",
+          path.join(wtBinDir, "wt"),
+        ],
         { cwd: path.resolve(LOXEL_ROOT, "../wt"), stdout: "ignore", stderr: "pipe" },
       );
       if (built.exitCode !== 0) throw new Error(built.stderr.toString());

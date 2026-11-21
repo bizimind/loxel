@@ -1,13 +1,20 @@
 /**
  * Where main reaches the app's server, and how it proves to the server that it is the app: the
- * session secret (app-session.ts), generated once per run. Every server the app starts gets it on
- * its channel, a restart after a crash included, so open windows keep working. Main sends it as a
- * Bearer header, on its own requests through {@link serverFetch} and on its windows' through
- * {@link authorizeWindowRequests}.
+ * session secret (app-session.ts). Each server main starts gets a new one on its channel, and main
+ * sends it only once that server has said on the channel that it is listening, and only until the
+ * server exits, so nothing else that answers on the port gets it, and a server never accepts one
+ * that might have. Main sends it as a Bearer header, on its own requests through
+ * {@link serverFetch} and on its windows' through {@link authorizeWindowRequests}, so open windows
+ * move to a restarted server's secret on their own.
  */
+import { createInterface } from "node:readline";
+import type { Duplex } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { DEFAULT_SERVER_PORT } from "../app-ports";
-import { bearer, newSessionSecret, readSessionToken } from "../app-session";
+import { bearer, readSessionToken } from "../app-session";
 import { demoPort } from "../demo-instance";
+import { parseServerMessage } from "../parent-channel-protocol";
 import { stateDirFor } from "../state-dir";
 import { DEMO_INSTANCE, DEV_RENDERER_URL, IS_DEMO, IS_DEV } from "./env";
 
@@ -24,8 +31,76 @@ export const APP_URL = DEV_RENDERER_URL ?? SERVER_URL;
 /** The origin Loxel's windows load the app from. */
 export const APP_ORIGIN = new URL(APP_URL).origin;
 
-/** The secret this run of the app gives the servers it starts. */
-export const APP_SESSION_SECRET = newSessionSecret();
+/** How long main waits for a server it started to say it is listening. */
+const SERVER_START_TIMEOUT_MS = 10_000;
+
+/** The secret of the server main started, while it is listening; null otherwise. */
+let listeningSecret: string | null = null;
+/** Whether a server main started has been listening yet, in this run of the app. */
+let anyServerListened = false;
+/** Resolves once a server main started is listening; replaced when that server is gone. */
+let listening = Promise.withResolvers<void>();
+
+/**
+ * Follow the channel of a server main started with `secret` (parent-channel-protocol.ts): from its
+ * `listening` until the channel closes with the server's exit, requests to the port carry
+ * `secret`. Resolves on `listening`; fails when the server exits first (`exited`, with its exit
+ * code), or does not say it within {@link SERVER_START_TIMEOUT_MS}, unless main ended the channel
+ * to stop it: then it never settles, since the app is quitting. A caller that does not wait for it
+ * need not handle the failure.
+ */
+export function followServerChannel(
+  channel: Duplex,
+  secret: string,
+  exited: Promise<number | null>,
+): Promise<void> {
+  const started = Promise.withResolvers<void>();
+  started.promise.catch(() => {});
+  const fail = (error: Error) => {
+    if (!channel.writableEnded) started.reject(error);
+  };
+  createInterface({ input: channel, crlfDelay: Number.POSITIVE_INFINITY }).on("line", (line) => {
+    if (parseServerMessage(line)?.type !== "listening") return;
+    listeningSecret = secret;
+    anyServerListened = true;
+    listening.resolve();
+    started.resolve();
+  });
+  void exited.then((code) =>
+    fail(
+      new Error(
+        `Loxel's server stopped before it was ready (exit code ${code}). If another program is using port ${SERVER_PORT}, quit it and open Loxel again.`,
+      ),
+    ),
+  );
+  channel.once("close", () => {
+    // A server main started since then has a secret of its own, which stays.
+    if (listeningSecret !== secret) return;
+    listeningSecret = null;
+    listening = Promise.withResolvers();
+  });
+  void startTimeout().catch(fail);
+  return started.promise;
+}
+
+/**
+ * Whether a server main started has been listening in this run. Until one has, a server that exits
+ * fails the launch rather than being restarted: it is the one launch waits for.
+ */
+export function serverHasListened(): boolean {
+  return anyServerListened;
+}
+
+/** Wait until a server main started is listening, one restarting after a crash included. */
+export async function whenServerListening(): Promise<void> {
+  await Promise.race([listening.promise, startTimeout()]);
+}
+
+/** Fails once a server has had {@link SERVER_START_TIMEOUT_MS} to start. */
+async function startTimeout(): Promise<never> {
+  await sleep(SERVER_START_TIMEOUT_MS, undefined, { ref: false });
+  throw new Error(`Loxel's server did not start within ${SERVER_START_TIMEOUT_MS}ms`);
+}
 
 /**
  * Whether main talks to a dev server started by hand (`pnpm run dev:server`), which has a secret of
@@ -42,7 +117,7 @@ export function setServerStartedByHand(byHand: boolean): void {
  * time it restarts, so its file is read on every request.
  */
 function currentSecret(): string | null {
-  if (!serverStartedByHand) return APP_SESSION_SECRET;
+  if (!serverStartedByHand) return listeningSecret;
   return readSessionToken(stateDirFor("dev"));
 }
 

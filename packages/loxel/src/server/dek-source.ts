@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { setTimeout } from "node:timers/promises";
 
+import { config } from "./config";
 import { logger } from "./logger";
 
 const log = logger.child("keychain");
@@ -11,12 +12,17 @@ export interface DekSource {
   loadKey(): Promise<Buffer | null>;
 }
 
-export function createDekSource(): DekSource {
-  // A demo holds no real secrets either, and must not prompt for the keychain.
-  if (process.env.LOXEL_DEV === "1" || process.env.LOXEL_DEMO === "1") {
-    return new DevDekSource();
-  }
-  const dekFile = process.env.LOXEL_DEK_FILE;
+/**
+ * Where the server gets its data encryption key. A dev or demo server from source takes a fixed
+ * one: it holds no real secrets, and a demo must not prompt for the keychain. A compiled server
+ * never does, in any mode: the key from the app (stdin) or a key file protects the user's secrets.
+ */
+export function createDekSource(
+  { isDev, isDemo, isCompiled }: Pick<typeof config, "isDev" | "isDemo" | "isCompiled"> = config,
+  env: NodeJS.ProcessEnv = process.env,
+): DekSource {
+  if ((isDev || isDemo) && !isCompiled) return new DevDekSource();
+  const dekFile = env.LOXEL_DEK_FILE;
   if (dekFile) {
     return new SecretFileDekSource(dekFile);
   }

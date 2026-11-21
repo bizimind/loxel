@@ -18,7 +18,7 @@ try {
   // canvas-loader.ts loads @napi-rs/canvas/js-binding only when run from
   // source; left in, the compiled binary would embed a second ~30 MB copy of
   // the native binary through it.
-  await Bun.$`bun build ${resolve(root, "src/cli.ts")} --compile --minify --external @napi-rs/canvas/js-binding --outfile ${outBinary}`.quiet();
+  await Bun.$`bun build ${resolve(root, "src/cli.ts")} --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --minify --external @napi-rs/canvas/js-binding --outfile ${outBinary}`.quiet();
 } finally {
   if (copiedBinary) removeNativeBinary();
 }

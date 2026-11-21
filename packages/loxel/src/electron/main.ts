@@ -2,7 +2,7 @@ import { type ChildProcess, type StdioOptions, spawn } from "node:child_process"
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Writable } from "node:stream";
+import { Duplex, type Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -25,17 +25,26 @@ import {
 } from "../lib/quit-terminals";
 import {
   APP_ORIGIN,
-  APP_SESSION_SECRET,
   APP_URL,
   SERVER_PORT,
   SERVER_URL,
   serverAuthorization,
   authorizeWindowRequests,
+  followServerChannel,
   serverFetch,
+  serverHasListened,
   setServerStartedByHand,
+  whenServerListening,
 } from "./app-server";
 import { getDek, initDek } from "./dek";
-import { DEMO_INSTANCE, DEMO_WINDOW_SIZE, IS_DEMO, IS_DEMO_HIDDEN, IS_DEV } from "./env";
+import {
+  DEMO_INSTANCE,
+  DEMO_WINDOW_SIZE,
+  IS_DEMO,
+  IS_DEMO_HIDDEN,
+  IS_DEV,
+  LAUNCH_ENV,
+} from "./env";
 
 /**
  * The server this process started, which lives exactly as long as the app. Null while a crashed
@@ -67,6 +76,7 @@ const SERVER_STABLE_UPTIME_MS = 60_000;
 let metaKeyHeld = false;
 
 import type { PromoteLayoutBody } from "../api/layout-promote-model";
+import { newSessionSecret } from "../app-session";
 import { type OpenRequest, requestOpen } from "../open-request";
 import {
   PARENT_CHANNEL_FD,
@@ -196,10 +206,11 @@ function serverStdio(): StdioOptions {
   return ["pipe", "pipe", "pipe", "pipe"];
 }
 
-function startServer(): void {
+/** Start the server; resolves once it says it is listening (see `followServerChannel`). */
+function startServer(): Promise<void> {
   serverStartedAt = Date.now();
   // The server exits on its own if this process dies without stopping it.
-  const env = { ...process.env, LOXEL_PARENT_PID: String(process.pid) };
+  const env = { ...LAUNCH_ENV, LOXEL_PARENT_PID: String(process.pid) };
   const child = IS_DEV
     ? // In dev, spawn bun running the server source directly
       spawn("bun", ["run", "src/server/index.ts"], {
@@ -220,7 +231,7 @@ function startServer(): void {
         });
   const { stdin, stdout, stderr } = child;
   const channel = child.stdio[PARENT_CHANNEL_FD];
-  if (!stdin || !stdout || !stderr || !(channel instanceof Writable)) {
+  if (!stdin || !stdout || !stderr || !(channel instanceof Duplex)) {
     child.kill();
     throw new Error("The server was started without its pipes");
   }
@@ -228,14 +239,16 @@ function startServer(): void {
   serverChannel = channel;
   setServerStartedByHand(false);
   channel.on("error", () => {});
+  // Each server its own secret, so one that reached anything else on the port is never accepted.
+  const secret = newSessionSecret();
+  const exited = new Promise<number | null>((resolve) => {
+    child.once("exit", resolve);
+  });
+  const listening = followServerChannel(channel, secret, exited);
   // First on the channel: the server serves nothing over TCP until it has the secret.
   // The open windows too: a server restarting after a crash keeps their layout session rows.
   channel.write(
-    encodeParentMessage({
-      type: "session",
-      secret: APP_SESSION_SECRET,
-      windowIds: layoutWindows.openWindowIds(),
-    }),
+    encodeParentMessage({ type: "session", secret, windowIds: layoutWindows.openWindowIds() }),
   );
   // A binary that cannot be run (missing, not executable) fails here, after the spawn returned.
   child.on("error", (err) => {
@@ -261,8 +274,9 @@ function startServer(): void {
     if (serverProcess !== child) return;
     serverProcess = null;
     serverChannel = null;
-    if (!stoppingServer) scheduleServerRestart();
+    if (!stoppingServer && serverHasListened()) scheduleServerRestart();
   });
+  return listening;
 }
 
 /**
@@ -291,7 +305,7 @@ function scheduleServerRestart(): void {
   serverRestartTimer = setTimeout(() => {
     serverRestartTimer = null;
     if (stoppingServer || serverProcess) return;
-    startServer();
+    void startServer();
   }, delayMs);
 }
 
@@ -301,28 +315,6 @@ function cancelServerRestart(): boolean {
   clearTimeout(serverRestartTimer);
   serverRestartTimer = null;
   return true;
-}
-
-function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    function check() {
-      fetch(url)
-        .then((res) => {
-          if (res.ok || res.status === 404) resolve();
-          else retry();
-        })
-        .catch(retry);
-    }
-    function retry() {
-      if (Date.now() - start > timeoutMs) {
-        reject(new Error(`Server did not start within ${timeoutMs}ms`));
-        return;
-      }
-      setTimeout(check, 100);
-    }
-    check();
-  });
 }
 
 function isLocal(url: string): boolean {
@@ -482,7 +474,7 @@ function stopServer(terminals: ShutdownTerminals): void {
  */
 function startServerToStop(): void {
   try {
-    startServer();
+    void startServer();
   } catch (err) {
     console.error("[electron] Could not start a server to carry the quit to the terminals:", err);
   }
@@ -805,12 +797,13 @@ app.on("web-contents-created", (_, contents) => {
 let serverStarting: Promise<void> | null = null;
 
 /**
- * Start the app's server and wait until it answers, or join the start already in flight. A server
- * already answering on the port that an app started is one a previous run left shutting down (in
- * dev, also the one an Electron that just restarted on a main-process rebuild leaves behind), so
- * launch waits for it to go. Any other server on the port was not started by an app: in dev, a dev
- * server started by hand (`pnpm run dev:server`), which the app uses instead; in production, one
- * from an earlier version or started by hand, which can stay up for minutes, so launch fails.
+ * Start the app's server and wait until it says it is listening, or join the start already in
+ * flight. A server already answering on the port that an app started is one a previous run left
+ * shutting down (in dev, also the one an Electron that just restarted on a main-process rebuild
+ * leaves behind), so launch waits for it to go. Any other server on the port was not started by an
+ * app: in dev, a dev server started by hand (`pnpm run dev:server`), which the app uses instead; in
+ * production, one from an earlier version or started by hand, which can stay up for minutes, so
+ * launch fails.
  */
 function startAppServer(): Promise<void> {
   serverStarting ??= (async () => {
@@ -826,8 +819,7 @@ function startAppServer(): Promise<void> {
       );
     }
     if (running) await waitForServerToStop();
-    startServer();
-    await waitForServer(SERVER_URL);
+    await startServer();
   })().finally(() => {
     serverStarting = null;
   });
@@ -900,16 +892,17 @@ app.on("new-window-for-tab", () => {
 });
 
 /**
- * Wait until the server answers. One restarting after a crash is waited for; in dev, a dev server
- * started by hand that has since shut down (it does when idle) is replaced by one this app starts.
+ * Wait until the server is listening. One restarting after a crash is waited for; in dev, a dev
+ * server started by hand is used while it runs, and once it has shut down (it does when idle) is
+ * replaced by one this app starts.
  */
 async function serverReady(): Promise<void> {
   if (serverStarting) {
     await serverStarting;
     return;
   }
-  if (serverProcess || serverRestartTimer || (await isServerRunning())) {
-    await waitForServer(SERVER_URL);
+  if (serverProcess || serverRestartTimer) {
+    await whenServerListening();
     return;
   }
   await startAppServer();

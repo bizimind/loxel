@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/wt",
-  "version": "0.1.84",
+  "version": "0.1.85",
   "description": "Configless CLI for managing git worktrees with shell hooks",
   "type": "module",
   "exports": {
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "bun src/cli.ts",
-    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
+    "build": "bun build --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --minify src/cli.ts --outfile dist/wt",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 30000 --parallel",
     "lint": "pnpm -w run lint",

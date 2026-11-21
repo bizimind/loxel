@@ -1,8 +1,8 @@
 /**
  * The app's session secret: what proves that a request to the server's loopback TCP port comes from
- * the app. The desktop app generates it once per run and hands it to the server it starts over its
- * channel (parent-channel-protocol.ts); main adds it as a Bearer header to its own requests and to
- * its windows'. A server started without the app (dev, tests) makes its own and writes it to its
+ * the app. The desktop app generates one for each server it starts and hands it over on its channel
+ * (parent-channel-protocol.ts); main adds it as a Bearer header to its own requests and to its
+ * windows' while that server is listening (electron/app-server.ts). A server started without the app (dev, tests) makes its own and writes it to its
  * token file for the tools that drive it (session-client.ts). See
  * docs/ARCHITECTURE.md#request-admission.
  *

@@ -29,10 +29,10 @@ const define = `LOXEL_TERMINAL_HOST_BUILD_ID=${JSON.stringify(hostBuildId)}`;
 console.log(`[build-server] terminal host build ${hostBuildId}`);
 
 if (mode === "compile") {
-  await $`bun build ${SERVER_ENTRIES} --compile --define ${define} --outfile build/loxel-server`.cwd(
+  await $`bun build ${SERVER_ENTRIES} --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --define ${define} --outfile build/loxel-server`.cwd(
     packageRoot,
   );
-  await $`bun build ${HOST_ENTRY} --compile --define ${define} --outfile ${`build/${TERMINAL_HOST_BINARY}`}`.cwd(
+  await $`bun build ${HOST_ENTRY} --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --define ${define} --outfile ${`build/${TERMINAL_HOST_BINARY}`}`.cwd(
     packageRoot,
   );
 } else {

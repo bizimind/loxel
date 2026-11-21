@@ -71,7 +71,16 @@ console.log("Step 2: Compiling to standalone binary...");
 const outfile = path.join(OUTDIR, "docker-langserver");
 
 const compile = Bun.spawn(
-  ["bun", "build", path.join(INTERMEDIATE, "server.js"), "--compile", "--outfile", outfile],
+  [
+    "bun",
+    "build",
+    path.join(INTERMEDIATE, "server.js"),
+    "--compile",
+    "--no-compile-autoload-bunfig",
+    "--no-compile-autoload-dotenv",
+    "--outfile",
+    outfile,
+  ],
   { stdout: "inherit", stderr: "inherit" },
 );
 const exitCode = await compile.exited;

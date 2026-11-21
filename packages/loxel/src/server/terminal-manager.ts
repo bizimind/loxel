@@ -13,6 +13,7 @@ import type { NotificationSequence, TerminalEnd } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
+import { LOXEL_OVERRIDE_ENV_VARS } from "@/loxel-overrides";
 import {
   FLOW_HIGH_WATER_BYTES,
   FLOW_LOW_WATER_BYTES,
@@ -119,6 +120,9 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // overrides, and a Home terminal must have no worktree, so its `loxel` opens pages in its window.
   delete env.LOXEL_WORKTREE;
   delete env.LOXEL_WINDOW_ID;
+  // Nor how this server was started (its mode, state, port, renderer, key): a server, app or tool
+  // started in the shell runs as it would anywhere else.
+  for (const name of LOXEL_OVERRIDE_ENV_VARS) delete env[name];
   return env;
 }
 
