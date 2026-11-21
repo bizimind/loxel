@@ -518,11 +518,6 @@
   color: transparent;
   text-shadow: none;
 }
-/* The ghost's escapes only take up their room: the real line draws them. */
-.diff-inline-ghost .unseen-char {
-  color: transparent;
-  background-color: transparent;
-}
 
 /* Suggest widget (auto-complete popover) */
 .monaco-editor .suggest-widget {

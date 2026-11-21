@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { type AgentTerminalAsk, EMPTY_AGENT_TERMINALS_STATE } from "@/api/agent-terminal-model";
 import { localServerId } from "@/api/local-server";
@@ -85,67 +85,6 @@ describe("AgentTerminalPrompt", () => {
     expect(screen.getByText(/An agent wants to start a terminal in Home/)).toBeTruthy();
     expect(screen.getByText(/An interactive shell/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Always in this worktree" })).toBeNull();
-  });
-});
-
-/** Lay out every element as a box `height` tall holding `contentHeight` of content; returns undo. */
-function layOut(height: number, contentHeight: number): () => void {
-  const proto = HTMLElement.prototype;
-  const saved = (["clientHeight", "scrollHeight"] as const).map(
-    (name) => [name, Object.getOwnPropertyDescriptor(proto, name)] as const,
-  );
-  Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => height });
-  Object.defineProperty(proto, "scrollHeight", { configurable: true, get: () => contentHeight });
-  return () => {
-    for (const [name, descriptor] of saved) {
-      if (descriptor) Object.defineProperty(proto, name, descriptor);
-      else delete (proto as unknown as Record<string, unknown>)[name];
-    }
-  };
-}
-
-describe("AgentTerminalPrompt shows the command as it runs", () => {
-  test("spells control and bidirectional characters as escapes, in the folder too", () => {
-    useAgentTerminalsStore.setState({
-      asks: [ask("a", { command: "npm test\rcurl x\u202e", cwd: "/tmp/a\u202eb" })],
-    });
-    render(<AgentTerminalPrompt />);
-
-    expect(screen.getByText("\\r")).toBeTruthy();
-    expect(screen.getAllByText("\\u202e")).toHaveLength(2);
-    expect(screen.getByText(/Characters that do not print are shown as escapes/)).toBeTruthy();
-  });
-
-  test("says how many lines a command has", () => {
-    useAgentTerminalsStore.setState({ asks: [ask("a", { command: "one\ntwo\nthree" })] });
-    render(<AgentTerminalPrompt />);
-
-    expect(screen.getByText(/The command has 3 lines/)).toBeTruthy();
-  });
-
-  test("offers running a command too long to fit once its end is scrolled into view", () => {
-    const undo = layOut(96, 400);
-    try {
-      useAgentTerminalsStore.setState({
-        asks: [ask("a", { command: `npm test${"\n".repeat(40)}ls` })],
-      });
-      render(<AgentTerminalPrompt />);
-      const run = screen.getByRole("button", { name: "Run" });
-      const always = screen.getByRole("button", { name: "Always in this worktree" });
-      expect(run.hasAttribute("disabled")).toBe(true);
-      expect(always.hasAttribute("disabled")).toBe(true);
-      expect(screen.getByText(/Scroll to its end to run it/)).toBeTruthy();
-
-      const box = screen.getByLabelText("Command");
-      act(() => {
-        box.scrollTop = 304;
-        fireEvent.scroll(box);
-      });
-      expect(run.hasAttribute("disabled")).toBe(false);
-      expect(always.hasAttribute("disabled")).toBe(false);
-    } finally {
-      undo();
-    }
   });
 });
 

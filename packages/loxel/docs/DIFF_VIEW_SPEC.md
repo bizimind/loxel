@@ -287,7 +287,7 @@ There is no fixed word or character granularity. Each modification block (a run 
 ### Key Files
 
 - `src/components/diff/inline-changes.ts` - Adapter over Monaco's `DefaultLinesDiffComputer` producing per-side ranges
-- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views; both layers spell unseen characters as escapes (`RevealedText`, `revealUnseenInHtml` in `src/components/ui/revealed-text.tsx`), so they stay aligned
+- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views
 
 ---
 

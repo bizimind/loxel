@@ -70,7 +70,6 @@ import { getMediaType } from "@/lib/media-extensions";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 import { classifySchemaGlob, schemaFilePatterns } from "@/lib/schema-glob";
 import { isRemoteSchemaUrl } from "@/lib/schema-references";
-import { hasKeyControl } from "@/lib/unseen-chars";
 import { isHttpUrl } from "@/url-utils";
 
 import type { AgentTerminals, StoredAsk } from "./agent-terminals";
@@ -3355,14 +3354,6 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (typeof rawCwd !== "string") return error("Missing terminal.cwd in body", 400);
     if (command !== undefined && typeof command !== "string") {
       return error("terminal.command must be a string", 400);
-    }
-    // The command is typed into the shell as keys, so a control character would edit or enter the
-    // line instead of being part of it, and what runs would differ from the command as written.
-    if (typeof command === "string" && hasKeyControl(command)) {
-      return error(
-        "terminal.command must not contain control characters (such as tab, carriage return or escape); only newlines are allowed",
-        400,
-      );
     }
     if (title !== undefined && typeof title !== "string") {
       return error("terminal.title must be a string", 400);

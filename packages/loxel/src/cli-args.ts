@@ -5,12 +5,21 @@
  */
 import { resolve } from "node:path";
 
-import { shellArg } from "@bizimind/wt/lib";
+import { shellQuote } from "@bizimind/wt/lib";
 
 import type { PanelOpenOptions, PanelPlacement } from "./api/panel-placement-model";
 import { SPLIT_DIRECTIONS, isSplitDirection } from "./api/panel-placement-model";
 import type { OpenRequest, OpenTerminalRequest } from "./open-request";
 import { isHttpUrl } from "./url-utils";
+
+/**
+ * Arguments made only of these characters need no quoting: no whitespace, no quotes, and none of
+ * the characters that start tilde, parameter, glob or command substitution. Leaving such words bare
+ * keeps the command word unquoted, which POSIX shells require for alias expansion.
+ */
+const SAFE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+const quoteArg = (arg: string): string => (SAFE_WORD.test(arg) ? arg : shellQuote(arg));
 
 const OPEN_FLAGS =
   "[--split left|right|up|down | --replace] [--group <tab>] [--worktree <path>] [--focus | --no-focus]";
@@ -196,14 +205,12 @@ export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs
     }
   });
 
-  // Several arguments are joined with each one quoted unless the shell reads it literally, which
-  // keeps the command word bare, as POSIX shells require for alias expansion.
   const command =
     commandArgs.length === 0
       ? undefined
       : commandArgs.length === 1
         ? commandArgs[0]
-        : commandArgs.map(shellArg).join(" ");
+        : commandArgs.map(quoteArg).join(" ");
 
   const result = flags.result();
   return {

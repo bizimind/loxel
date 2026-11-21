@@ -169,22 +169,6 @@ describe("POST /api/open terminals and placement", () => {
     expect(sent).toEqual([]);
   });
 
-  test("rejects a command holding control characters, which the shell would read as keys", async () => {
-    for (const command of ["npm test\rls", "a\tb", "claude 'x\u0015y'", "ls\u001b[D"]) {
-      const res = await open({ terminal: { cwd: root, command } });
-      expect(res.status).toBe(400);
-    }
-    expect(sent).toEqual([]);
-    expect(started).toEqual([]);
-  });
-
-  test("accepts a command spanning several lines", async () => {
-    const res = await open({ terminal: { cwd: root, command: "claude 'one\ntwo'" } });
-
-    expect(res.status).toBe(200);
-    expect(started).toMatchObject([{ command: "claude 'one\ntwo'" }]);
-  });
-
   test("starts no shell while no window can take the terminal", async () => {
     window = null;
 
