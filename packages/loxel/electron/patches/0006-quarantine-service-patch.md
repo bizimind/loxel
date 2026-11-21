@@ -6,7 +6,7 @@ Chromium marks a completed download, a page saved with `webContents.savePage()`,
 
 The patch connects both to a quarantine service in the browser process, as Chrome does outside Windows (`ChromeDownloadManagerDelegate::ConnectToQuarantineService`). On macOS that also records the file's source URLs (`kMDItemWhereFroms` and the quarantine event). One static, `ElectronDownloadManagerDelegate::QuarantineServiceConnection()`, serves both overrides. Windows keeps Chromium's own Mark of the Web, and on Linux Chromium's service does nothing.
 
-Chromium marks a download only once it is complete (`DownloadFile::RenameAndAnnotate`), and Electron writes a download straight to the path the user chose, so Loxel's `browser-downloads.ts` keeps marking the file while it downloads. Chromium's service merges into an attribute already there, adding the URLs, and Loxel leaves an attribute it finds in place, so Chromium's survives when Chromium marks first.
+Chromium marks a download only once it is complete (`DownloadFile::RenameAndAnnotate`), and Electron has Chromium write a download straight to its save path (Loxel sets one in Downloads), so Loxel's `browser-downloads.ts` keeps marking the file while it downloads and when it moves it where the user chose. Chromium's service merges into an attribute already there, adding the URLs, and Loxel leaves an attribute it finds in place, so Chromium's survives when Chromium marks first.
 
 ## Files
 
