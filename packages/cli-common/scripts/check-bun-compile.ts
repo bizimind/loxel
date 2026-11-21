@@ -1,7 +1,8 @@
 /**
  * Fails when a tracked file compiles a standalone binary without the shared flags in
- * `src/bun-compile.ts`: any `--compile` flag outside that helper, its test and this check.
- * Comments and Markdown may mention the flag. Run by the root `lint` script.
+ * `src/bun-compile.ts`: a `--compile` flag, or a `compile: true` / `compile: {` option of
+ * `Bun.build`, outside that helper, its test and this check. Comments and Markdown may mention
+ * either. Run by the root `lint` script.
  *
  * Usage: bun packages/cli-common/scripts/check-bun-compile.ts
  */
@@ -18,7 +19,9 @@ const COMMENT = /^\s*(?:\/\/|\/\*|\*|#)/;
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 // `--compile` not followed by `-`, so other tools' `--compile-*` flags do not match.
-const grep = await $`git grep -n -I -E -e ${"--compile([^-]|$)"} -- ${":!*.md"}`
+const COMPILE_FLAG = "--compile([^-]|$)";
+const COMPILE_OPTION = "(^|[^[:alnum:]_])compile[[:space:]]*:[[:space:]]*(true|\\{)";
+const grep = await $`git grep -n -I -E -e ${COMPILE_FLAG} -e ${COMPILE_OPTION} -- ${":!*.md"}`
   .cwd(repoRoot)
   .nothrow()
   .quiet();
@@ -34,7 +37,7 @@ const offending = grep.stdout
 
 if (offending.length > 0) {
   console.error(
-    "Compile standalone binaries through @bizimind/cli-common/bun-compile (BUN_COMPILE_FLAGS or the bun-compile bin), not with --compile directly:",
+    "Compile standalone binaries through @bizimind/cli-common/bun-compile (BUN_COMPILE_FLAGS or the bun-compile bin), not with --compile or Bun.build's compile option directly:",
   );
   for (const line of offending) console.error(`  ${line}`);
   process.exit(1);

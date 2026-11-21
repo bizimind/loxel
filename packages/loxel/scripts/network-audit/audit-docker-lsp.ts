@@ -11,7 +11,7 @@
  * offline registry client, which must fail by asking Docker Hub for the image's tags when completing
  * one after `FROM alpine:` (connect-log.c blocks the lookup):
  *
- *   bun build node_modules/dockerfile-language-server-nodejs/lib/server.js --compile --outfile <path>
+ *   pnpm exec bun-compile node_modules/dockerfile-language-server-nodejs/lib/server.js --outfile <path>
  */
 
 import { randomBytes } from "node:crypto";

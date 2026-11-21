@@ -33,9 +33,9 @@ beforeAll(() => {
   writeFileSync(path.join(project, "preload.js"), `console.log("preload");\n`);
   writeFileSync(path.join(project, ".env"), "BUN_COMPILE_PROBE=from-dotenv\n");
 
-  compile(["bun", BUN_COMPILE, "probe.ts", "--outfile", "shared-flags"]);
+  compile([process.execPath, BUN_COMPILE, "probe.ts", "--outfile", "shared-flags"]);
   // Bun's defaults, to show the project folder is one a compiled binary would otherwise pick up.
-  compile(["bun", "build", "--compile", "probe.ts", "--outfile", "defaults"]);
+  compile([process.execPath, "build", "--compile", "probe.ts", "--outfile", "defaults"]);
 }, COMPILE_TIMEOUT_MS);
 
 afterAll(() => {
@@ -47,6 +47,7 @@ describe("bun-compile", () => {
     expect(runInProject("shared-flags")).toEqual(["main unset"]);
   });
 
+  // Fails if a Bun upgrade turns these autoloads off by default, not if the helper broke.
   test("a binary built with Bun's defaults reads both from the same folder", () => {
     expect(runInProject("defaults")).toEqual(["preload", "main from-dotenv"]);
   });

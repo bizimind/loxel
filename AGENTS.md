@@ -76,7 +76,7 @@ Each package README is the authoritative doc for that package; this list only or
 
 #### Libraries
 
-- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, self-update) used by wt, excalidraw, and code-analysis, plus the `bun-compile` helper every package compiles its standalone binaries with. See `packages/cli-common/README.md`.
 
 - **localdb-sdk**: SQLite-backed (`bun:sqlite`) structured database SDK with typed columns, views, and formulas; powers loxel's local databases. See `packages/localdb-sdk/README.md`.
 

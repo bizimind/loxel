@@ -1,8 +1,8 @@
 # cli-common
 
-Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, the self-update system for compiled binaries, and the flags every standalone binary is compiled with. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis).
+Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, the self-update system for compiled binaries, and the flags every standalone binary is compiled with. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis); every package that builds a standalone binary, [loxel](../loxel) and [cc-git-editor](../cc-git-editor) included, compiles it with `bun-compile`.
 
-Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
+Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public except the compile helper (`@bizimind/cli-common/bun-compile`, kept apart so build scripts load nothing else) is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
 
 ## Command results and output modes
 
@@ -45,7 +45,7 @@ The key pair lives in GitHub: the private key (PKCS#8 PEM) is the `CLI_MANIFEST_
 
 ## Compiling standalone binaries
 
-Every `bun build --compile` in the repo goes through [`src/bun-compile.ts`](src/bun-compile.ts). Its `BUN_COMPILE_FLAGS` add `--no-compile-autoload-bunfig` and `--no-compile-autoload-dotenv` to `--compile`, so a binary never reads `bunfig.toml` or `.env` from the directory it runs in. Build scripts spread the constant (`import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile"`); package.json scripts call the `bun-compile` bin, which takes the rest of `bun build`'s arguments (`bun-compile --minify src/cli.ts --outfile dist/tool`) and needs `@bizimind/cli-common` among the package's dependencies. [`bun-compile.test.ts`](src/bun-compile.test.ts) builds a binary with it and runs it in a folder holding a `bunfig.toml` preload and a `.env`, and the root `lint` runs [`scripts/check-bun-compile.ts`](scripts/check-bun-compile.ts), which rejects a `--compile` flag anywhere else.
+Every `bun build --compile` in the repo goes through [`src/bun-compile.ts`](src/bun-compile.ts). Its `BUN_COMPILE_FLAGS` add `--no-compile-autoload-bunfig` and `--no-compile-autoload-dotenv` to `--compile`, so a binary never reads `bunfig.toml` or `.env` from the directory it runs in, and pin the `tsconfig.json` and `package.json` autoloads off too. Build scripts spread the constant (`import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile"`); package.json scripts call the `bun-compile` bin, which takes the rest of `bun build`'s arguments (`bun-compile --minify src/cli.ts --outfile dist/tool`) and needs `@bizimind/cli-common` among the package's dependencies. [`bun-compile.test.ts`](src/bun-compile.test.ts) builds a binary with it and runs it in a folder holding a `bunfig.toml` preload and a `.env`, and the root `lint` runs [`scripts/check-bun-compile.ts`](scripts/check-bun-compile.ts), which rejects a `--compile` flag or a `Bun.build` `compile` option anywhere else.
 
 ## Development
 
