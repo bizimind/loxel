@@ -92,16 +92,24 @@ async function checkPrerequisites(): Promise<void> {
 }
 
 /**
- * Create the arch's build-tools config on first use. An existing one must build the checkout under
- * `root`: one made for another root would build there while the patches go here, and the zip read
+ * Create the arch's build-tools config on first use. It, or an existing one, must build the checkout
+ * under `root`: one made for another root would build there while the patches go here, and the zip read
  * back from here would be an older build.
  */
 async function ensureConfig(arch: ElectronArch): Promise<void> {
-  const configs = await $`e show configs`.nothrow().quiet().text();
-  if (!configs.split(/\s+/).includes(configName(arch))) {
+  const hasConfig = async () =>
+    (await $`e show configs`.nothrow().quiet().text()).split(/\s+/).includes(configName(arch));
+  if (!(await hasConfig())) {
     log(`creating build config ${configName(arch)} in ${root}`);
-    await $`e init ${configName(arch)} --root ${root} --import ${buildConfig} --out ${outDir(arch)} --target-cpu ${arch} --remote-build none --use-https`;
-    return;
+    // `e init` writes the config, then refuses a root that holds a checkout already (another
+    // config's), which this shared checkout does; the config it wrote is what's needed.
+    const init =
+      await $`e init ${configName(arch)} --root ${root} --import ${buildConfig} --out ${outDir(arch)} --target-cpu ${arch} --remote-build none --use-https`.nothrow();
+    if (init.exitCode !== 0 && !(await hasConfig())) {
+      throw new Error(
+        `Could not create build config ${configName(arch)}: ${init.stderr.toString()}`,
+      );
+    }
   }
   await $`e use ${configName(arch)}`.quiet();
   const configRoot = path.resolve((await $`e show root`.text()).trim());
