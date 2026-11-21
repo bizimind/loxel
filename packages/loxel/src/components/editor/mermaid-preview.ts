@@ -4,12 +4,12 @@
  * The preview is view-only: it never touches the code block's text, so the markdown source (and
  * the source-preserving save) is unaffected. Mermaid is large, so it is imported on the first
  * mermaid block and cached. Repositories can be untrusted, so it runs with
- * `securityLevel: "strict"` (labels escaped, no click handlers or scripts), and its SVG is
- * sanitized again before insertion: by the panel for the preview, here for the full-size viewer.
+ * `securityLevel: "strict"` (no click handlers or scripts), label text is sanitized as it draws,
+ * and each rendered SVG is made inert (mermaid-sanitizer.ts) before it is cached: no links, and
+ * nothing loaded from outside the diagram. The panel sanitizes the preview once more on insertion.
  *
  * The preview's toolbar, zoom, pan and click-to-open are in mermaid-preview-controls.tsx.
  */
-import DOMPurify from "dompurify";
 import type { Mermaid, MermaidConfig } from "mermaid";
 
 import type { PreviewValue, RenderPreview } from "@/components/editor/code-block-preview";
@@ -19,6 +19,10 @@ import {
   mermaidToolbarHtml,
 } from "@/components/editor/mermaid-preview-controls";
 import { recordMermaidRender } from "@/components/editor/mermaid-render-results";
+import {
+  MERMAID_LABEL_PURIFY_CONFIG,
+  sanitizeMermaidSvg,
+} from "@/components/editor/mermaid-sanitizer";
 import type { Dimensions } from "@/components/pan-zoom/pan-zoom";
 import { frontendLog } from "@/lib/frontend-logger";
 
@@ -58,6 +62,13 @@ const CLASSIC_APPEARANCE = {
   usecase: DAGRE,
   agentflow: DAGRE,
 } as const satisfies MermaidConfig;
+
+/**
+ * Config keys a diagram's frontmatter or `%%{init}%%` cannot set, besides mermaid's own: the label
+ * sanitizer, and raw CSS for the whole diagram. Diagrams still pick their colors and font through
+ * `themeVariables`, whose values mermaid restricts.
+ */
+const DIAGRAM_LOCKED_KEYS = ["dompurifyConfig", "themeCSS"];
 
 let mermaidPromise: Promise<Mermaid> | null = null;
 
@@ -106,25 +117,6 @@ interface RenderedSvg {
   size: Dimensions | null;
 }
 
-const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-let purify: ReturnType<typeof DOMPurify> | null = null;
-
-/** The code block panel's sanitizer config (Crepe's `createSvgAwareSanitizer`). */
-function sanitizeSvg(svg: string): string {
-  if (!purify) {
-    purify = DOMPurify();
-    purify.addHook("uponSanitizeElement", (node, data) => {
-      if (data.tagName !== "foreignobject") return;
-      if (node.parentElement?.namespaceURI !== SVG_NAMESPACE) node.parentNode?.removeChild(node);
-    });
-  }
-  return purify.sanitize(svg, {
-    ADD_TAGS: ["foreignObject"],
-    ADD_ATTR: ["xmlns"],
-    HTML_INTEGRATION_POINTS: { foreignobject: true },
-  });
-}
-
 /** The width and height of the root `<svg>`'s `viewBox`. */
 function viewBoxSize(svg: string): Dimensions | null {
   const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? "";
@@ -167,6 +159,8 @@ async function renderSvg(
   const config: MermaidConfig = {
     startOnLoad: false,
     securityLevel: "strict",
+    dompurifyConfig: MERMAID_LABEL_PURIFY_CONFIG,
+    secure: [...(mermaid.mermaidAPI.defaultConfig.secure ?? []), ...DIAGRAM_LOCKED_KEYS],
     suppressErrorRendering: true,
     theme,
     ...CLASSIC_APPEARANCE,
@@ -177,7 +171,7 @@ async function renderSvg(
   }
   const id = nextId();
   try {
-    const { svg } = await mermaid.render(id, source);
+    const svg = sanitizeMermaidSvg((await mermaid.render(id, source)).svg);
     return { className, id, svg, size: viewBoxSize(svg) };
   } finally {
     // Mermaid removes its temp container on success but can leave it behind when rendering throws.
@@ -271,7 +265,7 @@ export async function renderMermaidDiagram(source: string): Promise<MermaidDiagr
   const svgFor = (className: string) => {
     const variant = rendered.find((r) => r.className === className);
     if (!variant) throw new Error(`Missing the ${className} variant`);
-    return sanitizeSvg(withFreshId(variant.id, variant.svg));
+    return withFreshId(variant.id, variant.svg);
   };
   return {
     light: svgFor("loxel-mermaid-light"),

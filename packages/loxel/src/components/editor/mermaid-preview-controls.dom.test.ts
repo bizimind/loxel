@@ -85,6 +85,15 @@ describe("mermaid preview controls", () => {
     expect(opened).toEqual([codeBlock!, codeBlock!]);
   });
 
+  test("a click on the diagram, even on a link in it, opens the viewer and prevents its default action", () => {
+    const link = document.createElement("a");
+    link.href = "http://127.0.0.1:7433/";
+    canvas().querySelector("svg")!.append(link);
+    const click = mouse(link, "click", 10);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toEqual([root.querySelector(".milkdown-code-block")!]);
+  });
+
   test("a drag pans the canvas, within its bounds, and does not open the viewer", () => {
     const down = mouse(canvas(), "mousedown", 300);
     expect(down.defaultPrevented).toBe(true); // ProseMirror must not start a selection
@@ -93,7 +102,7 @@ describe("mermaid preview controls", () => {
     mouse(window, "mousemove", -900);
     expect(canvas().style.transform).toBe("translate(-500px, 0px) scale(1)");
     mouse(window, "mouseup", -900);
-    mouse(canvas(), "click", -900);
+    expect(mouse(canvas(), "click", -900).defaultPrevented).toBe(true);
     expect(opened).toEqual([]);
   });
 
