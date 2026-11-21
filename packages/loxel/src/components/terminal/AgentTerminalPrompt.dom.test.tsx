@@ -116,6 +116,13 @@ describe("AgentTerminalPrompt shows the command as it runs", () => {
     expect(screen.getByText(/Characters that do not print are shown as escapes/)).toBeTruthy();
   });
 
+  test("spells unseen characters in the agent's name as escapes", () => {
+    useAgentTerminalsStore.setState({ asks: [ask("a", { origin: { agent: "Claude\u202e" } })] });
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText("\\u202e")).toBeTruthy();
+  });
+
   test("says how many lines a command has", () => {
     useAgentTerminalsStore.setState({ asks: [ask("a", { command: "one\ntwo\nthree" })] });
     render(<AgentTerminalPrompt />);

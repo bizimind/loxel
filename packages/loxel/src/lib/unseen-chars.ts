@@ -14,11 +14,11 @@ export function isKeyControl(code: number): boolean {
 
 /**
  * Characters that display as nothing, or change how the text around them displays: controls,
- * default-ignorable characters (zero-width characters, bidirectional controls, which reorder the text
+ * format characters, default-ignorable characters (zero-width characters, bidirectional controls, which reorder the text
  * on screen but not the characters a program reads, variation selectors, tag characters) and the
  * line and paragraph separators.
  */
-const UNSEEN = /[\p{Cc}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/gu;
+const UNSEEN = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/gu;
 
 /** Whether `text` holds a key control (see `isKeyControl`). */
 export function hasKeyControl(text: string): boolean {
