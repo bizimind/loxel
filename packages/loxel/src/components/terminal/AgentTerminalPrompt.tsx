@@ -9,6 +9,7 @@ import {
 import * as api from "@/api/client";
 import { localServerId } from "@/api/local-server";
 import { Button } from "@/components/ui/button";
+import { RevealedText } from "@/components/ui/revealed-text";
 import { showToast } from "@/components/ui/toast";
 import { pathName } from "@/lib/project-file-helpers";
 import { revealUnseen } from "@/lib/unseen-chars";
@@ -56,12 +57,13 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
       className="animate-in slide-in-from-bottom-2 fade-in bg-popover border-border fixed bottom-4 left-1/2 z-[9998] flex w-96 max-w-[calc(100%-2rem)] -translate-x-1/2 flex-col gap-2 rounded-lg border px-3 py-2.5 shadow-lg"
     >
       <span className="text-foreground text-xs font-medium">
-        {capitalized(agentName(ask.origin))} wants to start a terminal in <Revealed text={where} />
+        {capitalized(agentName(ask.origin))} wants to start a terminal in{" "}
+        <RevealedText text={where} />
         {waiting > 1 ? ` (1 of ${waiting})` : ""}
       </span>
       {ask.cwd !== ask.worktreePath && (
         <span className="text-muted-foreground text-xs break-all">
-          Starts in <Revealed text={ask.cwd} />
+          Starts in <RevealedText text={ask.cwd} />
         </span>
       )}
       {ask.command ? (
@@ -160,21 +162,8 @@ function CommandPreview({
         onScroll={checkEnd}
         className="text-foreground bg-muted max-h-24 overflow-y-auto rounded px-1.5 py-1 text-[11px] break-all whitespace-pre-wrap"
       >
-        <Revealed text={command} />
+        <RevealedText text={command} />
       </code>
     </>
-  );
-}
-
-/** `text` with each character that would not show spelled as a highlighted escape. */
-function Revealed({ text }: { text: string }) {
-  return revealUnseen(text).map((run, i) =>
-    run.unseen ? (
-      <span key={i} className="bg-warning/20 text-warning rounded-sm px-0.5">
-        {run.text}
-      </span>
-    ) : (
-      run.text
-    ),
   );
 }

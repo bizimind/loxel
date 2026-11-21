@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { hasKeyControl, revealUnseen } from "./unseen-chars";
+import { hasKeyControl, replaceUnseen, revealUnseen } from "./unseen-chars";
 
 describe("hasKeyControl", () => {
   test.each(["npm test", "claude 'line one\nline two'", "שלום", ""])(
@@ -56,5 +56,21 @@ describe("revealUnseen", () => {
       "\\u{e0041}",
       "c",
     ]);
+  });
+
+  test("keeps tabs and carriage returns as they are when asked to", () => {
+    expect(revealUnseen("\ta\u202e\r", { keepWhitespace: true })).toEqual([
+      { text: "\ta", unseen: false },
+      { text: "\\u202e", unseen: true },
+      { text: "\r", unseen: false },
+    ]);
+  });
+});
+
+describe("replaceUnseen", () => {
+  test("renders each unseen character in place", () => {
+    expect(replaceUnseen("<b>a\u202eb</b>\t", (escape) => `[${escape}]`)).toBe(
+      "<b>a[\\u202e]b</b>[\\t]",
+    );
   });
 });
