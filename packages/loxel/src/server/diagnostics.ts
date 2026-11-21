@@ -114,18 +114,29 @@ async function runTypeScriptInDir(
     log.warn("TypeScript compiler not found; skipping diagnostics");
     return [];
   }
-  let buildInfoDir: string | undefined;
+  let tempDir: string | undefined;
   try {
-    // `--noEmit` still writes a build info file for an incremental or composite project, where the
-    // config places it. The command line overrides that with a fresh directory of Loxel's own, which keeps
-    // the diagnostics unchanged, unlike turning incremental or composite off.
-    buildInfoDir = mkdtempSync(join(tmpdir(), "loxel-tsc-"));
-    const buildInfoFile = join(buildInfoDir, "tsconfig.tsbuildinfo");
+    // A config can make `tsc` write outside the project even with `--noEmit`: a build info file for
+    // an incremental or composite project, and trace files for `generateTrace`. The command line
+    // overrides both with paths in a fresh directory of Loxel's own, which keeps the diagnostics
+    // unchanged, unlike turning incremental or composite off. The trace path is an empty file, not
+    // a directory, so tracing fails to start and costs nothing; `tsc` prints a "Warning: Failed to
+    // start tracing" line, which the diagnostic pattern in `parseTypeScriptDiagnostics` never matches.
+    tempDir = mkdtempSync(join(tmpdir(), "loxel-tsc-"));
+    const traceSink = join(tempDir, "trace-sink");
+    await Bun.write(traceSink, "");
+    const args = [
+      ...["--noEmit", "--pretty", "false"],
+      ...["--tsBuildInfoFile", join(tempDir, "tsconfig.tsbuildinfo")],
+      ...["--generateTrace", traceSink],
+    ];
     const proc = measureSpawn("tsc", () =>
-      Bun.spawn(
-        [tsc, "--noEmit", "--pretty", "false", "--tsBuildInfoFile", buildInfoFile, "-p", config],
-        { cwd: dir, env: { ...process.env, NO_COLOR: "1" }, stdout: "pipe", stderr: "ignore" },
-      ),
+      Bun.spawn([tsc, ...args, "-p", config], {
+        cwd: dir,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdout: "pipe",
+        stderr: "ignore",
+      }),
     );
 
     // Race against timeout
@@ -153,7 +164,7 @@ async function runTypeScriptInDir(
     // TypeScript compiler not found or other spawn error
     return [];
   } finally {
-    if (buildInfoDir) rmSync(buildInfoDir, { recursive: true, force: true });
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
