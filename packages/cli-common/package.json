@@ -2,16 +2,12 @@
   "name": "@bizimind/cli-common",
   "version": "0.1.0",
   "description": "Common CLI utilities for bizimind packages",
-  "bin": {
-    "bun-compile": "./src/bun-compile.ts"
-  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./output": "./src/output.ts",
     "./update": "./src/update/index.ts",
-    "./commands": "./src/commands/index.ts",
-    "./bun-compile": "./src/bun-compile.ts"
+    "./commands": "./src/commands/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -18,7 +18,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
 import { executeAdd, executeMove, executeRemove, setWorktreeMeta } from "@bizimind/wt/lib";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -340,7 +339,9 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         [
           "bun",
           "build",
-          ...BUN_COMPILE_FLAGS,
+          "--compile",
+          "--no-compile-autoload-bunfig",
+          "--no-compile-autoload-dotenv",
           "src/cli.ts",
           "--outfile",
           path.join(wtBinDir, "wt"),

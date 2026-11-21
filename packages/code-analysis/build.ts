@@ -37,8 +37,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
-
 const dir = import.meta.dir;
 const nmDir = join(dir, "node_modules/dependency-cruiser/src");
 
@@ -155,7 +153,9 @@ try {
     [
       "bun",
       "build",
-      ...BUN_COMPILE_FLAGS,
+      "--compile",
+      "--no-compile-autoload-bunfig",
+      "--no-compile-autoload-dotenv",
       "--minify",
       "src/cli.ts",
       "--outfile",

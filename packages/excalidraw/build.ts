@@ -7,8 +7,6 @@
  */
 import { resolve } from "node:path";
 
-import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
-
 import { ensureNativeBinary, removeNativeBinary } from "./native-binary.ts";
 
 const root = import.meta.dirname;
@@ -20,7 +18,7 @@ try {
   // canvas-loader.ts loads @napi-rs/canvas/js-binding only when run from
   // source; left in, the compiled binary would embed a second ~30 MB copy of
   // the native binary through it.
-  await Bun.$`bun build ${resolve(root, "src/cli.ts")} ${BUN_COMPILE_FLAGS} --minify --external @napi-rs/canvas/js-binding --outfile ${outBinary}`.quiet();
+  await Bun.$`bun build ${resolve(root, "src/cli.ts")} --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --minify --external @napi-rs/canvas/js-binding --outfile ${outBinary}`.quiet();
 } finally {
   if (copiedBinary) removeNativeBinary();
 }

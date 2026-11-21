@@ -4,7 +4,7 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
-    "lint": "oxlint --ignore-pattern '**/deps/**' && bun packages/cli-common/scripts/check-bun-compile.ts",
+    "lint": "oxlint --ignore-pattern '**/deps/**'",
     "lint:fix": "oxlint --fix --ignore-pattern '**/deps/**'",
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",

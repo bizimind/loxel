@@ -1,8 +1,8 @@
 # cli-common
 
-Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, the self-update system for compiled binaries, and the flags every standalone binary is compiled with. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis); every package that builds a standalone binary, [loxel](../loxel) and [cc-git-editor](../cc-git-editor) included, compiles it with `bun-compile`.
+Shared building blocks for the monorepo's Bun CLIs: command output handling, human-readable formatters, and the self-update system for compiled binaries. Used by [wt](../wt), [excalidraw](../excalidraw), and [code-analysis](../code-analysis).
 
-Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public except the compile helper (`@bizimind/cli-common/bun-compile`, kept apart so build scripts load nothing else) is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
+Workspace-only; add `"@bizimind/cli-common": "workspace:*"` and import from `@bizimind/cli-common`. Everything public is exported from [`src/index.ts`](src/index.ts), including a re-export of Commander's `Command` so all CLIs share one Commander version.
 
 ## Command results and output modes
 
@@ -42,10 +42,6 @@ An update is installed only when these checks pass, so write access to the bucke
 A binary that fails a check is deleted and the running one is left as it was.
 
 The key pair lives in GitHub: the private key (PKCS#8 PEM) is the `CLI_MANIFEST_SIGNING_KEY` repository secret, and the public key (SPKI DER, base64) is the `CLI_MANIFEST_PUBLIC_KEY` repository variable, which the release builds embed. [`scripts/sign-manifest.ts`](scripts/sign-manifest.ts) signs the manifest and fails unless the two are a pair; each release checks the pair with `--check` before it tags anything. A binary built without `CLI_MANIFEST_PUBLIC_KEY` (a local build, by default) refuses to update. Rotating the pair means replacing both; binaries released before the rotation stop accepting updates and have to be downloaded again by hand.
-
-## Compiling standalone binaries
-
-Every `bun build --compile` in the repo goes through [`src/bun-compile.ts`](src/bun-compile.ts). Its `BUN_COMPILE_FLAGS` add `--no-compile-autoload-bunfig` and `--no-compile-autoload-dotenv` to `--compile`, so a binary never reads `bunfig.toml` or `.env` from the directory it runs in, and pin the `tsconfig.json` and `package.json` autoloads off too. Build scripts spread the constant (`import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile"`); package.json scripts call the `bun-compile` bin, which takes the rest of `bun build`'s arguments (`bun-compile --minify src/cli.ts --outfile dist/tool`) and needs `@bizimind/cli-common` among the package's dependencies. [`bun-compile.test.ts`](src/bun-compile.test.ts) builds a binary with it and runs it in a folder holding a `bunfig.toml` preload and a `.env`, and the root `lint` runs [`scripts/check-bun-compile.ts`](scripts/check-bun-compile.ts), which rejects a `--compile` flag or a `Bun.build` `compile` option anywhere else.
 
 ## Development
 

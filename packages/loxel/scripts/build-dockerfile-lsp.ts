@@ -13,8 +13,6 @@
 
 import path from "node:path";
 
-import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
-
 import { resolvePackage } from "./resolve-package";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
@@ -77,7 +75,9 @@ const compile = Bun.spawn(
     "bun",
     "build",
     path.join(INTERMEDIATE, "server.js"),
-    ...BUN_COMPILE_FLAGS,
+    "--compile",
+    "--no-compile-autoload-bunfig",
+    "--no-compile-autoload-dotenv",
     "--outfile",
     outfile,
   ],

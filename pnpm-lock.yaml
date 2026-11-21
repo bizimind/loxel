@@ -64,11 +64,7 @@ importers:
         specifier: npm:@typescript/typescript6@6.0.2
         version: '@typescript/typescript6@6.0.2'
 
-  packages/cc-git-editor:
-    devDependencies:
-      '@bizimind/cli-common':
-        specifier: workspace:*
-        version: link:../cli-common
+  packages/cc-git-editor: {}
 
   packages/cli-common:
     dependencies:
@@ -374,9 +370,6 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@types/react@19.3.0)(immer@11.1.18)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     devDependencies:
-      '@bizimind/cli-common':
-        specifier: workspace:*
-        version: link:../cli-common
       '@happy-dom/global-registrator':
         specifier: ^21.0.4
         version: 21.0.4

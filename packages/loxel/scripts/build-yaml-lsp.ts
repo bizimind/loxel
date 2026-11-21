@@ -8,8 +8,6 @@
 
 import path from "node:path";
 
-import { BUN_COMPILE_FLAGS } from "@bizimind/cli-common/bun-compile";
-
 import { resolvePackage } from "./resolve-package";
 
 const LOXEL = path.resolve(import.meta.dir, "..");
@@ -71,7 +69,16 @@ const intermediateJs = path.join(OUTDIR, ".yaml-lsp-intermediate/server.js");
 const outfile = path.join(OUTDIR, "yaml-language-server");
 
 const compile = Bun.spawn(
-  ["bun", "build", intermediateJs, ...BUN_COMPILE_FLAGS, "--outfile", outfile],
+  [
+    "bun",
+    "build",
+    intermediateJs,
+    "--compile",
+    "--no-compile-autoload-bunfig",
+    "--no-compile-autoload-dotenv",
+    "--outfile",
+    outfile,
+  ],
   { stdout: "inherit", stderr: "inherit" },
 );
 const exitCode = await compile.exited;
