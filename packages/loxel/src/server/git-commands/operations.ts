@@ -14,7 +14,7 @@ export async function createCommit(cwd: string, message: string): Promise<string
 export async function checkout(cwd: string, ref: string): Promise<void> {
   validateRefName(ref);
   log.debug(`Checking out ${ref}`);
-  await runGit(["checkout", ref], { cwd });
+  await runGit(["checkout", "--end-of-options", ref, "--"], { cwd });
 }
 
 export async function reset(
@@ -52,9 +52,9 @@ export async function createBranch(cwd: string, name: string, startPoint?: strin
   validateRefName(name);
   if (startPoint) {
     validateRefName(startPoint);
-    await runGit(["branch", name, startPoint], { cwd });
+    await runGit(["branch", "--end-of-options", name, startPoint], { cwd });
   } else {
-    await runGit(["branch", name], { cwd });
+    await runGit(["branch", "--end-of-options", name], { cwd });
   }
 }
 
@@ -62,14 +62,14 @@ export async function deleteBranch(cwd: string, name: string, force = false): Pr
   log.debug(`Deleting branch ${name}${force ? " (force)" : ""}`);
   validateRefName(name);
   const flag = force ? "-D" : "-d";
-  await runGit(["branch", flag, name], { cwd });
+  await runGit(["branch", flag, "--end-of-options", name], { cwd });
 }
 
 export async function renameBranch(cwd: string, oldName: string, newName: string): Promise<void> {
   log.debug(`Renaming branch ${oldName} to ${newName}`);
   validateRefName(oldName);
   validateRefName(newName);
-  await runGit(["branch", "-m", oldName, newName], { cwd });
+  await runGit(["branch", "-m", "--end-of-options", oldName, newName], { cwd });
 }
 
 export async function stash(cwd: string, message?: string): Promise<void> {

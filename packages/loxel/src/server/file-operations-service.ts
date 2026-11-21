@@ -19,13 +19,10 @@ import { $ } from "bun";
 
 import type { FileOperationResult } from "@/api/file-operations-model";
 
-import { readOnlyGitEnv } from "./git-commands";
+import { readOnlyGitEnv, validatePath } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
-
-// oxlint-disable-next-line no-control-regex -- intentional: reject null bytes in paths
-const SAFE_PATH_PATTERN = /^(?!.*(?:^|[/\\])\.\.(?:[/\\]|$))[^<>:"|?*\0]+$/;
 
 const MAX_UNDO_ENTRIES = 50;
 const MAX_UNDO_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -574,9 +571,11 @@ export class FileOperationsService {
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, content, { mode });
     if (wasTracked) {
-      await $`git -C ${this.worktreeCwd} add -- ${relPath}`.quiet().catch((err: unknown) => {
-        log.warn("Failed to git add restored file", { path: relPath, error: err });
-      });
+      await $`git --literal-pathspecs -C ${this.worktreeCwd} add -- ${relPath}`
+        .quiet()
+        .catch((err: unknown) => {
+          log.warn("Failed to git add restored file", { path: relPath, error: err });
+        });
     }
   }
 
@@ -598,13 +597,17 @@ export class FileOperationsService {
     }
     // Re-add to git if was tracked
     if (entry.wasTracked) {
-      await $`git -C ${this.worktreeCwd} add -- ${entry.path}`.quiet().catch((err: unknown) => {
-        log.warn("Failed to git add restored directory", { path: entry.path, error: err });
-      });
+      await $`git --literal-pathspecs -C ${this.worktreeCwd} add -- ${entry.path}`
+        .quiet()
+        .catch((err: unknown) => {
+          log.warn("Failed to git add restored directory", { path: entry.path, error: err });
+        });
     }
   }
 
   // --- Git helpers ---
+  // Every path is passed with `--literal-pathspecs`: a name like `[slug].tsx` is that file only,
+  // never a pattern that also matches `s.tsx`.
 
   /** Try `git mv`. Returns true if git handled it, false if untracked (fell back to raw rename). */
   private async tryGitMv(from: string, to: string): Promise<boolean> {
@@ -620,7 +623,7 @@ export class FileOperationsService {
     }
 
     try {
-      await $`git -C ${this.worktreeCwd} mv -- ${from} ${to}`.quiet();
+      await $`git --literal-pathspecs -C ${this.worktreeCwd} mv -- ${from} ${to}`.quiet();
       return true;
     } catch {
       // Fall back to raw rename for untracked files
@@ -633,7 +636,7 @@ export class FileOperationsService {
   private async isGitTracked(relPath: string): Promise<boolean> {
     if (this.options.git === false) return false;
     try {
-      const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`
+      const out = await $`git --literal-pathspecs -C ${this.worktreeCwd} ls-files -- ${relPath}`
         .env(readOnlyGitEnv(this.worktreeCwd))
         .text();
       return out.trim().length > 0;
@@ -644,12 +647,12 @@ export class FileOperationsService {
 
   /** Remove a tracked file via `git rm`. Throws on unexpected errors. */
   private async gitRm(relPath: string): Promise<void> {
-    await $`git -C ${this.worktreeCwd} rm -f -- ${relPath}`.quiet();
+    await $`git --literal-pathspecs -C ${this.worktreeCwd} rm -f -- ${relPath}`.quiet();
   }
 
   /** Remove a tracked directory via `git rm -r`, then clean up any remaining untracked files. */
   private async gitRmDir(relPath: string): Promise<void> {
-    await $`git -C ${this.worktreeCwd} rm -rf -- ${relPath}`.quiet();
+    await $`git --literal-pathspecs -C ${this.worktreeCwd} rm -rf -- ${relPath}`.quiet();
     // git rm -rf only removes tracked files — clean up any remaining untracked files
     await rm(this.abs(relPath), { recursive: true, force: true }).catch(() => {});
   }
@@ -835,12 +838,6 @@ export interface HistoryStep {
 const MAX_HISTORY_ENTRIES = MAX_UNDO_ENTRIES * 4;
 
 // --- Validation ---
-
-function validatePath(p: string): void {
-  if (!SAFE_PATH_PATTERN.test(p) || p.includes("..") || p.startsWith("/")) {
-    throw new Error(`Invalid path: ${p}`);
-  }
-}
 
 function validateName(name: string): void {
   if (

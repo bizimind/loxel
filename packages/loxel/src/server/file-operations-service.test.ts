@@ -45,6 +45,29 @@ describe("FileOperationsService with git disabled", () => {
   });
 });
 
+describe("FileOperationsService with git", () => {
+  test("deleting a file with brackets in its name leaves files its name would match as a glob", async () => {
+    const repo = tempDir();
+    await Bun.$`git init -q -b main ${repo}`.quiet();
+    await Bun.write(path.join(repo, "app", "[slug].tsx"), "route\n");
+    await Bun.write(path.join(repo, "app", "s.tsx"), "s\n");
+    await Bun.$`git -C ${repo} add -A`.quiet();
+    await Bun.$`git -C ${repo} -c user.email=t@t -c user.name=t commit -q -m init`.quiet();
+    await Bun.write(path.join(repo, "app", "s.tsx"), "s edited\n");
+
+    const service = new FileOperationsService(repo);
+    await service.delete("app/[slug].tsx");
+
+    expect(existsSync(path.join(repo, "app", "[slug].tsx"))).toBe(false);
+    expect(await Bun.file(path.join(repo, "app", "s.tsx")).text()).toBe("s edited\n");
+    expect(await Bun.$`git -C ${repo} ls-files`.text()).toBe("app/s.tsx\n");
+
+    await service.undo();
+    expect(await Bun.file(path.join(repo, "app", "[slug].tsx")).text()).toBe("route\n");
+    expect(await Bun.$`git -C ${repo} diff --cached --name-only`.text()).toBe("");
+  });
+});
+
 describe("FileOperationsHistory", () => {
   function setup() {
     const history = new FileOperationsHistory();

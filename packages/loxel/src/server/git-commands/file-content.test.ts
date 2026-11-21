@@ -68,6 +68,27 @@ describe("getFileContent", () => {
     }
   });
 
+  test("without a ref, reads the file at HEAD", async () => {
+    const repo = await template.copy();
+    try {
+      expect(await getFileContent(repo.path, "hello.txt")).toEqual(["hello", ""]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reads a file whose name starts with dashes as a file", async () => {
+    const repo = await template.copy();
+    try {
+      await commit(repo.path, "dash file", { "--output=x": "dashes\n" });
+      expect(await getFileContent(repo.path, "--output=x")).toEqual(["dashes", ""]);
+      expect(await getFileContent(repo.path, "--output=x", "HEAD")).toEqual(["dashes", ""]);
+      expect(await Bun.file(path.join(repo.path, "x")).exists()).toBe(false);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("rejects a worktree path outside the repository", async () => {
     const repo = await template.copy();
     try {

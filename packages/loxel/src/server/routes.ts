@@ -383,14 +383,27 @@ function parseFormatOnSaveSettings(raw: unknown): FormatOnSaveSettings | undefin
 // Log param parser
 // ---------------------------------------------------------------------------
 
+/** The branch list is a JSON array of names, so every name arrives whole whatever it holds. */
+function parseBranchesParam(raw: string | null): string[] | null {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
+  } catch {
+    // Not JSON: refused below like any other malformed list.
+  }
+  return null;
+}
+
 function parseLogParams(url: URL) {
   const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
   const all = url.searchParams.get("all") === "true";
-  const branchesParam = url.searchParams.get("branches");
-  const branches = branchesParam ? branchesParam.split(",") : [];
+  const branches = parseBranchesParam(url.searchParams.get("branches"));
   const since = url.searchParams.get("since") ?? undefined;
   return { limit, all, branches, since };
 }
+
+const INVALID_BRANCHES = "branches must be a JSON array of strings";
 
 // ---------------------------------------------------------------------------
 // Project-scoped routes (derive project from ?project= or ?wt= params)
@@ -402,6 +415,7 @@ async function handleLog(req: Request, ctx: RouteContext): Promise<Response> {
   if (resolved instanceof Response) return resolved;
   const url = new URL(req.url);
   const { limit, all, branches, since } = parseLogParams(url);
+  if (!branches) return error(INVALID_BRANCHES);
   const commits = await git.getLog(resolved.cwd, { limit, all, branches, since });
   return json(commits);
 }
@@ -412,6 +426,7 @@ async function handleGraph(req: Request, ctx: RouteContext): Promise<Response> {
   if (resolved instanceof Response) return resolved;
   const url = new URL(req.url);
   const { limit, all, branches, since } = parseLogParams(url);
+  if (!branches) return error(INVALID_BRANCHES);
   const [commits, refs] = await Promise.all([
     git.getLog(resolved.cwd, { limit, all, branches, since }),
     git.getRefs(resolved.cwd),
@@ -527,6 +542,12 @@ async function handleFileLines(req: Request, ctx: RouteContext): Promise<Respons
     return error("Invalid line range");
   }
 
+  // Without a ref the lines are the diff's worktree's own, read from disk.
+  const wt = url.searchParams.get("worktree") ?? url.searchParams.get("wt");
+  if (!ref && wt) {
+    const lines = await git.getWorkingTreeFileContent(resolved.cwd, wt, path);
+    return json({ lines: lines.slice(startLine - 1, endLine) });
+  }
   const lines = await git.getFileLines(resolved.cwd, path, startLine, endLine, ref);
   return json({ lines });
 }
@@ -1022,8 +1043,15 @@ async function handleDiscard(req: Request, ctx: RouteContext): Promise<Response>
   const body = await parseBody(req);
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
-  const files = requireStringArray(body, "files");
   await git.validateWorktreePath(resolved.wtPath, resolved.cwd);
+  // The Files panel sends absolute paths; git gets them relative to the worktree.
+  const files: string[] = [];
+  for (const file of requireStringArray(body, "files")) {
+    const relPath = normalizeWorktreeRelativePath(file, resolved.wtPath);
+    if (relPath instanceof Response) return relPath;
+    if (!relPath) return error("Invalid path", 400);
+    files.push(relPath);
+  }
   await git.discardChanges(resolved.wtPath, files);
   return json({ success: true });
 }
