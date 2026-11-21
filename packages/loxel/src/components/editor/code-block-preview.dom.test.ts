@@ -45,19 +45,7 @@ void mock.module("mermaid", () => ({
     },
     detectType: (source: string) =>
       source.trimStart().startsWith("flowchart-elk") ? "flowchart-elk" : "flowchart-v2",
-    mermaidAPI: { defaultConfig: { secure: ["secure", "securityLevel"] } },
   },
-}));
-
-/**
- * happy-dom's DOMPurify drops the root `<svg>` (Chromium keeps it), so the diagram sanitizer is
- * replaced by a marker here, which shows every SVG went through it. Its rules are covered by
- * mermaid-sanitizer.test.ts.
- */
-const LABEL_CONFIG = { FORBID_TAGS: ["a"] };
-void mock.module("./mermaid-sanitizer", () => ({
-  MERMAID_LABEL_PURIFY_CONFIG: LABEL_CONFIG,
-  sanitizeMermaidSvg: (svg: string) => svg.replace("<svg ", '<svg data-inert="" '),
 }));
 
 const { renderCodeBlockPreview } = await import("./code-block-preview");
@@ -68,7 +56,7 @@ type PreviewValue = string | HTMLElement | null;
 
 function svgIds(preview: PreviewValue): string[] {
   if (typeof preview !== "string") throw new Error("expected an SVG preview");
-  return [...preview.matchAll(/<svg (?:data-inert="" )?id="([^"]+)"/g)].map((m) => m[1]!);
+  return [...preview.matchAll(/<svg id="([^"]+)"/g)].map((m) => m[1]!);
 }
 
 /** Runs the preview hook and resolves with the value it applies asynchronously. */
@@ -133,9 +121,6 @@ describe("mermaid rendering", () => {
     const base = {
       startOnLoad: false,
       securityLevel: "strict",
-      dompurifyConfig: LABEL_CONFIG,
-      // Mermaid's own locked keys, then the label sanitizer and raw diagram CSS.
-      secure: ["secure", "securityLevel", "dompurifyConfig", "themeCSS"],
       suppressErrorRendering: true,
       look: "classic",
       flowchart: sized,
@@ -175,7 +160,6 @@ describe("mermaid rendering", () => {
     expect(variants).toEqual(["loxel-mermaid-light", "loxel-mermaid-dark"]);
     expect(canvas?.querySelectorAll("svg text")[0]?.textContent).toBe("15");
     expect(new Set(svgIds(preview)).size).toBe(2);
-    expect(canvas?.querySelectorAll("svg[data-inert]")).toHaveLength(2);
   });
 
   test("a diagram rendered again comes from the cache under fresh ids", async () => {
@@ -188,12 +172,19 @@ describe("mermaid rendering", () => {
 
   test("the full-size viewer reuses the preview's render, sanitized and with its size", async () => {
     renderImpl = (id) =>
-      Promise.resolve({ svg: `<svg id="${id}" viewBox="0 0 320 200"><text>Hi</text></svg>` });
+      Promise.resolve({
+        svg: `<svg id="${id}" viewBox="0 0 320 200"><script>alert(1)</script><text onclick="alert(2)">Hi</text></svg>`,
+      });
     await renderAsync("mermaid", "graph LR; X-->Y");
     const diagram = await renderMermaidDiagram("graph LR; X-->Y");
     expect(renderCalls).toHaveLength(2);
     expect(diagram.size).toEqual({ width: 320, height: 200 });
-    for (const svg of [diagram.light, diagram.dark]) expect(svg).toStartWith('<svg data-inert="" ');
+    // happy-dom's DOMPurify also drops the root <svg> itself (Chromium keeps it), so only what
+    // must be gone is checked here.
+    for (const svg of [diagram.light, diagram.dark]) {
+      expect(svg).not.toContain("<script");
+      expect(svg).not.toContain("onclick");
+    }
   });
 
   test("a parse error shows as plain text and the temp node is removed", async () => {

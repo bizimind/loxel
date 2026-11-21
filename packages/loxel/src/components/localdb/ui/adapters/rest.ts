@@ -26,23 +26,14 @@ export function localDbApiUrl(project: WorktreeRef | null | undefined): string {
 }
 
 /**
- * Whether `name` can name a table: the SDK's identifier rule. Names come from documents (a
- * `:::localdb` block's `table:`) and from server responses, and each one is a single segment of a
- * request path.
+ * The path of table `name`'s routes, followed by `rest`. Names come from documents (a `:::localdb`
+ * block's `table:`) and from server responses, so a name must pass the SDK's identifier rule.
  */
-export function isTableName(name: string): boolean {
-  return identifierSchema.safeParse(name).success;
-}
-
-/** The path of table `name`'s routes, followed by `rest`. */
 function tablePath(name: string, rest = ""): string {
-  if (!isTableName(name)) throw new Error(`Invalid table name: ${JSON.stringify(name)}`);
+  if (!identifierSchema.safeParse(name).success) {
+    throw new Error(`Invalid table name: ${JSON.stringify(name)}`);
+  }
   return `/tables/${encodeURIComponent(name)}${rest}`;
-}
-
-/** One request path segment for a row or view id. */
-function idSegment(id: number): string {
-  return encodeURIComponent(String(id));
 }
 
 /**
@@ -54,16 +45,17 @@ function idSegment(id: number): string {
 export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null): DataAdapter {
   const base = baseUrl.replace(/\/$/, "");
   const project = projectRef?.path;
+  const projectSuffix = project ? `?project=${encodeURIComponent(project)}` : "";
 
-  function url(path: string, query: Record<string, string> = {}): string {
-    const params = new URLSearchParams(query);
-    if (project) params.set("project", project);
-    const search = params.toString();
-    return `${base}${path}${search ? `?${search}` : ""}`;
+  function url(path: string): string {
+    if (!projectSuffix) return `${base}${path}`;
+    // Append project param — handle paths that already have a query string (e.g. /views?tableId=N)
+    const sep = path.includes("?") ? "&" : "?";
+    return `${base}${path}${sep}project=${encodeURIComponent(project!)}`;
   }
 
-  async function get<T>(path: string, query?: Record<string, string>): Promise<T> {
-    const res = await fetch(url(path, query));
+  async function get<T>(path: string): Promise<T> {
+    const res = await fetch(url(path));
     if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
     return res.json() as Promise<T>;
   }
@@ -109,7 +101,7 @@ export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null
       post<Page<T>>(tablePath(tableName, "/query"), opts ?? {}),
 
     get: async <T extends Record<string, unknown>>(tableName: string, id: number) =>
-      get<T | null>(tablePath(tableName, `/rows/${idSegment(id)}`)),
+      get<T | null>(tablePath(tableName, `/rows/${encodeURIComponent(id)}`)),
 
     insert: async <T extends Record<string, unknown>>(tableName: string, row: Partial<T>) =>
       post<InsertResult<T>>(tablePath(tableName, "/rows"), row),
@@ -118,17 +110,17 @@ export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null
       tableName: string,
       id: number,
       patchData: Partial<T>,
-    ) => patch<UpdateResult<T>>(tablePath(tableName, `/rows/${idSegment(id)}`), patchData),
+    ) => patch<UpdateResult<T>>(tablePath(tableName, `/rows/${encodeURIComponent(id)}`), patchData),
 
-    delete: async (tableName, id) => del(tablePath(tableName, `/rows/${idSegment(id)}`)),
+    delete: async (tableName, id) => del(tablePath(tableName, `/rows/${encodeURIComponent(id)}`)),
 
-    listViews: (tableId) => get<ViewMeta[]>("/views", { tableId: String(tableId) }),
+    listViews: (tableId) => get<ViewMeta[]>(`/views?tableId=${encodeURIComponent(tableId)}`),
 
     upsertView: (view) =>
       view.id
-        ? patch<ViewMeta>(`/views/${idSegment(view.id)}`, view)
+        ? patch<ViewMeta>(`/views/${encodeURIComponent(view.id)}`, view)
         : post<ViewMeta>("/views", view),
 
-    deleteView: (id) => del(`/views/${idSegment(id)}`),
+    deleteView: (id) => del(`/views/${encodeURIComponent(id)}`),
   };
 }

@@ -2,8 +2,7 @@
  * Narrow ambient typing for the Monaco internals `peek-text-models.ts` uses to resolve models for
  * peek widgets (the standalone service registry, the text model service and the `TextModel` class),
  * `virtual-document-links.ts` uses to keep links in rendered markdown and `rename-summary.ts` uses
- * to announce renames (the bulk-edit service), and `link-policy.ts` uses to check the links
- * editors open (the opener service).
+ * to announce renames (the bulk-edit service).
  * The modules are reachable through monaco-editor's `./*` export map but ship without
  * declarations. Only that surface is declared. Verified against monaco-editor 0.57.0;
  * `peek-text-models.test.ts` and `rename-summary.test.ts` exercise it against the real services to catch drift on upgrades.
@@ -105,24 +104,4 @@ declare module "monaco-editor/platform/markdown/browser/markdownRenderer.js" {
 
   export const MarkdownRendererService: { readonly prototype: MarkdownRendererInstance };
   export const IMarkdownRendererService: ServiceIdentifier<MarkdownRendererInstance>;
-}
-
-declare module "monaco-editor/platform/opener/common/opener.js" {
-  import type { IDisposable, Uri } from "monaco-editor";
-  import type { ServiceIdentifier } from "monaco-editor/platform/instantiation/common/instantiation.js";
-
-  /**
-   * Tried in turn, the last registered first; `target` is the link as given to the service, a
-   * string or a URI. Returns true when it handled the link, which ends the search.
-   */
-  export interface IOpener {
-    open(target: string | Uri, options?: unknown): boolean | Promise<boolean>;
-  }
-
-  /** Opens the links editors show (links, hover links) through its openers. */
-  export interface IOpenerService {
-    registerOpener(opener: IOpener): IDisposable;
-  }
-
-  export const IOpenerService: ServiceIdentifier<IOpenerService>;
 }

@@ -14,7 +14,6 @@ import type React from "react";
 import { useState } from "react";
 
 import {
-  isTableName,
   localDbApiUrl,
   makeRestAdapter,
   DataTable,
@@ -118,18 +117,16 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
     enabled: !!activeProjectPath && (configOpen || !table),
   });
 
-  const validTable = isTableName(table);
   const schemaQuery = useQuery({
     queryKey: queryKeys.localdbSchema(activeProject, table),
     queryFn: () => adapter.getSchema(table),
-    enabled: validTable && !!activeProjectPath,
+    enabled: !!table && !!activeProjectPath,
   });
   // Separate query for the pending table selection in config overlay (may differ from committed table)
   const pendingSchemaQuery = useQuery({
     queryKey: queryKeys.localdbSchema(activeProject, pendingTable),
     queryFn: () => adapter.getSchema(pendingTable),
-    enabled:
-      configOpen && isTableName(pendingTable) && !!activeProjectPath && pendingTable !== table,
+    enabled: configOpen && !!pendingTable && !!activeProjectPath && pendingTable !== table,
   });
   // Use pending schema in overlay when available; fall back to committed schema
   const configSchema =
@@ -327,10 +324,7 @@ export function LocalDbWidget({ table, view, viewId, onUpdateAttrs }: Props) {
         <div className="text-muted-foreground p-3 text-xs">Loading…</div>
       )}
       {!configOpen && schemaQuery.data && renderView()}
-      {!configOpen && !validTable && (
-        <div className="text-destructive p-3 text-xs">Invalid table name: {table}</div>
-      )}
-      {!configOpen && validTable && !schemaQuery.isLoading && !schemaQuery.data && (
+      {!configOpen && !schemaQuery.isLoading && !schemaQuery.data && (
         <div className="text-destructive p-3 text-xs">Table not found: {table}</div>
       )}
     </WidgetShell>
