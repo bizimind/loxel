@@ -88,7 +88,7 @@ async function readBranchReflogTimesOneByOne(cwd: string): Promise<Map<string, n
   const times = new Map<string, number>();
   await mapWithConcurrency(branches, REFLOG_FALLBACK_CONCURRENCY, async (branch) => {
     const output = await gitText(
-      ["reflog", "show", "--format=%at", "-n", "1", "--end-of-options", branch],
+      ["reflog", "show", "--format=%at", "-n", "1", "--end-of-options", branch, "--"],
       { cwd, env: readOnlyGitEnv(cwd), nothrow: true },
     );
     const timestamp = parseInt(output.trim(), 10);

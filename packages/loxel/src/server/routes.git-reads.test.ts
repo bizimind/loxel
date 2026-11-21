@@ -95,3 +95,25 @@ describe("GET /api/file-lines", () => {
     expect(await Bun.file(`${repo.path}/x`).exists()).toBe(false);
   });
 });
+
+describe("POST /api/discard", () => {
+  async function discard(files: string[]): Promise<number> {
+    const body = JSON.stringify({ worktreePath: repo.path, files });
+    const res = await handleRequest(
+      new Request("http://x/api/discard", { method: "POST", body }),
+      ctx,
+    );
+    return res.status;
+  }
+
+  test("takes an absolute path inside the worktree and discards that file", async () => {
+    await writeFile(repo.path, "--output=x", "edited\n");
+    expect(await discard([`${repo.path}/--output=x`])).toBe(200);
+    expect(await Bun.file(`${repo.path}/--output=x`).text()).toBe("dashes\n");
+  });
+
+  test("refuses a path outside the worktree and the worktree itself", async () => {
+    expect(await discard(["/etc/hosts"])).toBe(400);
+    expect(await discard([repo.path])).toBe(400);
+  });
+});

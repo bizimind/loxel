@@ -1043,8 +1043,15 @@ async function handleDiscard(req: Request, ctx: RouteContext): Promise<Response>
   const body = await parseBody(req);
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
-  const files = requireStringArray(body, "files");
   await git.validateWorktreePath(resolved.wtPath, resolved.cwd);
+  // The Files panel sends absolute paths; git gets them relative to the worktree.
+  const files: string[] = [];
+  for (const file of requireStringArray(body, "files")) {
+    const relPath = normalizeWorktreeRelativePath(file, resolved.wtPath);
+    if (relPath instanceof Response) return relPath;
+    if (!relPath) return error("Invalid path", 400);
+    files.push(relPath);
+  }
   await git.discardChanges(resolved.wtPath, files);
   return json({ success: true });
 }
