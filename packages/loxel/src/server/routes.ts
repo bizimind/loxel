@@ -708,9 +708,8 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   if (!mediaType) return error("Unsupported media type", 400);
   let bodyContent: string;
   if (mediaType === "svg") {
-    // SVGs are inlined so scripts can run (for WAAPI/JS-driven animations).
-    // Security is enforced by CSP: the SVG CSP has NO server origin and
-    // NO https:, so scripts cannot reach the loxel API or external servers.
+    // SVGs are inlined so scripts can run (for WAAPI/JS-driven animations). The CSP below
+    // sandboxes the page into an opaque origin and gives it no network access, wherever it loads.
     // Only data:/blob: resources are allowed (for embedded images/fonts).
     const file = Bun.file(fullPath);
     if (!(await file.exists())) return error("File not found", 404);
@@ -848,16 +847,19 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </head>
 <body>${bodyContent}</body></html>`;
 
-  // CSP varies by media type (the iframe sandbox in MediaViewerPanel varies with it):
-  // - SVGs: inlined content may contain scripts (for animations). The frame has an opaque
-  //   origin (sandbox without allow-same-origin) and CSP blocks ALL network access (no server
-  //   origin, no https:) so scripts can't reach the loxel API or exfiltrate data. Only
-  //   data:/blob: for embedded resources.
-  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin, and the frame
-  //   keeps the server origin (allow-same-origin) so that load is same-origin rather than a
-  //   cross-site subresource request, which request-origin.ts rejects. No untrusted scripts
-  //   run — only our trusted inline code (postMessage, controls).
+  // CSP varies by media type, and its sandbox matches the <iframe sandbox> in MediaViewerPanel.
+  // The response carries the sandbox itself, so the page is sandboxed wherever it loads, not only
+  // in the viewer's frame:
+  // - SVGs: inlined content may contain scripts (for animations). The page has an opaque origin
+  //   (sandbox without allow-same-origin) and CSP blocks ALL network access (no server origin, no
+  //   https:) so scripts can't reach the loxel API. Only data:/blob: for embedded resources.
+  //   Main keeps the frame on the server (will-frame-navigate in app-navigation.ts).
+  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin, and the page keeps
+  //   the server origin (allow-same-origin) so that load is same-origin rather than a cross-site
+  //   subresource request, which request-origin.ts rejects. No untrusted scripts run — only our
+  //   trusted inline code (postMessage, controls).
   const baseCsp = [
+    mediaType === "svg" ? "sandbox allow-scripts" : "sandbox allow-scripts allow-same-origin",
     "default-src 'none'",
     "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
