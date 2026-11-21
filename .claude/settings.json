@@ -17,7 +17,7 @@
       "Bash(eslint *)",
       "Bash(prettier *)",
       "Bash(biome *)",
-      "Bash(env)",
+      "Bash(env:*)",
       "Bash(printenv:*)",
       "Read(**/.env)"
     ]

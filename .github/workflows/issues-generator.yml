@@ -43,8 +43,8 @@ jobs:
           N_INPUT: ${{ inputs.n }}
         run: |
           N="${N_INPUT:-1}"
-          if ! [[ "$N" =~ ^[0-9]+$ ]]; then
-            echo "::error::n must be a whole number"
+          if ! [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::n must be a whole number of at least 1"
             exit 1
           fi
           INDICES=$(seq 0 $((N - 1)) | jq -R . | jq -sc .)
