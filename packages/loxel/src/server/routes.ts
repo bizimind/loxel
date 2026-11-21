@@ -866,6 +866,7 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     "connect-src 'none'",
     "frame-src 'none'",
     "object-src 'none'",
+    "base-uri 'none'",
   ];
 
   let csp: string;
@@ -882,7 +883,11 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   }
 
   return new Response(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": csp },
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": csp,
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 

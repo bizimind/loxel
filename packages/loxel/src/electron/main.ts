@@ -455,31 +455,6 @@ async function createWindow(): Promise<BrowserWindow> {
 
   win.loadURL(APP_URL);
 
-  // Intercept external link clicks at the document level. Chromium 134+ blocks
-  // <a target="_blank" rel="noopener"> before setWindowOpenHandler fires when the
-  // opener can't be cleared ("Opening link blocked as opener could not be cleared").
-  // Converting clicks into same-window navigations routes them through will-navigate
-  // (guardAppNavigation), which opens them in the system browser.
-  win.webContents.on("dom-ready", () => {
-    win.webContents.executeJavaScript(`
-      if (!window.__externalLinkHandlerInstalled) {
-        window.__externalLinkHandlerInstalled = true;
-        document.addEventListener('click', (e) => {
-          const link = e.target.closest('a[href]');
-          if (!link) return;
-          try {
-            const url = new URL(link.href, window.location.href);
-            if (url.origin !== window.location.origin) {
-              e.preventDefault();
-              e.stopPropagation();
-              window.location.assign(url.href);
-            }
-          } catch { /* best-effort cleanup */ }
-        }, true);
-      }
-    `);
-  });
-
   return win;
 }
 

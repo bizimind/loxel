@@ -56,6 +56,7 @@ describe("/api/media-frame", () => {
     const url = `http://x/api/media-frame?path=${name}&wt=${encodeURIComponent(wt)}`;
     const response = await handleRequest(new Request(url), ctx);
     expect(response.ok).toBe(true);
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     return (response.headers.get("Content-Security-Policy") ?? "").split("; ");
   }
 
@@ -63,6 +64,7 @@ describe("/api/media-frame", () => {
     const csp = await frameCsp("drawing.svg", '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect(csp).toContain("sandbox allow-scripts");
     expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("base-uri 'none'");
   });
 
   test("an image's and a video's pages are sandboxed and keep the server's origin", async () => {
