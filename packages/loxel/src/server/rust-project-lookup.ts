@@ -1,10 +1,12 @@
 import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
 import { isInside } from "./path-containment";
-import { isRepoTrusted } from "./repo-trust";
+import { isRepoTrusted, repoTrustId } from "./repo-trust";
+import { buildSpawnEnv } from "./shell-env";
 import { parseToml, recordAt } from "./toml-file";
 
 export const RUST_MANIFEST = "Cargo.toml";
@@ -62,6 +64,43 @@ export function isReadableRustManifest(manifest: string, wtPath: string): boolea
 export function untrustedNestedRepo(manifest: string, wtPath: string): string | null {
   const nested = dirsUpToRoot(path.dirname(manifest), path.resolve(wtPath)).slice(0, -1);
   return nested.find((dir) => existsSync(path.join(dir, ".git")) && !isRepoTrusted(dir)) ?? null;
+}
+
+/** Where Cargo reads a folder's configuration from, newest name first. */
+const CARGO_CONFIG_FILES = [".cargo/config.toml", ".cargo/config"];
+
+/**
+ * The folder above the worktree whose Cargo configuration belongs to a repository that is not
+ * trusted, or null. Cargo applies the configuration of every folder up to the filesystem root, so
+ * the worktree's trust alone would also run what that repository configures (wrappers, linkers,
+ * environment). The user's own Cargo home is theirs, whichever folder holds it.
+ */
+export function untrustedCargoConfigAbove(wtPath: string): string | null {
+  const env = buildSpawnEnv();
+  const cargoHome = path.resolve(env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo"));
+  // A folder holding the worktree's own repository, as a bare clone's container does, is its own.
+  const id = repoTrustId(wtPath);
+  const repoDir = id.startsWith("git:") ? id.slice("git:".length) : null;
+  const realWt = realPathOf(wtPath) ?? path.resolve(wtPath);
+  const ownRepo = repoDir !== null && !isInside(repoDir, realWt) ? repoDir : null;
+  let dir = path.resolve(wtPath);
+  while (path.dirname(dir) !== dir) {
+    dir = path.dirname(dir);
+    const config = CARGO_CONFIG_FILES.map((file) => path.join(dir, file)).find(existsSync);
+    if (!config || isInside(config, cargoHome)) continue;
+    if (ownRepo !== null && isInside(ownRepo, realPathOf(dir) ?? dir)) continue;
+    const repo = enclosingRepo(dir);
+    if (repo !== null && !isRepoTrusted(repo)) return dir;
+  }
+  return null;
+}
+
+/** The nearest folder from `dir` up that holds a `.git`, or null. */
+function enclosingRepo(dir: string): string | null {
+  for (let current = dir; ; current = path.dirname(current)) {
+    if (existsSync(path.join(current, ".git"))) return current;
+    if (path.dirname(current) === current) return null;
+  }
 }
 
 function isLinkedWorktree(dir: string): boolean {

@@ -431,6 +431,22 @@ describe("FormatService language modules", () => {
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 
+  test("an untrusted repository runs no formatter through a relative PATH entry", async () => {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await installFormatter(join(wt, "bin"), "repo-bin");
+    const { PATH } = process.env;
+    process.env.PATH = `bin:${PATH}`;
+    try {
+      const result = await newService([fakeLanguage({})]).format("x", "a.fake", wt, AUTO_DETECT);
+      expect(result).toEqual({
+        content: null,
+        notice: 'Format on save skipped: "fake-fmt" is not installed.',
+      });
+    } finally {
+      process.env.PATH = PATH;
+    }
+  });
+
   test("empty bin dirs keep node_modules/.bin off PATH", async () => {
     const wt = await makeWorktree({});
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");

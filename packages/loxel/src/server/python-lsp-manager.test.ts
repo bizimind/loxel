@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import { writeExecutable } from "@/test/executable";
+
 import type { ExternalTypeChecker } from "./python-lsp-manager";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
@@ -443,3 +445,56 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
     TEST_TIMEOUT_MS,
   );
 });
+
+describe.skipIf(python3 === null || process.platform === "win32")(
+  "pythonSettings and shims",
+  () => {
+    /** A version manager's shim stand-in: notes where it ran, then runs the real interpreter. */
+    async function makeShim(dir: string): Promise<string> {
+      const shim = join(dir, "shims", "python3");
+      await writeExecutable(
+        shim,
+        `#!/bin/sh\npwd -P >> "$(dirname "$0")/ran"\nexec ${python3} "$@"\n`,
+      );
+      return shim;
+    }
+
+    const ranFrom = async (shim: string) =>
+      (
+        await Bun.file(join(shim, "..", "ran"))
+          .text()
+          .catch(() => "")
+      )
+        .trim()
+        .split("\n");
+
+    test("an untrusted repository gets the interpreter behind a shim, asked from the filesystem root", async () => {
+      const wt = await makeWorktree();
+      const shim = await makeShim(root ?? "");
+      const settings = await pythonSettings(
+        { source: "system", pythonPath: shim, envPath: null },
+        wt,
+        false,
+      );
+      const asked = Bun.spawnSync([python3 ?? "", "-I", "-c", "import sys; print(sys.executable)"]);
+      expect(settings).toEqual({ pythonPath: await realpath(asked.stdout.toString().trim()) });
+      expect(await ranFrom(shim)).toEqual(["/"]);
+    });
+
+    test("an untrusted repository runs no shim inside the worktree", async () => {
+      const wt = await makeWorktree();
+      const shim = await makeShim(wt);
+      const env = { source: "system", pythonPath: shim, envPath: null } as const;
+      expect(await pythonSettings(env, wt, false)).toEqual({ venvPath: wt });
+      expect(await ranFrom(shim)).toEqual([""]);
+    });
+
+    test("a trusted repository gets the shim itself", async () => {
+      const wt = await makeWorktree();
+      const shim = await makeShim(root ?? "");
+      const env = { source: "system", pythonPath: shim, envPath: null } as const;
+      expect(await pythonSettings(env, wt, true)).toEqual({ pythonPath: shim });
+      expect(await ranFrom(shim)).toEqual([""]);
+    });
+  },
+);

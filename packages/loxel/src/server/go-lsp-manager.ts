@@ -17,6 +17,7 @@ import {
   subscribeGoEnv,
 } from "./go-env";
 import { getGoChoice } from "./go-toolchain-store";
+import { reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   sendWarning,
@@ -25,6 +26,22 @@ import {
   type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
+
+/** Exported for tests. */
+export const GO_REPO_TRUST_RESTRICTION =
+  "gopls leaves out Go files that use cgo, which it would compile with the C compiler.";
+
+/** A cgo import, alone or first in a group, as it opens a Go file that uses cgo. */
+const CGO_IMPORT = /^import\s*(?:\(\s*)?"C"/m;
+
+/** Whether a client frame opens a Go file that uses cgo. */
+export function opensCgoFile(data: string): boolean {
+  if (!data.includes('"textDocument/didOpen"')) return false;
+  const frame = parseFrame(data);
+  const params = isRecord(frame?.params) ? frame.params : null;
+  const document = isRecord(params?.textDocument) ? params.textDocument : null;
+  return typeof document?.text === "string" && CGO_IMPORT.test(document.text);
+}
 
 /** What the user is told when `go` is missing. */
 export const GO_NOT_FOUND_REASON = `${GO_NOT_FOUND}. Install Go, then restart the server.`;
@@ -238,10 +255,14 @@ interface SessionWatch {
 /**
  * Manages gopls (`gopls serve`) child processes, one per worktree. gopls runs `go` for everything
  * it knows about a project, so a session starts only where `go` is found, and restarts when the
- * worktree's `go` or the gopls to use changes, which it does not notice by itself.
+ * worktree's `go` or the gopls to use changes, which it does not notice by itself. In an untrusted
+ * repository cgo is off, so loading a package never runs the C compiler or linker on its files.
  */
 export class GoLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
+  protected override readonly repoTrustRestriction = GO_REPO_TRUST_RESTRICTION;
+  // Reported once a file that uses cgo opens: nothing else is held back.
+  protected override readonly reportsRestrictionAtStart = false;
   /** What each session has told the user already, by kind. */
   private readonly reported = new WeakMap<WtLspSession, Map<string, string>>();
   /** Worktrees last told to install a newer Go, which may be in a directory new to the PATH. */
@@ -288,7 +309,15 @@ export class GoLspManager extends WorktreeLspManager {
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     const go = this.spawned.get(context)?.go ?? null;
-    return { cwd: context.wtPath, env: goSpawnEnv(context.wtPath, go) };
+    const env = goSpawnEnv(context.wtPath, go);
+    return { cwd: context.wtPath, env: context.repoTrusted ? env : { ...env, CGO_ENABLED: "0" } };
+  }
+
+  protected override handleClientData(session: WtLspSession, data: string): void {
+    super.handleClientData(session, data);
+    if (!session.repoTrusted && opensCgoFile(data)) {
+      reportRepoRestriction(session.wtPath, GO_REPO_TRUST_RESTRICTION);
+    }
   }
 
   protected override buildSession(

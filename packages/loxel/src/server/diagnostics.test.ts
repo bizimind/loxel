@@ -73,6 +73,21 @@ describe("getDiagnostics", () => {
     ]);
   });
 
+  test("writes no build info file where an incremental, composite config names one", async () => {
+    const base = mkdtempSync(path.join(tmpdir(), "diag-out-"));
+    cleanups.push(() => rmSync(base, { recursive: true, force: true }));
+    const tsBuildInfoFile = path.join(base, "out", "info");
+    const compilerOptions = { incremental: true, composite: true, tsBuildInfoFile, types: [] };
+    const { repo, sha } = await seedRepo({
+      "tsconfig.json": JSON.stringify({ compilerOptions }),
+      "a.ts": TYPE_ERROR,
+    });
+    const typeError = [expect.objectContaining({ file: "a.ts", code: 2322 })];
+    expect(await getDiagnostics(repo, undefined)).toEqual(typeError);
+    expect(await getDiagnostics(repo, sha)).toEqual(typeError);
+    expect(existsSync(path.join(base, "out"))).toBe(false);
+  });
+
   test("runs tsc for a working tree with only a root jsconfig", async () => {
     const { repo } = await seedRepo({ "jsconfig.json": CHECK_JS_CONFIG, "a.js": JS_TYPE_ERROR });
     expect(await getDiagnostics(repo, undefined)).toEqual([

@@ -756,6 +756,42 @@ describe("the toolchain rule", () => {
     expect(rustChosenEnv(toolchain)).toEqual({});
   });
 
+  test("refuses a toolchain a toolchain file selects by path outside the worktree, and never runs it", async () => {
+    const fixture = await makeFixture();
+    const outside = await makeToolchain(fixture, join(fixture.root, "outside"), "9.9.9");
+    const file = join(fixture.wt, "rust-toolchain.toml");
+    await writeFile(file, `[toolchain]\npath = "${outside}"\n`);
+    await makeRustup(fixture, { active: outside, activeReason: `overridden by '${file}'` });
+
+    expect(await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env })).toEqual({
+      status: "refused",
+      name: outside,
+      toolchainFile: file,
+      rustcPath: join(outside, "bin", "rustc"),
+    });
+    expect((await fixture.runs()).filter((run) => run.includes(`${outside}/bin/`))).toEqual([]);
+  });
+
+  test("refuses a toolchain named by path for a reason rustup gives that Loxel does not know", async () => {
+    const fixture = await makeFixture();
+    const outside = await makeToolchain(fixture, join(fixture.root, "outside"), "9.9.9");
+    await makeRustup(fixture, { active: outside, activeReason: "selected somehow" });
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  test("runs a toolchain named by path when it is the user's default", async () => {
+    const fixture = await makeFixture();
+    const own = await makeToolchain(fixture, join(fixture.root, "own"), "1.95.0");
+    await makeRustup(fixture, { active: own });
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
+    ).toMatchObject({ status: "active", source: "default", version: "1.95.0" });
+  });
+
   test("a committed symlink to a toolchain counts as shipped", async () => {
     const fixture = await makeFixture();
     const outside = await makeToolchain(fixture, join(fixture.root, "outside"), "9.9.9");

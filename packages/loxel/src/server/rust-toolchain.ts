@@ -326,6 +326,14 @@ async function resolvePlain(
   };
 }
 
+/** Where a toolchain named by path is the user's own doing, and not a file in the repository. */
+const USER_SELECTED_SOURCES: ReadonlySet<RustToolchainSource> = new Set([
+  "chosen",
+  "default",
+  "directory-override",
+  "environment",
+]);
+
 async function resolveWithRustup(
   wtPath: string,
   rustup: string,
@@ -369,6 +377,12 @@ async function resolveWithRustup(
     return { status: "none", rustupPath: rustup, detail: firstError(which.stderr) };
   }
   const sysroot = path.dirname(path.dirname(rustcPath));
+  // A toolchain file's `path`: outside the worktree, but still the repository's pick of a binary.
+  // Anything but a source known to be the user's counts, also one rustup's wording hid.
+  if (path.isAbsolute(name) && !USER_SELECTED_SOURCES.has(source)) {
+    log.warn("Ignoring a Rust toolchain the repository selects by path", { wtPath, rustcPath });
+    return { status: "refused", name, toolchainFile, rustcPath };
+  }
   if (await isToolchainRepoLocal(wtPath, rustcPath, sysroot)) {
     log.warn("Ignoring a Rust toolchain that belongs to the worktree", { wtPath, rustcPath });
     return { status: "refused", name, toolchainFile, rustcPath };

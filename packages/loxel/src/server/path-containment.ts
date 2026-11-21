@@ -8,12 +8,13 @@ export function isInside(child: string, parent: string): boolean {
 }
 
 /**
- * `PATH` without the worktree's own directories, relative ones included, for processes that look
- * up a tool themselves, so they cannot pick up one the repository ships.
+ * `PATH` with only absolute directories outside the worktree, for processes that look up a tool
+ * themselves, so they cannot pick up one the repository ships. A relative entry goes whatever it
+ * names, since it resolves against whichever directory the process runs in.
  */
 export function pathOutsideWorktree(PATH: string, wtPath: string): string {
   const root = path.resolve(wtPath);
   return PATH.split(path.delimiter)
-    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
+    .filter((dir) => path.isAbsolute(dir) && !isInside(path.resolve(dir), root))
     .join(path.delimiter);
 }

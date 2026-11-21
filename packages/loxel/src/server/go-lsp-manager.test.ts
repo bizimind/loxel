@@ -13,12 +13,14 @@ import { repeatUntil } from "@/test/repeat-until";
 import { GO_ENV, GOPLS, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {
   GO_NOT_FOUND_REASON,
+  GO_REPO_TRUST_RESTRICTION,
   GoLspManager,
   GOPLS_SETTINGS,
   goSetupProblem,
   withoutHiddenActions,
 } from "./go-lsp-manager";
 import { setGoChoice } from "./go-toolchain-store";
+import { getRepoTrustStatus, setRepoTrusted } from "./repo-trust";
 
 const roots: string[] = [];
 let manager: GoLspManager | undefined;
@@ -64,6 +66,7 @@ process.stdin.on("data", (chunk) => {
           self: process.argv[1],
           path: process.env.PATH,
           goEnv: [process.env.GOPROXY, process.env.GOTOOLCHAIN, process.env.GOSUMDB, process.env.GONOPROXY],
+          cgo: process.env.CGO_ENABLED ?? null,
           clientConfiguration: msg.params.capabilities.workspace.configuration,
           capabilities: {
             codeActionProvider: { codeActionKinds: ["quickfix", "source.doc"] },
@@ -250,6 +253,46 @@ describe("GoLspManager", () => {
     const client = fakeSocket();
     manager.createSession(client.ws, wt);
     expect((await client.untilClosed()).code).toBe(LSP_START_FAILED_CLOSE_CODE);
+  });
+
+  test("turns cgo off until the repository is trusted, and says so once a cgo file opens", async () => {
+    const wt = await makeDir("go-wt-");
+    const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
+    const gopls = join(await makeDir("gopls-"), "gopls");
+    await writeExecutable(gopls, FAKE_GOPLS);
+    await restrictPath(bin);
+    manager = new TestGoLspManager(gopls);
+    const open = (name: string, text: string) =>
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "textDocument/didOpen",
+        params: { textDocument: { uri: `file://${join(wt, name)}`, languageId: "go", text } },
+      });
+    const cgoOf = async (client: ReturnType<typeof fakeSocket>) => {
+      const frame = await client.untilFrame((candidate) => candidate.id === 1);
+      return (frame.result as { cgo: string | null }).cgo;
+    };
+
+    const untrusted = fakeSocket();
+    manager.createSession(untrusted.ws, wt);
+    manager.handleMessage(untrusted.ws, INITIALIZE);
+    expect(await cgoOf(untrusted)).toBe("0");
+    manager.handleMessage(untrusted.ws, open("plain.go", 'package a\n\nimport "fmt"\n'));
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+    manager.handleMessage(
+      untrusted.ws,
+      open("c.go", 'package a\n\n// #include <stdio.h>\nimport "C"\n'),
+    );
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([GO_REPO_TRUST_RESTRICTION]);
+
+    setRepoTrusted(wt, true);
+    expect((await untrusted.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager.destroySession(untrusted.ws);
+    const trusted = fakeSocket();
+    manager.createSession(trusted.ws, wt);
+    manager.handleMessage(trusted.ws, INITIALIZE);
+    expect(await cgoOf(trusted)).toBeNull();
   });
 
   test("answers the gopls section with its settings and any other with an empty object", async () => {

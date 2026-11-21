@@ -2,10 +2,11 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-model";
+import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { isRecord } from "@/lib/is-record";
 
 import { pathOutsideWorktree } from "./path-containment";
+import { type CargoPackage, inlineCargoCrates, parseCargoPackages } from "./rust-inline-project";
 import { isReadableRustManifest, RUST_MANIFEST, untrustedNestedRepo } from "./rust-project-lookup";
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";
@@ -33,14 +34,6 @@ const SYSROOT_LIBRARY = "lib/rustlib/src/rust/library";
 
 /** What expands proc macros, in the toolchain the macros were compiled with. */
 const SYSROOT_PROC_MACRO_SERVER = "libexec/rust-analyzer-proc-macro-srv";
-
-/** Where a toolchain named by path is the user's own doing, and not a file in the repository. */
-const USER_SELECTED_SOURCES: ReadonlySet<RustToolchainSource> = new Set([
-  "chosen",
-  "default",
-  "directory-override",
-  "environment",
-]);
 
 /** A toolchain name safe to print as part of a command to run; it can come from a repository. */
 const PLAIN_TOOLCHAIN_NAME = /^[\w.+-]+$/;
@@ -172,13 +165,6 @@ export async function planRustAnalyzer(
   repoTrusted: boolean,
 ): Promise<RustAnalyzerPlan> {
   if (toolchain.status !== "active") return refuse(unusableReason(toolchain));
-  // A toolchain file's `path`: outside the worktree, but still the repository's pick of a binary.
-  // Anything but a source known to be the user's counts, also one rustup's wording hid.
-  if (path.isAbsolute(toolchain.name ?? "") && !USER_SELECTED_SOURCES.has(toolchain.source)) {
-    return refuse(
-      "The repository selects a Rust toolchain by path. Pick an installed one: Rust: Select Toolchain",
-    );
-  }
   const { rustAnalyzer, cargo, cargoClippy, rustSrc } = toolchain.tools;
   if (!rustAnalyzer) {
     return refuse(
@@ -263,16 +249,21 @@ export function isRustManifestPath(wtPath: string, changed: string): boolean {
   return parts.length <= 2 && parts.at(-1) === RUST_MANIFEST;
 }
 
+/** Whether rust-analyzer can load a manifest: its workspace's packages, or why not. */
+export type RustManifestCheck = { problem: null; packages: CargoPackage[] } | { problem: string };
+
 /**
- * Why rust-analyzer could not load this manifest, or null when it can. A server that fails on one
- * linked project stops taking in new ones, and its status does not say which one failed, so a
- * project is checked before it is added, with the command the server itself runs for a project, in
- * the server's environment, from the manifest's folder as the server does.
+ * Why rust-analyzer could not load this manifest, or its workspace's packages when it can. A server
+ * that fails on one linked project stops taking in new ones, and its status does not say which one
+ * failed, so a project is checked before it is added, with the command the server itself runs for a
+ * project, in the server's environment, from the manifest's folder as the server does. Without
+ * dependencies it starts no compiler; a restricted server is given what it reports instead of the
+ * manifest ({@link rustAnalyzerSettings}).
  */
-export async function rustManifestProblem(
+export async function checkRustManifest(
   { cargo, env }: Pick<RunPlan, "cargo" | "env">,
   manifest: string,
-): Promise<string | null> {
+): Promise<RustManifestCheck> {
   try {
     const proc = Bun.spawn(
       [
@@ -291,21 +282,44 @@ export async function rustManifestProblem(
         cwd: path.dirname(manifest),
         env: { ...buildSpawnEnv(), ...env },
         stdin: "ignore",
-        stdout: "ignore",
+        stdout: "pipe",
         stderr: "pipe",
         timeout: MANIFEST_CHECK_TIMEOUT_MS,
       },
     );
-    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-    if (exitCode === 0) return null;
-    if (proc.signalCode !== null) return "cargo did not finish in time.";
-    return (
-      stderr.split("\n").find((line) => line.startsWith("error:")) ?? "cargo could not read it."
-    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (exitCode === 0) return { problem: null, packages: parseCargoPackages(stdout) };
+    if (proc.signalCode !== null) return { problem: "cargo did not finish in time." };
+    return {
+      problem:
+        stderr.split("\n").find((line) => line.startsWith("error:")) ?? "cargo could not read it.",
+    };
   } catch {
-    return "cargo could not be started.";
+    return { problem: "cargo could not be started." };
   }
 }
+
+/** The standard library a server's inline project names: none without its sources. */
+function sysrootOf({ sysroot, rustSrc }: Pick<RunPlan, "sysroot" | "rustSrc">) {
+  return {
+    sysroot: rustSrc ? sysroot : null,
+    ...(rustSrc && { sysroot_src: path.join(sysroot, SYSROOT_LIBRARY) }),
+  };
+}
+
+/**
+ * Diagnostics a restricted server leaves out: what it reports for a dependency its inline project
+ * does not load, which it cannot tell from a real mistake.
+ */
+const UNLOADED_DEPENDENCY_DIAGNOSTICS = [
+  "unresolved-extern-crate",
+  "unresolved-import",
+  "unresolved-macro-call",
+];
 
 /**
  * rust-analyzer's settings. They go in `initializationOptions`, since it pulls configuration only
@@ -322,13 +336,20 @@ export function rustAnalyzerSettings(
   }: Pick<RunPlan, "sysroot" | "host" | "rustSrc" | "repoTrusted" | "checkCommand">,
   manifests: readonly string[],
   looseFiles: readonly string[] = [],
+  packagesOf: (manifest: string) => readonly CargoPackage[] | undefined = () => undefined,
 ): Record<string, unknown> {
-  const linkedProjects: unknown[] = [...manifests];
+  // Restricted, a manifest the check has not read yet waits for it.
+  const linkedProjects: unknown[] = repoTrusted
+    ? [...manifests]
+    : manifests.flatMap((manifest) => {
+        const packages = packagesOf(manifest);
+        if (!packages) return [];
+        return [{ ...sysrootOf({ sysroot, rustSrc }), crates: inlineCargoCrates(packages) }];
+      });
   if (looseFiles.length > 0) {
     // One project for all of them, listed here rather than through a `rust-project.json`.
     linkedProjects.push({
-      sysroot: rustSrc ? sysroot : null,
-      ...(rustSrc && { sysroot_src: path.join(sysroot, SYSROOT_LIBRARY) }),
+      ...sysrootOf({ sysroot, rustSrc }),
       crates: looseFiles.map((file) => ({
         root_module: file,
         edition: LOOSE_FILE_EDITION,
@@ -338,6 +359,7 @@ export function rustAnalyzerSettings(
   }
   return {
     checkOnSave: repoTrusted,
+    ...(!repoTrusted && { diagnostics: { disabled: UNLOADED_DEPENDENCY_DIAGNOSTICS } }),
     ...(repoTrusted && { check: { command: checkCommand } }),
     cargo: {
       buildScripts: { enable: repoTrusted },

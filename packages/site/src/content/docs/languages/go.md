@@ -44,6 +44,8 @@ Inlay hints show the types of assigned and `range` variables, parameter names at
 
 In `go.mod`, you also get hover, links, quick fixes and two lenses at the top of the file: **Run go mod tidy** and **Create vendor directory**.
 
+Until you [trust the repository](/docs/repository-trust), gopls loads packages with cgo turned off, so it never runs your C compiler on the project's files. Files that use cgo (`import "C"`) are then left out of analysis, and the status bar shows **Restricted** once you open one.
+
 ## Modules and toolchains
 
 Loxel does not download modules or Go toolchains. You do that from a terminal, and Loxel works with what is on your machine. A warning tells you what to run in these two cases:

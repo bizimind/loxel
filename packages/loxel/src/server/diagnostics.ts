@@ -1,4 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 
 import { $ } from "bun";
@@ -113,9 +115,21 @@ async function runTypeScriptInDir(
     log.warn("TypeScript compiler not found; skipping diagnostics");
     return [];
   }
+  let buildInfoDir: string | undefined;
   try {
+    // `--noEmit` still writes a build info file for an incremental or composite project, where the
+    // config says: turned off here, and pointed at a directory of Loxel's own besides.
+    buildInfoDir = await mkdtemp(join(tmpdir(), "loxel-tsc-"));
+    const buildInfoArgs = [
+      "--incremental",
+      "false",
+      "--composite",
+      "false",
+      "--tsBuildInfoFile",
+      join(buildInfoDir, "tsconfig.tsbuildinfo"),
+    ];
     const proc = measureSpawn("tsc", () =>
-      Bun.spawn([tsc, "--noEmit", "--pretty", "false", "-p", config], {
+      Bun.spawn([tsc, "--noEmit", "--pretty", "false", ...buildInfoArgs, "-p", config], {
         cwd: dir,
         env: { ...process.env, NO_COLOR: "1" },
         stdout: "pipe",
@@ -147,6 +161,8 @@ async function runTypeScriptInDir(
   } catch {
     // TypeScript compiler not found or other spawn error
     return [];
+  } finally {
+    if (buildInfoDir) rmSync(buildInfoDir, { recursive: true, force: true });
   }
 }
 

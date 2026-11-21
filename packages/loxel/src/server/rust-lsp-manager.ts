@@ -7,7 +7,7 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { fileUri } from "./lsp-file-uri";
 import { isInside } from "./path-containment";
-import { onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import {
   blockedClientMethod,
   findRustManifests,
@@ -16,16 +16,18 @@ import {
   readDocumentLifecycle,
   readServerStatus,
   type RustAnalyzerPlan,
+  checkRustManifest,
   rustAnalyzerSettings,
-  rustManifestProblem,
   withoutPullDiagnostics,
   withRustClientCapabilities,
 } from "./rust-analyzer-run";
 import { RustCheckOnChange } from "./rust-check-on-change";
+import type { CargoPackage } from "./rust-inline-project";
 import {
   findRustProject,
   isReadableRustManifest,
   RUST_MANIFEST,
+  untrustedCargoConfigAbove,
   untrustedNestedRepo,
 } from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
@@ -51,6 +53,8 @@ interface SessionState {
   openFiles: Set<string>;
   /** Manifests kept out for failing their check, until they pass it. */
   refusedManifests: Set<string>;
+  /** Each checked manifest's workspace packages, as last read: a restricted server's projects. */
+  cargoPackages: Map<string, CargoPackage[]>;
   /** Check what is linked at the next refresh: first at the start, then after a manifest change. */
   recheckManifests: boolean;
   /** No refresh has checked yet, so what fails now has never loaded. */
@@ -68,6 +72,23 @@ interface SessionState {
   checking: Promise<void>;
 }
 
+/** Folders whose `.rs` files Cargo takes as targets by their place alone. */
+const TARGET_FOLDERS: ReadonlySet<string> = new Set(["bin", "tests", "examples", "benches"]);
+
+/**
+ * Whether a file is one Cargo can take as a target of its own without a manifest naming it: a build
+ * script, or a file in a target folder, or a folder's `main.rs` there.
+ */
+export function isCargoTargetPath(file: string): boolean {
+  if (!file.endsWith(".rs")) return false;
+  if (path.basename(file) === "build.rs") return true;
+  const parent = path.dirname(file);
+  if (TARGET_FOLDERS.has(path.basename(parent))) return true;
+  return (
+    path.basename(file) === "main.rs" && TARGET_FOLDERS.has(path.basename(path.dirname(parent)))
+  );
+}
+
 /** JSON-RPC's `MethodNotFound`. */
 const METHOD_NOT_FOUND = -32601;
 
@@ -80,7 +101,7 @@ export const MAX_OPENED_RUST_PROJECTS = 10;
 const SETTINGS_SECTION = "rust-analyzer";
 
 const TRUST_RESTRICTION =
-  "Rust build scripts, proc macros and cargo check don't run, so generated code is unknown and many errors show no marker.";
+  "Rust dependencies aren't loaded, and build scripts, proc macros and cargo check don't run, so their items and generated code are unknown and many errors show no marker.";
 
 /**
  * Manages rust-analyzer child processes, one per worktree, running the user's own rust-analyzer from
@@ -103,10 +124,20 @@ export class RustLspManager extends WorktreeLspManager {
   private readonly reported = new WeakMap<WtLspSession, Map<string, string>>();
   /** What each start decided, from `resolveBinary` on. */
   private readonly plans = new WeakMap<WtLspContext, RustAnalyzerPlan>();
+  /** A restricted start's own manifests, as read before it: its first projects. */
+  private readonly startPackages = new WeakMap<WtLspContext, Map<string, CargoPackage[]>>();
   private readonly states = new WeakMap<WtLspSession, SessionState>();
 
   constructor() {
     super("rust-lsp");
+  }
+
+  /**
+   * A trusted repository whose Cargo configuration from above comes from an untrusted one runs
+   * restricted: cargo would apply that configuration on the worktree's trust.
+   */
+  protected override isTrusted(wtPath: string): boolean {
+    return super.isTrusted(wtPath) && untrustedCargoConfigAbove(wtPath) === null;
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
@@ -119,6 +150,21 @@ export class RustLspManager extends WorktreeLspManager {
     if (plan.kind === "refuse") {
       this.log.info("Not starting rust-analyzer", { wtPath: context.wtPath, reason: plan.reason });
       return null;
+    }
+    if (!context.repoTrusted) {
+      // A restricted server is given each workspace's packages, so they are read before it starts;
+      // one that cannot be read waits for the first refresh, which reports it.
+      const manifests = findRustManifests(context.wtPath, false);
+      const checks = await Promise.all(
+        manifests.map(
+          async (manifest) => [manifest, await checkRustManifest(plan, manifest)] as const,
+        ),
+      );
+      const packages = new Map<string, CargoPackage[]>();
+      for (const [manifest, check] of checks) {
+        if (check.problem === null) packages.set(manifest, check.packages);
+      }
+      this.startPackages.set(context, packages);
     }
     return plan.binary;
   }
@@ -154,6 +200,7 @@ export class RustLspManager extends WorktreeLspManager {
       looseFiles: new Set(),
       openFiles: new Set(),
       refusedManifests: new Set(),
+      cargoPackages: this.startPackages.get(context) ?? new Map(),
       recheckManifests: true,
       neverChecked: true,
       refreshing: Promise.resolve(),
@@ -215,7 +262,12 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   private settingsOf(plan: RunPlan, state: SessionState): Record<string, unknown> {
-    return rustAnalyzerSettings(plan, this.linkedManifests(state), [...state.looseFiles]);
+    return rustAnalyzerSettings(
+      plan,
+      this.linkedManifests(state),
+      [...state.looseFiles],
+      (manifest) => state.cargoPackages.get(manifest),
+    );
   }
 
   private linkedManifests(state: SessionState): string[] {
@@ -302,6 +354,14 @@ export class RustLspManager extends WorktreeLspManager {
   protected override onClientInitialized(session: WtLspSession): void {
     const state = this.states.get(session);
     if (state) state.initialized = true;
+    const parent = session.repoTrusted ? null : untrustedCargoConfigAbove(session.wtPath);
+    if (parent !== null && isRepoTrusted(session.wtPath)) {
+      this.report(
+        session,
+        "parent-cargo-config",
+        `${parent} holds Cargo configuration from a repository you haven't trusted, which Cargo applies here too, so Rust runs restricted. Open it as a project to trust it.`,
+      );
+    }
     if (state?.plan?.rustSrc !== false) return;
     this.report(
       session,
@@ -328,11 +388,14 @@ export class RustLspManager extends WorktreeLspManager {
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     super.notifyWatchedFilesChanged(wtPath, paths);
     const manifestChanged = paths.some((changed) => path.basename(changed) === RUST_MANIFEST);
+    const targetsChanged = paths.some(isCargoTargetPath);
     const root = path.resolve(wtPath);
     for (const session of this.sessions.values()) {
       if (path.resolve(session.wtPath) !== root) continue;
       const state = this.states.get(session);
       if (!state) continue;
+      // A restricted server's projects list each target, so one Cargo finds by its place counts too.
+      const projectsChanged = manifestChanged || (!session.repoTrusted && targetsChanged);
       if (paths.some((changed) => isRustManifestPath(wtPath, changed))) {
         const manifests = findRustManifests(session.wtPath, session.repoTrusted);
         if (manifests.join("\0") !== state.manifests.join("\0")) {
@@ -341,8 +404,8 @@ export class RustLspManager extends WorktreeLspManager {
         }
       }
       // Left to the refresh, so a check already running cannot overwrite what this one finds.
-      if (manifestChanged) state.recheckManifests = true;
-      if (manifestChanged || paths.some((changed) => state.openFiles.has(changed))) {
+      if (projectsChanged) state.recheckManifests = true;
+      if (projectsChanged || paths.some((changed) => state.openFiles.has(changed))) {
         this.queueRefresh(session, state);
       }
       state.checks?.pathsChanged(paths);
@@ -460,14 +523,15 @@ export class RustLspManager extends WorktreeLspManager {
         );
         continue;
       }
-      const problem = await rustManifestProblem(plan, project.manifest);
+      const check = await checkRustManifest(plan, project.manifest);
       if (!this.isSessionLive(session)) return;
-      if (problem === null) {
+      if (check.problem === null) {
+        state.cargoPackages.set(project.manifest, check.packages);
         state.openedManifests.add(project.manifest);
         continue;
       }
       state.refusedManifests.add(project.manifest);
-      this.reportManifestProblem(session, project.manifest, problem);
+      this.reportManifestProblem(session, project.manifest, check.problem);
     }
     if (!session.repoTrusted && this.linkedManifests(state).length > 0) {
       reportRepoRestriction(wtPath, TRUST_RESTRICTION);
@@ -504,14 +568,15 @@ export class RustLspManager extends WorktreeLspManager {
     const refuseFailures = state.neverChecked;
     state.neverChecked = false;
     for (const manifest of new Set([...linked, ...refused])) {
-      const problem = await rustManifestProblem(plan, manifest);
+      const check = await checkRustManifest(plan, manifest);
       if (!this.isSessionLive(session)) return false;
-      if (problem === null) {
+      if (check.problem === null) {
+        state.cargoPackages.set(manifest, check.packages);
         state.refusedManifests.delete(manifest);
         continue;
       }
       if (refuseFailures || refused.has(manifest)) state.refusedManifests.add(manifest);
-      this.reportManifestProblem(session, manifest, problem);
+      this.reportManifestProblem(session, manifest, check.problem);
     }
     return true;
   }
