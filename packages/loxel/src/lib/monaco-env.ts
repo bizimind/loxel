@@ -17,7 +17,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { createEditorOpener } from "./editor-opener";
 import { followEditorThemes } from "./editor-themes";
 import { getHighlighter } from "./highlighter";
-import { createLinkOpener } from "./link-opener";
+import { installLinkPolicy } from "./link-policy";
 import { editorFile, isLiveEditorModel } from "./live-editor-model";
 import { BUILTIN_THEMES } from "./loxel-theme";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
@@ -246,7 +246,7 @@ initSchemaSync();
 monaco.editor.registerEditorOpener(createEditorOpener());
 
 // Web links open in the browser, never on the app's own origin, and command links never run.
-monaco.editor.registerLinkOpener(createLinkOpener());
+installLinkPolicy();
 
 // Peek widgets show files no tab has open as read-only snapshots.
 installPeekModelResolver();
