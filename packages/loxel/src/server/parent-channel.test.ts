@@ -86,6 +86,15 @@ describe("listenToParent", () => {
     expect(events).toEqual(["closed"]);
   });
 
+  test("the channel failing means the app is gone, said once", async () => {
+    const { input, events, eventsReached } = openChannel();
+    input.destroy(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }));
+    await eventsReached(1);
+    // Whatever follows the failure (the stream's close) adds nothing.
+    if (!input.closed) await once(input, "close");
+    expect(events).toEqual(["closed"]);
+  });
+
   test("ignores lines that are not messages", async () => {
     const { input, events, eventsReached } = openChannel();
     input.write("not json\n");
