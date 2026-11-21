@@ -66,10 +66,19 @@ console.log("Compiling basedpyright-langserver to a standalone binary...");
 
 const outfile = path.join(OUTDIR, "basedpyright-langserver");
 
-const compile = Bun.spawn(["bun", "build", entryPath, "--compile", "--outfile", outfile], {
-  stdout: "inherit",
-  stderr: "inherit",
-});
+const compile = Bun.spawn(
+  [
+    "bun",
+    "build",
+    entryPath,
+    "--compile",
+    "--no-compile-autoload-bunfig",
+    "--no-compile-autoload-dotenv",
+    "--outfile",
+    outfile,
+  ],
+  { stdout: "inherit", stderr: "inherit" },
+);
 const exitCode = await compile.exited;
 if (exitCode !== 0) {
   console.error("Compile step failed");

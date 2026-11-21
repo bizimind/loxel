@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "bun src/cli.ts",
-    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
+    "build": "bun build --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --minify src/cli.ts --outfile dist/wt",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 30000 --parallel",
     "lint": "pnpm -w run lint",

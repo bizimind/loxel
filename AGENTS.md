@@ -96,7 +96,7 @@ Each package README is the authoritative doc for that package; this list only or
 
 **Privacy and Licensing**: Loxel never collects data about users without consent and does not require an account today. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
 
-**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
+**Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`, always with `--no-compile-autoload-bunfig --no-compile-autoload-dotenv` so a binary never reads `bunfig.toml` or `.env` from the directory it runs in. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
 ## Bun Guidelines
 
