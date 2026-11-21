@@ -25,6 +25,7 @@ import {
   WorktreeSessionLspManager,
 } from "./stdio-lsp-manager";
 import { readToml, recordAt } from "./toml-file";
+import { runsThroughVersionManager } from "./version-manager-link";
 
 /** Another type checker that owns type checking for some files (mypy, see `mypy-lsp-manager.ts`). */
 export interface ExternalTypeChecker {
@@ -54,6 +55,22 @@ interface PythonLspSession extends WtLspSession {
 }
 
 /**
+ * `PATH` for basedpyright in an untrusted repository: only absolute directories (a relative one
+ * resolves against the worktree it runs in), and none whose `python3` or `python` is a version
+ * manager's shim, which would run what the worktree's files select.
+ */
+export function pathWithoutPythonShims(PATH: string): string {
+  const hasShim = (dir: string) =>
+    ["python3", "python"].some((name) => {
+      const found = Bun.which(name, { PATH: dir });
+      return found !== null && runsThroughVersionManager(found);
+    });
+  return PATH.split(path.delimiter)
+    .filter((dir) => path.isAbsolute(dir) && !hasShim(dir))
+    .join(path.delimiter);
+}
+
+/**
  * Settings answered for the `basedpyright` section. Loxel defaults to the
  * `standard` ruleset because basedpyright's own `recommended` flags ordinary
  * code (unused call results, unknown types); a project config file
@@ -71,7 +88,8 @@ export const PYTHON_REPO_TRUST_RESTRICTION =
  * Settings answered for the `python` section: the resolved interpreter. Without one,
  * basedpyright would run a root `.venv/bin/python` it finds itself, even one the repository
  * commits, which the resolver refuses. A `venvPath` with no `venv` turns that detection off
- * without selecting an environment, so it falls back to `python3` on its (worktree-free) PATH.
+ * without selecting an environment, so it falls back to `python3` on its PATH, which holds no
+ * worktree directory and, in an untrusted repository, no version manager's shims.
  *
  * basedpyright runs `pythonPath` to ask it for its search paths, which starts the environment and
  * so its packages' startup hooks. In an untrusted repository `pythonPath` is only the interpreter
@@ -140,9 +158,13 @@ export class PythonLspManager extends WorktreeSessionLspManager<PythonLspSession
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     // Without a resolved interpreter basedpyright runs `python3` / `python` from its PATH; keep the
-    // worktree's own directories out of it, matching the resolver's refusal of committed ones.
+    // worktree's own directories out of it, matching the resolver's refusal of committed ones, and
+    // in an untrusted repository version managers' shims too, which run what the worktree selects.
     const PATH = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", context.wtPath);
-    return { cwd: context.wtPath, env: { PATH } };
+    return {
+      cwd: context.wtPath,
+      env: { PATH: context.repoTrusted ? PATH : pathWithoutPythonShims(PATH) },
+    };
   }
 
   protected buildSession(

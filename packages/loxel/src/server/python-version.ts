@@ -25,9 +25,9 @@ const cache = new Map<string, Promise<string | null>>();
  * version before reading any configuration or importing `site`, so no project code runs.
  * A version-manager shim (pyenv, asdf) picks its Python by directory. In a trusted repository this
  * runs in the worktree, so a shim reports what the worktree selects. Otherwise it runs from the
- * filesystem root, so the worktree's files have no say, and a shim reports its global version;
- * and only an interpreter from outside the worktree and its environment runs
- * ({@link untrustedInterpreter}), so an environment's own binary (conda, Pixi) has no version.
+ * filesystem root, so the worktree's files have no say, and only an interpreter from outside the
+ * worktree and its environment runs ({@link untrustedInterpreter}): for a shim, the global one it
+ * stands for, and for an environment's own binary (conda, Pixi) none, so that has no version.
  */
 export async function pythonVersion(
   env: Pick<PythonEnv, "pythonPath" | "envPath">,

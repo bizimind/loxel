@@ -13,6 +13,7 @@ import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
+import { runsThroughVersionManager, shimEntry } from "./version-manager-link";
 
 const log = logger.child("server");
 
@@ -33,6 +34,10 @@ const PROJECT_MARKERS = [
 /** How deep below the worktree root, and how many, project directories are searched. */
 const MAX_PROJECT_DEPTH = 3;
 const MAX_PROJECT_DIRS = 50;
+/** A shim answers at once, but on a loaded machine a missing interpreter is worse than a wait. */
+const SHIM_TIMEOUT_MS = 10_000;
+/** A shim's answer changes only with the user's global selection, which a minute's staleness covers. */
+const SHIM_ANSWER_TTL_MS = 60_000;
 /** Activated environments honored when they lie inside the worktree, in order. */
 const ACTIVATED_ENV_VARS = [
   ["VIRTUAL_ENV", "virtual-env"],
@@ -797,20 +802,76 @@ async function isInterpreterShippedByRepo(wtPath: string, pythonPath: string): P
  * `env.pythonPath` resolves to, when it lies outside both the worktree and the environment, so it
  * is the Python the environment was created from rather than anything installed into it. It runs
  * by its real path, which no environment's `pyvenv.cfg` sits next to, so the environment's
- * packages and their startup hooks stay out of it. Null when it lies inside either.
+ * packages and their startup hooks stay out of it. A version manager's shim is never the answer,
+ * since it picks its Python by the directory it runs in and basedpyright runs it in the worktree:
+ * the interpreter it stands for from the filesystem root is ({@link interpreterBehindShim}). Null
+ * when it lies inside either, or a shim names none.
  */
 export async function untrustedInterpreter(
   env: Pick<PythonEnv, "pythonPath" | "envPath">,
   wtPath: string,
 ): Promise<string | null> {
-  const real = await realpath(env.pythonPath).catch(() => null);
-  if (!real) return null;
   const realOf = (dir: string) => realpath(dir).catch(() => path.resolve(dir));
   const containers = [wtPath, ...(env.envPath ? [env.envPath] : [])];
-  for (const dir of containers) {
-    if (isInside(real, dir) || isInside(real, await realOf(dir))) return null;
+  const isOutside = async (file: string) => {
+    for (const dir of containers) {
+      if (isInside(file, dir) || isInside(file, await realOf(dir))) return false;
+    }
+    return true;
+  };
+  const outside = async (file: string | null) => {
+    const real = file && (await realpath(file).catch(() => null));
+    return real && (await isOutside(real)) ? real : null;
+  };
+  const real = await outside(env.pythonPath);
+  if (!real || !runsThroughVersionManager(env.pythonPath)) return real;
+  // Started by a path inside the environment, the interpreter could take it for its own.
+  const entry = shimEntry(env.pythonPath);
+  if (!(await isOutside(entry))) return null;
+  const behind = await outside(await interpreterBehindShim(entry));
+  return behind && !runsThroughVersionManager(behind) ? behind : null;
+}
+
+const shimAnswers = new Map<string, { at: number; answer: Promise<string | null> }>();
+
+/**
+ * The interpreter a version manager's shim runs when started from the filesystem root, where no
+ * project file selects one, as `sys.executable` reports it, or null. Isolated mode keeps the
+ * interpreter from reading anything but its own installation. Answers are cached briefly, since
+ * it is asked on every configuration pull and version read; failures are not cached.
+ */
+function interpreterBehindShim(shim: string): Promise<string | null> {
+  const cached = shimAnswers.get(shim);
+  if (cached && Date.now() - cached.at < SHIM_ANSWER_TTL_MS) return cached.answer;
+  const answer = askShim(shim);
+  shimAnswers.set(shim, { at: Date.now(), answer });
+  // A failed ask (a timeout on a loaded machine) is retried next time.
+  void answer.then((asked) => {
+    if (asked === null) shimAnswers.delete(shim);
+  });
+  return answer;
+}
+
+async function askShim(shim: string): Promise<string | null> {
+  const root = path.parse(shim).root;
+  try {
+    const proc = measureSpawn("python-shim", () =>
+      Bun.spawn([shim, "-I", "-c", "import sys; print(sys.executable)"], {
+        cwd: root,
+        env: { ...buildSpawnEnv(), PWD: root },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: SHIM_TIMEOUT_MS,
+      }),
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    const executable = stdout.trim();
+    return exitCode === 0 && path.isAbsolute(executable) ? executable : null;
+  } catch (err) {
+    log.debug("Could not ask a Python shim for its interpreter", { shim, error: err });
+    return null;
   }
-  return real;
 }
 
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */
