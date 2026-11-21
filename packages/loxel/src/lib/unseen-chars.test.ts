@@ -21,6 +21,15 @@ describe("hasKeyControl", () => {
 });
 
 describe("revealUnseen", () => {
+  test("spells format characters as escapes", () => {
+    expect(revealUnseen("npm\u{13437} test\u0600").map((run) => run.text)).toEqual([
+      "npm",
+      "\\u{13437}",
+      " test",
+      "\\u0600",
+    ]);
+  });
+
   test("leaves printable text and newlines as one run", () => {
     expect(revealUnseen("npm test\nnpm run build")).toMatchObject([
       { text: "npm test\nnpm run build", unseen: false },

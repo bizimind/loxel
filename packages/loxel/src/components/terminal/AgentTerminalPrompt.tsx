@@ -57,7 +57,7 @@ function AskCard({ ask, waiting }: { ask: AgentTerminalAsk; waiting: number }) {
       className="animate-in slide-in-from-bottom-2 fade-in bg-popover border-border fixed bottom-4 left-1/2 z-[9998] flex w-96 max-w-[calc(100%-2rem)] -translate-x-1/2 flex-col gap-2 rounded-lg border px-3 py-2.5 shadow-lg"
     >
       <span className="text-foreground text-xs font-medium">
-        {capitalized(agentName(ask.origin))} wants to start a terminal in{" "}
+        <RevealedText text={capitalized(agentName(ask.origin))} /> wants to start a terminal in{" "}
         <RevealedText text={where} />
         {waiting > 1 ? ` (1 of ${waiting})` : ""}
       </span>
