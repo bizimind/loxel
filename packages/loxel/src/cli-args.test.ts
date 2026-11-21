@@ -25,6 +25,10 @@ describe("parseTerminalArgs", () => {
       cwd: BASE,
       command: `echo '~/x' '$HOME' '*.ts' 'a;b' ''`,
     });
+    expect(terminal(["echo", "=ls", "a=b"], BASE)).toEqual({
+      cwd: BASE,
+      command: `echo '=ls' a=b`,
+    });
   });
 
   test("flags stop at the first non-flag so the command keeps its own flags", () => {
