@@ -3,15 +3,51 @@
  * one panel or area of Loxel; `shoot.ts` runs it in a fresh headless Chromium context (so the
  * window starts from the default layout) against the stack started by `stack.sh`.
  */
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { Locator, Page } from "@playwright/test";
 
+import { sessionAuthorization } from "@/session-client";
+
 /**
- * The stack's Vite dev server. The shots reach the server through its proxy too, which adds the
- * secret from the stack server's token file (see vite.config.ts).
+ * The stack's Vite dev server. The shots reach the server through its proxy too: the page as a
+ * browser does, through the access link Vite prints ({@link accessLink}); the scripts' own calls
+ * with the stack server's secret ({@link stackAuthorization}), which the proxy forwards.
  */
 export const BASE_URL = "http://127.0.0.1:5173";
+
+/** The work directory `stack.sh` was started with, which {@link targetThemeStack} sets. */
+let stackWorkDir: string | null = null;
+
+/** Point these helpers at the stack `stack.sh` started with `workDir`, before any other call. */
+export function targetThemeStack(workDir: string): void {
+  stackWorkDir = workDir;
+}
+
+function workDirOfStack(): string {
+  if (!stackWorkDir) throw new Error("Call targetThemeStack(workDir) first");
+  return stackWorkDir;
+}
+
+/**
+ * The header with the stack server's secret, from its token file. Read on each call: the stack
+ * restarts its server when idle, which then makes a new one.
+ */
+export function stackAuthorization(): { Authorization: string } {
+  return sessionAuthorization(resolve(workDirOfStack(), "state"));
+}
+
+/** The access link the stack's Vite printed last to `vite.log` (see src/dev-proxy.ts). */
+export function accessLink(): string {
+  const log = readFileSync(resolve(workDirOfStack(), "vite.log"), "utf8");
+  const link = log
+    .match(/Open Loxel: (\S+)/g)
+    ?.at(-1)
+    ?.slice("Open Loxel: ".length);
+  if (!link) throw new Error("The stack's Vite has printed no access link yet");
+  return link;
+}
 
 export interface ShotContext {
   page: Page;
@@ -71,7 +107,10 @@ export async function assertThemeStack(workDir: string): Promise<void> {
 export async function api(path: string, init?: { method?: string; body?: unknown }) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: init?.method ?? (init?.body === undefined ? "GET" : "POST"),
-    headers: init?.body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: {
+      ...stackAuthorization(),
+      ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const text = await res.text();
@@ -81,7 +120,8 @@ export async function api(path: string, init?: { method?: string; body?: unknown
 
 /** Load Loxel, activate the fixture project and wait for the center dockview. */
 export async function waitForLoxel(page: Page): Promise<void> {
-  await page.goto(BASE_URL);
+  // The link sets the cookie that lets this page through Vite's proxy, then leads to BASE_URL.
+  await page.goto(accessLink());
   await page.getByText("Loxel").first().waitFor({ state: "visible" });
   await settle(page);
   const gitButton = page.locator('[title="Git"]').first();

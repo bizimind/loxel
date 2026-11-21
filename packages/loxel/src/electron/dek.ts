@@ -1,15 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { safeStorage } from "electron";
 
-import { IS_DEV } from "./env";
+import { ensurePrivateStateDir, stateDirFor } from "../state-dir";
+import { IS_DEV, LAUNCH_ENV } from "./env";
 
-const STATE_DIR =
-  process.env.LOXEL_STATE_DIR ??
-  path.join(os.homedir(), ".local", "state", "loxel", IS_DEV ? "loxel-dev" : "loxel");
+const STATE_DIR = stateDirFor(IS_DEV ? "dev" : "production", LAUNCH_ENV);
 const DEK_FILE = path.join(STATE_DIR, "data-encryption-key.enc");
 
 /** The key `initDek()` loaded: undefined until it has run, null when there is none. */
@@ -76,7 +74,7 @@ async function readDek(): Promise<string | null> {
 
 async function storeDek(dekBase64: string): Promise<void> {
   const encrypted = await safeStorage.encryptStringAsync(dekBase64);
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  ensurePrivateStateDir(STATE_DIR);
   fs.writeFileSync(DEK_FILE, encrypted, { mode: 0o600 });
 }
 

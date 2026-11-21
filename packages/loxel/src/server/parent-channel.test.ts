@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { closeSync } from "node:fs";
-import { PassThrough } from "node:stream";
+import { createInterface } from "node:readline";
+import { Duplex, PassThrough } from "node:stream";
 
 import { newSessionSecret } from "@/app-session";
 import type { ShutdownTerminals } from "@/parent-channel-protocol";
-import { PARENT_CHANNEL_FD, encodeParentMessage } from "@/parent-channel-protocol";
+import {
+  PARENT_CHANNEL_FD,
+  encodeParentMessage,
+  parseServerMessage,
+} from "@/parent-channel-protocol";
 
 import { listenToParent } from "./parent-channel";
 
@@ -79,6 +86,15 @@ describe("listenToParent", () => {
     expect(events).toEqual(["closed"]);
   });
 
+  test("the channel failing means the app is gone, said once", async () => {
+    const { input, events, eventsReached } = openChannel();
+    input.destroy(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }));
+    await eventsReached(1);
+    // Whatever follows the failure (the stream's close) adds nothing.
+    if (!input.closed) await once(input, "close");
+    expect(events).toEqual(["closed"]);
+  });
+
   test("ignores lines that are not messages", async () => {
     const { input, events, eventsReached } = openChannel();
     input.write("not json\n");
@@ -124,5 +140,29 @@ describe("the channel's descriptor", () => {
       spawnInheritingStdin: "closed",
       detached: "closed",
     });
+  });
+});
+
+/** The channel goes both ways, as Electron main spawns the server: a server answers on it. */
+describe("tellParent", () => {
+  test("reaches the app on the channel it reads the app's messages from", async () => {
+    const script = `
+      import { listenToParent, parentChannelInput, tellParent } from ${JSON.stringify(`${import.meta.dir}/parent-channel.ts`)};
+      listenToParent(parentChannelInput(), {
+        session: () => tellParent({ type: "listening" }),
+        shutdown: () => {},
+        closed: () => process.exit(0),
+      });
+    `;
+    const server = spawn("bun", ["-e", script], { stdio: ["ignore", "ignore", "inherit", "pipe"] });
+    const channel = server.stdio[PARENT_CHANNEL_FD];
+    if (!(channel instanceof Duplex)) throw new Error("The channel is not a socket pair");
+    const secret = newSessionSecret();
+    channel.write(encodeParentMessage({ type: "session", secret, windowIds: [] }));
+    const [line] = (await once(createInterface({ input: channel }), "line")) as [string];
+    expect(parseServerMessage(line)).toEqual({ type: "listening" });
+    channel.end();
+    const [code] = (await once(server, "exit")) as [number];
+    expect(code).toBe(0);
   });
 });
