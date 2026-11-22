@@ -40,12 +40,13 @@ export class GitCommandError extends Error {
 }
 
 /**
- * What git says, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when their settings
- * kept it from downloading an object a partial clone doesn't have yet: `GIT_NO_LAZY_FETCH`'s warning,
- * or `GIT_ALLOW_PROTOCOL`'s refusal on a git too old for it. Only these say so unambiguously; a read
- * that fails on a missing object without them (`git show <rev>:<path>` among them) fails as usual.
+ * `GIT_NO_LAZY_FETCH`'s warning, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts): git
+ * wanted an object a partial clone doesn't have yet and didn't download it. Only this says so
+ * unambiguously. Any other failure on a missing object fails as usual, including `git show
+ * <rev>:<path>`, a treeless clone's unreadable tree, and the transport refusal of a git too old for
+ * `GIT_NO_LAZY_FETCH`, which a revision that doesn't exist produces as well.
  */
-const DOWNLOAD_REFUSED = /lazy fetching disabled|transport '[^']*' not allowed/;
+const LAZY_FETCH_DISABLED = "lazy fetching disabled";
 
 const AWAITS_TRUST_RESTRICTION =
   "Git doesn't download content this partial clone doesn't have yet.";
@@ -100,7 +101,7 @@ export async function runGit(
   if (
     cwd !== undefined &&
     env?.GIT_ALLOW_PROTOCOL === "" &&
-    DOWNLOAD_REFUSED.test(result.stderr) &&
+    result.stderr.includes(LAZY_FETCH_DISABLED) &&
     !isRepoTrusted(cwd)
   ) {
     reportRepoRestriction(cwd, AWAITS_TRUST_RESTRICTION);

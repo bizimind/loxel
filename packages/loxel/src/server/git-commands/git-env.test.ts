@@ -10,7 +10,7 @@ import { getRepoTrustStatus, setRepoTrusted } from "../repo-trust";
 import { getCommitDiff, getUnstagedDiff, getWorkingTreeDiff } from "./diff";
 import { getFileContent } from "./file-content";
 import { readOnlyGitEnv, worktreeReadEnv } from "./git-env";
-import { ContentAwaitsTrustError, runGit } from "./run-git";
+import { ContentAwaitsTrustError, type GitCommandError, runGit } from "./run-git";
 import { getStatus } from "./status";
 import { commit, createRepo, writeFile } from "./test-utils";
 
@@ -172,14 +172,16 @@ describe("a partial clone in an untrusted repository", () => {
       expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
       // A path the commit doesn't have, or a commit the repository doesn't have, is no such content.
       expect(await getFileContent(clone, "missing.txt", second)).toEqual([]);
-      expect(await getCommitDiff(clone, "0".repeat(40))).toMatchObject({ files: [] });
+      expect(await getCommitDiff(clone, "1a2b".repeat(10))).toMatchObject({ files: [] });
 
-      // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses.
+      // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses, and
+      // the read fails as an ordinary one.
       const { GIT_NO_LAZY_FETCH: _ignored, ...olderGitEnv } = readOnlyGitEnv(clone);
       const olderGit = await runGit(["diff-tree", "-p", second], { cwd: clone, env: olderGitEnv })
         .then(() => null)
         .catch((err: unknown) => err);
-      expect(olderGit).toBeInstanceOf(ContentAwaitsTrustError);
+      expect(olderGit).not.toBeInstanceOf(ContentAwaitsTrustError);
+      expect((olderGit as GitCommandError).stderr).toContain("not allowed");
 
       setRepoTrusted(clone, true);
       expect(await getFileContent(clone, "a.txt", first)).toEqual(["a", ""]);
