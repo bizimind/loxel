@@ -16,9 +16,9 @@ For what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/dra
 | Action                              | Shortcut                                                     |
 | ----------------------------------- | ------------------------------------------------------------ |
 | New terminal                        | `Cmd+T` or `` Ctrl+Shift+` ``                                |
-| New markdown draft                  | `Cmd+Shift+M` or `Cmd+N`                                     |
+| New markdown draft                  | `Cmd+Shift+M`                                                |
 | New drawing                         | `Cmd+Shift+D`                                                |
-| New browser                         | `Cmd+Shift+B`                                                |
+| New browser                         | `Cmd+N` or `Cmd+Shift+B`                                     |
 | New tab of the active panel's type  | `Cmd+\` then `Enter`                                         |
 | Close panel                         | `Cmd+W`                                                      |
 | Reopen closed tab                   | `Cmd+Shift+T`                                                |
