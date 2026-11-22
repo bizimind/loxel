@@ -122,6 +122,22 @@ describe("working-tree reads in an untrusted repository", () => {
     }
   });
 
+  test("git's own trace output on stderr does not fail them", async () => {
+    const repo = await createRepo();
+    const savedTrace = process.env.GIT_TRACE;
+    process.env.GIT_TRACE = "1";
+    try {
+      await commit(repo.path, "init", { "a.txt": "a\n" });
+      await writeFile(repo.path, "a.txt", "b\n");
+      expect((await getStatus(repo.path)).unstaged.map((file) => file.path)).toEqual(["a.txt"]);
+      expect((await getUnstagedDiff(repo.path)).files.map((f) => f.newPath)).toEqual(["a.txt"]);
+    } finally {
+      if (savedTrace === undefined) delete process.env.GIT_TRACE;
+      else process.env.GIT_TRACE = savedTrace;
+      await repo.cleanup();
+    }
+  });
+
   test("the user's own global filter drivers keep their commands", async () => {
     const { repo, cleanup } = await repoWithPrograms();
     const global = `${repo.path}-global`;

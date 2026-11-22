@@ -1,7 +1,7 @@
 import { shellQuote } from "@bizimind/wt/lib";
 
 import { isRepoTrusted } from "../repo-trust";
-import { GitCommandError, inheritedGitEnv, runGit } from "./run-git";
+import { gitText, inheritedGitEnv } from "./run-git";
 
 /**
  * Environment and shared arguments for git invocations.
@@ -99,21 +99,20 @@ export async function worktreeReadEnv(cwd: string): Promise<Record<string, strin
  * nothing, so the names are exactly the ones it would use.
  */
 async function repoFilterDrivers(cwd: string, env: Record<string, string>): Promise<string[]> {
-  const result = await runGit(
-    ["config", "--show-scope", "--name-only", "-z", "--get-regexp", String.raw`^filter\.`],
-    { cwd, env, nothrow: true },
-  );
-  // Exit code 1 with nothing on stderr: no filter keys at all. A git that could not be started also
-  // reports 1, with the reason on stderr (git-exec.ts). That, or a config git cannot read, leaves
-  // the drivers unknown, so the read fails rather than run them.
-  if (result.exitCode === 1 && result.stderr.trim() === "") return [];
-  if (result.exitCode !== 0) throw new GitCommandError(result);
+  // `--list` succeeds when nothing matches, unlike `--get-regexp`, whose exit code 1 for "no match"
+  // is also what a git that could not be started reports. So any failure, a config git cannot read
+  // included, leaves the drivers unknown and fails the read rather than run them.
+  const stdout = await gitText(["config", "--list", "--show-scope", "--name-only", "-z"], {
+    cwd,
+    env,
+  });
   // `-z` with `--show-scope`: scope and key, each NUL-terminated.
-  const fields = result.stdout.split("\0");
+  const fields = stdout.split("\0");
   const names = new Set<string>();
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const [scope, key] = [fields[i], fields[i + 1] ?? ""];
     if (scope !== "local" && scope !== "worktree") continue;
+    if (!key.startsWith("filter.")) continue;
     // `filter.<name>.<variable>`; the name may hold dots, the variable cannot.
     const rest = key.slice("filter.".length);
     const end = rest.lastIndexOf(".");
