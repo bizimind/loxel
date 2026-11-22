@@ -9,7 +9,7 @@ import { $ } from "bun";
 import { getRepoTrustStatus, setRepoTrusted } from "../repo-trust";
 import { getCommitDiff, getUnstagedDiff, getWorkingTreeDiff } from "./diff";
 import { readOnlyGitEnv, worktreeReadEnv } from "./git-env";
-import { ContentAwaitsTrustError } from "./run-git";
+import { ContentAwaitsTrustError, runGit } from "./run-git";
 import { getStatus } from "./status";
 import { commit, createRepo, writeFile } from "./test-utils";
 
@@ -35,6 +35,7 @@ describe("readOnlyGitEnv", () => {
     expect(readOnlyGitEnv()).toMatchObject({
       GIT_OPTIONAL_LOCKS: "0",
       GIT_NO_LAZY_FETCH: "1",
+      GIT_ALLOW_PROTOCOL: "",
       GIT_CONFIG_PARAMETERS: OFF,
     });
   });
@@ -47,6 +48,7 @@ describe("readOnlyGitEnv", () => {
       expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
       expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBeUndefined();
       expect(readOnlyGitEnv(dir).GIT_NO_LAZY_FETCH).toBeUndefined();
+      expect(readOnlyGitEnv(dir).GIT_ALLOW_PROTOCOL).toBeUndefined();
       expect(readOnlyGitEnv().GIT_CONFIG_PARAMETERS).toBe(OFF);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -167,6 +169,13 @@ describe("a partial clone in an untrusted repository", () => {
       const error = await getCommitDiff(clone, second).catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ContentAwaitsTrustError);
       expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
+
+      // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses.
+      const { GIT_NO_LAZY_FETCH: _ignored, ...olderGitEnv } = readOnlyGitEnv(clone);
+      const olderGit = await runGit(["diff-tree", "-p", second], { cwd: clone, env: olderGitEnv })
+        .then(() => null)
+        .catch((err: unknown) => err);
+      expect(olderGit).toBeInstanceOf(ContentAwaitsTrustError);
 
       setRepoTrusted(clone, true);
       const diff = await getCommitDiff(clone, second);

@@ -40,10 +40,11 @@ export class GitCommandError extends Error {
 }
 
 /**
- * Git's warning when `GIT_NO_LAZY_FETCH`, which untrusted reads set (git-env.ts), kept it from
- * downloading an object that a partial clone doesn't have yet.
+ * What git says when the settings of untrusted reads (git-env.ts) kept it from downloading an object
+ * that a partial clone doesn't have yet: `GIT_NO_LAZY_FETCH`'s warning, or on a git too old for it,
+ * `GIT_ALLOW_PROTOCOL`'s refusal.
  */
-const LAZY_FETCH_DISABLED = "lazy fetching disabled";
+const DOWNLOAD_REFUSED = /lazy fetching disabled|transport '[^']*' not allowed/;
 
 const AWAITS_TRUST_RESTRICTION =
   "Git doesn't download content this partial clone doesn't have yet.";
@@ -95,7 +96,7 @@ export async function runGit(
   if (result.exitCode === 0) return result;
   // Thrown even with `nothrow`: a caller that expects some failures still never expects this one,
   // and would show it as an empty file or diff.
-  if (cwd !== undefined && result.stderr.includes(LAZY_FETCH_DISABLED) && !isRepoTrusted(cwd)) {
+  if (cwd !== undefined && DOWNLOAD_REFUSED.test(result.stderr) && !isRepoTrusted(cwd)) {
     reportRepoRestriction(cwd, AWAITS_TRUST_RESTRICTION);
     throw new ContentAwaitsTrustError(result);
   }
