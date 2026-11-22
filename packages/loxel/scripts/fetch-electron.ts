@@ -9,8 +9,8 @@
  * private CI bucket's token). Fails when the build this checkout pins was never uploaded or has no
  * SHA-256 committed in electron/builds.json, so a release can't fall back to stock Electron. The
  * zip must match that committed SHA-256: the bucket is only storage, never the source of truth.
- * The release workflow runs `--check` before it bumps the version, so a missing build stops it
- * before it leaves a release commit or tag behind.
+ * The release workflow runs `--check` before it bumps the version, so a missing build, or one whose
+ * uploaded checksum differs from the pin, stops it before it leaves a release commit or tag behind.
  */
 
 import { mkdirSync, rmSync } from "node:fs";
@@ -41,13 +41,28 @@ const howToUpload =
 
 if (arg === "--check") {
   const missing = [];
+  const mismatched = [];
   for (const arch of ELECTRON_ARCHES) {
-    pinnedSha256(id, arch);
-    if (!(await isUploaded(client, id, version, arch))) missing.push(`darwin-${arch}`);
+    const pinned = pinnedSha256(id, arch);
+    if (!(await isUploaded(client, id, version, arch))) {
+      missing.push(`darwin-${arch}`);
+      continue;
+    }
+    // The uploaded checksum is not trusted, but one that differs from the pin means the fetch
+    // would fail, so stop here, before the release commit and tag.
+    const checksumKey = objectKey(id, `${distZipName(version, arch)}.sha256`);
+    if ((await client.file(checksumKey).text()).trim() !== pinned)
+      mismatched.push(`darwin-${arch}`);
   }
   if (missing.length > 0) {
     throw new Error(
       `Patched Electron ${id} is not in R2 for ${missing.join(", ")}. ${howToUpload}`,
+    );
+  }
+  if (mismatched.length > 0) {
+    throw new Error(
+      `Patched Electron ${id} in R2 for ${mismatched.join(", ")} is not the build ` +
+        `electron/builds.json pins: upload the pinned build, or rebuild and commit the file.`,
     );
   }
   console.log(`[fetch-electron] patched Electron ${id} is in R2 for every architecture`);
