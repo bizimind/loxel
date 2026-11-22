@@ -12,7 +12,6 @@ import {
   HOOK_INIT,
   listManagedWorktrees,
   detectRepoType,
-  hasUncommittedChanges,
   getCurrentBranch,
   initBareRepo,
   transformToBare,
@@ -2021,6 +2020,24 @@ function failedInitActions(results: InitResult[]): string | null {
   return failed.map((outcome) => `${outcome.id}: ${outcome.error ?? "failed"}`).join("; ");
 }
 
+/**
+ * Whether an Add Project repository has staged, unstaged, untracked or conflicted changes, for
+ * detect and Convert alike so the wizard and the conversion agree. Loxel's own status read, not
+ * wt's: the folder is not trusted yet, and this read runs with the environment Loxel gives every
+ * read of an untrusted repository (no fsmonitor). A status git cannot read counts as dirty.
+ */
+async function hasUncommittedChanges(repoPath: string): Promise<boolean> {
+  try {
+    const status = await git.getStatus(repoPath);
+    return [status.staged, status.unstaged, status.untracked, status.conflicted].some(
+      (files) => files.length > 0,
+    );
+  } catch (err) {
+    wtLog.warn("Failed to read the repository's status", { path: repoPath, error: err });
+    return true;
+  }
+}
+
 // POST /api/projects/detect — detect what a path points to
 async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -2049,24 +2066,12 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
     if (repoType === "regular" || repoType === "worktree") {
       const gitRoot = await git.getGitRoot(dirPath);
       let branch: string | undefined;
-      let dirty = false;
       try {
         branch = await getCurrentBranch(gitRoot);
       } catch {
         // detached HEAD
       }
-      // Loxel's own status read, not wt's: the folder is not trusted yet, and this read runs with
-      // the environment Loxel gives every read of an untrusted repository (no fsmonitor).
-      try {
-        const status = await git.getStatus(gitRoot);
-        dirty = [status.staged, status.unstaged, status.untracked, status.conflicted].some(
-          (files) => files.length > 0,
-        );
-      } catch (err) {
-        // A status git cannot read counts as dirty, so the wizard does not offer to convert it.
-        wtLog.warn("Failed to read the repository's status", { path: gitRoot, error: err });
-        dirty = true;
-      }
+      const dirty = await hasUncommittedChanges(gitRoot);
       const result: DetectPathResult = {
         type: "git-repo-regular",
         path: gitRoot,
