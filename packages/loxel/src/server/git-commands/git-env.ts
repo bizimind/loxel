@@ -108,6 +108,12 @@ function filterDriverOverrides(names: string[]): string[] {
  * fsmonitor and none of the filter drivers its config defines, nor those that the config of a
  * submodule checked out under `dir` defines: these commands check for uncommitted changes inside
  * submodules too, and the settings here reach the git commands run inside them.
+ *
+ * None of these commands needs a transport (the ones that contact a remote wait for trust), so git
+ * also allows none and never downloads what a partial clone is missing: `GIT_NO_LAZY_FETCH=1`
+ * (git with the May 2024 security fixes, 2.39.4 and later), and an empty `GIT_ALLOW_PROTOCOL`,
+ * which no `protocol.*.allow` setting overrides, for an older git. A command that needs such content fails instead, before it changes
+ * anything (`withRepoGitEnv` says what to do about it).
  */
 export async function untrustedChangeGitEnv(dir: string): Promise<Record<string, string>> {
   const env = readOnlyGitEnv();
@@ -116,7 +122,11 @@ export async function untrustedChangeGitEnv(dir: string): Promise<Record<string,
     configParameter("core.fsmonitor", "false"),
     ...filterDriverOverrides(await checkoutFilterDrivers(dir, env)),
   ];
-  return { GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, entries) };
+  return {
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_ALLOW_PROTOCOL: "",
+    GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, entries),
+  };
 }
 
 /** {@link repoFilterDrivers} of `dir` and of every submodule checked out under it, recursively. */

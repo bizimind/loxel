@@ -48,14 +48,18 @@ async function makeRepo(): Promise<{ repo: string; ctx: RouteContext }> {
     await chmod(file, 0o755);
   }
 
+  return { repo, ctx: projectContext(repo) };
+}
+
+/** A route context whose one project is the regular repository at `repo`. */
+function projectContext(repo: string): RouteContext {
   const project = { cwd: repo, isBare: false, worktreesDir: join(repo, ".worktrees") };
-  const ctx = {
+  return {
     broadcastAll: () => {},
     getProject: (cwd: string) => (cwd === repo ? project : undefined),
     suspendWorktreeWatchers: async () => async () => {},
     completeWorktreeRemoval: () => {},
   } as unknown as RouteContext;
-  return { repo, ctx };
 }
 
 async function post<T>(ctx: RouteContext, path: string, body: unknown): Promise<[number, T]> {
@@ -222,6 +226,62 @@ describe("worktree hooks in an untrusted repository", () => {
     await post(ctx, "/api/worktree/create", { projectPath: repo, name: "after-trust" });
     expect(await Bun.$`git -C ${repo} rev-parse origin/main`.text()).toBe(next);
   });
+});
+
+describe("a partial clone in an untrusted repository", () => {
+  // Without file contents, or without trees, which git fails on before it would fetch them, also
+  // set up as git before 2.24 set up a partial clone.
+  test.each([
+    ["blob:none", false],
+    ["tree:0", false],
+    ["tree:0", true],
+  ])(
+    "creating a worktree from content a %s clone hasn't downloaded waits for trust (older config: %p)",
+    async (filter, olderConfig) => {
+      const commit = "-c user.email=t@example.com -c user.name=T commit -qm".split(" ");
+      await Bun.$`git -C ${repo} switch -qc feature`;
+      await Bun.write(join(repo, "a.txt"), "a\n");
+      await Bun.$`git -C ${repo} add a.txt`;
+      await Bun.$`git -C ${repo} -c core.hooksPath=/dev/null ${commit} feature`;
+      await Bun.$`git -C ${repo} switch -q main`;
+      await Bun.$`git -C ${repo} config uploadpack.allowFilter true`;
+      const clone = `${repo}-clone`;
+      roots.push(clone);
+      await Bun.$`git clone -q --filter=${filter} -- ${`file://${repo}`} ${clone}`;
+      // The branch, but not its content, which only checking it out would download.
+      await Bun.$`git -C ${clone} branch -q feature origin/feature`;
+      if (olderConfig) {
+        // What git 2.23 wrote instead of the remote's `promisor` and `partialclonefilter`.
+        await Bun.$`git -C ${clone} config --unset remote.origin.promisor`;
+        await Bun.$`git -C ${clone} config --unset remote.origin.partialclonefilter`;
+        await Bun.$`git -C ${clone} config core.repositoryFormatVersion 1`;
+        await Bun.$`git -C ${clone} config core.partialCloneFilter ${filter}`;
+        await Bun.$`git -C ${clone} config extensions.partialClone origin`;
+      }
+      const cloneCtx = projectContext(clone);
+      const create = { projectPath: clone, name: "feat", branch: "feature" };
+
+      const [status, refused] = await post<{ error: string }>(
+        cloneCtx,
+        "/api/worktree/create",
+        create,
+      );
+      expect(status).toBe(400);
+      expect(refused.error).toContain("once you trust the repository");
+      expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
+      expect(await Bun.$`git -C ${clone} worktree list --porcelain`.text()).not.toContain("feat\n");
+      expect(existsSync(join(clone, ".worktrees", "feat"))).toBe(false);
+
+      setRepoTrusted(clone, true);
+      const [trustedStatus, created] = await post<{ path: string }>(
+        cloneCtx,
+        "/api/worktree/create",
+        create,
+      );
+      expect(trustedStatus).toBe(200);
+      expect(await Bun.file(join(created.path, "a.txt")).text()).toBe("a\n");
+    },
+  );
 });
 
 describe("worktree hooks in a trusted repository", () => {
@@ -409,6 +469,27 @@ describe("setting up an existing or cloned repository like wt init", () => {
       "fetch-refspec: skipped because the repository is not trusted",
     );
     expect(await gitConfig(bareDir, "remote.origin.fetch")).toBe("");
+  });
+
+  test("adding a bare partial clone says its first worktree waits for trust", async () => {
+    const { url, dest } = await makeRemote();
+    const upstream = url.slice("file://".length);
+    await Bun.write(join(upstream, "a.txt"), "a\n");
+    await Bun.$`git -C ${upstream} add a.txt`;
+    await Bun.$`git -C ${upstream} -c user.email=t@example.com -c user.name=T commit -qm a`;
+    await Bun.$`git -C ${upstream} config uploadpack.allowFilter true`;
+    const bareDir = join(dest, "partial.git");
+    // No file content at all, since a bare clone checks nothing out.
+    await Bun.$`git clone -q --bare --filter=blob:none -- ${url} ${bareDir}`;
+
+    const [status, project] = await post<{ setupFailures?: string }>(projectCtx, "/api/projects", {
+      path: bareDir,
+      apply: ["main-worktree"],
+    });
+
+    expect(status).toBe(200);
+    expect(project.setupFailures).toContain("once you trust the repository");
+    expect(existsSync(join(bareDir, ".worktrees", "main"))).toBe(false);
   });
 
   test("adding a trusted repository applies the fixes that contact origin", async () => {

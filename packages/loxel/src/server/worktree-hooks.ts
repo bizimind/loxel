@@ -38,6 +38,64 @@ import { buildSpawnEnv } from "./shell-env";
 /** What an untrusted repository holds back, as the trust UI lists it. */
 export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.sh) don't run.";
 
+/**
+ * Git's refusal, untranslated under wt's `LC_ALL=C`, of an object the partial clone left to its
+ * promisor remote, which `untrustedChangeGitEnv` keeps it from downloading. Git prints it only for
+ * an object the remote is known to have, never for one that doesn't exist.
+ */
+const PROMISED_OBJECT_REFUSED = /could not fetch [0-9a-f]+ from promisor remote/;
+
+/**
+ * What git prints instead in a clone without trees (`--filter=tree:0`), which fails on a missing
+ * tree before it would fetch it. A corrupt repository prints it too, so it counts only in a
+ * partial clone.
+ */
+const TREE_MISSING = /unable to read tree \([0-9a-f]+\)/;
+
+/** What an untrusted partial clone holds back, as the trust UI lists it. */
+const PARTIAL_CLONE_RESTRICTION =
+  "Git doesn't download content this partial clone doesn't have yet.";
+
+const CONTENT_AWAITS_TRUST =
+  "This needs content the repository hasn't downloaded yet. It is a partial clone, and Git downloads what it is missing once you trust the repository. Click Restricted in the status bar to choose.";
+
+/**
+ * Whether `message`, a failed operation's, is git's refusal of content the partial clone at
+ * `repoPath` hasn't downloaded. If so, reports the restriction.
+ */
+async function awaitsTrust(repoPath: string, message: string): Promise<boolean> {
+  const refused =
+    PROMISED_OBJECT_REFUSED.test(message) ||
+    (TREE_MISSING.test(message) && (await isPartialClone(repoPath)));
+  if (refused) reportRepoRestriction(repoPath, PARTIAL_CLONE_RESTRICTION);
+  return refused;
+}
+
+/**
+ * Whether the repository's own config makes a remote a promisor, as a partial clone's does: a
+ * remote's `promisor` (a boolean) or `partialclonefilter`, or `extensions.partialclone`, which a
+ * clone from git before 2.24 carries instead.
+ */
+async function isPartialClone(repoPath: string): Promise<boolean> {
+  // `--list` rather than `--get-regexp`, whose exit code for "no match" is also a failed start's.
+  const config = await gitText(["config", "--local", "--list", "-z"], {
+    cwd: repoPath,
+    env: readOnlyGitEnv(repoPath),
+    nothrow: true,
+  });
+  // `-z`: each entry is `key\nvalue`, or a bare key for a valueless (true) boolean.
+  return config.split("\0").some((entry) => {
+    const [key = "", value] = entry.split("\n", 2);
+    if (key === "extensions.partialclone" || /^remote\..+\.partialclonefilter$/.test(key)) {
+      return true;
+    }
+    return (
+      /^remote\..+\.promisor$/.test(key) &&
+      (value === undefined || /^(true|yes|on|1)$/i.test(value))
+    );
+  });
+}
+
 /** The `wt init` fixes that contact origin, with the repository's own transport settings. */
 const ORIGIN_FIXES: readonly InitActionId[] = ["fetch-refspec", "origin-head"];
 
@@ -69,7 +127,8 @@ export async function isRepositoryTrusted(repoPath: string): Promise<boolean> {
  * `checkout` is the worktree whose submodules a check for uncommitted changes looks into, when it
  * is another one than `repoPath` and still exists. A checkout wt creates is filled in under the
  * env worked out from inside it, so config that applies only there (a conditional include on the
- * new worktree or branch) is covered too.
+ * new worktree or branch) is covered too. Content a partial clone hasn't downloaded waits for
+ * trust: an operation that needs it fails, saying so, before git changes the checkout.
  */
 export async function withRepoGitEnv<T>(
   repoPath: string,
@@ -78,7 +137,12 @@ export async function withRepoGitEnv<T>(
 ): Promise<T> {
   if (await isRepositoryTrusted(repoPath)) return fn();
   const env = await untrustedChangeGitEnv(existsSync(checkout) ? checkout : repoPath);
-  return withGitEnv(env, fn, untrustedChangeGitEnv);
+  try {
+    return await withGitEnv(env, fn, untrustedChangeGitEnv);
+  } catch (error) {
+    if (!(error instanceof Error) || !(await awaitsTrust(repoPath, error.message))) throw error;
+    throw new Error(CONTENT_AWAITS_TRUST, { cause: error });
+  }
 }
 
 /** Add a worktree, running `init.wt.sh` and the repository's git hooks only if it is trusted. */
@@ -124,7 +188,15 @@ export async function applyInitActions(
     error:
       "skipped because the repository is not trusted (it contacts origin with the repository's git settings); run `wt init` in the repository once you trust it",
   }));
-  return reportHeldHooks({ ...result, outcomes: [...heldOutcomes, ...result.outcomes] });
+  // A fix fails as an outcome rather than throwing, such as a worktree it cannot fill in.
+  const outcomes = await Promise.all(
+    result.outcomes.map(async (outcome) =>
+      outcome.error !== undefined && !trusted && (await awaitsTrust(repoPath, outcome.error))
+        ? { ...outcome, error: CONTENT_AWAITS_TRUST }
+        : outcome,
+    ),
+  );
+  return reportHeldHooks({ ...result, outcomes: [...heldOutcomes, ...outcomes] });
 }
 
 /**
