@@ -15,6 +15,7 @@ import path from "node:path";
 import { BrowserWindow, type Session, session, webContents } from "electron";
 
 import { onAppWindowMessage } from "./app-windows";
+import { markIncognitoSession } from "./browser-partition";
 import { BROWSER_INCOGNITO_TABS } from "./ipc-channels";
 
 let current: { partition: string; session: Session } | null = null;
@@ -36,6 +37,7 @@ export function incognitoPartition(): string {
   if (current) return current.partition;
   const partition = `incognito-${++sessionCount}`;
   const created = session.fromPartition(partition);
+  markIncognitoSession(created);
   created.registerPreloadScript({
     type: "frame",
     filePath: path.join(import.meta.dirname, "incognito-preload.cjs"),
@@ -56,7 +58,8 @@ function endSession(): void {
   current = null;
   for (const contents of webContents.getAllWebContents()) {
     if (contents.getType() !== "window" || contents.session !== ended) continue;
-    BrowserWindow.fromWebContents(contents)?.close();
+    // Not `close()`, which a page's `beforeunload` can cancel.
+    BrowserWindow.fromWebContents(contents)?.destroy();
   }
   void Promise.allSettled([
     ended.clearStorageData(),

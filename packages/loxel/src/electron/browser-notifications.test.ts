@@ -37,6 +37,7 @@ void mock.module("electron", () => ({
 }));
 
 const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
+const { fakeIncognitoSession } = await import("../test/fake-browser-panels");
 const { installBrowserNotifications, trackWebviewNotifications } =
   await import("./browser-notifications");
 installBrowserNotifications();
@@ -111,7 +112,7 @@ function fakeGuest(host: WebContents, origin = "http://localhost:5173", incognit
     getType: () => "webview",
     isDestroyed: () => false,
     hostWebContents: host,
-    session: { storagePath: incognito ? null : "/browser" },
+    session: incognito ? fakeIncognitoSession() : { storagePath: "/browser" },
     mainFrame,
   } as unknown as WebContents;
   trackWebviewNotifications(guest);
@@ -207,6 +208,11 @@ describe("permission", () => {
     expect(permission(guest)).toBe("granted");
     setSites({ "http://localhost:5173": "block" });
     expect(permission(guest)).toBe("denied");
+  });
+
+  test("is denied to incognito tabs, whatever the site's decision", () => {
+    setSites({ "http://localhost:5173": "allow" });
+    expect(permission(fakeGuest(host.host, "http://localhost:5173", true).guest)).toBe("denied");
   });
 
   test("is denied to plain http away from this machine", () => {

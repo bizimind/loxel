@@ -4,8 +4,9 @@
 // Refuses to create passkeys, as a NotAllowedError, the error a site gets when the user cancels.
 // The Touch ID authenticator keeps what it needs to find a passkey again in the session, which an
 // incognito session drops, so a passkey made there would be left in the keychain unusable
-// (electron/electron#52302). Signing in with an existing passkey, and registering a security key
-// or a phone (a cross-platform authenticator, which keeps its own), still work.
+// (electron/electron#52302). Signing in with an existing passkey still works, and so does a
+// registration that asks for a cross-platform authenticator (a security key or a phone, which keeps
+// its own); one that leaves the authenticator open, as most sites do, is refused.
 const { contextBridge } = require("electron");
 
 contextBridge.executeInMainWorld({

@@ -27,7 +27,7 @@ void mock.module("electron", () => ({
 }));
 
 const { windowOf } = await import("../test/fake-app-windows");
-const { afterMicrotasks, fakeGuest, fakeHost, sendSites } =
+const { afterMicrotasks, fakeGuest, fakeHost, fakeIncognitoSession, sendSites } =
   await import("../test/fake-browser-panels");
 const { installSiteAccess, trackWebviewSiteAccess } = await import("./browser-site-access");
 const { requestExternalApp, schemeOf } = await import("./browser-external-apps");
@@ -98,7 +98,7 @@ describe("links to other apps", () => {
 
   test("in an incognito tab, follow saved Blocks only, and keep its answers for its session", async () => {
     sendSites(channels, { externalApps: { [SITE]: { zoommtg: "allow", mailto: "block" } } });
-    const session = { storagePath: null };
+    const session = fakeIncognitoSession();
     const page = panel({ session });
     page.click();
     expect(await openLink(page.guest, "mailto:a@example.com")).toBe(false);
@@ -111,7 +111,7 @@ describe("links to other apps", () => {
     const sameSession = panel({ session });
     sameSession.click();
     expect(await openLink(sameSession.guest)).toBe(true);
-    const later = panel({ session: { storagePath: null } });
+    const later = panel({ session: fakeIncognitoSession() });
     later.click();
     void openLink(later.guest);
     await afterMicrotasks(() => later.requests().length === 1, "the prompt");

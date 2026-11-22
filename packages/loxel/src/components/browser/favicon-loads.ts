@@ -12,6 +12,7 @@
  * Successful loads are kept, least recently used first, so a tab rebuilt by a worktree switch shows
  * its favicon at once; a failure isn't kept, so the next try loads it again.
  */
+import { onLastIncognitoTabClosed } from "@/store/browser-pages";
 import { isHttpUrl, isSameOrigin, isStorableFavicon } from "@/url-utils";
 
 /** Whether favicon `url` is loaded through main: a web favicon, in the desktop app. */
@@ -19,17 +20,39 @@ export function loadsThroughMain(url: string): boolean {
   return window.electronAPI !== undefined && isHttpUrl(url);
 }
 
+/**
+ * Counts this window's incognito sessions: favicons an ended one loaded (with its cookies, for its
+ * sites) are dropped and never shown to the next.
+ */
+let incognitoGeneration = 0;
+const sessionKey = (incognito: boolean) =>
+  incognito ? `incognito:${incognitoGeneration}` : "browser";
+
 const loadKey = (url: string, pageUrl: string | undefined, incognito: boolean) => {
   const cookies = pageUrl !== undefined && isSameOrigin(url, pageUrl) ? "cookies" : "none";
   const page = pageUrl !== undefined && URL.canParse(pageUrl) ? new URL(pageUrl).origin : "";
-  return `${incognito ? "incognito" : "browser"} ${cookies} ${page} ${url}`;
+  return `${sessionKey(incognito)} ${cookies} ${page} ${url}`;
 };
+
+/** Whether a load of `key` belongs to an incognito session that has ended since. */
+const isStale = (key: string) =>
+  key.startsWith("incognito:") && !key.startsWith(`${sessionKey(true)} `);
 
 /** Loaded favicons as `data:` URLs by load key, least recently used first. */
 const loaded = new Map<string, string>();
 /** How much `loaded` keeps, in characters: the favicons of the open tabs, bookmarks and the bell. */
 const MAX_LOADED_LENGTH = 4 * 1024 * 1024;
 let loadedLength = 0;
+
+// The window's last incognito tab closed: its session's favicons go.
+onLastIncognitoTabClosed(() => {
+  incognitoGeneration++;
+  for (const [key, src] of loaded) {
+    if (!isStale(key)) continue;
+    loaded.delete(key);
+    loadedLength -= src.length;
+  }
+});
 
 function keepLoaded(key: string, src: string): void {
   loaded.set(key, src);
@@ -111,7 +134,7 @@ export function requestFavicon(
         .then((result) => {
           running--;
           loads.delete(key);
-          if (result) keepLoaded(key, result);
+          if (result && !isStale(key)) keepLoaded(key, result);
           resolve(result);
           runQueued();
         });

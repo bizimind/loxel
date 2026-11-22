@@ -246,10 +246,19 @@ function closeIncognitoTabs(close: (id: string, tab: IncognitoTab) => boolean): 
   }
 }
 
+const lastIncognitoTabClosedListeners = new Set<() => void>();
+
+/** Call `listener` each time this window's last incognito tab closes, to drop what it kept. */
+export function onLastIncognitoTabClosed(listener: () => void): void {
+  lastIncognitoTabClosedListeners.add(listener);
+}
+
 // Main keeps the incognito session while any window has incognito tabs, and ends it after the last.
 useIncognitoTabs.subscribe(({ tabs }, previous) => {
   const has = Object.keys(tabs).length > 0;
-  if (has !== Object.keys(previous.tabs).length > 0) window.electronAPI?.setHasIncognitoTabs(has);
+  if (has === Object.keys(previous.tabs).length > 0) return;
+  window.electronAPI?.setHasIncognitoTabs(has);
+  if (!has) for (const listener of lastIncognitoTabClosedListeners) listener();
 });
 
 /** Unload panel `id`'s page for good: its panel closed. */

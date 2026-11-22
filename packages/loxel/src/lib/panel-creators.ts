@@ -49,7 +49,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { activeLayoutKey, layoutWorktree } from "@/store/active-worktree";
-import { INCOGNITO_TAB_TITLE, openIncognitoTab } from "@/store/browser-pages";
+import { INCOGNITO_TAB_TITLE, closeBrowserPage, openIncognitoTab } from "@/store/browser-pages";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import {
   type EditorKey,
@@ -439,6 +439,19 @@ function browserPanelOptions(
   };
 }
 
+/**
+ * Add browser panel `id` with `add`. If that fails, an incognito one's in-memory entry goes too,
+ * or it would keep the incognito session alive with no tab.
+ */
+function addBrowserPanel(id: string, add: () => unknown): void {
+  try {
+    add();
+  } catch (error) {
+    closeBrowserPage(id);
+    throw error;
+  }
+}
+
 /** Open a new browser panel on `url` (blank by default), an incognito tab with `incognito`. */
 export function createBrowser(
   url?: string,
@@ -447,7 +460,7 @@ export function createBrowser(
   const cApi = getCenterApi();
   if (!cApi) return;
   const options = browserPanelOptions(cApi, url || "about:blank", incognito);
-  addPlacedPanel(cApi, placement, options, focus);
+  addBrowserPanel(options.id, () => addPlacedPanel(cApi, placement, options, focus));
   uiLog.info("Panel created", { panelType: "browser", panelId: options.id });
 }
 
@@ -484,11 +497,13 @@ export function openBrowserTab(
   const index = Math.max(sourceIndex, lastOpenedIndex) + 1;
 
   const options = browserPanelOptions(cApi, url, incognito);
-  cApi.addPanel({
-    ...options,
-    position: { referenceGroup: source.group, direction: "within", index },
-    inactive: !activate,
-  });
+  addBrowserPanel(options.id, () =>
+    cApi.addPanel({
+      ...options,
+      position: { referenceGroup: source.group, direction: "within", index },
+      inactive: !activate,
+    }),
+  );
   uiLog.info("Panel created", { panelType: "browser", panelId: options.id });
   lastTabOpenedFrom.set(sourcePanelId, options.id);
 }

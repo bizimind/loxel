@@ -54,6 +54,7 @@ const {
 } = await import("./browser-media");
 installBrowserMedia();
 const { installBrowserPermissions } = await import("./browser-permissions");
+const { markIncognitoSession } = await import("./browser-partition");
 
 const handler = (channel: string) => ipcHandlers.get(channel)!;
 
@@ -106,8 +107,12 @@ function fakeHost({ listening = true } = {}) {
 }
 
 const browserSession = { storagePath: "/browser" };
-/** An incognito session: in memory only. */
-const incognitoSession = () => ({ storagePath: null });
+/** A new incognito session, as main makes one. */
+const incognitoSession = () => {
+  const session = { storagePath: null };
+  markIncognitoSession(session);
+  return session;
+};
 
 /** A webview guest hosted by `host`, whose page can navigate to another origin. */
 function fakeGuest(

@@ -63,7 +63,7 @@ import type {
   WorktreeRemovePlan,
   WorktreeRemoveResult,
 } from "@/api/worktree-removal-model";
-import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
+import type { IncognitoUrlMessage, TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
@@ -3445,7 +3445,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (body.incognito === true) {
       const wtPath = body.wtPath === undefined ? null : await namedWorktree(ctx, body.wtPath);
       if (body.wtPath !== undefined && !wtPath) return error("No project found for worktree", 404);
-      const message: InboxMessage = {
+      const message: IncognitoUrlMessage = {
         type: "open_url",
         wtPath,
         data: { url: body.url, incognito: true, ...placed },

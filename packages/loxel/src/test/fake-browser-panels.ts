@@ -7,6 +7,7 @@
  */
 import type { IpcMainEvent, WebContents } from "electron";
 
+import { markIncognitoSession } from "../electron/browser-partition";
 import {
   type SiteAccessSites,
   type SitePermissionAnswer,
@@ -86,8 +87,15 @@ export function sendSites(channels: SiteAccessChannels, sites: Partial<SiteAcces
   });
 }
 
-/** The browser panels' session, persistent; an incognito session's `storagePath` is null. */
+/** The browser panels' session. */
 export const fakeBrowserSession = { storagePath: "/browser" };
+
+/** A new incognito session, as main makes one. */
+export function fakeIncognitoSession(): { storagePath: string | null } {
+  const session = { storagePath: null };
+  markIncognitoSession(session);
+  return session;
+}
 
 /**
  * A webview guest hosted by `host` (or a popup, by `type`) in `session`, whose page can navigate

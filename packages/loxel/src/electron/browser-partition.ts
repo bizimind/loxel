@@ -12,12 +12,18 @@ export const BROWSER_PARTITION = "persist:browser";
  */
 export const INCOGNITO_PARTITION = "loxel-incognito";
 
+/** The incognito sessions `incognito-session.ts` made this run, ended ones included. */
+const incognitoSessions = new WeakSet<object>();
+
+/** Record `browserSession` as an incognito one (`incognito-session.ts`, when it makes one). */
+export function markIncognitoSession(browserSession: object): void {
+  incognitoSessions.add(browserSession);
+}
+
 /**
- * Whether a browser session is incognito: its data lives in memory only (`storagePath` null), as
- * the incognito sessions' partitions are the browser panels' only ones without `persist:`.
+ * Whether a browser session is incognito: one main made for incognito tabs, not just any in-memory
+ * session (electron-updater's is one too).
  */
-export function isIncognitoSession(browserSession: {
-  readonly storagePath: string | null;
-}): boolean {
-  return browserSession.storagePath === null;
+export function isIncognitoSession(browserSession: object): boolean {
+  return incognitoSessions.has(browserSession);
 }

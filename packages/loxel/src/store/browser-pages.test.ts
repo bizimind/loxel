@@ -13,10 +13,14 @@ import {
   closeBrowserPage,
   closeLayoutBrowserPages,
   detachBrowserPage,
+  getIncognitoTab,
   markBrowserPageFrozen,
+  onLastIncognitoTabClosed,
+  openIncognitoTab,
   setBrowserPageUrl,
   setBrowserPageWebContents,
   unloadBrowserPages,
+  updateIncognitoTab,
   useBrowserPages,
   whenBrowserPageAttached,
 } from "./browser-pages";
@@ -196,5 +200,61 @@ describe("browser pages", () => {
     show("x1", WT_A_ELSEWHERE);
     closeLayoutBrowserPages(WT_A);
     expect(loaded()).toEqual(["x1"]);
+  });
+});
+
+describe("incognito tabs", () => {
+  const setHasIncognitoTabs = jest.fn((_hasTabs: boolean) => {});
+  beforeEach(() => {
+    setHasIncognitoTabs.mockClear();
+    window.electronAPI = stubElectronAPI({ setHasIncognitoTabs });
+  });
+
+  test("keep their page in memory from opening to closing, and tell main when there are any", () => {
+    let lastClosed = 0;
+    onLastIncognitoTabClosed(() => lastClosed++);
+    openIncognitoTab("i1", WT_A, "https://i1.test/");
+    openIncognitoTab("i2", WT_B, "https://i2.test/");
+    expect(setHasIncognitoTabs.mock.calls).toEqual([[true]]);
+    updateIncognitoTab("i1", { url: "https://i1.test/next", title: "Next" });
+    expect(getIncognitoTab("i1")).toEqual({
+      layoutKey: WT_A,
+      url: "https://i1.test/next",
+      title: "Next",
+    });
+
+    closeBrowserPage("i1");
+    expect(getIncognitoTab("i1")).toBeUndefined();
+    expect(lastClosed).toBe(0);
+    closeLayoutBrowserPages(WT_B);
+    expect(getIncognitoTab("i2")).toBeUndefined();
+    expect(setHasIncognitoTabs.mock.calls).toEqual([[true], [false]]);
+    expect(lastClosed).toBe(1);
+    // A gone tab takes no updates.
+    updateIncognitoTab("i2", { title: "Late" });
+    expect(getIncognitoTab("i2")).toBeUndefined();
+  });
+
+  test("an unloaded incognito page comes back on the URL it was on", () => {
+    openIncognitoTab("i3", WT_A, "https://i3.test/");
+    attachBrowserPage("i3", {
+      layoutKey: WT_A,
+      url: "https://i3.test/",
+      incognito: true,
+      slot: { element: document.createElement("div"), api },
+    });
+    setBrowserPageUrl("i3", "https://i3.test/later");
+    unloadBrowserPages(["i3"]);
+    attachBrowserPage("i3", {
+      layoutKey: WT_A,
+      url: "https://i3.test/",
+      incognito: true,
+      slot: { element: document.createElement("div"), api },
+    });
+    expect(useBrowserPages.getState().pages.i3).toMatchObject({
+      initialUrl: "https://i3.test/later",
+      incognito: true,
+    });
+    closeBrowserPage("i3");
   });
 });

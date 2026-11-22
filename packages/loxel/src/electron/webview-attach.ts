@@ -1,7 +1,7 @@
 /**
  * What a browser panel `<webview>` gets when it attaches (`will-attach-webview`), whatever its
- * element asks for: the browser panels' partition (or the incognito session, the one other choice), Loxel's own sandboxed preload, and Chromium's
- * secure defaults. Only Loxel's window renderer can create a webview; this holds even if that
+ * element asks for: the browser panels' partition (or the incognito session, the one other
+ * choice), Loxel's own sandboxed preload, and Chromium's secure defaults. Only Loxel's window renderer can create a webview; this holds even if that
  * renderer were made to ask for less.
  * See: https://www.electronjs.org/docs/latest/tutorial/security#12-verify-webview-options-before-creation
  */
