@@ -8,6 +8,7 @@ import { $ } from "bun";
 
 import { getRepoTrustStatus, setRepoTrusted } from "../repo-trust";
 import { getCommitDiff, getUnstagedDiff, getWorkingTreeDiff } from "./diff";
+import { getFileContent } from "./file-content";
 import { readOnlyGitEnv, worktreeReadEnv } from "./git-env";
 import { ContentAwaitsTrustError, runGit } from "./run-git";
 import { getStatus } from "./status";
@@ -147,10 +148,10 @@ describe("working-tree reads in an untrusted repository", () => {
 });
 
 describe("a partial clone in an untrusted repository", () => {
-  /** A clone without file contents of a repository with two commits, and the second commit. */
+  /** A clone without file contents of a repository with two commits, and those commits. */
   async function partialClone() {
     const origin = await createRepo();
-    await commit(origin.path, "first", { "a.txt": "a\n" });
+    const first = await commit(origin.path, "first", { "a.txt": "a\n" });
     const second = await commit(origin.path, "second", { "a.txt": "b\n" });
     await $`git -C ${origin.path} config uploadpack.allowFilter true`.quiet();
     const clone = `${origin.path}-clone`;
@@ -159,16 +160,20 @@ describe("a partial clone in an untrusted repository", () => {
       await rm(clone, { recursive: true, force: true });
       await origin.cleanup();
     };
-    return { clone, second, cleanup };
+    return { clone, first, second, cleanup };
   }
 
   test("content the clone doesn't have yet waits for trust", async () => {
-    const { clone, second, cleanup } = await partialClone();
+    const { clone, first, second, cleanup } = await partialClone();
     try {
       // The first commit's `a.txt` was never downloaded.
       const error = await getCommitDiff(clone, second).catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ContentAwaitsTrustError);
       expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
+      const fileError = await getFileContent(clone, "a.txt", first).catch((err: unknown) => err);
+      expect(fileError).toBeInstanceOf(ContentAwaitsTrustError);
+      // A path the commit doesn't have is still just an empty file.
+      expect(await getFileContent(clone, "missing.txt", second)).toEqual([]);
 
       // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses.
       const { GIT_NO_LAZY_FETCH: _ignored, ...olderGitEnv } = readOnlyGitEnv(clone);
@@ -178,6 +183,7 @@ describe("a partial clone in an untrusted repository", () => {
       expect(olderGit).toBeInstanceOf(ContentAwaitsTrustError);
 
       setRepoTrusted(clone, true);
+      expect(await getFileContent(clone, "a.txt", first)).toEqual(["a", ""]);
       const diff = await getCommitDiff(clone, second);
       expect(diff.files.map((f) => [f.newPath, f.additions, f.deletions])).toEqual([
         ["a.txt", 1, 1],
