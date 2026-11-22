@@ -7,9 +7,9 @@ type AppPermission = Parameters<PermissionCheckHandler>[1];
 
 /**
  * The permissions Loxel's own page uses, for its main frame only. Everything else is refused, to
- * the page and to every frame inside it: with no handlers, Electron grants every permission to
- * every page, and frames in the app's windows can show content from a repository or the web (an
- * embed in a drawing).
+ * the page and to every frame inside it, unless it is in `FRAME_PERMISSIONS`: with no handlers,
+ * Electron grants every permission to every page, and frames in the app's windows can show content
+ * from a repository or the web (an embed in a drawing).
  */
 const APP_PAGE_PERMISSIONS: ReadonlySet<AppPermission> = new Set<AppPermission>([
   // `window.queryLocalFonts()`, the font pickers in Settings. The list fingerprints the machine.

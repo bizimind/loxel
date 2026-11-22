@@ -1122,8 +1122,8 @@ app.whenReady().then(async () => {
     const browserSession = session.fromPartition(BROWSER_PARTITION);
     installAccountChooser(browserSession, promptForAccount);
     installHybridQrCode(browserSession, browserPanelFrame);
-    // Loxel's own page gets only the permissions it uses, and frames inside it none; browser
-    // panels get only their own short allowlist.
+    // Loxel's own page gets only the permissions it uses, and frames inside it only clipboard
+    // writes and fullscreen; browser panels get only their own short allowlist.
     installAppPermissions(session.defaultSession, isLocal);
     installBrowserPermissions(
       browserSession,
