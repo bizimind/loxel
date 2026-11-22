@@ -340,6 +340,29 @@ describe("executeAdd", () => {
     );
   });
 
+  test("refuses a .worktrees symlink, pointing to WT_DIR instead", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, ".worktrees"));
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
+  test("refuses a symlink inside .worktrees that leads out of it", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await Bun.write(join(repo.root, ".worktrees", ".keep"), "");
+    await symlink(outside, join(repo.root, ".worktrees", "feat"));
+
+    await expect(executeAdd({ name: "feat/away", repoPath: repo.root })).rejects.toThrow(
+      "a symlink along it",
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
   test("checks out an existing branch with an explicit branch", async () => {
     repo = await createTestRepo({ bare: true });
     await git(["branch", "existing"], repo.root);

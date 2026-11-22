@@ -122,6 +122,16 @@ describe("transformToBare", () => {
     expect(await Bun.file(join(repo.root, "README.md")).exists()).toBe(true);
   });
 
+  test("refuses conversion when .worktrees is a symlink", async () => {
+    repo = await createTestRepo();
+    await symlink(join(repo.root, ".."), join(repo.root, ".worktrees"));
+
+    await expect(transformToBare(repo.root, "main")).rejects.toThrow("set WT_DIR=");
+
+    expect(await detectRepoType(repo.root)).toBe("regular");
+    expect(await Bun.file(join(repo.root, "README.md")).exists()).toBe(true);
+  });
+
   test("honors WT_DIR for the converted working tree", async () => {
     repo = await createTestRepo();
     const trees = join(repo.root, "..", "trees");

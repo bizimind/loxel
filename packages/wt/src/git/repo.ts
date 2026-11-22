@@ -7,7 +7,12 @@ import { getCurrentBranch } from "./branch.ts";
 import { git, gitSucceeds, runGit } from "./run.ts";
 import { readWorktreeConfigState } from "./worktree-config.ts";
 import { reownMeta } from "./worktree-meta.ts";
-import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
+import {
+  assertWorktreePathContained,
+  canonicalWorktreesDir,
+  isWorktreeDirty,
+  pathExists,
+} from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
 
@@ -98,6 +103,7 @@ export async function assertCanTransformToBare(
 
   const dir = await canonicalWorktreesDir(cwd);
   const worktreePath = join(dir, currentBranch);
+  await assertWorktreePathContained(cwd, dir, worktreePath);
   if (await pathExists(worktreePath)) {
     throw new Error(`Cannot convert because the destination already exists: ${worktreePath}`);
   }

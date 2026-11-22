@@ -26,6 +26,7 @@ export {
 export { git, gitFailure, gitSucceeds, runGit, type GitResult } from "./run.ts";
 export {
   addWorktree,
+  assertWorktreePathContained,
   canonicalWorktreesDir,
   DETACHED,
   deleteInBackground,

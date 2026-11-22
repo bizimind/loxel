@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 
 import {
   assertValidWorktreeName,
+  assertWorktreePathContained,
   branchExists,
   branchNameError,
   DETACHED,
@@ -176,6 +177,7 @@ async function inspectMove(
   await assertValidWorktreeName(params.name, root);
 
   const worktreePath = join(dir, params.name);
+  await assertWorktreePathContained(root, dir, worktreePath);
   if (worktreePath === worktree.path) {
     throw new Error(`Worktree '${oldName}' is already at ${worktreePath}`);
   }

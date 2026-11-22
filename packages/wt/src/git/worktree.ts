@@ -116,6 +116,36 @@ export async function canonicalWorktreesDir(root: string): Promise<string> {
 }
 
 /**
+ * Refuse a new worktree path that a symlink leads out of the worktrees directory.
+ *
+ * The default `.worktrees` lives inside the repository, so the repository's own
+ * content can make it, or an entry in it, a symlink to anywhere. Only `WT_DIR`
+ * may place worktrees outside the repository.
+ *
+ * @param root - Canonical repository root
+ * @param dir - Canonical worktrees directory
+ * @param path - The new worktree's path under `dir`
+ */
+export async function assertWorktreePathContained(
+  root: string,
+  dir: string,
+  path: string,
+): Promise<void> {
+  const defaultDir = join(root, ".worktrees");
+  if (worktreesDir(root) === defaultDir && dir !== defaultDir) {
+    throw new Error(
+      `Refusing to create worktrees through ${defaultDir}: it is a symlink to ${dir}. If you created it to keep worktrees there, set WT_DIR=${dir} instead.`,
+    );
+  }
+  const real = await canonicalizePotentialPath(path);
+  if (!real.startsWith(`${dir}/`)) {
+    throw new Error(
+      `Refusing to create a worktree at ${path}: a symlink along it leads to ${real}, outside ${dir}.`,
+    );
+  }
+}
+
+/**
  * A worktree's name: its path relative to the worktrees directory, so nested
  * names like `feat/foo` round-trip. Falls back to the last path segment for
  * display-only callers handling paths outside the managed directory.

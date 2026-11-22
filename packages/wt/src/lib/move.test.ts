@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { branchExists, git, pathExists } from "../git/index.ts";
@@ -101,6 +102,17 @@ describe("planMove", () => {
 
     await expect(planMove({ oldName: "one", name: "two", repoPath: repo.root })).rejects.toThrow(
       "Path already exists",
+    );
+  });
+
+  test("rejects a destination that a symlink leads out of .worktrees", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeAdd({ name: "a", repoPath: repo.root });
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, ".worktrees", "feat"));
+
+    await expect(planMove({ oldName: "a", name: "feat/b", repoPath: repo.root })).rejects.toThrow(
+      "a symlink along it",
     );
   });
 
