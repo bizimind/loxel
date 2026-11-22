@@ -287,6 +287,25 @@ describe("executeRemove", () => {
     expect(await Bun.file(join(elsewhere, "foo", "README.md")).exists()).toBe(true);
   });
 
+  test("refuses a worktree whose recorded path is not normalized", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "foo", repoPath: repo.root });
+    const gitFile = await Bun.file(join(added.path, ".git")).text();
+    const adminDir = gitFile.replace(/^gitdir: /, "").trim();
+    await Bun.write(join(adminDir, "gitdir"), `${dirname(added.path)}/other/../foo/.git\n`);
+    await mkdir(join(dirname(added.path), "other"));
+
+    const removal = executeRemove({
+      name: "other/../foo",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: true,
+    });
+
+    await expect(removal).rejects.toThrow("not a normalized path");
+    expect(await Bun.file(join(added.path, "README.md")).exists()).toBe(true);
+  });
+
   test("deleting an unmerged branch without force warns instead of failing", async () => {
     repo = await createTestRepo({ bare: true });
     const added = await executeAdd({ name: "unmerged", repoPath: repo.root });

@@ -103,7 +103,7 @@ export function forceReason(name: string, dirty: boolean): string | null {
  * Run the clean hook, then remove the worktree and optionally its branch.
  *
  * Throws when the worktree is dirty and `force` is not set, when it is the main worktree, when it is locked,
- * or when its path resolves outside the worktrees directory.
+ * or when its path is not normalized or resolves outside the worktrees directory.
  * Every refusal happens before the clean hook runs, so a removal git would
  * reject never tears down the environment; only a change made while the hook
  * runs can fail afterwards.
@@ -125,6 +125,13 @@ export async function executeRemove(
   // The path comes from the repository's worktree entries, and removing deletes
   // whatever directory it resolves to, so a symlink along it must not lead out
   // of the worktrees directory. A checkout that is already gone still passes.
+  // A `..` after a symlink resolves differently in the kernel than in
+  // `resolve`, so only a normalized path (as git and wt record) is checked.
+  if (resolve(worktree.path) !== worktree.path) {
+    throw new Error(
+      `Refusing to remove worktree '${name}': ${worktree.path} is not a normalized path`,
+    );
+  }
   let realPath: string;
   try {
     realPath = await canonicalizePotentialPath(worktree.path);
