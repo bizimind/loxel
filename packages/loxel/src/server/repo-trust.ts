@@ -58,6 +58,23 @@ function linkedWorktreeRepo(folder: string, dotGit: string): string | null {
   }
 }
 
+/**
+ * Whether `folder` is itself a git directory (`HEAD`, `objects` and `refs`, the shape git looks for),
+ * such as a bare repository's: its own common directory, whose config and hooks git runs there as it
+ * does in the repository's worktrees.
+ */
+function isGitDir(folder: string): boolean {
+  try {
+    return (
+      lstatSync(path.join(folder, "HEAD")).isFile() &&
+      lstatSync(path.join(folder, "objects")).isDirectory() &&
+      lstatSync(path.join(folder, "refs")).isDirectory()
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** What trust is stored under, and the directory on disk that stands for it. */
 interface RepoIdentity {
   id: string;
@@ -66,9 +83,10 @@ interface RepoIdentity {
 
 /**
  * What trust is stored under for a worktree: the repository's git common directory, so all its
- * worktrees share one answer, or the worktree's own folder when it has none (a folder outside any
- * repository, a submodule). The two kinds have separate ids, so a repository claiming a folder as
- * its common directory cannot take that folder's answer. Remote URLs and commits identify nothing
+ * worktrees share one answer (as does that directory itself, such as a bare repository's, where
+ * Loxel runs git for history), or the worktree's own folder when it has none (a folder outside
+ * any repository, a submodule). The two kinds have separate ids, so a repository claiming a folder
+ * as its common directory cannot take that folder's answer. Remote URLs and commits identify nothing
  * here, since a fork has the same ones and the repository's config can claim any.
  *
  * Reads the filesystem instead of asking git, so that answering runs nothing in an untrusted
@@ -83,7 +101,8 @@ function repoIdentity(wtPath: string): RepoIdentity {
     if (entry.isDirectory()) repoDir = dotGit;
     else if (entry.isFile()) repoDir = linkedWorktreeRepo(folder, dotGit);
   } catch {
-    // No `.git` here: the folder stands for itself.
+    // No `.git` here: the folder stands for itself, unless it is a git directory itself.
+    if (isGitDir(folder)) repoDir = folder;
   }
   return repoDir ? { id: `git:${repoDir}`, dir: repoDir } : { id: `folder:${folder}`, dir: folder };
 }

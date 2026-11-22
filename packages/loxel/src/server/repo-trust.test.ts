@@ -55,6 +55,15 @@ function makeRepo(name: string): string {
   return repo;
 }
 
+/** A bare repository's directory, as `git clone --bare` leaves it. */
+function makeBareRepo(name: string): string {
+  const bare = join(root, name);
+  mkdirSync(join(bare, "objects"), { recursive: true });
+  mkdirSync(join(bare, "refs"));
+  writeFileSync(join(bare, "HEAD"), "ref: refs/heads/main\n");
+  return bare;
+}
+
 /** A linked worktree of the repository whose common directory is `commonDir`, as git records it. */
 function makeLinkedWorktree(commonDir: string, name: string): string {
   const worktree = join(root, name);
@@ -87,6 +96,7 @@ describe("repository identity", () => {
     await Bun.$`git -C ${repo} -c worktree.useRelativePaths=true worktree add -q ${relative}`;
     expect(repoTrustId(absolute)).toBe(repoTrustId(repo));
     expect(repoTrustId(relative)).toBe(repoTrustId(repo));
+    expect(repoTrustId(join(repo, ".git"))).toBe(repoTrustId(repo));
 
     const bare = join(root, "real-bare");
     await Bun.$`git clone -q --bare ${repo} ${bare}`;
@@ -95,6 +105,28 @@ describe("repository identity", () => {
       await Bun.$`git -C ${bare} worktree add -q -b ${`b${i}`} ${worktree}`;
     }
     expect(repoTrustId(bareWorktrees[0]!)).toBe(repoTrustId(bareWorktrees[1]!));
+    expect(repoTrustId(bare)).toBe(repoTrustId(bareWorktrees[0]!));
+  });
+
+  test("a repository's git directory shares its worktrees' trust", () => {
+    const bare = makeBareRepo("bare");
+    const worktree = makeLinkedWorktree(bare, "wt");
+    expect(repoTrustId(bare)).toBe(`git:${bare}`);
+    expect(repoTrustId(bare)).toBe(repoTrustId(worktree));
+    setRepoTrusted(worktree, true);
+    expect(isRepoTrusted(bare)).toBe(true);
+    expect(getRepoTrustStatus(bare).repository).toBe(bare);
+  });
+
+  test("a bare repository reached through a symlink is the same repository", () => {
+    const bare = makeBareRepo("bare");
+    const link = join(root, "link");
+    symlinkSync(bare, link);
+    const throughLink = makeLinkedWorktree(link, "through-link");
+    const direct = makeLinkedWorktree(bare, "direct");
+    expect(repoTrustId(link)).toBe(repoTrustId(bare));
+    expect(repoTrustId(throughLink)).toBe(repoTrustId(bare));
+    expect(repoTrustId(direct)).toBe(repoTrustId(link));
   });
 
   test("a folder outside any repository stands for itself", () => {
@@ -154,6 +186,27 @@ describe("a repository cannot claim trust", () => {
     writeFileSync(join(inside, ".git"), "gitdir: ../worktrees/x\n");
     writeFileSync(join(adminDir, "gitdir"), "../../evil/.git\n");
     expect(isRepoTrusted(inside)).toBe(false);
+  });
+
+  test("a folder is a repository's git directory only when it has the shape of one", () => {
+    const plain = join(root, "plain");
+    mkdirSync(plain);
+    const planted = makeLinkedWorktree(plain, "planted");
+    setRepoTrusted(plain, true);
+    expect(repoTrustId(plain)).toBe(`folder:${plain}`);
+    expect(isRepoTrusted(planted)).toBe(false);
+
+    // Taking the shape of a git directory later makes it another repository, which starts untrusted.
+    mkdirSync(join(plain, "objects"));
+    mkdirSync(join(plain, "refs"));
+    writeFileSync(join(plain, "HEAD"), "ref: refs/heads/main\n");
+    expect(isRepoTrusted(plain)).toBe(false);
+    expect(isRepoTrusted(planted)).toBe(false);
+
+    const linkedHead = makeBareRepo("linked-head");
+    rmSync(join(linkedHead, "HEAD"));
+    symlinkSync(join(plain, "HEAD"), join(linkedHead, "HEAD"));
+    expect(repoTrustId(linkedHead)).toBe(`folder:${linkedHead}`);
   });
 
   test("a symlinked .git does not borrow trust", () => {
