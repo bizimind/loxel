@@ -4,6 +4,7 @@ import type { ExcalidrawImperativeAPI, ExcalidrawProps } from "@excalidraw/excal
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
+import { useEffect } from "react";
 
 import { localServerId } from "@/api/local-server";
 import { fileEditorKey, useEditorStateStore } from "@/store/editor-state";
@@ -33,12 +34,27 @@ Object.defineProperty(document, "fonts", {
   }),
 });
 
+/** Point the page at `url`, through the controls happy-dom's DOM preload puts on `window`. */
+function setPageUrl(url: string): void {
+  const happyDOM: unknown = Reflect.get(window, "happyDOM");
+  if (typeof happyDOM !== "object" || happyDOM === null || !("setURL" in happyDOM)) {
+    throw new Error("happy-dom is not registered");
+  }
+  const { setURL } = happyDOM;
+  if (typeof setURL !== "function") throw new Error("happy-dom has no setURL");
+  setURL.call(happyDOM, url);
+}
+
 // The real Excalidraw, wrapped to hand the test its API and count the changes it reports.
 const excalidraw = await import("@excalidraw/excalidraw");
 const RealExcalidraw = excalidraw.Excalidraw;
 let api: ExcalidrawImperativeAPI | null = null;
 let reportedChanges = 0;
+let onLinkOpen: ExcalidrawProps["onLinkOpen"];
 function ObservedExcalidraw(props: ExcalidrawProps) {
+  useEffect(() => {
+    onLinkOpen = props.onLinkOpen;
+  });
   return (
     <RealExcalidraw
       {...props}
@@ -210,5 +226,82 @@ describe("ExcalidrawEditor", () => {
       ["a", 10, "a0"],
       ["b", 80, "a1"],
     ]);
+  });
+
+  describe("a link on an element", () => {
+    /** Click the link on rectangle `a` as Excalidraw reports it; returns the event it hands over. */
+    async function openLink(link: string): Promise<CustomEvent> {
+      const loaded = await loadedApi();
+      const element = loaded.getSceneElements().find((el) => el.id === "a");
+      if (!element || !onLinkOpen) throw new Error("the drawing has no rectangle or link handler");
+      const event = new CustomEvent("excalidraw-link", {
+        cancelable: true,
+        detail: { nativeEvent: new MouseEvent("click") },
+      });
+      onLinkOpen({ ...element, link }, event);
+      return event;
+    }
+
+    const realOpen = window.open;
+    let realUrl = "";
+    let opened: unknown[] = [];
+    beforeEach(() => {
+      // The app's page, which happy-dom's `about:blank` stands in for, has a web origin.
+      realUrl = location.href;
+      setPageUrl("http://localhost:7433/");
+      opened = [];
+      window.open = (url) => {
+        opened.push(url);
+        return null;
+      };
+    });
+    afterEach(() => {
+      setPageUrl(realUrl);
+      window.open = realOpen;
+    });
+
+    test("opens a web link the way the app's other links open", async () => {
+      renderEditor();
+      const event = await openLink("https://example.com/docs");
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(opened).toEqual(["https://example.com/docs"]);
+    });
+
+    /** Render the editor and record what its link handler scrolls to. */
+    async function recordScrolls(): Promise<unknown[]> {
+      renderEditor();
+      const loaded = await loadedApi();
+      const scrolledTo: unknown[] = [];
+      loaded.scrollToContent = (target) => {
+        scrolledTo.push(target);
+      };
+      return scrolledTo;
+    }
+
+    test("scrolls to the element a link to this drawing names", async () => {
+      const scrolledTo = await recordScrolls();
+      const event = await openLink("http://localhost:7433/?element=b");
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(scrolledTo).toEqual(["http://localhost:7433/?element=b"]);
+      expect(opened).toEqual([]);
+    });
+
+    test("scrolls to the element a relative link names", async () => {
+      const scrolledTo = await recordScrolls();
+      await openLink("?element=b");
+
+      expect(scrolledTo).toEqual(["http://localhost:7433/?element=b"]);
+      expect(opened).toEqual([]);
+    });
+
+    test("hands a link to another page of the app's origin to the window, not the canvas", async () => {
+      const scrolledTo = await recordScrolls();
+      await openLink("/docs");
+
+      expect(scrolledTo).toEqual([]);
+      expect(opened).toEqual(["/docs"]);
+    });
   });
 });
