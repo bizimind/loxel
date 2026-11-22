@@ -5,15 +5,21 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
  */
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
-import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
+import { getRepoTrust } from "@/api/repo-trust-client";
+import { usePanelWorktree } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { EditorBanner } from "@/components/editor/EditorBanner";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { SaveRefusedBanner } from "@/components/editor/SaveRefusedBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { queryKeys } from "@/queries/query-keys";
+import { useProjectRef } from "@/queries/use-scope";
 import { type EditorKey, useEditorStateStore } from "@/store/editor-state";
 import { useUIStore } from "@/store/ui";
 
@@ -184,6 +190,52 @@ function deserializeExcalidraw(content: string): ExcalidrawData {
 }
 
 /**
+ * `iframe` elements (Excalidraw's "magic frames") render HTML stored in the drawing, scripts
+ * included, as soon as they are on screen. Until the repository is trusted or the user loads them,
+ * Excalidraw gets each one with its `customData` moved aside under this key and a "not loaded"
+ * state in its place. The original goes back before every save, so the file keeps it unchanged.
+ */
+const HELD_CUSTOM_DATA = "loxelHeldCustomData";
+const HTML_NOT_LOADED = {
+  status: "error",
+  code: "ERR_NOT_LOADED",
+  message: "Embedded HTML is not loaded. Use Load above the drawing to show it.",
+} as const;
+
+const HTML_NOT_LOADED_JSON = JSON.stringify(HTML_NOT_LOADED);
+
+/**
+ * An `iframe` element held back by {@link holdHtml}: Excalidraw renders only Loxel's own "not
+ * loaded" state for it. Own properties only, so nothing a file writes passes for held while
+ * Excalidraw would still find the file's own data.
+ */
+function isHtmlHeld(el: ExcalidrawElement): boolean {
+  const data: unknown = el.customData;
+  if (el.type !== "iframe" || typeof data !== "object" || data === null) return false;
+  const shown: unknown = Object.getOwnPropertyDescriptor(data, "generationData")?.value;
+  return Object.hasOwn(data, HELD_CUSTOM_DATA) && JSON.stringify(shown) === HTML_NOT_LOADED_JSON;
+}
+
+/** `elements` with the `customData` of every `iframe` element held back. */
+function holdHtml(elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
+  return elements.map((el) =>
+    el.type === "iframe" && !isHtmlHeld(el)
+      ? {
+          ...el,
+          customData: { [HELD_CUSTOM_DATA]: el.customData, generationData: HTML_NOT_LOADED },
+        }
+      : el,
+  );
+}
+
+/** `elements` with every held-back `iframe` element's original `customData` back in place. */
+function restoreHtml(elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
+  return elements.map((el) =>
+    isHtmlHeld(el) ? { ...el, customData: el.customData?.[HELD_CUSTOM_DATA] } : el,
+  );
+}
+
+/**
  * Apply ExcalidrawData to the Excalidraw imperative API and return the version of the scene it
  * loaded. `updateScene` fills in missing fractional indices and bumps the version of each element
  * it fixes, so the loaded version can differ from `data`'s.
@@ -191,8 +243,11 @@ function deserializeExcalidraw(content: string): ExcalidrawData {
 function applyScene(
   apiRef: React.MutableRefObject<ExcalidrawImperativeAPI | null>,
   data: ExcalidrawData,
+  htmlAllowed: boolean,
 ): number {
-  const scene: Record<string, unknown> = { elements: data.elements };
+  const scene: Record<string, unknown> = {
+    elements: htmlAllowed ? data.elements : holdHtml(data.elements),
+  };
   if (data.appState.viewBackgroundColor !== undefined) {
     scene.appState = { viewBackgroundColor: data.appState.viewBackgroundColor };
   }
@@ -224,6 +279,28 @@ export function ExcalidrawEditor({
   // False until Excalidraw reports the scene it loaded from initialData (see handleChange).
   const sceneLoadedRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+
+  // HTML in the drawing's `iframe` elements runs once the repository is trusted or the user loads it.
+  const worktree = usePanelWorktree();
+  const project = useProjectRef(worktree);
+  const { data: trust, isLoading: trustLoading } = useQuery({
+    queryKey: queryKeys.repoTrust(project, worktree),
+    queryFn: worktree ? () => getRepoTrust(worktree) : skipToken,
+    staleTime: Infinity, // WebSocket bridge invalidates it on repo_trust_changed
+  });
+  // Times the user clicked Load. Showing or holding back the HTML remounts Excalidraw from the
+  // content cache, which holds the original: a fresh scene and undo history, with nothing changed.
+  const [htmlLoads, setHtmlLoads] = useState(0);
+  const [hasHeldHtml, setHasHeldHtml] = useState(false);
+  const htmlAllowed = trust?.decision === "trusted" || htmlLoads > 0;
+  const htmlAllowedRef = useRef(htmlAllowed);
+  htmlAllowedRef.current = htmlAllowed;
+  const sceneKey = `${htmlAllowed}-${htmlLoads}`;
+  const sceneKeyRef = useRef(sceneKey);
+  if (sceneKeyRef.current !== sceneKey) {
+    sceneKeyRef.current = sceneKey;
+    sceneLoadedRef.current = false; // the remounted Excalidraw reports its loaded scene again
+  }
 
   // Excalidraw has no imperative focus API; focusing the canvas container is
   // enough for keyboard shortcuts (delete/arrow keys/zoom) to work.
@@ -285,7 +362,7 @@ export function ExcalidrawEditor({
     if (!data) return;
     isProgrammaticRef.current = true;
     try {
-      lastVersionRef.current = applyScene(excalidrawApiRef, data);
+      lastVersionRef.current = applyScene(excalidrawApiRef, data, htmlAllowedRef.current);
     } finally {
       isProgrammaticRef.current = false;
     }
@@ -293,7 +370,9 @@ export function ExcalidrawEditor({
 
   const handleChange = useCallback(
     (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      if (isProgrammaticRef.current || drawingTeardownActive) return;
+      if (drawingTeardownActive) return;
+      setHasHeldHtml(elements.some((el) => !el.isDeleted && isHtmlHeld(el)));
+      if (isProgrammaticRef.current) return;
       const version = sceneVersion(elements);
       // The first change after mount is Excalidraw reporting the scene it loaded, not an edit.
       // Loading fills in missing fractional indices and bumps those elements' versions, so a
@@ -305,7 +384,7 @@ export function ExcalidrawEditor({
       }
       if (version !== lastVersionRef.current) {
         lastVersionRef.current = version;
-        hookHandleChange({ elements, appState, files });
+        hookHandleChange({ elements: restoreHtml(elements), appState, files });
       }
     },
     [hookHandleChange, isProgrammaticRef],
@@ -372,7 +451,7 @@ export function ExcalidrawEditor({
     isProgrammaticRef.current = true;
     try {
       drawingContentCache.set(cacheKeyRef.current, diskContent);
-      lastVersionRef.current = applyScene(excalidrawApiRef, diskContent);
+      lastVersionRef.current = applyScene(excalidrawApiRef, diskContent, htmlAllowedRef.current);
     } finally {
       isProgrammaticRef.current = false;
     }
@@ -391,7 +470,8 @@ export function ExcalidrawEditor({
     );
   }
 
-  if (!initialData) {
+  // Excalidraw mounts once trust is known, so a trusted repository's drawing opens with its HTML.
+  if (!initialData || trustLoading) {
     return (
       <div
         className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -423,6 +503,13 @@ export function ExcalidrawEditor({
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}
+      {hasHeldHtml && (
+        <EditorBanner
+          tone="info"
+          message="This drawing embeds HTML. It is not loaded until you trust the repository or load it here."
+          actions={[{ label: "Load", onClick: () => setHtmlLoads((n) => n + 1) }]}
+        />
+      )}
       <div className="flex-1">
         <Suspense
           fallback={
@@ -435,11 +522,12 @@ export function ExcalidrawEditor({
           }
         >
           <ExcalidrawWithMenu
+            key={sceneKey}
             excalidrawAPI={(api) => {
               excalidrawApiRef.current = api;
             }}
             initialData={{
-              elements: initialData.elements,
+              elements: htmlAllowed ? initialData.elements : holdHtml(initialData.elements),
               appState: initialData.appState,
               files: initialData.files,
             }}
