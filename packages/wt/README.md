@@ -203,7 +203,7 @@ New worktrees are created at `<repoRoot>/.worktrees/<name>`. The repo root is th
 WT_DIR=~/wt/myrepo wt add feature-x
 ```
 
-Without `WT_DIR`, `.worktrees` must be a real directory: since a repository could ship a symlink there, `wt add`, `wt mv` and converting a repo to the bare layout refuse a `.worktrees` that is a symlink, and any destination a symlink leads out of the worktrees directory. To keep worktrees somewhere else, point `WT_DIR` there instead of linking `.worktrees` to it.
+A worktrees directory inside the repo, `.worktrees` or a `WT_DIR` pointing into the checkout, must be a real directory: since a repository could ship a symlink there, `wt add`, `wt mv` and converting a repo to the bare layout refuse one reached through a symlink, and any destination a symlink leads out of the worktrees directory. To keep worktrees somewhere else, point `WT_DIR` there instead of linking to it from inside the repo.
 
 A worktree's name is its path under the worktrees directory, so nested names work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch `feat/voice-input`.
 

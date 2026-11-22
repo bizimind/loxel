@@ -351,6 +351,18 @@ describe("executeAdd", () => {
     expect(await pathExists(join(outside, "away"))).toBe(false);
   });
 
+  test("refuses a WT_DIR inside the repository that a symlink leads out of", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, "trees"));
+    process.env.WT_DIR = "trees";
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
   test("refuses a symlink inside .worktrees that leads out of it", async () => {
     repo = await createTestRepo();
     const outside = await realpath(join(repo.root, ".."));
