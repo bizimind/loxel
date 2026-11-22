@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -72,6 +72,37 @@ describe("getDiagnostics", () => {
       expect.objectContaining({ file: "a.ts", line: 1, severity: "error", code: 2322 }),
     ]);
   });
+
+  test.each([
+    {},
+    { incremental: true },
+    // `isolatedDeclarations` needs composite (or declaration) on, so a run that turned composite
+    // off to avoid the write would report an option error here instead of the type error.
+    { composite: true, isolatedDeclarations: true },
+  ])(
+    "writes nothing where the tsconfig points build info and traces, and still reports errors: %o",
+    async (options) => {
+      const outside = mkdtempSync(path.join(tmpdir(), "diag-out-"));
+      cleanups.push(() => rmSync(outside, { recursive: true, force: true }));
+      const files = {
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: {
+            ...options,
+            tsBuildInfoFile: path.join(outside, "build.tsbuildinfo"),
+            generateTrace: path.join(outside, "trace"),
+            types: [],
+          },
+        }),
+        "a.ts": TYPE_ERROR,
+      };
+      const { repo, sha } = await seedRepo(files);
+      const expected = [expect.objectContaining({ file: "a.ts", code: 2322 })];
+      expect(await getDiagnostics(repo, undefined)).toEqual(expected);
+      expect(await getDiagnostics(repo, sha)).toEqual(expected);
+      expect(readdirSync(outside)).toEqual([]);
+      expect(readdirSync(repo).toSorted()).toEqual([".git", ...Object.keys(files)].toSorted());
+    },
+  );
 
   test("runs tsc for a working tree with only a root jsconfig", async () => {
     const { repo } = await seedRepo({ "jsconfig.json": CHECK_JS_CONFIG, "a.js": JS_TYPE_ERROR });
