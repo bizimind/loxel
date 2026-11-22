@@ -5,7 +5,9 @@
  *
  * Git C-quotes a path containing a double quote, a control character or a non-ASCII byte, and
  * does so per side: `diff --git a/plain.txt "b/\303\274.txt"` is a valid header. Unquoted
- * paths may contain spaces, so an all-unquoted header is split on its ` b/` separator.
+ * paths may contain spaces, and even ` b/`, so an all-unquoted header is read as the same path on
+ * both sides when it can be (every change but a rename or copy, whose `rename`/`copy` lines name
+ * the paths), and is otherwise split on its last ` b/` separator.
  */
 export function parseGitHeaderPaths(line: string): { oldPath: string; newPath: string } | null {
   const prefix = "diff --git ";
@@ -27,6 +29,10 @@ export function parseGitHeaderPaths(line: string): { oldPath: string; newPath: s
     if (!quotedNew) return null;
     oldToken = rest.slice(0, separator);
     newToken = quotedNew.value;
+  } else if (isSamePathTwice(rest)) {
+    const half = (rest.length - 1) / 2;
+    oldToken = rest.slice(0, half);
+    newToken = rest.slice(half + 1);
   } else {
     const match = rest.match(/^(a\/.+) (b\/.+)$/);
     if (!match) return null;
@@ -36,6 +42,23 @@ export function parseGitHeaderPaths(line: string): { oldPath: string; newPath: s
 
   if (!oldToken.startsWith("a/") || !newToken.startsWith("b/")) return null;
   return { oldPath: oldToken.slice(2), newPath: newToken.slice(2) };
+}
+
+/** Whether `rest` is `a/<path> b/<path>` with the same path on both sides. */
+function isSamePathTwice(rest: string): boolean {
+  if (rest.length % 2 === 0) return false;
+  const half = (rest.length - 1) / 2;
+  return (
+    rest.startsWith("a/") &&
+    rest[half] === " " &&
+    rest.slice(half + 1, half + 3) === "b/" &&
+    rest.slice(2, half) === rest.slice(half + 3)
+  );
+}
+
+/** A path value of a git extended header (`rename from <path>`), C-quoted by git when unusual. */
+export function gitPathValue(value: string): string {
+  return (value.startsWith('"') ? unquoteCString(value, 0)?.value : undefined) ?? value;
 }
 
 const C_ESCAPES: Record<string, number> = {

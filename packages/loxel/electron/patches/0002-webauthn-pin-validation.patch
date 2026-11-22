@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Oleksandr Kulkov <adamant.pwn@gmail.com>
 Date: Wed, 28 Oct 2026 00:20:07 +0100
-Subject: [PATCH 2/4] fix: rely on Chromium's PIN validation; cover
+Subject: [PATCH] fix: rely on Chromium's PIN validation; cover
  collect-webauthn-pin in specs
 
 Chromium's AuthTokenRequester already validates every entered PIN (length,

@@ -105,13 +105,13 @@ When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over t
 
 ## Downloads
 
-When a page downloads a file, the download starts right away in your Downloads folder while Loxel asks where to save it, and once both are done Loxel moves the file where you chose. A file already in Downloads keeps its place: the download takes a numbered name beside it, such as `report (1).pdf`. Loxel replaces a file where you chose to save only when you confirmed replacing it in the dialog. Cancelling the dialog cancels the download, or deletes it if it already finished. While Loxel asks, further downloads from that page are cancelled, so a site can't pile up save dialogs. Every file you download is marked as downloaded from the internet, as files from Safari or Chrome are, from the moment it starts arriving, so macOS checks a downloaded app, script or installer when you first open it, even one whose download never finished.
+When a page downloads a file, the download starts right away in your Downloads folder while Loxel asks where to save it, and once both are done Loxel moves the file where you chose. A file already in Downloads keeps its place: the download takes a numbered name beside it, such as `report (1).pdf`. Loxel replaces a file where you chose to save only when you confirmed replacing it in the dialog. Cancelling the dialog cancels the download, or deletes it if it already finished. While Loxel asks, further downloads from that page are cancelled, so a site can't pile up save dialogs. Every file you download, and every file a site saves to your Mac, is marked as downloaded from the internet, as files from Safari or Chrome are, from the moment it starts arriving, so macOS checks a downloaded app, script or installer when you first open it, even one whose download never finished.
 
 ---
 
 ## Site permissions
 
-Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, and saving to files you pick. A site that wants your camera or microphone, to send notifications, to open a link in another app, or to reach your dev servers and devices on your network asks you first (see [Camera and microphone](#camera-and-microphone), [Other apps](#other-apps), [Local network](#local-network) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
+Pages in browser panels get what a browser gives every site without asking: copying to the clipboard when you click a copy button, fullscreen video, locking the pointer in games and 3D views, keeping the screen awake, reading files you open or drop in them, and saving new files through their Save dialog. A site that wants your camera or microphone, to send notifications, to open a link in another app, to reach your dev servers and devices on your network, or to change a file you only opened asks you first (see [Camera and microphone](#camera-and-microphone), [Other apps](#other-apps), [Local network](#local-network), [Files](#files) and [Notifications](#notifications)). Everything else a browser would ask you about first is turned off, so sites can't use your location or read your clipboard; a site that asks is told no and can offer its usual fallback.
 
 When a page goes full screen or hides your pointer, Loxel names the site at the top of the page for a few seconds, every time, and again when you come back, after a while away or from another app or window, to a page that is still full screen or still has your pointer, so a page can't pass itself off as Loxel or as your Mac asking for a password. Press Esc to leave full screen or get your pointer back. Popup windows that sites open can't go full screen or hide your pointer.
 
@@ -133,9 +133,15 @@ Change or remove a site's choices in **Settings > Browser > Other Apps**.
 
 Your dev servers stay private to your Mac: a site on the internet asks before it connects to apps on your Mac, such as a dev server or a local API, or to devices on your network, such as your router or printer. Pages on your Mac or your local network never ask, such as `http://localhost:3000`, `http://127.0.0.1:5173` or a dev server opened on your Mac's network address, so a dev server's page reaches its API, live reload and other local ports as before.
 
-While the bar asks, the site's requests wait. **Allow** lets them through and lets the site connect from then on, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good, which fails those requests. Close the bar to fail them for now: the site doesn't ask again until you reload or leave the page. Frames embedded in a page follow the page's choice, and a site's background workers ask in a tab showing the site.
+While the bar asks, the site's requests wait. **Allow** lets them through and lets the site connect from then on, **Allow this time** lets it while the tab stays on the site, and **Block** turns it down for good, which fails those requests. Close the bar to fail them for now: the site doesn't ask again until you reload or leave the page. Frames from other sites embedded in a page, such as ads or widgets, never ask, and connect only when the page allowed its site and lets the frame use that choice. A site's background workers ask in a tab showing the site.
 
 Change or remove a site's choice in **Settings > Browser > Local Network**.
+
+A site on plain `http` on the internet can't reach your Mac or your network at all, as in Chrome, so it doesn't ask.
+
+### Files
+
+Sites that edit files, such as an online code, image or diagram editor, ask before they change a file you opened in them: a bar under the address bar names the site and the file. Saving a new file through the site's Save dialog, and reading a file you opened or dropped on the page, need no question. A site also asks before it looks into a folder you picked, and before it uses a file or folder it remembered from an earlier visit. **Allow** lets the page use that file or folder, and **Block** or closing the bar turns it down; either answer lasts until you reload or leave the page. Loxel doesn't remember it, so the site asks again on your next visit. Popup windows that sites open can't edit files or open folders.
 
 ---
 

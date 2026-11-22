@@ -16,6 +16,7 @@ export function NotificationPermissionBar({
 }) {
   return (
     <SitePermissionBar
+      requestKey={JSON.stringify(request)}
       icon={BellIcon}
       onAllow={() => onAnswer("allow")}
       onBlock={() => onAnswer("block")}

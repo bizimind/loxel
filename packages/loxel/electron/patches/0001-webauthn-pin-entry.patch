@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Donnie Guedry <dguedry@gmail.com>
 Date: Wed, 28 Oct 2026 00:20:07 +0100
-Subject: [PATCH 1/4] feat: collect security key PINs via
- 'collect-webauthn-pin' session event
+Subject: [PATCH] feat: collect security key PINs via 'collect-webauthn-pin'
+ session event
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

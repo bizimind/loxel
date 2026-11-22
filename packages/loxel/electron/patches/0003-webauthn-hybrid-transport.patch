@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Joshua Silets <joshuasilets@gmail.com>
 Date: Mon, 7 Sep 2026 20:04:28 -0500
-Subject: [PATCH 3/4] feat: expose WebAuthn hybrid transport via
+Subject: [PATCH] feat: expose WebAuthn hybrid transport via
  'webauthn-hybrid-request'
 
 Chromium adds the hybrid (caBLE v2) transport to every WebAuthn request,

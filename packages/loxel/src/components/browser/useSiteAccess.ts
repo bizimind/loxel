@@ -1,6 +1,6 @@
 /**
- * Routes browser panel pages' requests to open a link in another app or to reach the local
- * network, which the Electron main process sends to the window (see
+ * Routes browser panel pages' requests to open a link in another app, to reach the local network,
+ * or to read or write a file, which the Electron main process sends to the window (see
  * `src/electron/browser-site-access.ts`), to the panel whose `<webview>` the page is in, for its
  * permission bar. Also keeps main's copy of the per-site decisions in step with settings.
  */
@@ -74,7 +74,7 @@ function listen(): void {
 /**
  * The site access requests of the webview with this guest webContents id (null until it is
  * ready). `request` is the oldest open one, for the panel's prompt, and `answer` replies to it:
- * Allow and Block are saved for the site.
+ * Allow and Block are saved for the site (file access is never saved).
  */
 export function useSiteAccess(webContentsId: number | null): {
   request: SiteAccessRequest | null;
@@ -98,7 +98,7 @@ export function useSiteAccess(webContentsId: number | null): {
         const store = useSettingsStore.getState();
         if (access.kind === "external-app") {
           store.setExternalAppSite(access.origin, access.scheme, reply);
-        } else {
+        } else if (access.kind === "local-network") {
           store.setLocalNetworkSite(access.origin, reply);
         }
       }

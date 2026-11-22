@@ -17,7 +17,7 @@
  * show it as plain text instead.
  */
 import type { DiffHunk, DiffInfo, DiffLine, FileDiff } from "@/api/diff-model";
-import { parseGitHeaderPaths, unquoteCString } from "@/lib/git-diff-paths";
+import { gitPathValue, parseGitHeaderPaths, unquoteCString } from "@/lib/git-diff-paths";
 
 const HUNK_HEADER = /^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@+/;
 /** Side prefixes git writes: a/ b/, or with diff.mnemonicPrefix c/ i/ o/ w/ and 1/ 2/ */
@@ -232,12 +232,14 @@ function applyExtendedHeader({ file }: OpenFile, line: string): boolean {
   else if (line.startsWith("deleted file mode")) file.status = "deleted";
   else if (line.startsWith("rename from ")) {
     file.status = "renamed";
-    file.oldPath = line.slice("rename from ".length);
-  } else if (line.startsWith("rename to ")) file.newPath = line.slice("rename to ".length);
+    file.oldPath = gitPathValue(line.slice("rename from ".length));
+  } else if (line.startsWith("rename to "))
+    file.newPath = gitPathValue(line.slice("rename to ".length));
   else if (line.startsWith("copy from ")) {
     file.status = "copied";
-    file.oldPath = line.slice("copy from ".length);
-  } else if (line.startsWith("copy to ")) file.newPath = line.slice("copy to ".length);
+    file.oldPath = gitPathValue(line.slice("copy from ".length));
+  } else if (line.startsWith("copy to "))
+    file.newPath = gitPathValue(line.slice("copy to ".length));
   else if (line.startsWith("Binary files ") || line === "GIT binary patch") file.isBinary = true;
   else return EXTENDED_HEADER.test(line);
   return true;

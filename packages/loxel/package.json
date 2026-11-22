@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.411",
+  "version": "0.1.415",
   "description": "The professional workspace for AI-powered development",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -124,7 +124,7 @@
     "@types/react-dom": "^19.3.0",
     "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^6.3.0",
-    "electron": "45.3.0",
+    "electron": "45.4.1",
     "electron-builder": "^26.18.0",
     "eslint": "^10.14.0",
     "mdast-util-to-markdown": "^2.2.3",
