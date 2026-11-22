@@ -19,14 +19,37 @@ import { useUIStore } from "@/store/ui";
 
 import "@/styles/excalidraw-theme.css";
 
+/**
+ * Excalidraw embeds X/Twitter and Reddit posts as an inline document that loads the provider's
+ * widget script with the app's own origin. Those links are refused and shown as a link box; every
+ * other link is left to Excalidraw's allowlist, whose embeds load as cross-origin frames.
+ */
+const SAME_ORIGIN_EMBED =
+  /(?:twitter|x)\.com\/[^/]+\/status\/\d|reddit\.com\/r\/[^/]+\/comments\//i;
+
 /** Lazy-loaded wrapper that renders Excalidraw with a custom MainMenu (no Open/Save/links). */
 const ExcalidrawWithMenu = lazy(() =>
   Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(
     ([mod]) => {
-      const { Excalidraw, MainMenu } = mod;
+      const { Excalidraw, MainMenu, normalizeLink } = mod;
+      // Tested on the link normalized, as Excalidraw's renderer reads it.
+      const isSameOriginEmbed = (link: string | null) =>
+        SAME_ORIGIN_EMBED.test(normalizeLink(link ?? ""));
+      const validateEmbeddable = (link: string) => (isSameOriginEmbed(link) ? false : undefined);
+      // Excalidraw validates an embed once per element, so this also catches a link changed since.
+      const renderEmbeddable = (el: { link: string | null }) =>
+        isSameOriginEmbed(el.link) ? (
+          <div className="flex size-full items-center justify-center p-4 text-center text-sm break-all">
+            {el.link}
+          </div>
+        ) : null;
       function ExcalidrawCustomMenu(props: React.ComponentProps<typeof Excalidraw>) {
         return (
-          <Excalidraw {...props}>
+          <Excalidraw
+            {...props}
+            validateEmbeddable={validateEmbeddable}
+            renderEmbeddable={renderEmbeddable}
+          >
             <MainMenu>
               <MainMenu.DefaultItems.SaveAsImage />
               <MainMenu.DefaultItems.SearchMenu />
