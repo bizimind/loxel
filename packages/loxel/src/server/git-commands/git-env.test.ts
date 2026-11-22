@@ -174,13 +174,12 @@ describe("a partial clone in an untrusted repository", () => {
       expect(await getFileContent(clone, "missing.txt", second)).toEqual([]);
       expect(await getCommitDiff(clone, "1a2b".repeat(10))).toMatchObject({ files: [] });
 
-      // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses, and
-      // the read fails as an ordinary one.
+      // A git too old for GIT_NO_LAZY_FETCH ignores it; the transport setting still refuses.
       const { GIT_NO_LAZY_FETCH: _ignored, ...olderGitEnv } = readOnlyGitEnv(clone);
       const olderGit = await runGit(["diff-tree", "-p", second], { cwd: clone, env: olderGitEnv })
         .then(() => null)
         .catch((err: unknown) => err);
-      expect(olderGit).not.toBeInstanceOf(ContentAwaitsTrustError);
+      expect(olderGit).toBeInstanceOf(ContentAwaitsTrustError);
       expect((olderGit as GitCommandError).stderr).toContain("not allowed");
 
       setRepoTrusted(clone, true);

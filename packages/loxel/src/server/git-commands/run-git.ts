@@ -40,13 +40,14 @@ export class GitCommandError extends Error {
 }
 
 /**
- * `GIT_NO_LAZY_FETCH`'s warning, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts): git
- * wanted an object a partial clone doesn't have yet and didn't download it. Only this says so
- * unambiguously. Any other failure on a missing object fails as usual, including `git show
- * <rev>:<path>`, a treeless clone's unreadable tree, and the transport refusal of a git too old for
- * `GIT_NO_LAZY_FETCH`, which a revision that doesn't exist produces as well.
+ * Git's message, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when it needed an
+ * object the partial clone left to its promisor remote and could not download it, because
+ * `GIT_NO_LAZY_FETCH` or, on an older git, `GIT_ALLOW_PROTOCOL` held the download back. Git prints
+ * it only for an object a promisor remote is known to have, so a revision that doesn't exist never
+ * produces it (the lazy-fetch warning alone does, on git 2.39.4 to 2.46). Any other failure on a
+ * missing object, such as `git show <rev>:<path>`'s, fails as usual.
  */
-const LAZY_FETCH_DISABLED = "lazy fetching disabled";
+const PROMISED_OBJECT_REFUSED = /could not fetch [0-9a-f]+ from promisor remote/;
 
 const AWAITS_TRUST_RESTRICTION =
   "Git doesn't download content this partial clone doesn't have yet.";
@@ -101,7 +102,7 @@ export async function runGit(
   if (
     cwd !== undefined &&
     env?.GIT_ALLOW_PROTOCOL === "" &&
-    result.stderr.includes(LAZY_FETCH_DISABLED) &&
+    PROMISED_OBJECT_REFUSED.test(result.stderr) &&
     !isRepoTrusted(cwd)
   ) {
     reportRepoRestriction(cwd, AWAITS_TRUST_RESTRICTION);
