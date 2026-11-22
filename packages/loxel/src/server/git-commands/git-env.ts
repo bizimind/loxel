@@ -1,4 +1,7 @@
+import { shellQuote } from "@bizimind/wt/lib";
+
 import { isRepoTrusted } from "../repo-trust";
+import { gitText, inheritedGitEnv } from "./run-git";
 
 /**
  * Environment and shared arguments for git invocations.
@@ -41,10 +44,12 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * all. Git ignores it wherever the lock is mandatory, so it is a no-op for mutating commands —
  * but it is only set here, on the read-only modules, to keep that guarantee explicit.
  *
- * `core.fsmonitor=false` is set here as well, so every read-only command has it in one place,
- * unless `cwd` is in a trusted repository, whose fsmonitor stays the user's choice. Without a `cwd`
- * it is always set. `GIT_CONFIG_PARAMETERS` is what `git -c` itself sets, with the same precedence,
- * and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited value is kept.
+ * `core.fsmonitor=false` and `log.showSignature=false` (which would run the configured signature
+ * program on every `git log`) are set here as well, so every read-only command has them in one
+ * place, unless `cwd` is in a trusted repository, whose settings stay the user's choice. Without a
+ * `cwd` they are always set. `GIT_CONFIG_PARAMETERS` is what `git -c` itself sets, with the same
+ * precedence, and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited
+ * value is kept.
  *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
@@ -53,20 +58,102 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
 export function readOnlyGitEnv(cwd?: string): Record<string, string> {
   const env = inheritedGitEnv();
   if (cwd !== undefined && isRepoTrusted(cwd)) return { ...env, GIT_OPTIONAL_LOCKS: "0" };
-  const inherited = env.GIT_CONFIG_PARAMETERS;
-  const fsmonitorOff = "'core.fsmonitor=false'";
   return {
     ...env,
     GIT_OPTIONAL_LOCKS: "0",
-    GIT_CONFIG_PARAMETERS: inherited ? `${inherited} ${fsmonitorOff}` : fsmonitorOff,
+    GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, UNTRUSTED_READ_CONFIG),
   };
 }
 
-/** The server's current environment, for commands with no special needs. */
-export function inheritedGitEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
+const UNTRUSTED_READ_CONFIG = [
+  configParameter("core.fsmonitor", "false"),
+  configParameter("log.showSignature", "false"),
+];
+
+/**
+ * {@link readOnlyGitEnv} for the commands that read working-tree content: status and the diffs
+ * against the working tree. Git hashes such a file through the clean (or process) command of its
+ * filter driver, so in an untrusted repository every filter driver that the repository's own config
+ * defines gets empty commands, and its files are compared as stored. Drivers from the user's own
+ * global or system config, such as git-lfs, keep working.
+ */
+export async function worktreeReadEnv(cwd: string): Promise<Record<string, string>> {
+  const env = readOnlyGitEnv(cwd);
+  if (isRepoTrusted(cwd)) return env;
+  const overrides = (await repoFilterDrivers(cwd, env)).flatMap((name) => [
+    configParameter(`filter.${name}.clean`, ""),
+    configParameter(`filter.${name}.smudge`, ""),
+    configParameter(`filter.${name}.process`, ""),
+    // Otherwise git fails on a required filter with no command instead of passing content through.
+    configParameter(`filter.${name}.required`, "false"),
+  ]);
+  return {
+    ...env,
+    GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, overrides),
+  };
+}
+
+/**
+ * The names of the filter drivers that the repository's own config files (`config`,
+ * `config.worktree` and the files they include) define. Git reads the config itself, which runs
+ * nothing, so the names are exactly the ones it would use.
+ */
+async function repoFilterDrivers(cwd: string, env: Record<string, string>): Promise<string[]> {
+  // `--list` succeeds when nothing matches, unlike `--get-regexp`, whose exit code 1 for "no match"
+  // is also what a git that could not be started reports. So any failure, a config git cannot read
+  // included, leaves the drivers unknown and fails the read rather than run them.
+  const stdout = await gitText(["config", "--list", "--show-scope", "--name-only", "-z"], {
+    cwd,
+    env,
+  });
+  // `-z` with `--show-scope`: scope and key, each NUL-terminated.
+  const fields = stdout.split("\0");
+  const names = new Set<string>();
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const [scope, key] = [fields[i], fields[i + 1] ?? ""];
+    if (scope !== "local" && scope !== "worktree") continue;
+    if (!key.startsWith("filter.")) continue;
+    // `filter.<name>.<variable>`; the name may hold dots, the variable cannot.
+    const rest = key.slice("filter.".length);
+    const end = rest.lastIndexOf(".");
+    if (end >= 0) names.add(rest.slice(0, end));
   }
-  return env;
+  return [...names];
+}
+
+/**
+ * Flags for the reads that print a diff, whose output Loxel parses as git's own patch format: never
+ * an external diff program, submodule changes as a plain gitlink patch (a `diff.submodule` setting
+ * would instead run a log or a diff inside the submodule), and in an untrusted repository no
+ * `textconv` program either. (Git fails on an empty textconv command, so these are flags rather
+ * than config.)
+ */
+export function diffProgramArgs(cwd: string): string[] {
+  const always = ["--no-ext-diff", "--submodule=short"];
+  return isRepoTrusted(cwd) ? always : [...always, "--no-textconv"];
+}
+
+/**
+ * For the reads that compare the working tree in an untrusted repository: submodules compared by
+ * commit only. {@link SUBMODULE_GITLINK_ONLY} is only a default that a submodule's own `ignore`
+ * setting overrides, and git would then run a status inside the submodule, whose own config none of
+ * the overrides here cover.
+ */
+export function untrustedSubmoduleArgs(cwd: string): string[] {
+  return isRepoTrusted(cwd) ? [] : ["--ignore-submodules=dirty"];
+}
+
+function withConfigParameters(inherited: string | undefined, entries: string[]): string {
+  return [...(inherited ? [inherited] : []), ...entries].join(" ");
+}
+
+/**
+ * One `GIT_CONFIG_PARAMETERS` entry, single-quoted as git's `sq_quote` writes and its `sq_dequote`
+ * reads. A key holding `=` (a driver name may) takes the `'key'='value'` form of git 2.31 and
+ * later, since the older `'key=value'` splits at the first `=`.
+ */
+function configParameter(key: string, value: string): string {
+  return key.includes("=")
+    ? `${shellQuote(key)}=${shellQuote(value)}`
+    : shellQuote(`${key}=${value}`);
 }
