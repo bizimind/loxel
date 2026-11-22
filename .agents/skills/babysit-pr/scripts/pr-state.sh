@@ -45,9 +45,10 @@ branch="$(jq -r .headRefName <<<"$pr_json")"
 runs_json="$(gh run list --workflow claude-code-review.yml --branch "$branch" --limit 20 \
   --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
 
-# A resumed review sometimes words its clean summary "No new issues found"; both mean clean.
+# A resumed review sometimes words its clean summary "No new issues found"; both mean clean. The
+# review posts as github-actions[bot]; a user account cannot take a [bot] login.
 clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
-  --jq '.[] | select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]") and (.body | test("No (new )?issues found")))
+  --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | test("No (new )?issues found")))
     | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
