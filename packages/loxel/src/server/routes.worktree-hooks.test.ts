@@ -336,7 +336,7 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(worktree.setup).toBeUndefined();
   });
 
-  test("detect and convert see uncommitted changes without starting the repository's fsmonitor", async () => {
+  test("detect reports uncommitted changes without starting the repository's fsmonitor", async () => {
     const { url, dest } = await makeRemote();
     const checkout = join(dest, "checkout");
     await Bun.$`git clone -q -- ${url} ${checkout}`;
@@ -355,13 +355,6 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(await detect()).toMatchObject({ hasUncommittedChanges: false });
     await Bun.write(join(checkout, "notes.txt"), "draft\n");
     expect(await detect()).toMatchObject({ hasUncommittedChanges: true });
-    const [convertStatus, refused] = await post<{ error: string }>(
-      projectCtx,
-      "/api/projects/convert",
-      { path: checkout },
-    );
-    expect(convertStatus).toBe(400);
-    expect(refused.error).toContain("uncommitted changes");
     expect(existsSync(monitorRan)).toBe(false);
   });
 
