@@ -376,6 +376,20 @@ describe("executeAdd", () => {
     );
   });
 
+  test("refuses an in-repo WT_DIR spelled through a symlink to a repository folder", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    const alias = join(outside, "alias");
+    await Bun.write(join(repo.root, "sub", ".keep"), "");
+    await symlink(join(repo.root, "sub"), alias);
+    await symlink(outside, join(repo.root, "sub", "trees"));
+    process.env.WT_DIR = join(alias, "trees");
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+  });
+
   test("refuses a WT_DIR whose parent inside the repository is a symlink", async () => {
     repo = await createTestRepo();
     const outside = await realpath(join(repo.root, ".."));
@@ -383,7 +397,7 @@ describe("executeAdd", () => {
     process.env.WT_DIR = join(repo.root, "sub", "trees");
 
     await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
-      "leads through a symlink",
+      "is a symlink inside the repository",
     );
   });
 

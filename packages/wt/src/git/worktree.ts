@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { lstat, mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
 
@@ -132,13 +132,7 @@ export async function assertWorktreePathContained(
   dir: string,
   path: string,
 ): Promise<void> {
-  const configured = resolve(worktreesDir(root));
-  const literal = await literalPathInRepo(root, configured);
-  if (literal && dir !== literal) {
-    throw new Error(
-      `Refusing to create worktrees through ${configured}: it leads through a symlink to ${dir}. If you created it to keep worktrees there, set WT_DIR=${dir} instead.`,
-    );
-  }
+  await assertNoSymlinkInRepo(root, dir, resolve(worktreesDir(root)));
   const real = await canonicalizePotentialPath(path);
   if (!real.startsWith(`${dir}/`)) {
     throw new Error(
@@ -148,17 +142,34 @@ export async function assertWorktreePathContained(
 }
 
 /**
- * Where `path` lands when the part of it inside the repository is taken
- * literally, or null when it does not pass through the repository. The part
- * before the repository may go through the user's own symlinks.
+ * Walk the configured worktrees path one component at a time. From the first
+ * component that resolves inside the repository onward, any symlink is refused:
+ * the repository's own content decides those. Components before it, the user's
+ * own path, may be symlinks.
  */
-async function literalPathInRepo(root: string, path: string): Promise<string | null> {
-  for (let cursor = path; cursor !== dirname(cursor); cursor = dirname(cursor)) {
-    if ((await canonicalizePotentialPath(cursor)) === root) {
-      return join(root, relative(cursor, path));
+async function assertNoSymlinkInRepo(root: string, dir: string, configured: string): Promise<void> {
+  let cursor = "/";
+  let inRepo = false;
+  for (const part of configured.split("/").filter(Boolean)) {
+    cursor = join(cursor, part);
+    if (!inRepo) {
+      const real = await canonicalizePotentialPath(cursor);
+      inRepo = real === root || real.startsWith(`${root}/`);
+      continue;
+    }
+    let info;
+    try {
+      info = await lstat(cursor);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error(
+        `Refusing to create worktrees through ${configured}: ${cursor} is a symlink inside the repository. If you created it to keep worktrees there, set WT_DIR=${dir} instead.`,
+      );
     }
   }
-  return null;
 }
 
 /**
