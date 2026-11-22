@@ -66,6 +66,12 @@ describe("section globs", () => {
     ["{3..120}", "060", false],
     ["{3..120}", "60", true],
     ["{0..9}", "0", true],
+    ["{0..9999999999999999}", "1234567890123456", true],
+    ["{-10..-5}", "-7", true],
+    ["{-10..-5}", "-12", false],
+    ["{1..9}", "+5", true],
+    ["{0..1}", "-0", true],
+    ["file{1..3}", "file12", false],
     ["{single}.txt", "{single}.txt", true],
     ["{single}.txt", "single.txt", false],
     ["\\*.txt", "*.txt", true],
@@ -111,6 +117,15 @@ test("a glob expanding to too many alternatives matches nothing", () => {
   expect(
     globMatches(compileSectionGlob("{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}"), "abababab"),
   ).toBe(true);
+});
+
+test("sections past a file's token budget match nothing", () => {
+  const large = `[${"*?".repeat(500)}]`;
+  const config = parseEditorConfig(
+    ["[*]", ...Array.from({ length: 17 }, () => large), "[*]"].join("\n"),
+  );
+  expect(globMatches(config.sections[0]!.glob, "a.ts")).toBe(true);
+  expect(globMatches(config.sections.at(-1)!.glob, "a.ts")).toBe(false);
 });
 
 describe("resolveEditorConfig", () => {
@@ -219,6 +234,17 @@ describe("resolveEditorConfig", () => {
   test("ignores an oversized file", async () => {
     await write("repo/.editorconfig", ["[*]", "indent_size = 2", `# ${"x".repeat(70_000)}`]);
     expect(await resolveEditorConfig(join(repo, "a.ts"), repo)).toEqual({});
+  });
+
+  test("ignores the sections past a lookup's matching budget", async () => {
+    // A cost of about 15,000, within the file's budget: matching takes that much per path character.
+    const large = Array.from({ length: 15 }, () => `[${"*?".repeat(500)}.none]`);
+    await write("repo/.editorconfig", [...large, "[*]", "indent_size = 2"]);
+    expect(await resolveEditorConfig(join(repo, "a.ts"), repo)).toEqual({
+      indentSize: 2,
+      tabWidth: 2,
+    });
+    expect(await resolveEditorConfig(join(repo, `${"d".repeat(200)}/a.ts`), repo)).toEqual({});
   });
 
   test("re-reads a file that changed, appeared or was removed", async () => {

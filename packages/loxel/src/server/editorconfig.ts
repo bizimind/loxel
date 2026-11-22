@@ -3,7 +3,7 @@ import { dirname, relative } from "node:path";
 
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
 
-import { type SectionGlob, compileSectionGlob, globMatches } from "./editorconfig-glob";
+import { type SectionGlob, compileSectionGlob, globMatches, globCost } from "./editorconfig-glob";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -18,11 +18,17 @@ const log = logger.child("files");
 const FILE_NAME = ".editorconfig";
 /** The spec limits section names to 1024 characters; a longer one is ignored with its keys. */
 const MAX_SECTION_LINE = 1026;
-/**
- * Real files are a few KB. Bounding the size bounds the section count, and with it (see
- * editorconfig-glob.ts) the time a crafted file in a cloned repository can take per lookup.
- */
+/** Real files are a few KB. */
 const MAX_FILE_SIZE = 64 * 1024;
+/**
+ * Bounds on the glob work a crafted `.editorconfig` in a cloned repository can cause, so a lookup
+ * never stalls the server. Matching a section costs its `globCost` x the path's length. Real files
+ * cost a few hundred in all, so neither is reached: past the first, a file's remaining sections
+ * match nothing; past the second, a lookup ignores the remaining sections, which keeps it to tens
+ * of milliseconds.
+ */
+const MAX_FILE_COST = 16_384;
+const MAX_LOOKUP_WORK = 2_000_000;
 
 interface Section {
   glob: SectionGlob;
@@ -38,6 +44,7 @@ export interface EditorConfigFile {
 export function parseEditorConfig(text: string): EditorConfigFile {
   let root = false;
   const sections: Section[] = [];
+  let cost = 0;
   // null in the preamble; "invalid" after a malformed section header, whose keys are skipped.
   let current: Section | "invalid" | null = null;
   for (const rawLine of text.split(/\r\n|\n|\r/)) {
@@ -48,7 +55,9 @@ export function parseEditorConfig(text: string): EditorConfigFile {
         current = "invalid";
         continue;
       }
-      current = { glob: compileSectionGlob(line.slice(1, -1)), properties: [] };
+      const glob = cost > MAX_FILE_COST ? [] : compileSectionGlob(line.slice(1, -1));
+      cost += globCost(glob);
+      current = { glob, properties: [] };
       sections.push(current);
       continue;
     }
@@ -87,9 +96,17 @@ export async function resolveEditorConfig(
   }
 
   const raw = new Map<string, string>();
+  let work = 0;
   for (const { dir, config } of chain.reverse()) {
     const relativePath = relative(dir, filePath);
     for (const section of config.sections) {
+      work += globCost(section.glob) * (relativePath.length + 1);
+      if (work > MAX_LOOKUP_WORK) {
+        log.warn("Ignoring the rest of .editorconfig sections past the matching budget", {
+          path: filePath,
+        });
+        return toProperties(raw);
+      }
       if (!globMatches(section.glob, relativePath)) continue;
       for (const [key, value] of section.properties) raw.set(key, value);
     }

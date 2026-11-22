@@ -26,11 +26,11 @@ export type SectionGlob = Token[][];
 
 /**
  * Bounds on a section's expansion, far beyond any real `.editorconfig`: past them the section
- * matches nothing. Matching costs tokens x path length, so the total token count is what bounds
- * the time a crafted file can take.
+ * matches nothing. Matching costs `globCost` x path length, so the cost is what bounds the time a
+ * section takes; editorconfig.ts bounds the total per file and per lookup with it.
  */
 const MAX_ALTERNATIVES = 256;
-const MAX_TOTAL_TOKENS = 4096;
+const MAX_COST = 4096;
 
 /**
  * Compile a section name. A glob without `/` matches the file name in any directory below the
@@ -185,13 +185,25 @@ function expand(nodes: Node[]): Token[][] | null {
       options.push(...expanded);
     }
     sequences = sequences.flatMap((sequence) => options.map((option) => [...sequence, ...option]));
-    if (totalTokens(sequences) > MAX_TOTAL_TOKENS) return null;
+    if (globCost(sequences) > MAX_COST) return null;
   }
-  return totalTokens(sequences) > MAX_TOTAL_TOKENS ? null : sequences;
+  return globCost(sequences) > MAX_COST ? null : sequences;
 }
 
-function totalTokens(sequences: Token[][]): number {
-  return sequences.reduce((sum, sequence) => sum + sequence.length, 0);
+/**
+ * A compiled glob's matching cost per path character: one step per token, except that a class
+ * checks each of its ranges and a number reads up to 17 digits (see `numberMatches`).
+ */
+export function globCost(sequences: SectionGlob): number {
+  let cost = 0;
+  for (const sequence of sequences) {
+    for (const token of sequence) {
+      if (token.kind === "class") cost += Math.max(1, token.ranges.length);
+      else if (token.kind === "number") cost += 17;
+      else cost++;
+    }
+  }
+  return cost;
 }
 
 /**
@@ -260,9 +272,20 @@ function numberMatches(
   // Zero-padded numbers are not matched: `{3..120}` does not match `060`, as in every core.
   const second = path[end + 1];
   if (path[end] === "0" && second !== undefined && second >= "0" && second <= "9") return false;
+  const sign = path[start] === "-" ? -1 : 1;
+  // The digits only grow the magnitude, so the walk stops once it passes both bounds: a long digit
+  // run in a path costs at most 17 steps per position rather than a pass over the whole run. Bounds
+  // past the safe integers are deliberately capped there, since such numbers are not exact.
+  const limit = Math.min(
+    Math.max(Math.abs(token.low), Math.abs(token.high)),
+    Number.MAX_SAFE_INTEGER,
+  );
+  let magnitude = 0;
   while (end < path.length && path[end]! >= "0" && path[end]! <= "9") {
+    magnitude = magnitude * 10 + path.charCodeAt(end) - 48;
     end++;
-    const value = Number(path.slice(start, end));
+    if (magnitude > limit) return false;
+    const value = sign * magnitude;
     if (value >= token.low && value <= token.high && next[end] === 1) return true;
   }
   return false;
