@@ -487,6 +487,11 @@ function bridgeConnection(ws: WsClient): () => void {
         void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
         // What a toolchain reports can depend on trust, such as a shim's version.
         void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
+        // A read that failed for lack of trust, such as content a partial clone is missing, may
+        // load now.
+        void queryClient.invalidateQueries({
+          predicate: (query) => query.state.status === "error",
+        });
         break;
 
       case "store_updated":

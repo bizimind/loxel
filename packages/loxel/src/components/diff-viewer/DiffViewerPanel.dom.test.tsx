@@ -32,12 +32,13 @@ mock.module("./GitSideBySideDiffView", () => ({
 /** The sources the diff query was asked for, and the diff it answers with */
 let queriedSources: (DiffSource | null)[] = [];
 let serverDiff: DiffInfo | undefined;
+let serverError: Error | null = null;
 const actualQueries = await import("@/queries/use-repo-queries");
 mock.module("@/queries/use-repo-queries", () => ({
   ...actualQueries,
   useDiffQuery: (source: DiffSource | null) => {
     queriedSources.push(source);
-    return { data: serverDiff, isLoading: false };
+    return { data: serverDiff, isLoading: false, error: serverError };
   },
 }));
 
@@ -80,6 +81,7 @@ beforeEach(() => {
   sideBySide = [];
   queriedSources = [];
   serverDiff = undefined;
+  serverError = null;
   reviewWorktreePath = undefined;
   useUIStore.getState().setDiffViewMode("unified");
   useWorktreeStore.setState(activeWorktreeFields(localRef(WT)));
@@ -182,6 +184,15 @@ describe("git source", () => {
     expect(queriedSources.at(-1)).toEqual(source);
     expect(screen.getByText("src/app.ts")).toBeInTheDocument();
     expect(rows(container)).toHaveLength(2);
+  });
+
+  test("says why a diff could not be read instead of showing no changes", () => {
+    getCurrentRepositoryStore().getState().setDiffSource({ type: "commit", commit: "abc1234" });
+    serverError = new Error("This content isn't downloaded yet.");
+
+    render(<DiffViewerPanel source={{ type: "git" }} />);
+    expect(screen.getByText("This content isn't downloaded yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No changes")).toBeNull();
   });
 
   test("splits with the side-by-side view against the diff's base and worktree", () => {

@@ -6,9 +6,10 @@ import path, { join } from "node:path";
 
 import { $ } from "bun";
 
-import { setRepoTrusted } from "../repo-trust";
-import { getUnstagedDiff, getWorkingTreeDiff } from "./diff";
+import { getRepoTrustStatus, setRepoTrusted } from "../repo-trust";
+import { getCommitDiff, getUnstagedDiff, getWorkingTreeDiff } from "./diff";
 import { readOnlyGitEnv, worktreeReadEnv } from "./git-env";
+import { ContentAwaitsTrustError } from "./run-git";
 import { getStatus } from "./status";
 import { commit, createRepo, writeFile } from "./test-utils";
 
@@ -31,7 +32,11 @@ afterEach(() => {
 
 describe("readOnlyGitEnv", () => {
   test("turns fsmonitor and signature checks off", () => {
-    expect(readOnlyGitEnv()).toMatchObject({ GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_PARAMETERS: OFF });
+    expect(readOnlyGitEnv()).toMatchObject({
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_NO_LAZY_FETCH: "1",
+      GIT_CONFIG_PARAMETERS: OFF,
+    });
   });
 
   test("leaves them to the user's Git configuration only in a trusted repository", () => {
@@ -41,6 +46,7 @@ describe("readOnlyGitEnv", () => {
       setRepoTrusted(dir, true);
       expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
       expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBeUndefined();
+      expect(readOnlyGitEnv(dir).GIT_NO_LAZY_FETCH).toBeUndefined();
       expect(readOnlyGitEnv().GIT_CONFIG_PARAMETERS).toBe(OFF);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -133,6 +139,41 @@ describe("working-tree reads in an untrusted repository", () => {
       expect(params).not.toContain("filter.lfs");
     } finally {
       await rm(global, { force: true });
+      await cleanup();
+    }
+  });
+});
+
+describe("a partial clone in an untrusted repository", () => {
+  /** A clone without file contents of a repository with two commits, and the second commit. */
+  async function partialClone() {
+    const origin = await createRepo();
+    await commit(origin.path, "first", { "a.txt": "a\n" });
+    const second = await commit(origin.path, "second", { "a.txt": "b\n" });
+    await $`git -C ${origin.path} config uploadpack.allowFilter true`.quiet();
+    const clone = `${origin.path}-clone`;
+    await $`git clone --quiet --filter=blob:none file://${origin.path} ${clone}`.quiet();
+    const cleanup = async () => {
+      await rm(clone, { recursive: true, force: true });
+      await origin.cleanup();
+    };
+    return { clone, second, cleanup };
+  }
+
+  test("content the clone doesn't have yet waits for trust", async () => {
+    const { clone, second, cleanup } = await partialClone();
+    try {
+      // The first commit's `a.txt` was never downloaded.
+      const error = await getCommitDiff(clone, second).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ContentAwaitsTrustError);
+      expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
+
+      setRepoTrusted(clone, true);
+      const diff = await getCommitDiff(clone, second);
+      expect(diff.files.map((f) => [f.newPath, f.additions, f.deletions])).toEqual([
+        ["a.txt", 1, 1],
+      ]);
+    } finally {
       await cleanup();
     }
   });
