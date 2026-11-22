@@ -38,11 +38,16 @@ function checked(
   return check(null, permission, origin, { isMainFrame: true, ...details });
 }
 
-function requested(permission: Permission, requestingUrl: string, isMainFrame = true): boolean {
+/** A request from a frame showing `requestingUrl` in a window showing `pageUrl`. */
+function requested(
+  permission: Permission,
+  requestingUrl: string,
+  { isMainFrame = true, pageUrl = `${APP}/` } = {},
+): boolean {
   let granted: boolean | undefined;
   request(
-    // The handler doesn't read the webContents.
-    null as unknown as Parameters<RequestHandler>[0],
+    // The handler reads only the page's URL.
+    { getURL: () => pageUrl } as unknown as Parameters<RequestHandler>[0],
     permission,
     (answer) => {
       granted = answer;
@@ -53,13 +58,8 @@ function requested(permission: Permission, requestingUrl: string, isMainFrame = 
   return granted;
 }
 
-const APP_PAGE: Permission[] = [
-  "local-fonts",
-  "clipboard-sanitized-write",
-  "clipboard-read",
-  "fullscreen",
-  "fileSystem",
-];
+const PAGE_ONLY: Permission[] = ["local-fonts", "clipboard-read", "fileSystem"];
+const ALL_FRAMES: Permission[] = ["clipboard-sanitized-write", "fullscreen"];
 const REFUSED: Permission[] = [
   "openExternal",
   "media",
@@ -67,54 +67,66 @@ const REFUSED: Permission[] = [
   "notifications",
   "midi",
   "pointerLock",
+  "automatic-fullscreen",
   "deprecated-sync-clipboard-read",
 ];
 
+/** A frame of another origin inside the app's page. */
+const EMBED = "https://example.com/";
+
 describe("installAppPermissions", () => {
   test("gives the app's page the permissions it uses", () => {
-    for (const permission of APP_PAGE) {
-      expect(checked(permission, `${APP}/`)).toBe(true);
+    for (const permission of [...PAGE_ONLY, ...ALL_FRAMES]) {
       // As Electron reports the app's main frame.
       expect(checked(permission, `${APP}/`, { embeddingOrigin: `${APP}/` })).toBe(true);
       expect(requested(permission, `${APP}/?window=1`)).toBe(true);
     }
   });
 
-  test("refuses the app's page every other permission", () => {
+  test("refuses the app's page and its frames every other permission", () => {
     for (const permission of REFUSED) {
       expect(checked(permission, `${APP}/`, { embeddingOrigin: `${APP}/` })).toBe(false);
       expect(requested(permission, `${APP}/`)).toBe(false);
-    }
-  });
-
-  test("refuses other origins and frames of other origins inside the app", () => {
-    for (const permission of APP_PAGE) {
-      expect(checked(permission, "https://example.com")).toBe(false);
       const framed = { isMainFrame: false, embeddingOrigin: `${APP}/` };
-      expect(checked(permission, "https://example.com/", framed)).toBe(false);
-      expect(requested(permission, "https://example.com/", false)).toBe(false);
-      expect(requested(permission, "https://example.com/")).toBe(false);
+      expect(checked(permission, EMBED, framed)).toBe(false);
+      expect(requested(permission, EMBED, { isMainFrame: false })).toBe(false);
     }
-    expect(requested("openExternal", "about:srcdoc", false)).toBe(false);
+    expect(requested("openExternal", "about:srcdoc", { isMainFrame: false })).toBe(false);
   });
 
-  test("refuses frames at the app's origin that aren't its page", () => {
-    // A media frame is at the app's URL, with the app's origin or an opaque one.
+  test("keeps the page's own permissions from frames inside it, even at its URL", () => {
     const framed = { isMainFrame: false, embeddingOrigin: `${APP}/` };
-    // The app framed by another origin.
-    const framing = { isMainFrame: false, embeddingOrigin: "https://example.com/" };
-    for (const permission of APP_PAGE) {
-      expect(requested(permission, `${APP}/api/media-frame`, false)).toBe(false);
+    for (const permission of PAGE_ONLY) {
+      expect(requested(permission, EMBED, { isMainFrame: false })).toBe(false);
+      // A media frame is at the app's URL, with the app's origin or an opaque one.
+      expect(requested(permission, `${APP}/api/media-frame`, { isMainFrame: false })).toBe(false);
+      expect(checked(permission, EMBED, framed)).toBe(false);
       if (permission === "fileSystem") continue;
       expect(checked(permission, `${APP}/`, framed)).toBe(false);
-      expect(checked(permission, `${APP}/`, framing)).toBe(false);
+    }
+  });
+
+  test("gives frames inside the app's page the copy and fullscreen buttons browsers give", () => {
+    const framed = { isMainFrame: false, embeddingOrigin: `${APP}/` };
+    for (const permission of ALL_FRAMES) {
+      expect(checked(permission, EMBED, framed)).toBe(true);
+      expect(requested(permission, EMBED, { isMainFrame: false })).toBe(true);
+    }
+  });
+
+  test("refuses everything to pages other than the app's", () => {
+    for (const permission of [...PAGE_ONLY, ...ALL_FRAMES]) {
+      expect(checked(permission, EMBED, { embeddingOrigin: EMBED })).toBe(false);
+      expect(requested(permission, EMBED, { pageUrl: EMBED })).toBe(false);
+      // The app framed by another origin.
+      const framing = { isMainFrame: false, embeddingOrigin: EMBED };
+      if (permission !== "fileSystem") expect(checked(permission, `${APP}/`, framing)).toBe(false);
+      expect(requested(permission, `${APP}/`, { isMainFrame: false, pageUrl: EMBED })).toBe(false);
     }
   });
 
   test("checks `fileSystem` by origin, as Electron checks a grant with no frame", () => {
     expect(checked("fileSystem", `${APP}/`, { isMainFrame: false })).toBe(true);
-    expect(checked("fileSystem", "https://example.com/", { isMainFrame: false })).toBe(false);
-    // The request that grants it names its frame.
-    expect(requested("fileSystem", `${APP}/api/media-frame`, false)).toBe(false);
+    expect(checked("fileSystem", EMBED, { isMainFrame: false })).toBe(false);
   });
 });
