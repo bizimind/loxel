@@ -2,7 +2,8 @@
  * Where a worktree Loxel creates starts. A new branch starts from origin's default branch, which
  * `wt` resolves as last fetched and never fetches itself, so Loxel fetches that one branch first.
  * A child worktree can instead be stacked on its parent's current commit, which the New worktree
- * dialog shows next to how far it is behind the default.
+ * dialog shows next to how far it is behind the default. In an untrusted repository nothing is
+ * fetched: its git config decides how git reaches the remote, which can run any program.
  */
 import { resolveRemoteDefault } from "@bizimind/wt/lib";
 
@@ -11,6 +12,7 @@ import type { WorktreeBasePlan } from "@/api/project-model";
 import { gitText, readOnlyGitEnv, runGit } from "./git-commands";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
+import { isRepositoryTrusted } from "./worktree-hooks";
 
 const log = logger.child("worktrees");
 
@@ -20,19 +22,24 @@ const log = logger.child("worktrees");
  */
 export const FETCH_TIMEOUT_MS = 15_000;
 
+/** What the restriction notice says when a worktree starts from the default as last fetched. */
+export const DEFAULT_BRANCH_FETCH_RESTRICTION =
+  "New worktrees start from the default branch as last fetched: Loxel fetches it first only in a trusted repository.";
+
 /** Fetches in progress by repository, so concurrent creates in one repository share one fetch. */
-const fetching = new Map<string, Promise<void>>();
+const fetching = new Map<string, Promise<boolean>>();
 
 /**
  * Bring origin's default branch (`origin/main`) up to date before a worktree is created from it.
  * Best effort: when it fails (offline, no remote, auth, timeout) the create goes ahead from the
  * last fetched ref and the failure is only logged. A repository with no origin default is not
- * fetched, since its worktrees start from `HEAD`.
+ * fetched, since its worktrees start from `HEAD`, and neither is an untrusted one: then it resolves
+ * to true, so the caller can say the worktree starts from the default as last fetched.
  */
 export function fetchRemoteDefault(
   repoPath: string,
   timeoutMs: number = FETCH_TIMEOUT_MS,
-): Promise<void> {
+): Promise<boolean> {
   const running = fetching.get(repoPath);
   if (running) return running;
   const fetch = runFetch(repoPath, timeoutMs).finally(() => fetching.delete(repoPath));
@@ -40,11 +47,17 @@ export function fetchRemoteDefault(
   return fetch;
 }
 
-async function runFetch(repoPath: string, timeoutMs: number): Promise<void> {
+async function runFetch(repoPath: string, timeoutMs: number): Promise<boolean> {
   try {
     const ref = await resolveRemoteDefault(repoPath);
     // An origin/HEAD pointed at another remote's ref is not origin's branch to fetch.
-    if (!ref?.startsWith("origin/")) return;
+    if (!ref?.startsWith("origin/")) return false;
+    if (!(await isRepositoryTrusted(repoPath))) {
+      log.info(
+        `Not fetching ${ref} in an untrusted repository; creating the worktree from it as last fetched`,
+      );
+      return true;
+    }
     const branch = ref.slice("origin/".length);
     // Only the default branch, into its remote-tracking ref whatever the configured refspec says,
     // leaving FETCH_HEAD to the user's own fetches, and without submodules (which may live on
@@ -63,7 +76,7 @@ async function runFetch(repoPath: string, timeoutMs: number): Promise<void> {
     );
     if (result.exitCode === 0) {
       log.info(`Fetched ${ref} before creating a worktree`);
-      return;
+      return false;
     }
     log.warn(`Could not fetch ${ref}; creating the worktree from it as last fetched`, {
       error: result.stderr.trim(),
@@ -73,6 +86,7 @@ async function runFetch(repoPath: string, timeoutMs: number): Promise<void> {
       error,
     });
   }
+  return false;
 }
 
 /**

@@ -12,7 +12,7 @@ Every Git read the UI depends on goes through [`src/server/git-commands/`](../sr
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | [run-git.ts](../src/server/git-commands/run-git.ts)           | `runGit`, `gitText`, `GitCommandError`: how every command here runs and fails                         |
 | [git-exec.ts](../src/server/git-commands/git-exec.ts)         | `execGit`, the spawn itself, as plain data in and out                                                 |
-| [git-env.ts](../src/server/git-commands/git-env.ts)           | `readOnlyGitEnv()`, `worktreeReadEnv()` and shared arguments: the one source of truth for running Git |
+| [git-env.ts](../src/server/git-commands/git-env.ts)           | `readOnlyGitEnv()`, `worktreeReadEnv()`, `untrustedChangeGitEnv()` and shared arguments: how Git runs |
 | [status.ts](../src/server/git-commands/status.ts)             | `getStatus`: the one `git status --porcelain=v2 --branch -z` reader                                   |
 | [diff.ts](../src/server/git-commands/diff.ts)                 | staged, unstaged, commit, range and working-tree diffs; `resolveCommit`, `resolveMergeBase`           |
 | [log.ts](../src/server/git-commands/log.ts)                   | `getLog` (graph) and `getBranchCommits` (the commits a branch adds over the default branch)           |

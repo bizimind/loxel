@@ -1,8 +1,13 @@
 /**
  * Worktree hooks (`init.wt.sh`, `clean.wt.sh`) are the repository's code, so Loxel runs them only
- * in a trusted repository. Every add, remove, bare clone and `wt init` fix Loxel makes goes through
- * here; the `wt` command line is the user's own act and runs them as it always does.
+ * in a trusted repository, and the same goes for the git hooks and the programs the repository's
+ * git config names, which the git commands of these operations would run. Every add, remove, bare
+ * clone and `wt init` fix Loxel makes goes through here; the `wt` command line is the user's own
+ * act and runs them as it always does. A bare clone is not restricted: its git config and hooks
+ * come from git itself, not from the repository.
  */
+import { existsSync, realpathSync } from "node:fs";
+
 import {
   cloneBareRepo,
   executeAdd,
@@ -18,45 +23,106 @@ import {
   type ProgressHandler,
   type RemoveParams,
   type RemoveResult,
+  withGitEnv,
 } from "@bizimind/wt/lib";
 
-import { isRepoTrusted, reportRepoRestriction, setRepoTrusted } from "./repo-trust";
+import { gitText, readOnlyGitEnv, untrustedChangeGitEnv } from "./git-commands";
+import {
+  isRepoGitDirTrusted,
+  isRepoTrusted,
+  reportRepoRestriction,
+  setRepoTrusted,
+} from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
 export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.sh) don't run.";
 
+/** The `wt init` fixes that contact origin, with the repository's own transport settings. */
+const ORIGIN_FIXES: readonly InitActionId[] = ["fetch-refspec", "origin-head"];
+
 type HookOptions = "hookEnv" | "allowHook";
 
-/** Add a worktree, running `init.wt.sh` only if the repository is trusted. */
+/**
+ * Whether Loxel may run code from the repository at `repoPath`: one of its worktrees, or the root of
+ * a bare repository, which stands for the repository when it is itself the git directory (never
+ * through a `.git` file or link, which could name any repository's).
+ */
+export async function isRepositoryTrusted(repoPath: string): Promise<boolean> {
+  if (isRepoTrusted(repoPath)) return true;
+  const dirs = await gitText(
+    ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+    { cwd: repoPath, env: readOnlyGitEnv(repoPath), nothrow: true },
+  );
+  const [gitDir, commonDir] = dirs.trim().split("\n");
+  if (gitDir === undefined || gitDir !== commonDir) return false;
+  try {
+    return realpathSync(gitDir) === realpathSync(repoPath) && isRepoGitDirTrusted(gitDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run `fn`, wt operations on the repository at `repoPath`, with every git command they run kept
+ * from running the repository's own programs unless it is trusted (`untrustedChangeGitEnv`).
+ * `checkout` is the worktree whose submodules a check for uncommitted changes looks into, when it
+ * is another one than `repoPath` and still exists.
+ */
+export async function withRepoGitEnv<T>(
+  repoPath: string,
+  fn: () => Promise<T>,
+  checkout: string = repoPath,
+): Promise<T> {
+  if (await isRepositoryTrusted(repoPath)) return fn();
+  const env = await untrustedChangeGitEnv(existsSync(checkout) ? checkout : repoPath);
+  return withGitEnv(env, fn);
+}
+
+/** Add a worktree, running `init.wt.sh` and the repository's git hooks only if it is trusted. */
 export async function addWorktree(
   params: Omit<AddParams, HookOptions>,
   progress: ProgressHandler,
 ): Promise<AddResult> {
-  const result = await executeAdd(
-    { ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
-    progress,
+  const result = await withRepoGitEnv(params.repoPath, () =>
+    executeAdd({ ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted }, progress),
   );
   if (result.hookSkipped) reportRepoRestriction(result.path, WORKTREE_HOOKS_RESTRICTION);
   return result;
 }
 
 /**
- * Apply `wt init` fixes (`executeInit`), running `init.wt.sh` in a worktree one adds only if the
- * repository is trusted.
+ * Apply `wt init` fixes (`executeInit`), running `init.wt.sh` in a worktree one adds and the
+ * repository's git hooks only if it is trusted. The fixes that contact origin wait for trust: the
+ * repository's git config decides how git reaches a remote, which can run any program, so they are
+ * reported as failed until then.
  */
 export async function applyInitActions(
   repoPath: string,
   apply: InitActionId[],
   progress: ProgressHandler,
 ): Promise<InitResult> {
-  return reportHeldHooks(
-    await executeInit(
+  const trusted = await isRepositoryTrusted(repoPath);
+  const held = trusted ? [] : apply.filter((id) => ORIGIN_FIXES.includes(id));
+  const result = await withRepoGitEnv(repoPath, () =>
+    executeInit(
       repoPath,
-      { apply, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
+      {
+        apply: apply.filter((id) => !held.includes(id)),
+        hookEnv: buildSpawnEnv(),
+        allowHook: isRepoTrusted,
+      },
       progress,
     ),
   );
+  const heldOutcomes = held.map((id) => ({
+    id,
+    status: "failed" as const,
+    commands: [],
+    error:
+      "waits for the repository to be trusted (it contacts origin with the repository's git settings)",
+  }));
+  return reportHeldHooks({ ...result, outcomes: [...heldOutcomes, ...result.outcomes] });
 }
 
 /**
@@ -105,14 +171,20 @@ export async function addFirstWorktreeOfNewRepo(
 }
 
 /**
- * Remove a worktree, running `clean.wt.sh` only if the repository is trusted. Nothing is reported
- * when it is held back: the removal dialog already said so, from the plan's `cleanHookHeld`.
+ * Remove a worktree, running `clean.wt.sh` and the repository's git hooks only if it is trusted.
+ * Nothing is reported when the clean hook is held back: the removal dialog already said so, from
+ * the plan's `cleanHookHeld`.
  */
 export async function removeWorktree(
   params: Omit<RemoveParams, HookOptions>,
   progress: ProgressHandler,
 ): Promise<RemoveResult> {
-  return executeRemove({ ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted }, progress);
+  return withRepoGitEnv(
+    params.repoPath,
+    () =>
+      executeRemove({ ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted }, progress),
+    params.expectedPath,
+  );
 }
 
 /** Whether removing a worktree would hold back its repository's `clean.wt.sh`. */

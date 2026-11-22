@@ -142,6 +142,16 @@ export function isRepoTrusted(wtPath: string): boolean {
   return isTrustedIdentity(repoIdentity(wtPath));
 }
 
+/**
+ * Whether Loxel may run code from the repository whose git directory is `gitDir`. For the root of a
+ * bare repository, which stands for no worktree of its own; the caller makes sure it is that
+ * repository's own git directory rather than one that links to another.
+ */
+export function isRepoGitDirTrusted(gitDir: string): boolean {
+  const dir = realPathOrResolved(gitDir);
+  return isTrustedIdentity({ id: `git:${dir}`, dir });
+}
+
 /** What was reported as restricted per untrusted repository, since Loxel started. */
 const restrictionsByRepo = new Map<string, Set<string>>();
 const restrictionListeners = new Set<() => void>();

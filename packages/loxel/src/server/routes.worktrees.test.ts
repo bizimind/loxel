@@ -9,6 +9,7 @@ import { setWorktreeMeta } from "@bizimind/wt/lib";
 import type { WsMessage } from "@/api/ws-protocol";
 
 import { listProjectWorktrees, projectWorktreesResponse } from "./project-worktrees";
+import { setRepoTrusted } from "./repo-trust";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import type { ProjectState } from "./server-state";
@@ -396,9 +397,12 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       await git(repo, "push", "--quiet", "origin", "main");
       await git(repo, "update-ref", "refs/remotes/origin/main", fetched);
       await git(repo, "reset", "--hard", "--quiet", fetched);
+      // Loxel fetches before a create only in a trusted repository.
+      setRepoTrusted(repo, true);
     });
 
     afterEach(async () => {
+      setRepoTrusted(repo, false);
       await rm(origin, { recursive: true, force: true });
     });
 

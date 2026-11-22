@@ -1,9 +1,22 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { $ } from "bun";
 
 export interface GitResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+const scopedGitEnv = new AsyncLocalStorage<Record<string, string>>();
+
+/**
+ * Run `fn` with `env` added to the environment of every git command wt runs on its behalf, however
+ * deep, for an app that runs git in a repository with settings of its own (for example config that
+ * keeps the repository's hooks from running). Outside such a scope git gets wt's usual environment.
+ */
+export function withGitEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  return scopedGitEnv.run({ ...scopedGitEnv.getStore(), ...env }, fn);
 }
 
 /**
@@ -14,7 +27,7 @@ export async function runGit(args: string[], cwd?: string): Promise<GitResult> {
   try {
     const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
     const result = await shell
-      .env({ ...process.env, LANG: "C", LC_ALL: "C" })
+      .env({ ...process.env, ...scopedGitEnv.getStore(), LANG: "C", LC_ALL: "C" })
       .quiet()
       .nothrow();
 
