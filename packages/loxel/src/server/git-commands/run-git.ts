@@ -42,11 +42,12 @@ export class GitCommandError extends Error {
 /**
  * What git says, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when a read needs
  * an object that isn't there: `GIT_NO_LAZY_FETCH`'s warning, `GIT_ALLOW_PROTOCOL`'s refusal on a
- * git too old for it, or the plain missing object of a read that never asks to download, such as
- * `git show <rev>:<path>` (`bad object`).
+ * git too old for it, or the plain missing object of `git show <rev>:<path>`, which never asks to
+ * download (`bad object <rev>:<path>`; a bare `bad object <sha>` is a revision that doesn't exist,
+ * which trust wouldn't bring).
  */
 const OBJECT_MISSING =
-  /lazy fetching disabled|transport '[^']*' not allowed|bad object|unable to read tree/;
+  /lazy fetching disabled|transport '[^']*' not allowed|bad object \S*:|unable to read tree/;
 
 const AWAITS_TRUST_RESTRICTION =
   "Git doesn't download content this partial clone doesn't have yet.";
