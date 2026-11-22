@@ -29,6 +29,7 @@ if [[ "${2:-}" == "--wait" ]]; then
   done
 fi
 
+here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 owner="${repo%/*}"
 name="${repo#*/}"
@@ -44,24 +45,36 @@ branch="$(jq -r .headRefName <<<"$pr_json")"
 runs_json="$(gh run list --workflow claude-code-review.yml --branch "$branch" --limit 20 \
   --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
 
-# A resumed review sometimes words its clean summary "No new issues found"; both mean clean.
+# A resumed review sometimes words its clean summary "No new issues found"; both mean clean. The
+# review posts as github-actions[bot]; a user account cannot take a [bot] login.
 clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
-  --jq '.[] | select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]") and (.body | test("No (new )?issues found")))
+  --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | test("No (new )?issues found")))
     | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
-# last: 100 because unresolved threads are usually the newest.
+# last: 100 because unresolved threads are usually the newest. Only feedback from the project's own
+# people and review bots (trusted.jq) is a work item; anything else goes to outsideFeedback as links.
 # shellcheck disable=SC2016 # GraphQL variables, not shell expansions
-threads_json="$(gh api graphql \
+feedback_json="$(gh api graphql \
   -f query='query($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
       reviewThreads(last: 100) { nodes { id isResolved isOutdated path line
-        comments(first: 1) { nodes { databaseId url author { login } createdAt body } } } } } } }' \
+        comments(first: 1) { nodes { databaseId url author { login __typename } authorAssociation createdAt body } } } }
+      reviews(last: 100) { nodes { url state body author { login __typename } authorAssociation } }
+      comments(last: 100) { nodes { url author { login __typename } authorAssociation } } } } }' \
   -f owner="$owner" -f name="$name" -F number="$pr" |
-  jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)
-      | {threadId: .id, path, line, isOutdated, commentId: .comments.nodes[0].databaseId,
-         author: .comments.nodes[0].author.login, createdAt: .comments.nodes[0].createdAt,
-         url: .comments.nodes[0].url, body: (.comments.nodes[0].body | .[0:300])}]')"
+  jq -L "$here" 'include "trusted";
+    def link($kind): {kind: $kind, author: (.author.login // "unknown"), url};
+    .data.repository.pullRequest as $p
+    | [$p.reviewThreads.nodes[] | select(.isResolved | not)] as $open
+    | {
+        threads: [$open[] | .comments.nodes[0] as $c | select($c | trusted)
+          | {threadId: .id, path, line, isOutdated, commentId: $c.databaseId, author: $c.author.login,
+             createdAt: $c.createdAt, url: $c.url, body: ($c.body | .[0:300])}],
+        outside: ([$open[].comments.nodes[0] | select(trusted | not) | link("thread")]
+          + [$p.reviews.nodes[] | select((trusted | not) and (.state != "COMMENTED" or .body != "")) | link("review")]
+          + [$p.comments.nodes[] | select(trusted | not) | link("comment")])
+      }')"
 
 # With --json, gh pr checks exits 0 even when checks fail or are pending; its one non-zero case is
 # "no checks reported", which prints nothing on stdout — hence the || true and the array guard below.
@@ -93,9 +106,10 @@ fi
 
 jq -n \
   --argjson pr "$pr_json" --argjson runs "$runs_json" --argjson cleans "$clean_comments_json" \
-  --argjson threads "$threads_json" --argjson checks "$checks_json" \
+  --argjson feedback "$feedback_json" --argjson checks "$checks_json" \
   --arg localHead "$local_head" --arg localRelation "$local_relation" '
-  ($runs | map(select(.headSha == $pr.headRefOid)) | first) as $run
+  $feedback.threads as $threads
+  | ($runs | map(select(.headSha == $pr.headRefOid)) | first) as $run
   | ($run != null and $run.status == "completed") as $reviewDone
   # A clean comment names the commit it reviewed. Older comments without one belong to the first
   # run that completed after they were posted, and count only when that run is the head run.
@@ -131,6 +145,7 @@ jq -n \
       pr: ($pr | {number, url, state, isDraft, headRefName, head: .headRefOid, mergeable, mergeStateStatus}),
       review: {run: $run, cleanComment: $clean, done: $reviewDone},
       unresolvedThreads: $threads,
+      outsideFeedback: $feedback.outside,
       failedChecks: $failed,
       pendingChecks: ($pending | map("\(.workflow) / \(.name)")),
       blockers: $blockers,

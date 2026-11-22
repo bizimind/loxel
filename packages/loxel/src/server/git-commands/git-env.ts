@@ -1,7 +1,7 @@
 import { shellQuote } from "@bizimind/wt/lib";
 
 import { isRepoTrusted } from "../repo-trust";
-import { GitCommandError, inheritedGitEnv, runGit } from "./run-git";
+import { gitText, inheritedGitEnv } from "./run-git";
 
 /**
  * Environment and shared arguments for git invocations.
@@ -51,11 +51,12 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * precedence, and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited
  * value is kept.
  *
- * Outside a trusted repository `GIT_NO_LAZY_FETCH=1` (git 2.45.1 and later) also keeps git from
- * downloading an object a partial clone doesn't have yet, which would run the transport the
- * repository's own config sets up. An empty `GIT_ALLOW_PROTOCOL` allows no transport at all, over any
- * `protocol.*.allow` config, so an older git refuses that download too: no read here needs one. Such
- * a read fails instead, and `runGit` reports it as content that waits for trust.
+ * Outside a trusted repository `GIT_NO_LAZY_FETCH=1` (git 2.39.4 and later, and the May 2024
+ * security release of each older line) also keeps git from downloading an object a partial clone
+ * doesn't have yet, which would run the transport the repository's own config sets up. An empty
+ * `GIT_ALLOW_PROTOCOL` allows no transport at all, over any `protocol.*.allow` config, so an older
+ * git refuses that download too: no read here needs one. Such a read fails instead, and `runGit`
+ * reports it as content that waits for trust.
  *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
@@ -109,21 +110,20 @@ export async function worktreeReadEnv(cwd: string): Promise<Record<string, strin
  * nothing, so the names are exactly the ones it would use.
  */
 async function repoFilterDrivers(cwd: string, env: Record<string, string>): Promise<string[]> {
-  const result = await runGit(
-    ["config", "--show-scope", "--name-only", "-z", "--get-regexp", String.raw`^filter\.`],
-    { cwd, env, nothrow: true },
-  );
-  // Exit code 1 with nothing on stderr: no filter keys at all. A git that could not be started also
-  // reports 1, with the reason on stderr (git-exec.ts). That, or a config git cannot read, leaves
-  // the drivers unknown, so the read fails rather than run them.
-  if (result.exitCode === 1 && result.stderr.trim() === "") return [];
-  if (result.exitCode !== 0) throw new GitCommandError(result);
+  // `--list` succeeds when nothing matches, unlike `--get-regexp`, whose exit code 1 for "no match"
+  // is also what a git that could not be started reports. So any failure, a config git cannot read
+  // included, leaves the drivers unknown and fails the read rather than run them.
+  const stdout = await gitText(["config", "--list", "--show-scope", "--name-only", "-z"], {
+    cwd,
+    env,
+  });
   // `-z` with `--show-scope`: scope and key, each NUL-terminated.
-  const fields = result.stdout.split("\0");
+  const fields = stdout.split("\0");
   const names = new Set<string>();
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const [scope, key] = [fields[i], fields[i + 1] ?? ""];
     if (scope !== "local" && scope !== "worktree") continue;
+    if (!key.startsWith("filter.")) continue;
     // `filter.<name>.<variable>`; the name may hold dots, the variable cannot.
     const rest = key.slice("filter.".length);
     const end = rest.lastIndexOf(".");

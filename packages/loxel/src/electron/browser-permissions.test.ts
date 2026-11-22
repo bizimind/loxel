@@ -16,7 +16,16 @@ const mediaCheck = mock((..._args: unknown[]) => true);
 const mediaRequest = mock((..._args: unknown[]) => {});
 /** What the module for links to other apps was handed, standing in for `browser-external-apps.ts`. */
 const openExternal = mock((..._args: unknown[]) => {});
-const askers = { media: { check: mediaCheck, request: mediaRequest }, openExternal };
+/** Standing in for `browser-file-access.ts`. */
+const fileSystem = mock((..._args: unknown[]) => {});
+/** Standing in for `browser-local-network.ts`. */
+const localNetwork = mock((..._args: unknown[]) => true);
+const askers = {
+  media: { check: mediaCheck, request: mediaRequest },
+  openExternal,
+  fileSystem,
+  localNetwork,
+};
 
 /** The handlers `installBrowserPermissions` gives a session. */
 function installedHandlers(): {
@@ -181,6 +190,49 @@ describe("installBrowserPermissions", () => {
     const answer = openExternal.mock.calls.at(-1)![2] as (granted: boolean) => void;
     answer(true);
     expect(events).toEqual(["granted openExternal", "answered true"]);
+  });
+
+  test("file access requests are decided by the file access module", () => {
+    const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
+    const details = {
+      isMainFrame: false,
+      requestingUrl: "https://editor.example/",
+      filePath: "/Users/me/notes.txt",
+      isDirectory: false,
+      fileAccessType: "writable" as const,
+    };
+    const callback = mock((_granted: boolean) => {});
+    request(webContents, "fileSystem", callback, details);
+    expect(fileSystem).toHaveBeenCalledWith(webContents, details, expect.any(Function));
+    expect(callback).not.toHaveBeenCalled();
+    const answer = fileSystem.mock.calls.at(-1)![2] as (granted: boolean) => void;
+    answer(false);
+    expect(callback).toHaveBeenCalledWith(false);
+    // The check keeps what was granted (the patched Electron makes it a veto).
+    expect(check(webContents, "fileSystem", "https://editor.example/", details)).toBe(true);
+  });
+
+  test("the local network is decided by its module, from the page's top-level origin", () => {
+    const webContents = { getType: () => "webview" } as Parameters<typeof request>[0];
+    const frame = { isMainFrame: false, embeddingOrigin: "https://app.example/" };
+    for (const permission of [
+      "local-network",
+      "loopback-network",
+      "local-network-access",
+    ] as const) {
+      localNetwork.mockReturnValueOnce(false);
+      expect(check(webContents, permission, "https://widget.example/", frame)).toBe(false);
+      expect(localNetwork).toHaveBeenLastCalledWith(
+        webContents,
+        "https://widget.example/",
+        "https://app.example/",
+      );
+    }
+    const callback = mock((_granted: boolean) => {});
+    const page = { isMainFrame: true, requestingUrl: "https://app.example/page" };
+    request(webContents, "loopback-network", callback, page);
+    expect(localNetwork).toHaveBeenLastCalledWith(webContents, "https://app.example");
+    expect(callback).toHaveBeenCalledWith(true);
   });
 
   test("the camera and microphone are decided by the media module", () => {
