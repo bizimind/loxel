@@ -649,8 +649,10 @@ async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response>
   let fullPath: string;
 
   if (path.startsWith("/")) {
-    // Absolute path mode: resolve via ctx.resolveFilePath to validate ownership
-    const resolved = resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
+    // Absolute path mode: only a file the worktree owns or already lists in Others. Page elements
+    // load this route (request-origin.ts), so the hint adds no file: the media frame that links
+    // here already did.
+    const resolved = ctx.resolveFilePath(path, url.searchParams.get("wt") ?? undefined);
     if (!resolved) return error("File not found in any active worktree", 404);
     fullPath = path;
   } else {

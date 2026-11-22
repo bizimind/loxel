@@ -117,7 +117,8 @@ describe("checkRequest: Sec-Fetch-Site", () => {
 
   test("admits cross-site top-level document navigations (a link into the app)", () => {
     const navigation = { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" };
-    expect(status(request("GET", { ...navigation, "Sec-Fetch-Dest": "document" }))).toBeNull();
+    const headers = { ...navigation, "Sec-Fetch-Dest": "document" };
+    expect(status(request("GET", headers, "/"))).toBeNull();
   });
 
   test("rejects cross-site fetches, subresource loads and framing of any method", () => {
@@ -141,10 +142,62 @@ describe("checkRequest: Sec-Fetch-Site", () => {
 
   test("admits same-origin subresource loads such as the media viewer's frame content", () => {
     const image = { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "no-cors" };
-    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "image" }))).toBeNull();
-    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "video" }))).toBeNull();
+    const raw = "/api/file-raw";
+    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "image" }, raw))).toBeNull();
+    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "video" }, raw))).toBeNull();
     const frame = { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" };
-    expect(status(request("GET", { ...frame, "Sec-Fetch-Dest": "iframe" }))).toBeNull();
+    const mediaFrame = "/api/media-frame";
+    expect(status(request("GET", { ...frame, "Sec-Fetch-Dest": "iframe" }, mediaFrame))).toBeNull();
+  });
+});
+
+describe("checkRequest: Sec-Fetch-Dest", () => {
+  const sameOrigin = (dest: string) => ({
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Dest": dest,
+  });
+
+  test("admits the app's own fetches and WebSockets on every endpoint", () => {
+    for (const dest of ["empty", "websocket", "EMPTY"]) {
+      expect(status(request("GET", sameOrigin(dest)))).toBeNull();
+      expect(status(jsonPost(sameOrigin(dest)))).toBeNull();
+      expect(status(request("GET", sameOrigin(dest), "/ws"))).toBeNull();
+    }
+    expect(status(request("GET"))).toBeNull();
+    // The CLI's socket has no pages.
+    expect(status(request("GET", sameOrigin("image"), "/api/version"), prod, "cli")).toBeNull();
+  });
+
+  test("admits page elements only on the routes built for them", () => {
+    for (const [pathname, dest] of [
+      ["/api/file-raw", "image"],
+      ["/api/file-raw", "video"],
+      ["/api/media-frame", "iframe"],
+      ["/api/open-in/app-icon", "image"],
+    ]) {
+      expect(status(request("GET", sameOrigin(dest!), pathname))).toBeNull();
+    }
+  });
+
+  test("refuses page elements on every other endpoint, and other elements on those routes", () => {
+    for (const dest of ["image", "video", "audio", "style", "font", "script", "iframe", "object"]) {
+      expect(status(request("GET", sameOrigin(dest)))).toBe(403);
+      expect(status(request("GET", sameOrigin(dest), "/api/file-content"))).toBe(403);
+    }
+    expect(status(request("GET", sameOrigin("style"), "/api/file-raw"))).toBe(403);
+    expect(status(request("GET", sameOrigin("iframe"), "/api/file-raw"))).toBe(403);
+    expect(status(request("GET", sameOrigin("image"), "/api/media-frame"))).toBe(403);
+    expect(status(request("POST", sameOrigin("image"), "/api/file-raw"))).toBe(403);
+    expect(status(request("HEAD", sameOrigin("image"), "/api/file-raw"))).toBe(403);
+    expect(status(request("GET", sameOrigin("image"), "/api/file-raw/"))).toBe(403);
+    expect(status(request("GET", sameOrigin("Image"), "/api/projects"))).toBe(403);
+    expect(status(request("GET", sameOrigin("document")))).toBe(403);
+  });
+
+  test("leaves static files to page elements", () => {
+    for (const dest of ["image", "script", "style", "font", "worker"]) {
+      expect(status(request("GET", sameOrigin(dest), "/assets/index.js"))).toBeNull();
+    }
   });
 });
 

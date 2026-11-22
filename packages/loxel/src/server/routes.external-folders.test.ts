@@ -289,6 +289,23 @@ describe("Others folders routes", () => {
     });
   });
 
+  describe("GET /api/file-raw", () => {
+    const rawUrl = (path: string) =>
+      `/api/file-raw?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(wt)}`;
+
+    test("serves only files the worktree lists, and adds none to Others", async () => {
+      const file = join(root, "photo.png");
+      await writeFile(file, "png");
+
+      expect((await get(rawUrl(file))).status).toBe(404);
+      expect(resources.externalFilesService.listFiles()).toEqual([]);
+
+      // A file in an Others folder is the worktree's.
+      await post("/api/external-folders/add", { wt, path: folder });
+      expect((await get(rawUrl(join(folder, "a.md")))).status).toBe(200);
+    });
+  });
+
   describe("file operations", () => {
     beforeEach(async () => {
       await post("/api/external-folders/add", { wt, path: folder });
