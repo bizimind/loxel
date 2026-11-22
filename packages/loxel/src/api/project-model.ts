@@ -96,6 +96,12 @@ export interface RepoSetupPlan {
   actions: InitAction[];
 }
 
+/**
+ * The `wt init` fixes that contact origin with the repository's own git settings, which can run any
+ * program: the server applies them only in a trusted repository and skips them in any other.
+ */
+export const ORIGIN_SETUP_FIXES: readonly InitActionId[] = ["fetch-refspec", "origin-head"];
+
 /** Body of POST /api/projects: register an existing folder, applying the chosen `wt init` fixes. */
 export interface AddProjectRequest {
   path: string;

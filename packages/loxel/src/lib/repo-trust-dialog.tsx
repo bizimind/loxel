@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { runInitHook } from "@/api/client";
-import { getRepoTrust, setRepoTrust } from "@/api/repo-trust-client";
+import { getRepoTrust, type RepoTrustTarget, setRepoTrust } from "@/api/repo-trust-client";
 import type { RepoTrustStatus } from "@/api/repo-trust-model";
 import { type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
 import type { ConfirmationOptions } from "@/components/ui/confirm-dialog-host";
@@ -65,17 +65,17 @@ function stopTrustingQuestion({ repository }: RepoTrustStatus): ConfirmationOpti
  * replaced (`answer` null) was not answered, and one already declined needs no new row.
  */
 async function recordAnswer(
-  wt: WorktreeRef,
+  target: RepoTrustTarget,
   status: RepoTrustStatus,
   answer: boolean | null,
 ): Promise<boolean> {
   if (answer === true) {
-    await setRepoTrust(wt, { decision: "trusted" });
+    await setRepoTrust(target, { decision: "trusted" });
     return true;
   }
   if (answer === false && status.decision === "undecided") {
     // The server keeps trust given in another window while this question was open.
-    await setRepoTrust(wt, { decision: "declined", unlessTrusted: true });
+    await setRepoTrust(target, { decision: "declined", unlessTrusted: true });
   }
   return false;
 }
@@ -107,14 +107,15 @@ export async function manageRepoTrust(
 }
 
 /**
- * Asks to trust the worktree's repository, after `reason` says what is waiting on it. Resolves
- * true when the repository is trusted, already or by this answer. "Not Now" records it declined.
+ * Asks to trust the repository, after `reason` says what is waiting on it: a worktree's, or a folder
+ * about to be added as a project. Resolves true when the repository is trusted, already or by this
+ * answer. "Not Now" records it declined.
  */
 export async function askToTrustRepo(
-  wt: WorktreeRef,
+  target: RepoTrustTarget,
   ask: { title: string; reason: ReactNode; confirmLabel: string },
 ): Promise<boolean> {
-  const status = await getRepoTrust(wt);
+  const status = await getRepoTrust(target);
   if (status.decision === "trusted") return true;
   const answer = await requestAnswer({
     title: ask.title,
@@ -127,7 +128,7 @@ export async function askToTrustRepo(
     confirmLabel: ask.confirmLabel,
     cancelLabel: "Not Now",
   });
-  return recordAnswer(wt, status, answer);
+  return recordAnswer(target, status, answer);
 }
 
 /** The offers still to show, one at a time: a newer confirmation would cancel the one showing. */

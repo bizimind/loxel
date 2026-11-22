@@ -11,13 +11,18 @@ import { useCallback, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import { localServerId } from "@/api/local-server";
-import type { DetectPathResult, ProjectSetupResult, WorkspaceSetup } from "@/api/project-model";
+import {
+  type DetectPathResult,
+  ORIGIN_SETUP_FIXES,
+  type ProjectSetupResult,
+  type WorkspaceSetup,
+} from "@/api/project-model";
 import { type ServerId, worktreeRef } from "@/api/worktree-ref";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { showToast } from "@/components/ui/toast";
 import { frontendLog } from "@/lib/frontend-logger";
-import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
+import { askToTrustRepo, offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { cn } from "@/lib/utils";
 import { useAddProjectWizardStore } from "@/store/add-project-wizard";
 import { useProjectStore } from "@/store/projects";
@@ -51,6 +56,28 @@ function wizardServer(): ServerId {
 function offerHeldInitHook(project: ProjectSetupResult): void {
   if (!project.initHookSkippedAt) return;
   void offerToRunInitHook(worktreeRef(wizardServer(), project.path), project.initHookSkippedAt);
+}
+
+/**
+ * Asks to trust the repository at `path` before it is added when a chosen fix contacts its remote,
+ * which the server does only in a trusted repository. Declined, or when trust could not be read or
+ * recorded, the server skips those fixes and says so.
+ */
+async function askTrustForFixes(path: string, apply: InitActionId[]): Promise<void> {
+  if (!apply.some((id) => ORIGIN_SETUP_FIXES.includes(id))) return;
+  try {
+    await askToTrustRepo(
+      { server: wizardServer(), repository: path },
+      {
+        title: "Trust this repository and apply its setup fixes?",
+        reason:
+          "Some of the chosen fixes contact origin with the repository's own Git settings, which Loxel does only in trusted repositories. Without trust the project is added without them.",
+        confirmLabel: "Trust and Add",
+      },
+    );
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : "Could not change repository trust");
+  }
 }
 
 /**
@@ -205,15 +232,14 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
   const handleAddAsIs = useCallback(async () => {
     if (!detection) return;
-    await submit(
-      () =>
-        api.addProject(wizardServer(), {
-          path: detection.path,
-          name: importName || undefined,
-          apply: importApply,
-        }),
-      "Failed to add project",
-    );
+    await submit(async () => {
+      await askTrustForFixes(detection.path, importApply);
+      return api.addProject(wizardServer(), {
+        path: detection.path,
+        name: importName || undefined,
+        apply: importApply,
+      });
+    }, "Failed to add project");
   }, [detection, importName, importApply, submit]);
 
   const handleCreateNew = useCallback(async () => {
