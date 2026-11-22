@@ -56,11 +56,15 @@ class LspDocumentLinkProvider implements monaco.languages.LinkProvider {
     }
 
     return {
-      links: result.map((link) => ({
-        range: this._client.bridge.translateBackRange(translated.textDocument, link.range).range,
-        url: link.target,
-        tooltip: link.tooltip,
-      })),
+      links: result
+        // A document link names a location to open, but Monaco runs a `command:` target as an
+        // editor command, so such links are left out.
+        .filter((link) => !/^\s*command:/i.test(link.target ?? ""))
+        .map((link) => ({
+          range: this._client.bridge.translateBackRange(translated.textDocument, link.range).range,
+          url: link.target,
+          tooltip: link.tooltip,
+        })),
     };
   }
 
@@ -72,7 +76,7 @@ class LspDocumentLinkProvider implements monaco.languages.LinkProvider {
       return link;
     }
 
-    // TODO: Implement resolve
+    // TODO: Implement resolve, leaving out `command:` targets as `provideLinks` does
     return link;
   }
 }
