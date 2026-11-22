@@ -349,6 +349,19 @@ describe("commands that need a trusted repository", () => {
         JSON.stringify({ jsonrpc: "2.0", id: 1, result: "workspace/executeCommand" }),
       ),
     ).toBeNull();
+    // Read as gopls reads JSON: escapes decoded, keys in any letter case.
+    expect(trustedOnlyCommand(executeCommand(1, "gopls.generate").replace("/", "\\u002f"))).toEqual(
+      { id: 1, command: "gopls.generate" },
+    );
+    expect(
+      trustedOnlyCommand(
+        JSON.stringify({
+          id: 1,
+          Method: "workspace/executeCommand",
+          PARAMS: { Command: "gopls.lsp" },
+        }),
+      ),
+    ).toEqual({ id: 1, command: "gopls.lsp" });
   });
 });
 

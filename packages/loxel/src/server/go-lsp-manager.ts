@@ -157,14 +157,29 @@ const TRUSTED_ONLY_COMMANDS: ReadonlySet<string> = new Set([
 /** LSP's code for a request the server could not carry out. */
 const REQUEST_FAILED = -32803;
 
-/** The `workspace/executeCommand` request in a client frame for a command that needs trust. */
+/** The values of `record`'s keys that gopls reads as `name`: Go's JSON decoding ignores letter case. */
+function goFieldValues(record: Record<string, unknown>, name: string): unknown[] {
+  return Object.entries(record)
+    .filter(([key]) => key.toUpperCase().toLowerCase() === name)
+    .map(([, value]) => value);
+}
+
+/**
+ * The `workspace/executeCommand` request in a client frame for a command that needs trust, judged
+ * on the parsed frame as gopls reads it, never on its text.
+ */
 export function trustedOnlyCommand(data: string): { id: unknown; command: string } | null {
-  if (!data.includes('"workspace/executeCommand"')) return null;
   const frame = parseFrame(data);
-  if (frame?.method !== "workspace/executeCommand" || !isRecord(frame.params)) return null;
-  const { command } = frame.params;
-  if (typeof command !== "string" || !TRUSTED_ONLY_COMMANDS.has(command)) return null;
-  return { id: frame.id, command };
+  if (!frame || !goFieldValues(frame, "method").includes("workspace/executeCommand")) return null;
+  for (const params of goFieldValues(frame, "params")) {
+    if (!isRecord(params)) continue;
+    for (const command of goFieldValues(params, "command")) {
+      if (typeof command === "string" && TRUSTED_ONLY_COMMANDS.has(command)) {
+        return { id: frame.id, command };
+      }
+    }
+  }
+  return null;
 }
 
 /** Finds a kind of problem in a frame's text; a capture group holds what the message names. */
