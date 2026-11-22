@@ -34,7 +34,7 @@ In a repository you haven't trusted:
 - **Python**: nothing runs from the project's Python environment. basedpyright reads its installed packages without running it, and mypy doesn't run, so basedpyright checks types. Ruff and format on save use the Ruff that ships with Loxel, Black doesn't run on save, Poetry and Pipenv aren't asked for their environments, and new terminals don't activate the environment. A Python installed through a version manager such as pyenv shows its global version in the status bar. See [Python](/docs/languages/python).
 - **Rust**: build scripts, proc macros and `cargo check` don't run, and flags from `.cargo/config.toml` don't apply to analysis. See [Rust](/docs/languages/rust).
 - **Terraform**: Terraform itself doesn't run, so provider schemas come from the language server's built-in set rather than your initialized providers.
-- **Every language**: format on save doesn't run a formatter override that names a file by its path in the repository, or one that runs a tool your project's .NET tool manifest names.
+- **Every language**: format on save doesn't run your formatter overrides from **Settings > Editor**, since a formatter can load the repository's own config, plugins or tools. Those files save unformatted, and your overrides format them again from the first save after you trust the repository.
 
 Kotlin, TOML and YAML features work the same in every repository, and so do gofmt, rustfmt, clang-format, ktfmt, ktlint and the Java formatters: they read the repository's files as settings and run nothing from it.
 

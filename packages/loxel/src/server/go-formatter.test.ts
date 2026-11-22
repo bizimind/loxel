@@ -10,6 +10,7 @@ import { writeExecutable } from "@/test/executable";
 import { FormatService } from "./format-service";
 import { GO_ENV } from "./go-env";
 import { goFormatter, goFormatterWith } from "./go-formatter";
+import { setRepoTrusted } from "./repo-trust";
 
 const GOLANGCI = "golangci-lint";
 const REAL_PATH = process.env.PATH;
@@ -319,6 +320,7 @@ describe("goFormatter binaries", () => {
   });
 
   test("a manual override gets the same cwd and environment", async () => {
+    setRepoTrusted(wt, true);
     await install(tools, "gofumpt");
     await addFiles({ "go.mod": "module m\n", "pkg/a.go": "" });
     const { content } = await new FormatService().format(

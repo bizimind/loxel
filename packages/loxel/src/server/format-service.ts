@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
@@ -12,7 +12,6 @@ import {
   killProcessGroup,
 } from "./formatter-backends";
 import {
-  dirsUpToRoot,
   type FileFormatter,
   type FormatterDecline,
   type FormatterFailure,
@@ -131,19 +130,14 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
-      // Overrides apply to every repository, and a relative path or a manifest names a different
-      // file or tool in each.
-      if (
-        worktreePath &&
-        !isRepoTrusted(worktreePath) &&
-        (overrideNamesRepoPath(override, worktreePath) ||
-          this.overrideRunsProjectTool(override, filePath, worktreePath))
-      ) {
+      // A formatter loads the repository's config, plugins or binaries, so an override waits for
+      // trust like a detected formatter does.
+      if (worktreePath && !isRepoTrusted(worktreePath)) {
         const named = `${override.command} ${override.args}`.trim();
-        log.info("Holding back an override that runs a project's file or tool", { filePath });
+        log.info("Holding back an override until the repository is trusted", { filePath });
         reportRepoRestriction(
           worktreePath,
-          `Format on save doesn't run ${named} from this repository.`,
+          `Format on save doesn't run your override ${named} until you trust this repository.`,
         );
         return UNFORMATTED;
       }
@@ -170,19 +164,6 @@ export class FormatService {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
     }
     return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath, fmt.spawn);
-  }
-
-  /** Whether a language module finds that `override` runs a tool the repository names. */
-  private overrideRunsProjectTool(
-    override: FormatterOverride,
-    filePath: string,
-    worktreePath: string,
-  ): boolean {
-    const dirs = dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath);
-    return this.languages.some(
-      (language) =>
-        language.overrideRunsProjectTool?.(override.command, override.args, dirs) === true,
-    );
   }
 
   /**
@@ -536,26 +517,6 @@ function spawnFailureNotice(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** A command with a directory in it that isn't absolute, which resolves against the worktree. */
-function isRelativePath(command: string): boolean {
-  return command.includes("/") && !isAbsolute(command);
-}
-
-/**
- * Whether an override's command or an argument names a path in the worktree it runs in: `node
- * tools/fmt.js {file}` runs the repository's script as surely as `tools/fmt.js` does. The saved
- * file's own `{file}` doesn't count, and a value is read from `--flag=value`.
- */
-function overrideNamesRepoPath(override: FormatterOverride, worktreePath: string): boolean {
-  if (isRelativePath(override.command)) return true;
-  return splitArgs(override.args).some((arg) => {
-    if (arg.includes("{file}")) return false;
-    const value = arg.startsWith("-") ? arg.split("=").slice(1).join("=") : arg;
-    if (value === "" || isAbsolute(value)) return false;
-    return isRelativePath(value) || existsSync(resolve(worktreePath, value));
-  });
-}
 
 function extractExtension(filePath: string): string | null {
   const lastSlash = filePath.lastIndexOf("/");
