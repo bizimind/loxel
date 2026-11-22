@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from "bun:test";
 import type { HandlerDetails, WebContents, WindowOpenHandlerResponse } from "electron";
 
 import { appWindowTarget, guardAppNavigation, isAppPage, mayFrameNavigate } from "./app-navigation";
+import { USER_ACTIVATION_MS } from "./user-activation";
 
 const APP_URL = "http://127.0.0.1:7433";
 const APP_ORIGIN = "http://127.0.0.1:7433";
@@ -73,20 +74,28 @@ describe("mayFrameNavigate", () => {
 type Listener = (...args: unknown[]) => void;
 type OpenHandler = (details: HandlerDetails) => WindowOpenHandlerResponse;
 
-/** A webContents that records the handlers the guard installs. */
+/** A webContents that records the handlers the guard installs, on a clock the test moves. */
 function fakeContents() {
-  const listeners = new Map<string, Listener>();
+  const listeners = new Map<string, Listener[]>();
   let openHandler: OpenHandler | undefined;
+  const clock = { time: 1_000 };
   const contents = {
     setWindowOpenHandler: (handler: OpenHandler) => {
       openHandler = handler;
     },
     on: (event: string, listener: Listener) => {
-      listeners.set(event, listener);
+      listeners.set(event, [...(listeners.get(event) ?? []), listener]);
     },
   };
   const actions = { openAppWindow: mock(() => {}), openOutside: mock((_url: string) => {}) };
-  guardAppNavigation(contents as unknown as WebContents, APP_URL, actions);
+  guardAppNavigation(contents as unknown as WebContents, APP_URL, actions, () => clock.time);
+
+  /** A click anywhere in the window, a sub-frame's included. */
+  function click(): void {
+    for (const listener of listeners.get("before-mouse-event") ?? []) {
+      listener({}, { type: "mouseDown" });
+    }
+  }
 
   function open(url: string): WindowOpenHandlerResponse {
     if (!openHandler) throw new Error("no window open handler");
@@ -101,27 +110,54 @@ function fakeContents() {
   function emit(name: string, ...args: unknown[]): boolean {
     let prevented = false;
     const event = { preventDefault: () => (prevented = true) };
-    const listener = listeners.get(name);
+    const [listener] = listeners.get(name) ?? [];
     if (!listener) throw new Error(`no ${name} listener`);
     if (name === "will-frame-navigate") listener({ ...event, ...(args[0] as object) });
     else listener(event, ...args);
     return prevented;
   }
-  return { actions, open, emit };
+  return { actions, clock, click, open, emit };
 }
 
 describe("guardAppNavigation", () => {
   test("opens every window a page asks for as no child of it", () => {
-    const { actions, open } = fakeContents();
+    const { actions, click, open } = fakeContents();
     for (const url of [
       `${APP_ORIGIN}/`,
       MEDIA_FRAME,
       "https://example.com/",
       "file:///etc/hosts",
     ]) {
+      click();
       expect(open(url)).toEqual({ action: "deny" });
     }
     expect(actions.openAppWindow).toHaveBeenCalledTimes(1);
+    expect(actions.openOutside.mock.calls).toEqual([["https://example.com/"]]);
+  });
+
+  test("opens a window only right after a click or key press, one per action", () => {
+    const { actions, clock, click, open } = fakeContents();
+    open("https://example.com/");
+    open(`${APP_ORIGIN}/`);
+    expect(actions.openOutside).not.toHaveBeenCalled();
+    expect(actions.openAppWindow).not.toHaveBeenCalled();
+
+    click();
+    open("https://example.com/a");
+    open("https://example.com/b");
+    expect(actions.openOutside.mock.calls).toEqual([["https://example.com/a"]]);
+
+    click();
+    clock.time += USER_ACTIVATION_MS;
+    open(`${APP_ORIGIN}/`);
+    expect(actions.openAppWindow).not.toHaveBeenCalled();
+  });
+
+  test("a refused URL leaves the click for the next window", () => {
+    const { actions, click, open } = fakeContents();
+    click();
+    open("file:///etc/hosts");
+    open("https://example.com/");
     expect(actions.openOutside.mock.calls).toEqual([["https://example.com/"]]);
   });
 

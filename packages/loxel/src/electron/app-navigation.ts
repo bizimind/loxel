@@ -2,12 +2,14 @@
  * Where the web contents of the app's session may go: Loxel's windows show the app's page and
  * nothing else. Their main frame stays on the app's page, a frame showing a document the app's
  * server sent stays on the server, and a window they ask to open is a new Loxel window (for the
- * app's page) or a web link opened outside the app. Browser panels and their popups have a
- * session of their own, with rules of their own (webview-new-tabs.ts).
+ * app's page) or a web link opened outside the app, once per click or key press in the window.
+ * Browser panels and their popups have a session of their own, with rules of their own
+ * (webview-new-tabs.ts).
  */
 import type { WebContents } from "electron";
 
 import { isHttpUrl } from "../url-utils";
+import { trackUserActivation } from "./user-activation";
 
 /** What to do with a URL a window asks to open or navigate its main frame to. */
 export type AppWindowTarget = "app-page" | "outside" | "none";
@@ -78,13 +80,23 @@ export function guardAppNavigation(
   contents: WebContents,
   appUrl: string,
   actions: AppNavigationActions,
+  now = Date.now,
 ): void {
   const appOrigin = new URL(appUrl).origin;
+  // Electron blocks no popups in its windows and doesn't tell the handler whether the user acted,
+  // so a frame embedded in the app could open windows on its own. Like a browser's popup blocker,
+  // each click or key press in the window opens at most one.
+  const activation = trackUserActivation(contents, now);
   contents.setWindowOpenHandler(({ url }) => {
     const target = appWindowTarget(url, appUrl);
+    if (target === "none") {
+      logRefused("open a window for", url);
+      return { action: "deny" };
+    }
+    if (!activation.isActive()) return { action: "deny" };
+    activation.consume();
     if (target === "app-page") actions.openAppWindow();
-    if (target === "outside") actions.openOutside(url);
-    if (target === "none") logRefused("open a window for", url);
+    else actions.openOutside(url);
     return { action: "deny" };
   });
   contents.on("will-navigate", (event, url) => {
