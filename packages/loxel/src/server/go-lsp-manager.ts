@@ -17,6 +17,7 @@ import {
   subscribeGoEnv,
 } from "./go-env";
 import { getGoChoice } from "./go-toolchain-store";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   sendWarning,
@@ -136,6 +137,34 @@ export function withoutHiddenActions(body: string): string {
     }
   }
   return JSON.stringify(frame);
+}
+
+/** What an untrusted repository is told gopls holds back until it is trusted. */
+export const GO_REPO_TRUST_RESTRICTION = "gopls doesn't run go generate or tests.";
+
+/**
+ * Commands Loxel keeps from gopls until the repository is trusted: those that run the project's code
+ * (`go generate`, `go test`), the one that starts gopls's debug server, and `gopls.lsp`, which calls
+ * any LSP method, `workspace/executeCommand` included. Nothing in Loxel sends them.
+ */
+const TRUSTED_ONLY_COMMANDS: ReadonlySet<string> = new Set([
+  "gopls.generate",
+  "gopls.lsp",
+  "gopls.run_tests",
+  "gopls.start_debugging",
+]);
+
+/** LSP's code for a request the server could not carry out. */
+const REQUEST_FAILED = -32803;
+
+/** The `workspace/executeCommand` request in a client frame for a command that needs trust. */
+export function trustedOnlyCommand(data: string): { id: unknown; command: string } | null {
+  if (!data.includes('"workspace/executeCommand"')) return null;
+  const frame = parseFrame(data);
+  if (frame?.method !== "workspace/executeCommand" || !isRecord(frame.params)) return null;
+  const { command } = frame.params;
+  if (typeof command !== "string" || !TRUSTED_ONLY_COMMANDS.has(command)) return null;
+  return { id: frame.id, command };
 }
 
 /** Finds a kind of problem in a frame's text; a capture group holds what the message names. */
@@ -369,6 +398,26 @@ export class GoLspManager extends WorktreeLspManager {
     section: string | undefined,
   ): Promise<unknown> {
     return section === "gopls" ? GOPLS_SETTINGS : {};
+  }
+
+  // Checked on every request rather than per session, so trusting or not takes effect at once.
+  protected override handleClientData(session: WtLspSession, data: string): void {
+    const refused = trustedOnlyCommand(data);
+    if (!refused || isRepoTrusted(session.wtPath)) {
+      super.handleClientData(session, data);
+      return;
+    }
+    this.log.info("Refusing a gopls command until the repository is trusted", {
+      wtPath: session.wtPath,
+      command: refused.command,
+    });
+    reportRepoRestriction(session.wtPath, GO_REPO_TRUST_RESTRICTION);
+    if (refused.id === undefined) return;
+    const error = {
+      code: REQUEST_FAILED,
+      message: `${refused.command} runs only in a trusted repository`,
+    };
+    this.sendToClient(session, JSON.stringify({ jsonrpc: "2.0", id: refused.id, error }));
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {
