@@ -52,7 +52,7 @@ Paste a remote URL and Loxel clones it for you. Before cloning, you choose the w
 
 ### Init
 
-Initialize git in an existing folder that isn't yet a repo. The same single/multi choice applies — regular or bare + first worktree.
+Initialize git in an existing folder that isn't yet a repo. The same single/multi choice applies — regular or bare + first worktree. A folder that already has a `.git` entry is never initialized over: if git can't open it as a repository, Loxel says so instead of offering Init.
 
 ### Convert
 

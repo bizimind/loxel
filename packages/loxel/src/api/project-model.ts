@@ -87,6 +87,8 @@ export interface DetectPathResult {
   hasUncommittedChanges?: boolean;
   /** For a git repository: what `wt doctor` finds and the `wt init` fixes for it */
   setup?: RepoSetupPlan;
+  /** For an "invalid" path: why it cannot be added, when there is more to say than that */
+  error?: string;
 }
 
 /** The `wt doctor` checks of an existing repository that are not ok, and their `wt init` fixes. */
