@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
 
@@ -116,12 +116,12 @@ export async function canonicalWorktreesDir(root: string): Promise<string> {
 }
 
 /**
- * Refuse a new worktree path that a symlink leads out of the worktrees directory.
+ * Refuse a new worktree path unless it resolves inside the worktrees directory,
+ * and that directory was not chosen by a symlink inside the repository.
  *
- * A worktrees directory inside the repository (the default `.worktrees`, or a
- * `WT_DIR` pointing into the checkout) is a path the repository's own content
- * controls, so it, or an entry in it, may be a symlink to anywhere. Only a
- * `WT_DIR` outside the repository may place worktrees outside it.
+ * The repository's own content decides what is a symlink inside it, so the part
+ * of the worktrees path within the repository is taken literally; only the
+ * user's own path outside it (a `WT_DIR` elsewhere) may lead somewhere else.
  *
  * @param root - Canonical repository root
  * @param dir - Canonical worktrees directory
@@ -133,7 +133,8 @@ export async function assertWorktreePathContained(
   path: string,
 ): Promise<void> {
   const configured = resolve(worktreesDir(root));
-  if (configured.startsWith(`${root}/`) && dir !== configured) {
+  const literal = await literalPathInRepo(root, configured);
+  if (literal && dir !== literal) {
     throw new Error(
       `Refusing to create worktrees through ${configured}: it leads through a symlink to ${dir}. If you created it to keep worktrees there, set WT_DIR=${dir} instead.`,
     );
@@ -144,6 +145,20 @@ export async function assertWorktreePathContained(
       `Refusing to create a worktree at ${path}: a symlink along it leads to ${real}, outside ${dir}.`,
     );
   }
+}
+
+/**
+ * Where `path` lands when the part of it inside the repository is taken
+ * literally, or null when it does not pass through the repository. The part
+ * before the repository may go through the user's own symlinks.
+ */
+async function literalPathInRepo(root: string, path: string): Promise<string | null> {
+  for (let cursor = path; cursor !== dirname(cursor); cursor = dirname(cursor)) {
+    if ((await canonicalizePotentialPath(cursor)) === root) {
+      return join(root, relative(cursor, path));
+    }
+  }
+  return null;
 }
 
 /**
