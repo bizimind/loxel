@@ -5,10 +5,12 @@ import { $ } from "bun";
 
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 
+import { untrustedChangeGitEnv } from "./git-commands";
 import { logger } from "./logger";
 import { measureSpawn } from "./spawn-metrics";
 import { stress } from "./stress-detector";
 import { resolveTypeScriptBinary } from "./typescript-path";
+import { isRepositoryTrusted } from "./worktree-hooks";
 import { INTERNAL_WORKTREE_PREFIX, REF_PATTERN, symlinkNodeModules } from "./worktree-utils";
 
 const log = logger.child("ts-lsp");
@@ -72,12 +74,28 @@ async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeS
     return [];
   }
 
+  // Loxel's own temporary checkout, so in an untrusted repository it runs none of the
+  // repository's git hooks or filter drivers.
+  const trusted = await isRepositoryTrusted(cwd);
+  const gitEnv = trusted ? process.env : { ...process.env, ...(await untrustedChangeGitEnv(cwd)) };
   const parentDir = (await $`mktemp -d`.text()).trim();
   const tmpDir = join(parentDir, `${INTERNAL_WORKTREE_PREFIX}diag-${ref.slice(0, 8)}`);
 
   try {
     // Create detached worktree at the ref
-    await $`git -C ${cwd} worktree add --detach ${tmpDir} ${ref}`.quiet();
+    if (trusted) {
+      await $`git -C ${cwd} worktree add --detach ${tmpDir} ${ref}`.quiet();
+    } else {
+      // Added empty first, so the filter drivers are read from the new worktree's own config, whose
+      // conditional includes match its own git directory, before its files are checked out.
+      await $`git -C ${cwd} worktree add --no-checkout --detach ${tmpDir} ${ref}`
+        .env(gitEnv)
+        .quiet();
+      const checkoutEnv = { ...process.env, ...(await untrustedChangeGitEnv(tmpDir)) };
+      await $`git -C ${tmpDir} reset --hard --quiet --no-recurse-submodules`
+        .env(checkoutEnv)
+        .quiet();
+    }
 
     // Symlink node_modules from main repo
     await symlinkNodeModules(cwd, tmpDir);
@@ -88,7 +106,7 @@ async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeS
   } finally {
     // Cleanup worktree then temp directory
     try {
-      await $`git -C ${cwd} worktree remove --force ${tmpDir}`.quiet();
+      await $`git -C ${cwd} worktree remove --force ${tmpDir}`.env(gitEnv).quiet();
     } catch {
       // Best-effort
     }

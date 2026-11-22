@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { getDiagnostics, parseTypeScriptDiagnostics } from "./diagnostics";
+import { setRepoTrusted } from "./repo-trust";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -34,6 +35,15 @@ async function seedRepo(
   return { repo, sha, base };
 }
 
+/** A post-checkout hook that leaves a marker in `base` when git runs it; returns the marker. */
+async function addCheckoutHook(repo: string, base: string): Promise<string> {
+  const marker = path.join(base, "checked-out");
+  const hook = path.join(repo, ".git", "hooks", "post-checkout");
+  await Bun.write(hook, `#!/bin/sh\ntouch "${marker}"\n`);
+  chmodSync(hook, 0o755);
+  return marker;
+}
+
 describe("getDiagnostics", () => {
   test("skips a working tree without a root config", async () => {
     // tsc would otherwise fall back to the ancestor tsconfig and report a.ts.
@@ -46,14 +56,41 @@ describe("getDiagnostics", () => {
 
   test("skips the temp checkout for a ref without a root config", async () => {
     const { repo, sha, base } = await seedRepo({ "main.py": "x = 1\n", "a.ts": TYPE_ERROR });
-    // Any checkout (the temp worktree) runs this hook and leaves a marker.
-    const marker = path.join(base, "checked-out");
-    const hook = path.join(repo, ".git", "hooks", "post-checkout");
-    await Bun.write(hook, `#!/bin/sh\ntouch "${marker}"\n`);
-    chmodSync(hook, 0o755);
+    // Any checkout (the temp worktree) of a trusted repository runs this hook and leaves a marker.
+    const marker = await addCheckoutHook(repo, base);
+    setRepoTrusted(repo, true);
 
     expect(await getDiagnostics(repo, sha)).toEqual([]);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  test("checks out a ref of an untrusted repository without its hooks or filters", async () => {
+    const { repo, sha, base } = await seedRepo({
+      ".gitattributes": "*.ts filter=repo\n",
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, types: [] } }),
+      "a.ts": TYPE_ERROR,
+    });
+    const hookMarker = await addCheckoutHook(repo, base);
+    const filterMarker = path.join(base, "filtered");
+    await Bun.$`git -C ${repo} config filter.repo.smudge ${`touch "${filterMarker}"; cat`}`.quiet();
+
+    expect(await getDiagnostics(repo, sha)).toEqual([
+      expect.objectContaining({ file: "a.ts", line: 1, severity: "error", code: 2322 }),
+    ]);
+    expect(existsSync(hookMarker)).toBe(false);
+    expect(existsSync(filterMarker)).toBe(false);
+  });
+
+  test("checks out a ref of a trusted repository with its hooks", async () => {
+    const { repo, sha, base } = await seedRepo({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [] } }),
+      "a.ts": "export {};\n",
+    });
+    const marker = await addCheckoutHook(repo, base);
+    setRepoTrusted(repo, true);
+
+    expect(await getDiagnostics(repo, sha)).toEqual([]);
+    expect(existsSync(marker)).toBe(true);
   });
 
   test("rejects an unknown ref instead of caching it as empty", async () => {
