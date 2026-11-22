@@ -230,7 +230,7 @@ describe("worktree hooks in an untrusted repository", () => {
 
 describe("a partial clone in an untrusted repository", () => {
   // Without file contents, or without trees, which git fails on before it would fetch them, also
-  // recorded as a clone from git before 2.24 records it.
+  // set up as git before 2.24 set up a partial clone.
   test.each([
     ["blob:none", false],
     ["tree:0", false],
@@ -251,8 +251,11 @@ describe("a partial clone in an untrusted repository", () => {
       // The branch, but not its content, which only checking it out would download.
       await Bun.$`git -C ${clone} branch -q feature origin/feature`;
       if (olderConfig) {
+        // What git 2.23 wrote instead of the remote's `promisor` and `partialclonefilter`.
         await Bun.$`git -C ${clone} config --unset remote.origin.promisor`;
+        await Bun.$`git -C ${clone} config --unset remote.origin.partialclonefilter`;
         await Bun.$`git -C ${clone} config core.repositoryFormatVersion 1`;
+        await Bun.$`git -C ${clone} config core.partialCloneFilter ${filter}`;
         await Bun.$`git -C ${clone} config extensions.partialClone origin`;
       }
       const cloneCtx = projectContext(clone);
