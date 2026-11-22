@@ -377,9 +377,9 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(project).toMatchObject({ path: bareDir, initHookSkippedAt: main });
     expect(existsSync(main)).toBe(true);
     expect(existsSync(join(bareDir, "init-ran"))).toBe(false);
-    // Contacting origin waits for trust.
+    // Contacting origin is skipped before trust.
     expect(project.setupFailures).toStartWith(
-      "fetch-refspec: waits for the repository to be trusted",
+      "fetch-refspec: skipped because the repository is not trusted",
     );
     expect(await gitConfig(bareDir, "remote.origin.fetch")).toBe("");
   });

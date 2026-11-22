@@ -93,9 +93,9 @@ export async function addWorktree(
 
 /**
  * Apply `wt init` fixes (`executeInit`), running `init.wt.sh` in a worktree one adds and the
- * repository's git hooks only if it is trusted. The fixes that contact origin wait for trust: the
- * repository's git config decides how git reaches a remote, which can run any program, so they are
- * reported as failed until then.
+ * repository's git hooks only if it is trusted. In an untrusted repository the fixes that contact
+ * origin are skipped and reported as failed: the repository's git config decides how git reaches a
+ * remote, which can run any program. `wt init` applies them once the user trusts the repository.
  */
 export async function applyInitActions(
   repoPath: string,
@@ -120,7 +120,7 @@ export async function applyInitActions(
     status: "failed" as const,
     commands: [],
     error:
-      "waits for the repository to be trusted (it contacts origin with the repository's git settings)",
+      "skipped because the repository is not trusted (it contacts origin with the repository's git settings); run `wt init` in the repository once you trust it",
   }));
   return reportHeldHooks({ ...result, outcomes: [...heldOutcomes, ...result.outcomes] });
 }
