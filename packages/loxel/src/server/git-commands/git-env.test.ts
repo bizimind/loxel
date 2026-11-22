@@ -156,7 +156,7 @@ describe("working-tree reads in an untrusted repository", () => {
 });
 
 describe("untrustedChangeGitEnv", () => {
-  test("turns off hooks, fsmonitor and the filter drivers of the repository and its submodules", async () => {
+  test("turns off hooks, fsmonitor, downloads and the filter drivers of the repository and its submodules", async () => {
     const sub = await createRepo();
     const repo = await createRepo();
     const ran = `${repo.path}-ran`;
@@ -174,6 +174,8 @@ describe("untrustedChangeGitEnv", () => {
       await utimes(join(repo.path, "sub", "b.txt"), past, past);
 
       const env = await untrustedChangeGitEnv(repo.path);
+      // Nor does git download what a partial clone is missing.
+      expect(env).toMatchObject({ GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "" });
       for (const entry of [
         "core.hooksPath=/dev/null",
         "core.fsmonitor=false",
