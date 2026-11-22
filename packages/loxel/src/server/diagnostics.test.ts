@@ -35,12 +35,16 @@ async function seedRepo(
   return { repo, sha, base };
 }
 
-/** A post-checkout hook that leaves a marker in `base` when git runs it; returns the marker. */
+/** Checkout hooks that leave a marker in `base` when git runs any of them; returns the marker. */
 async function addCheckoutHook(repo: string, base: string): Promise<string> {
   const marker = path.join(base, "checked-out");
-  const hook = path.join(repo, ".git", "hooks", "post-checkout");
-  await Bun.write(hook, `#!/bin/sh\ntouch "${marker}"\n`);
-  chmodSync(hook, 0o755);
+  // A one-step `worktree add --detach` runs post-checkout; the untrusted two-step checkout runs
+  // reference-transaction (the add) and post-index-change (the reset) instead.
+  for (const name of ["post-checkout", "post-index-change", "reference-transaction"]) {
+    const hook = path.join(repo, ".git", "hooks", name);
+    await Bun.write(hook, `#!/bin/sh\ntouch "${marker}"\n`);
+    chmodSync(hook, 0o755);
+  }
   return marker;
 }
 
