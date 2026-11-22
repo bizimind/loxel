@@ -702,6 +702,9 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   const path = url.searchParams.get("path");
 
   if (!path) return error("Missing path parameter", 400);
+  // Checked first, since resolving can add the file to Others: only a file the frame shows.
+  const mediaType = getMediaType(path);
+  if (!mediaType) return error("Unsupported media type", 400);
 
   let fullPath: string;
   let rawUrl: string;
@@ -727,8 +730,6 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     rawUrl = `/api/file-raw?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(worktree)}`;
   }
 
-  const mediaType = getMediaType(path);
-  if (!mediaType) return error("Unsupported media type", 400);
   let bodyContent: string;
   if (mediaType === "svg") {
     // SVGs are inlined so scripts can run (for WAAPI/JS-driven animations). The CSP below

@@ -323,6 +323,15 @@ describe("Others folders routes", () => {
       });
       expect((await handleRequest(range, ctx)).status).toBe(206);
     });
+
+    test("the media viewer's frame adds no file it would not show", async () => {
+      const file = join(root, "notes.txt");
+      await writeFile(file, "x");
+      const query = `path=${encodeURIComponent(file)}&wt=${encodeURIComponent(wt)}`;
+
+      expect((await get(`/api/media-frame?${query}`)).status).toBe(400);
+      expect(resources.externalFilesService.listFiles()).toEqual([]);
+    });
   });
 
   describe("file operations", () => {
