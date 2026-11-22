@@ -191,12 +191,14 @@ function expand(nodes: Node[]): Token[][] | null {
 }
 
 /**
- * A compiled glob's matching cost per path character: one step per token, except that a class
- * checks each of its ranges and a number reads up to 17 digits (see `numberMatches`).
+ * A compiled glob's matching cost per path character: one step per sequence, since `matchTokens`
+ * walks the path once per sequence even when it holds no tokens, plus one per token, except that a
+ * class checks each of its ranges and a number reads up to 17 digits (see `numberMatches`).
  */
 export function globCost(sequences: SectionGlob): number {
   let cost = 0;
   for (const sequence of sequences) {
+    cost++;
     for (const token of sequence) {
       if (token.kind === "class") cost += Math.max(1, token.ranges.length);
       else if (token.kind === "number") cost += 17;

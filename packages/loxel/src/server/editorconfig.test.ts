@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseEditorConfig, resolveEditorConfig } from "./editorconfig";
-import { compileSectionGlob, globMatches } from "./editorconfig-glob";
+import { compileSectionGlob, globCost, globMatches } from "./editorconfig-glob";
 
 describe("parseEditorConfig", () => {
   test("reads root from the preamble only, and skips comments and malformed sections", () => {
@@ -117,6 +117,10 @@ test("a glob expanding to too many alternatives matches nothing", () => {
   expect(
     globMatches(compileSectionGlob("{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}"), "abababab"),
   ).toBe(true);
+});
+
+test("a glob's cost counts each alternative's pass over the path, even an empty one", () => {
+  expect(globCost(compileSectionGlob("/{a,}"))).toBe(3);
 });
 
 test("sections past a file's token budget match nothing", () => {
