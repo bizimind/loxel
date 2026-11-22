@@ -40,14 +40,12 @@ export class GitCommandError extends Error {
 }
 
 /**
- * What git says, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when a read needs
- * an object that isn't there: `GIT_NO_LAZY_FETCH`'s warning, `GIT_ALLOW_PROTOCOL`'s refusal on a
- * git too old for it, or the plain missing object of `git show <rev>:<path>`, which never asks to
- * download (`bad object <rev>:<path>`; a bare `bad object <sha>` is a revision that doesn't exist,
- * which trust wouldn't bring).
+ * What git says, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when their settings
+ * kept it from downloading an object a partial clone doesn't have yet: `GIT_NO_LAZY_FETCH`'s warning,
+ * or `GIT_ALLOW_PROTOCOL`'s refusal on a git too old for it. Only these say so unambiguously; a read
+ * that fails on a missing object without them (`git show <rev>:<path>` among them) fails as usual.
  */
-const OBJECT_MISSING =
-  /lazy fetching disabled|transport '[^']*' not allowed|bad object \S*:|unable to read tree/;
+const DOWNLOAD_REFUSED = /lazy fetching disabled|transport '[^']*' not allowed/;
 
 const AWAITS_TRUST_RESTRICTION =
   "Git doesn't download content this partial clone doesn't have yet.";
@@ -99,33 +97,17 @@ export async function runGit(
   if (result.exitCode === 0) return result;
   // Thrown even with `nothrow`: a caller that expects some failures still never expects this one,
   // and would show it as an empty file or diff.
-  if (cwd !== undefined && (await awaitsTrust(result, cwd, env))) {
+  if (
+    cwd !== undefined &&
+    env?.GIT_ALLOW_PROTOCOL === "" &&
+    DOWNLOAD_REFUSED.test(result.stderr) &&
+    !isRepoTrusted(cwd)
+  ) {
     reportRepoRestriction(cwd, AWAITS_TRUST_RESTRICTION);
     throw new ContentAwaitsTrustError(result);
   }
   if (!nothrow) throw new GitCommandError(result);
   return result;
-}
-
-/**
- * Whether a failed untrusted read (one that allowed no transport) failed on an object a
- * partial clone hasn't downloaded yet. Only a partial clone counts: anywhere else a missing object
- * is not something trust would bring.
- */
-async function awaitsTrust(
-  result: GitResult,
-  cwd: string,
-  env: Record<string, string> | undefined,
-): Promise<boolean> {
-  if (env?.GIT_ALLOW_PROTOCOL !== "") return false;
-  if (!OBJECT_MISSING.test(result.stderr) || isRepoTrusted(cwd)) return false;
-  // Reading config runs nothing. A partial clone has a promisor remote (`extensions.partialClone`
-  // names one; more can be marked by `remote.<name>.promisor`).
-  const promisors = await runGit(
-    ["config", "--get-regexp", String.raw`^(extensions\.partialclone|remote\..*\.promisor)$`],
-    { cwd, env, nothrow: true },
-  );
-  return promisors.stdout.trim() !== "";
 }
 
 /** {@link runGit}, for the commands whose stdout is all the caller needs. */

@@ -170,8 +170,6 @@ describe("a partial clone in an untrusted repository", () => {
       const error = await getCommitDiff(clone, second).catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ContentAwaitsTrustError);
       expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
-      const fileError = await getFileContent(clone, "a.txt", first).catch((err: unknown) => err);
-      expect(fileError).toBeInstanceOf(ContentAwaitsTrustError);
       // A path the commit doesn't have, or a commit the repository doesn't have, is no such content.
       expect(await getFileContent(clone, "missing.txt", second)).toEqual([]);
       expect(await getCommitDiff(clone, "0".repeat(40))).toMatchObject({ files: [] });
