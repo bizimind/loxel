@@ -87,6 +87,7 @@ import {
 import { persistedWhenQuitting } from "../server/persisted-settings";
 import { isHttpUrl } from "../url-utils";
 import { guardAppNavigation } from "./app-navigation";
+import { installAppPermissions } from "./app-permissions";
 import {
   installAppUpdater,
   isInstallingUpdate,
@@ -131,7 +132,6 @@ import {
 } from "./ipc-channels";
 import { installJavaScriptDialogs, trackWebviewDialogs } from "./javascript-dialogs";
 import { LayoutWindows } from "./layout-windows";
-import { localFontsCheckHandler } from "./local-fonts-permission";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { applyPersistedTheme, installNativeTheme, windowBackgroundColor } from "./native-theme";
 import {
@@ -1122,9 +1122,9 @@ app.whenReady().then(async () => {
     const browserSession = session.fromPartition(BROWSER_PARTITION);
     installAccountChooser(browserSession, promptForAccount);
     installHybridQrCode(browserSession, browserPanelFrame);
-    // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
-    // them, nor any permission outside their short allowlist.
-    session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
+    // Loxel's own page gets only the permissions it uses, and frames inside it none; browser
+    // panels get only their own short allowlist.
+    installAppPermissions(session.defaultSession, isLocal);
     installBrowserPermissions(
       browserSession,
       {
