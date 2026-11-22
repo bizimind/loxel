@@ -1,3 +1,5 @@
+import { shellQuote } from "@bizimind/wt/lib";
+
 import { isRepoTrusted } from "../repo-trust";
 import { GitCommandError, inheritedGitEnv, runGit } from "./run-git";
 
@@ -101,9 +103,10 @@ async function repoFilterDrivers(cwd: string, env: Record<string, string>): Prom
     ["config", "--show-scope", "--name-only", "-z", "--get-regexp", String.raw`^filter\.`],
     { cwd, env, nothrow: true },
   );
-  // Exit code 1: no filter keys at all.
-  if (result.exitCode === 1) return [];
-  // A config git cannot read would leave drivers unknown, so the read fails rather than run them.
+  // Exit code 1 with nothing on stderr: no filter keys at all. A git that could not be started also
+  // reports 1, with the reason on stderr (git-exec.ts). That, or a config git cannot read, leaves
+  // the drivers unknown, so the read fails rather than run them.
+  if (result.exitCode === 1 && result.stderr.trim() === "") return [];
   if (result.exitCode !== 0) throw new GitCommandError(result);
   // `-z` with `--show-scope`: scope and key, each NUL-terminated.
   const fields = result.stdout.split("\0");
@@ -146,16 +149,12 @@ function withConfigParameters(inherited: string | undefined, entries: string[]):
 }
 
 /**
- * One `GIT_CONFIG_PARAMETERS` entry. A key holding `=` (a driver name may) takes the
- * `'key'='value'` form of git 2.31 and later, since the older `'key=value'` splits at the first `=`.
+ * One `GIT_CONFIG_PARAMETERS` entry, single-quoted as git's `sq_quote` writes and its `sq_dequote`
+ * reads. A key holding `=` (a driver name may) takes the `'key'='value'` form of git 2.31 and
+ * later, since the older `'key=value'` splits at the first `=`.
  */
 function configParameter(key: string, value: string): string {
   return key.includes("=")
     ? `${shellQuote(key)}=${shellQuote(value)}`
     : shellQuote(`${key}=${value}`);
-}
-
-/** Single-quoted the way git's `sq_quote` writes and its `sq_dequote` reads. */
-function shellQuote(text: string): string {
-  return `'${text.replaceAll("'", String.raw`'\''`)}'`;
 }
