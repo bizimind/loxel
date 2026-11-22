@@ -135,11 +135,15 @@ function originOf(url: string): string | null {
   }
 }
 
-/** The loaded browser panel of `origin` that most recently had focus. */
+/**
+ * The loaded browser panel of `origin` that most recently had focus. Never an incognito tab: a
+ * worker of the browser session must not reach a page of the incognito one.
+ */
 function focusedPanel(origin: string): Panel | null {
   let best: (Panel & { order: number }) | null = null;
   for (const guest of webContents.getAllWebContents()) {
     if (guest.getType() !== "webview" || guest.isDestroyed()) continue;
+    if (isIncognitoSession(guest.session)) continue;
     if (guest.mainFrame.origin !== origin) continue;
     const host = listeningHost(guest);
     const order = focusOrder.get(guest.id) ?? 0;
@@ -424,12 +428,9 @@ export function installServiceWorkerNotifications(session: Session): void {
   });
 }
 
-/**
- * Track which browser panel had focus last (from `web-contents-created`). Not incognito ones: a
- * worker of the browser session must never reach a page of the incognito one.
- */
+/** Track which browser panel had focus last (from `web-contents-created`). */
 export function trackWebviewFocus(contents: WebContents): void {
-  if (contents.getType() !== "webview" || isIncognitoSession(contents.session)) return;
+  if (contents.getType() !== "webview") return;
   const guestId = contents.id;
   // A new panel counts as the most recent until another one gets focus.
   focusOrder.set(guestId, nextFocus++);
