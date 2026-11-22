@@ -29,10 +29,13 @@ export interface OpenTerminalRequest {
  * names no project's worktree, since the file can still open by itself.
  *
  * `agent` marks a terminal a coding agent asked for: it follows "When an Agent Starts a Terminal".
+ *
+ * `incognito` opens a URL in an incognito tab, in the window in use only; it never waits for a
+ * window in the server's inbox.
  */
 export type OpenRequest = (
   | { filePath: string; pinWtPath?: string; commandWtPath?: string }
-  | { url: string; wtPath?: string }
+  | { url: string; wtPath?: string; incognito?: true }
   | { terminal: OpenTerminalRequest; pinWtPath?: string; agent?: AgentOrigin }
 ) & { windowId?: string } & PanelOpenOptions;
 

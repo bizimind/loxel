@@ -1,9 +1,8 @@
-import type { Session } from "electron";
+import type { Session, WebContents } from "electron";
 
 import { normalizeOrigin } from "../url-utils";
 import type { requestExternalApp } from "./browser-external-apps";
 import type { requestFileAccess } from "./browser-file-access";
-import type { localNetworkPermitted } from "./browser-local-network";
 import type { checkMediaPermission, requestMediaPermission } from "./browser-media";
 
 type PermissionCheckHandler = NonNullable<Parameters<Session["setPermissionCheckHandler"]>[0]>;
@@ -97,7 +96,12 @@ export interface PermissionAskers {
   media: { check: typeof checkMediaPermission; request: typeof requestMediaPermission };
   openExternal: typeof requestExternalApp;
   fileSystem: typeof requestFileAccess;
-  localNetwork: typeof localNetworkPermitted;
+  /** `localNetworkPermitted` for the session the handlers are installed on. */
+  localNetwork: (
+    contents: WebContents | null,
+    requestingOrigin: string,
+    embeddingOrigin?: string,
+  ) => boolean;
 }
 
 /**

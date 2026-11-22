@@ -47,7 +47,9 @@ async function decide(
   await siteAccessLoaded();
   if (contents.isDestroyed() || contents.mainFrame.origin !== site) return false;
   const access: SiteAccess = { kind: "external-app", origin: site, scheme, app: appFor(url) };
-  if (contents.getType() !== "webview") return siteAccessState(contents.id, access) === "allow";
+  if (contents.getType() !== "webview") {
+    return siteAccessState(contents.session, contents.id, access) === "allow";
+  }
   return askSiteAccess(contents, access);
 }
 

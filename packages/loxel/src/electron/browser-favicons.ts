@@ -150,7 +150,7 @@ async function loadBlobFavicon(guest: WebContents, url: string): Promise<string 
 }
 
 async function loadFavicon(
-  browserSession: Session,
+  browserSession: Session | null,
   event: IpcMainInvokeEvent,
   url: unknown,
   pageUrl: unknown,
@@ -158,6 +158,7 @@ async function loadFavicon(
 ): Promise<string | null> {
   if (typeof url !== "string") return null;
   if (isHttpUrl(url)) {
+    if (!browserSession) return null;
     return loadWebFavicon(browserSession, url, typeof pageUrl === "string" ? pageUrl : undefined);
   }
   if (!url.startsWith("blob:")) return null;
@@ -165,11 +166,17 @@ async function loadFavicon(
   return guest ? loadBlobFavicon(guest, url) : null;
 }
 
-/** Answer `BROWSER_FAVICON_LOAD` from Loxel's windows. */
-export function installBrowserFavicons(browserSession: Session): void {
+/**
+ * Answer `BROWSER_FAVICON_LOAD` from Loxel's windows, through the session `sessionFor` gives: the
+ * browser session, or for an incognito tab's page the incognito one (null while there is none,
+ * which loads nothing), so a favicon never carries one session's cookies for the other's page.
+ */
+export function installBrowserFavicons(sessionFor: (incognito: boolean) => Session | null): void {
   handleAppWindowInvoke(
     BROWSER_FAVICON_LOAD,
-    (event, url: unknown, pageUrl: unknown, webContentsId: unknown) =>
-      loadFavicon(browserSession, event, url, pageUrl, webContentsId).catch(() => null),
+    (event, url: unknown, pageUrl: unknown, webContentsId: unknown, incognito: unknown) =>
+      loadFavicon(sessionFor(incognito === true), event, url, pageUrl, webContentsId).catch(
+        () => null,
+      ),
   );
 }

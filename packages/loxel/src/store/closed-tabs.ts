@@ -48,7 +48,8 @@ export function registerClosedTabParams(
 
 function toClosedTab(panel: IDockviewPanel): ClosedTab | null {
   const def = getCenterPanelDef(panel.id);
-  if (!def) return null;
+  // An incognito tab's page is gone once it closes, as in Chrome's incognito windows.
+  if (!def || panel.params?.incognito === true) return null;
   // A past jump's position and move notice are not part of the tab's state any more.
   const params = { ...panel.params };
   delete params.line;

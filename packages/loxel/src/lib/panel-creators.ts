@@ -25,6 +25,7 @@ import type {
   SplitDirection,
 } from "@/api/panel-placement-model";
 import { type ServerId, type WorktreeRef, worktreeRef } from "@/api/worktree-ref";
+import type { BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import {
   centerLayoutServer,
@@ -48,6 +49,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { activeLayoutKey, layoutWorktree } from "@/store/active-worktree";
+import { INCOGNITO_TAB_TITLE, openIncognitoTab } from "@/store/browser-pages";
 import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import {
   type EditorKey,
@@ -414,26 +416,37 @@ export async function createDrawing(placement?: PanelPlacement): Promise<void> {
   }
 }
 
-/** A new browser panel showing `url`, for `addPanel`. */
+/**
+ * A new browser panel showing `url`, for `addPanel`. An incognito one's params and title are a
+ * placeholder that is saved with the layout: its URL is kept in memory (`openIncognitoTab`).
+ */
 function browserPanelOptions(
   cApi: DockviewApi,
   url: string,
+  incognito: boolean,
 ): PanelOptions & Pick<AddPanelOptions, "renderer"> {
+  const id = `browser-${crypto.randomUUID()}`;
+  if (incognito) openIncognitoTab(id, activeLayoutKey(), url);
+  const params: BrowserPanelParams = incognito ? { url: "", incognito: true } : { url };
   return {
-    id: `browser-${crypto.randomUUID()}`,
+    id,
     component: "browser",
     tabComponent: "browserTab",
-    title: nextPanelTitle(cApi, "Browser"),
-    params: { url },
+    title: incognito ? INCOGNITO_TAB_TITLE : nextPanelTitle(cApi, "Browser"),
+    params,
     // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
     renderer: "always",
   };
 }
 
-export function createBrowser(url?: string, { placement, focus }: PanelOpenOptions = {}): void {
+/** Open a new browser panel on `url` (blank by default), an incognito tab with `incognito`. */
+export function createBrowser(
+  url?: string,
+  { placement, focus, incognito = false }: PanelOpenOptions & { incognito?: boolean } = {},
+): void {
   const cApi = getCenterApi();
   if (!cApi) return;
-  const options = browserPanelOptions(cApi, url || "about:blank");
+  const options = browserPanelOptions(cApi, url || "about:blank", incognito);
   addPlacedPanel(cApi, placement, options, focus);
   uiLog.info("Panel created", { panelType: "browser", panelId: options.id });
 }
@@ -443,6 +456,8 @@ export interface OpenBrowserTabOptions {
   sourcePanelId: string;
   /** Focus the new tab. By default it opens in the background, like a browser's new-tab links. */
   activate?: boolean;
+  /** Open an incognito tab. */
+  incognito?: boolean;
 }
 
 /** The tab most recently opened from each browser panel, so repeated opens keep their order. */
@@ -451,13 +466,13 @@ const lastTabOpenedFrom = new Map<string, string>();
 /** Open a URL in a new browser tab next to the browser panel it came from. */
 export function openBrowserTab(
   url: string,
-  { sourcePanelId, activate = false }: OpenBrowserTabOptions,
+  { sourcePanelId, activate = false, incognito = false }: OpenBrowserTabOptions,
 ): void {
   const cApi = getCenterApi();
   if (!cApi) return;
   const source = cApi.getPanel(sourcePanelId);
   if (!source) {
-    createBrowser(url);
+    createBrowser(url, { incognito });
     return;
   }
 
@@ -468,7 +483,7 @@ export function openBrowserTab(
   const lastOpenedIndex = tabs.findIndex((p) => p.id === lastTabOpenedFrom.get(sourcePanelId));
   const index = Math.max(sourceIndex, lastOpenedIndex) + 1;
 
-  const options = browserPanelOptions(cApi, url);
+  const options = browserPanelOptions(cApi, url, incognito);
   cApi.addPanel({
     ...options,
     position: { referenceGroup: source.group, direction: "within", index },

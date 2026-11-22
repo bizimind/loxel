@@ -93,6 +93,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
   "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
   "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],
+  // Chrome's key. The app menu's New Window gives it up: macOS menus take their keys first.
+  "panel.new.incognitoBrowser": ["Cmd+Shift+N"],
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],

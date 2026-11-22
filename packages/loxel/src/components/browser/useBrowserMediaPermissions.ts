@@ -86,13 +86,15 @@ function listen(): void {
 /**
  * The camera and microphone requests of the webview with this guest webContents id (null until it
  * is ready). `request` is the oldest open one, for the panel's prompt, and `answer` replies to it:
- * Allow and Block are saved for the site. `systemBlocked` is set when an allowed site was refused
- * because macOS has Loxel's access off, until `dismissSystemBlocked` or the panel's page (`pageUrl`)
- * leaves that site.
+ * Allow and Block are saved for the site, except in an incognito tab (`incognito`), where main keeps
+ * them for the incognito session. `systemBlocked` is set when an allowed site was refused because
+ * macOS has Loxel's access off, until `dismissSystemBlocked` or the panel's page (`pageUrl`) leaves
+ * that site.
  */
 export function useBrowserMediaPermissions(
   webContentsId: number | null,
   pageUrl: string,
+  incognito: boolean,
 ): {
   request: MediaPermissionRequest | null;
   answer: (answer: SitePermissionAnswer) => void;
@@ -117,12 +119,12 @@ export function useBrowserMediaPermissions(
     (reply: SitePermissionAnswer) => {
       if (!request) return;
       window.electronAPI?.respondToMediaPermission({ id: request.id, answer: reply });
-      if (reply === "allow" || reply === "block") {
+      if (!incognito && (reply === "allow" || reply === "block")) {
         useSettingsStore.getState().setMediaSite(request.origin, request.devices, reply);
       }
       remove(request.id);
     },
-    [request, remove],
+    [request, remove, incognito],
   );
   const dismissSystemBlocked = useCallback(() => setSystemBlocked(null), []);
   const pageOrigin = URL.canParse(pageUrl) ? new URL(pageUrl).origin : null;

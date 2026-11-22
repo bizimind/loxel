@@ -7,6 +7,7 @@ import {
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  HatGlassesIcon,
   ImageIcon,
   LinkIcon,
   PanelTopOpenIcon,
@@ -45,6 +46,8 @@ interface BrowserContextMenuProps {
   menu: BrowserContextMenuState;
   /** The browser panel hosting the webview; new tabs open next to it. */
   panelId: string;
+  /** Whether that panel is an incognito tab, whose new tabs are incognito too. */
+  incognito?: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -74,7 +77,12 @@ function quoteSelection(text: string): string {
  * The browser panel's page context menu, built like a browser's from what was right-clicked: a
  * link, an image, selected text or an editable field, or else the page itself.
  */
-export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserContextMenuProps) {
+export function BrowserContextMenu({
+  menu,
+  panelId,
+  incognito = false,
+  onOpenChange,
+}: BrowserContextMenuProps) {
   const { webview, params } = menu;
   const { linkURL, srcURL, selectionText, isEditable, editFlags } = params;
   const isImage = params.mediaType === "image" && srcURL !== "";
@@ -82,8 +90,8 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
   const searchText = quoteSelection(searchQuery);
   const copyImage = window.electronAPI?.copyWebviewImage;
 
-  const openTab = (url: string, activate = false) =>
-    openBrowserTab(url, { sourcePanelId: panelId, activate });
+  const openTab = (url: string, { activate = false, inIncognito = incognito } = {}) =>
+    openBrowserTab(url, { sourcePanelId: panelId, activate, incognito: inIncognito });
   // Editing commands act on the page's focused element, so give the page focus back first.
   const edit = (command: "cut" | "copy" | "paste" | "selectAll") => () => {
     webview.focus();
@@ -103,6 +111,12 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
                 <PanelTopOpenIcon />
                 Open Link in New Tab
               </ContextMenuItem>
+              {!incognito && (
+                <ContextMenuItem onClick={() => openTab(linkURL, { inIncognito: true })}>
+                  <HatGlassesIcon />
+                  Open Link in Incognito Tab
+                </ContextMenuItem>
+              )}
               <ContextMenuItem onClick={() => window.open(linkURL)}>
                 <ExternalLinkIcon />
                 Open Link in External Browser
@@ -180,7 +194,7 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
             </>
           )}
           {searchText && (
-            <ContextMenuItem onClick={() => openTab(webSearchUrl(searchQuery), true)}>
+            <ContextMenuItem onClick={() => openTab(webSearchUrl(searchQuery), { activate: true })}>
               <SearchIcon />
               Search the Web for “{searchText}”
             </ContextMenuItem>
@@ -215,7 +229,9 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
       groups.push({
         id: "source",
         items: (
-          <ContextMenuItem onClick={() => openTab(`view-source:${params.pageURL}`, true)}>
+          <ContextMenuItem
+            onClick={() => openTab(`view-source:${params.pageURL}`, { activate: true })}
+          >
             <CodeIcon />
             View Page Source
           </ContextMenuItem>

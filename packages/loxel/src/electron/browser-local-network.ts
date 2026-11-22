@@ -219,26 +219,37 @@ function refusedOutright(site: string): boolean {
   return protocol === "http:" && !isLoopbackHost(hostname);
 }
 
-/** Whether `caller`'s site may reach a more private space: decided, or asked in a panel. */
-async function allowedFor(caller: Caller): Promise<boolean> {
+/**
+ * Whether `caller`'s site may reach a more private space: decided, or asked in a panel. A request
+ * of `browserSession`.
+ */
+async function allowedFor(browserSession: Session, caller: Caller): Promise<boolean> {
   const { site, contents } = caller;
   if (!site || refusedOutright(site)) return false;
   await siteAccessLoaded();
   const access: SiteAccess = { kind: "local-network", origin: site };
-  const state = siteAccessState(contents?.id ?? null, access);
+  const state = siteAccessState(browserSession, contents?.id ?? null, access);
   if (state !== "ask" || !caller.mayAsk) return state === "allow";
   // A popup window has no panel to ask in.
-  const panel = contents ? (contents.getType() === "webview" ? contents : null) : panelOf(site);
+  const panel = contents
+    ? contents.getType() === "webview"
+      ? contents
+      : null
+    : panelOf(browserSession, site);
   if (!panel || panel.isDestroyed() || panel.mainFrame.origin !== site) return false;
   return askSiteAccess(panel, access);
 }
 
-/** The panel to ask in for a worker of `site`: the one asking already, or one showing the site. */
-function panelOf(site: string): WebContents | null {
-  const asking = askingLocalNetwork(site);
+/**
+ * The panel to ask in for a worker of `site` in `browserSession`: the one asking already, or one
+ * showing the site.
+ */
+function panelOf(browserSession: Session, site: string): WebContents | null {
+  const asking = askingLocalNetwork(browserSession, site);
   if (asking !== null) return allWebContents.fromId(asking) ?? null;
   for (const contents of allWebContents.getAllWebContents()) {
     if (contents.getType() !== "webview" || contents.isDestroyed()) continue;
+    if (contents.session !== browserSession) continue;
     if (contents.mainFrame.origin === site && canAskLocalNetwork(contents)) return contents;
   }
   return null;
@@ -255,7 +266,7 @@ async function admit(browserSession: Session, details: RequestDetails): Promise<
   // Pages on this machine or the local network reach anything.
   if (space !== "public") return true;
   if (isMorePrivate(await targetSpace(browserSession, url.hostname), space)) {
-    return allowedFor(caller);
+    return allowedFor(browserSession, caller);
   }
   const contentsId = caller.contents?.id ?? null;
   checked.set(details.id, { callerSpace: space, site: caller.site, contentsId });
@@ -354,7 +365,7 @@ async function acceptResponse(browserSession: Session, details: ResponseDetails)
   if (request.site && !refusedOutright(request.site)) {
     await siteAccessLoaded();
     const access: SiteAccess = { kind: "local-network", origin: request.site };
-    if (siteAccessState(request.contentsId, access) === "allow") return true;
+    if (siteAccessState(browserSession, request.contentsId, access) === "allow") return true;
   }
   return (await responseSpace(browserSession, details.url, details.ip)) === null;
 }
@@ -366,9 +377,11 @@ async function acceptResponse(browserSession: Session, details: ResponseDetails)
  * saved decision or a panel's Allow this time, which the `webRequest` gate asked the user for.
  * `contents` is the webview or popup of the page asking, whose top-level origin decides (the
  * check's `embeddingOrigin` when it names one); with none, a worker's origin decides, and Allow
- * this time in any panel on that site counts, as the gate asked there.
+ * this time in any panel on that site counts, as the gate asked there. `browserSession` is the
+ * session checking, whose decisions apply.
  */
 export function localNetworkPermitted(
+  browserSession: Session,
   contents: WebContents | null,
   requestingOrigin: string,
   embeddingOrigin?: string,
@@ -378,7 +391,8 @@ export function localNetworkPermitted(
     ? (normalizeOrigin(embeddingOrigin) ?? normalizeOrigin(page.mainFrame.origin))
     : normalizeOrigin(requestingOrigin);
   if (!site || refusedOutright(site)) return false;
-  return siteAccessState(page?.id ?? null, { kind: "local-network", origin: site }) === "allow";
+  const access: SiteAccess = { kind: "local-network", origin: site };
+  return siteAccessState(browserSession, page?.id ?? null, access) === "allow";
 }
 
 /** Gate `browserSession`'s requests (the browser panels' session). */

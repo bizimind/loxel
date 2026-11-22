@@ -86,8 +86,19 @@ export function sendSites(channels: SiteAccessChannels, sites: Partial<SiteAcces
   });
 }
 
-/** A webview guest hosted by `host`, whose page can navigate to another origin. */
-export function fakeGuest(host: WebContents, origin: string, type = "webview") {
+/** The browser panels' session, persistent; an incognito session's `storagePath` is null. */
+export const fakeBrowserSession = { storagePath: "/browser" };
+
+/**
+ * A webview guest hosted by `host` (or a popup, by `type`) in `session`, whose page can navigate
+ * to another origin.
+ */
+export function fakeGuest(
+  host: WebContents,
+  origin: string,
+  type = "webview",
+  session: { storagePath: string | null } = fakeBrowserSession,
+) {
   const emitter = fakeEmitter();
   const mainFrame = { origin, detached: false };
   const guest = {
@@ -96,6 +107,7 @@ export function fakeGuest(host: WebContents, origin: string, type = "webview") {
     getType: () => type,
     isDestroyed: () => false,
     hostWebContents: type === "webview" ? host : null,
+    session,
     mainFrame,
   } as unknown as WebContents;
   const navigate = (to: string) => {

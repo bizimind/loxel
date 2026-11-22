@@ -102,7 +102,7 @@ function fakeHost({ listening = true } = {}) {
 }
 
 /** A webview guest hosted by `host`, with its lifecycle events triggerable. */
-function fakeGuest(host: WebContents, origin = "http://localhost:5173") {
+function fakeGuest(host: WebContents, origin = "http://localhost:5173", incognito = false) {
   const emitter = fakeEmitter();
   const mainFrame = frame(origin);
   const guest = {
@@ -111,6 +111,7 @@ function fakeGuest(host: WebContents, origin = "http://localhost:5173") {
     getType: () => "webview",
     isDestroyed: () => false,
     hostWebContents: host,
+    session: { storagePath: incognito ? null : "/browser" },
     mainFrame,
   } as unknown as WebContents;
   trackWebviewNotifications(guest);

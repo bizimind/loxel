@@ -203,13 +203,29 @@ function trackNavigations(
   contents.on("did-stop-loading", () => navigating.delete(contents));
 }
 
-/** Decide every client certificate request: ask for browser panel pages, refuse the rest. */
-export function installClientCertificatePicker(browserSession: Session): void {
-  const { pick, pageNavigated } = createClientCertificatePicker(promptForCertificate);
+/**
+ * Decide every client certificate request: ask for browser panel pages (webContents in a session
+ * `isBrowserSession` accepts), refuse the rest. Each session keeps its own answers, as Chromium
+ * keeps its own per session, so an incognito session's never answer another's requests.
+ */
+export function installClientCertificatePicker(
+  isBrowserSession: (browserSession: Session) => boolean,
+): void {
+  const pickers = new WeakMap<Session, ReturnType<typeof createClientCertificatePicker>>();
+  const pickerOf = (browserSession: Session) => {
+    let picker = pickers.get(browserSession);
+    if (!picker) {
+      picker = createClientCertificatePicker(promptForCertificate);
+      pickers.set(browserSession, picker);
+    }
+    return picker;
+  };
   const navigating = new WeakMap<WebContents, string>();
   app.on("web-contents-created", (_event, contents) => {
-    if (contents.session !== browserSession) return;
-    trackNavigations(contents, navigating, () => pageNavigated(contents));
+    if (!isBrowserSession(contents.session)) return;
+    trackNavigations(contents, navigating, () =>
+      pickerOf(contents.session).pageNavigated(contents),
+    );
   });
 
   app.on("select-client-certificate", (event, contents, server, certificates, callback) => {
@@ -219,7 +235,7 @@ export function installClientCertificatePicker(browserSession: Session): void {
     // certificate sends none, which Chromium then keeps for that server as it keeps a chosen
     // certificate. Requests without a webContents (main-process `net`, and a browser panel's
     // service workers, which Chrome gives none either) and Loxel's own pages get none.
-    if (!contents || contents.isDestroyed() || contents.session !== browserSession) {
+    if (!contents || contents.isDestroyed() || !isBrowserSession(contents.session)) {
       callback();
       return;
     }
@@ -228,7 +244,8 @@ export function installClientCertificatePicker(browserSession: Session): void {
       contents.getURL(),
       navigating.get(contents) ?? null,
     );
-    pick({ contents, question, certificates })
+    pickerOf(contents.session)
+      .pick({ contents, question, certificates })
       .catch((err: unknown) => {
         console.error("[electron] Client certificate selection failed:", err);
         return undefined;

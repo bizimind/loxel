@@ -16,6 +16,7 @@ import {
   ArrowRightIcon,
   BugIcon,
   GlobeIcon,
+  HatGlassesIcon,
   LoaderIcon,
   RefreshCwIcon,
   XIcon,
@@ -24,7 +25,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import type { ServerId } from "@/api/worktree-ref";
 import { FindBar } from "@/components/ui/find-bar";
-import { BROWSER_PARTITION } from "@/electron/browser-partition";
+import { BROWSER_PARTITION, INCOGNITO_PARTITION } from "@/electron/browser-partition";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
 import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
@@ -36,9 +37,11 @@ import {
   useIsBookmarked,
 } from "@/store/browser-bookmarks";
 import {
+  type IncognitoTab,
   setBrowserPageLoading,
   setBrowserPageUrl,
   setBrowserPageWebContents,
+  updateIncognitoTab,
 } from "@/store/browser-pages";
 import { isHttpUrl, isSameOrigin } from "@/url-utils";
 
@@ -76,13 +79,23 @@ function isBlankPage(url: string): boolean {
   return !url || url === "about:blank";
 }
 
+/**
+ * A browser panel's params, saved with the layout. An incognito tab's are a placeholder: an empty
+ * `url` and `incognito`, its page's URL, title and favicon kept in memory only (`IncognitoTab`).
+ */
 export interface BrowserPanelParams {
   url: string;
   faviconUrl?: string;
+  incognito?: true;
 }
 
 interface BrowserPanelProps {
   url: string;
+  /**
+   * Whether this is an incognito tab: its page is in the incognito session, and its URL, title and
+   * favicon go to memory (`IncognitoTab`) instead of the panel's params and title.
+   */
+  incognito?: boolean;
   /** The browser panel's dockview id. */
   panelId: string;
   /**
@@ -103,6 +116,7 @@ interface BrowserPanelProps {
 
 export function BrowserPanel({
   url: initialUrl,
+  incognito = false,
   panelId,
   panelApi,
   worktreePath,
@@ -159,13 +173,29 @@ export function BrowserPanel({
   useLayoutEffect(() => {
     panelApiRef.current = panelApi;
   }, [panelApi]);
+  // The page's tab: the panel's params and title, saved with the layout; an incognito tab's in
+  // memory instead, kept up to date in the background too.
+  const updateTab = useCallback(
+    (update: Partial<Pick<IncognitoTab, "url" | "title" | "faviconUrl">>) => {
+      if (incognito) {
+        updateIncognitoTab(panelId, update);
+        return;
+      }
+      const api = panelApiRef.current;
+      if (!api) return;
+      const { title, ...params } = update;
+      if (Object.keys(params).length > 0) api.updateParameters(params);
+      if (title !== undefined) api.setTitle(title);
+    },
+    [incognito, panelId],
+  );
   useEffect(() => {
     // Shown again after running in the background: give the panel the page's tab and params.
     const page = pageRef.current;
-    if (!panelApi || !page.url) return;
+    if (incognito || !panelApi || !page.url) return;
     panelApi.updateParameters({ url: page.url, faviconUrl: page.faviconUrl });
     if (page.title) panelApi.setTitle(page.title);
-  }, [panelApi]);
+  }, [incognito, panelApi]);
 
   // The page's alert() / confirm() / prompt(), shown over the page one at a time.
   // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
@@ -186,10 +216,12 @@ export function BrowserPanel({
     answer: answerMediaRequest,
     systemBlocked: mediaSystemBlocked,
     dismissSystemBlocked: dismissMediaSystemBlocked,
-  } = useBrowserMediaPermissions(webContentsId, pageUrl);
+  } = useBrowserMediaPermissions(webContentsId, pageUrl, incognito);
   // And so does a site asking to open another app or to reach the local network.
-  const { request: siteAccessRequest, answer: answerSiteAccessRequest } =
-    useSiteAccess(webContentsId);
+  const { request: siteAccessRequest, answer: answerSiteAccessRequest } = useSiteAccess(
+    webContentsId,
+    incognito,
+  );
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -250,10 +282,11 @@ export function BrowserPanel({
         const webview = webviewRef.current;
         if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
         // Tabs open next to the panel, in the layout shown; not from a page in the background.
+        // An incognito tab's open incognito too.
         if (!panelApiRef.current) return;
-        openBrowserTab(url, { sourcePanelId: panelId, activate: !background });
+        openBrowserTab(url, { sourcePanelId: panelId, activate: !background, incognito });
       }),
-    [panelId],
+    [panelId, incognito],
   );
 
   // Attach webview event listeners
@@ -319,23 +352,23 @@ export function BrowserPanel({
         const keepFavicon = faviconUrl !== undefined && isSameOrigin(pageRef.current.url, url);
         faviconRequestRef.current++;
         pageRef.current = { url, title: "", ...(keepFavicon && { faviconUrl }) };
-        panelApiRef.current?.updateParameters({ url, faviconUrl: pageRef.current.faviconUrl });
+        updateTab({ url, faviconUrl: pageRef.current.faviconUrl });
       } else {
         // The same document, which keeps its title and favicon (Chromium reports them per document).
         pageRef.current = { ...pageRef.current, url };
-        panelApiRef.current?.updateParameters({ url });
+        updateTab({ url });
       }
       updateNavState();
     };
 
     const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
       pageRef.current = { ...pageRef.current, title: event.title };
-      panelApiRef.current?.setTitle(event.title);
+      updateTab({ title: event.title });
     };
 
     const setFavicon = (faviconUrl: string | undefined) => {
       pageRef.current = { ...pageRef.current, faviconUrl };
-      panelApiRef.current?.updateParameters({ faviconUrl });
+      updateTab({ faviconUrl });
     };
 
     // Chromium lists the page's favicons, its preferred first. Pages change them as they please (an
@@ -352,9 +385,11 @@ export function BrowserPanel({
       const readBlob = (url: string) =>
         window.electronAPI?.loadFavicon(url, undefined, webview.getWebContentsId()) ??
         Promise.resolve(null);
-      void pickFavicon(candidates, pageRef.current.url, readBlob, isCurrent).then((picked) => {
-        if (isCurrent() && picked !== pageRef.current.faviconUrl) setFavicon(picked);
-      });
+      void pickFavicon(candidates, pageRef.current.url, readBlob, isCurrent, incognito).then(
+        (picked) => {
+          if (isCurrent() && picked !== pageRef.current.faviconUrl) setFavicon(picked);
+        },
+      );
     };
 
     const onFailLoad = (event: DidFailLoadEvent) => {
@@ -419,7 +454,7 @@ export function BrowserPanel({
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
-  }, [panelId]);
+  }, [panelId, updateTab]);
 
   const navigate = useCallback(
     (url: string) => {
@@ -461,13 +496,14 @@ export function BrowserPanel({
     webviewRef.current?.reloadIgnoringCache();
   }, [dismissDialogs]);
 
-  // Pages of the web only: not the blank page, or Chromium's error and internal pages.
-  const canBookmark = isHttpUrl(pageUrl);
+  // Pages of the web only: not the blank page, or Chromium's error and internal pages. Bookmarks
+  // are saved, so never from an incognito tab.
+  const canBookmark = !incognito && isHttpUrl(pageUrl);
   const toggleBookmark = useCallback(() => {
     const page = pageRef.current;
-    if (!isHttpUrl(page.url)) return;
+    if (incognito || !isHttpUrl(page.url)) return;
     useBrowserBookmarksStore.getState().toggleBookmark({ ...page, title: page.title || page.url });
-  }, []);
+  }, [incognito]);
 
   const browserPanelTarget = useMemo(
     () => ({ hardRefresh, toggleBookmark }),
@@ -496,13 +532,13 @@ export function BrowserPanel({
   const openBookmark = useCallback<OpenBookmark>(
     (url, inNewTab) => {
       if (inNewTab) {
-        openBrowserTab(url, { sourcePanelId: panelId, activate: inNewTab.activate });
+        openBrowserTab(url, { sourcePanelId: panelId, activate: inNewTab.activate, incognito });
         return;
       }
       navigate(url);
       webviewRef.current?.focus();
     },
-    [navigate, panelId],
+    [navigate, panelId, incognito],
   );
 
   // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
@@ -546,8 +582,22 @@ export function BrowserPanel({
 
   return (
     <div ref={rootRef} className="bg-editor-surface flex h-full flex-col overflow-hidden">
-      {/* Navigation toolbar */}
-      <div className="border-border flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
+      {/* Navigation toolbar, tinted in an incognito tab */}
+      <div
+        className={cn(
+          "border-border flex h-8 shrink-0 items-center gap-1 border-b px-1.5",
+          incognito && "bg-incognito/25 border-incognito/60",
+        )}
+      >
+        {incognito && (
+          <span
+            title="Incognito: this tab's history, cookies and site data are forgotten when the last incognito tab closes."
+            className="text-incognito flex shrink-0 items-center gap-1 pr-0.5 pl-1 text-xs font-medium"
+          >
+            <HatGlassesIcon className="size-3.5" />
+            Incognito
+          </span>
+        )}
         <NavButton onClick={goBack} disabled={!canGoBack} title="Back">
           <ArrowLeftIcon className="size-3.5" />
         </NavButton>
@@ -575,11 +625,13 @@ export function BrowserPanel({
             className="text-foreground min-w-0 flex-1 bg-transparent text-xs outline-none"
             spellCheck={false}
           />
-          <BookmarkToggle
-            bookmarked={isBookmarked}
-            disabled={!canBookmark}
-            onToggle={toggleBookmark}
-          />
+          {!incognito && (
+            <BookmarkToggle
+              bookmarked={isBookmarked}
+              disabled={!canBookmark}
+              onToggle={toggleBookmark}
+            />
+          )}
         </div>
 
         <BookmarksMenu onOpen={openBookmark} />
@@ -633,7 +685,7 @@ export function BrowserPanel({
         <webview
           ref={webviewRef as React.Ref<HTMLElement>}
           src="about:blank"
-          partition={BROWSER_PARTITION}
+          partition={incognito ? INCOGNITO_PARTITION : BROWSER_PARTITION}
           {...popupAttributes}
           className="flex-1"
           style={{ display: "flex" }}
@@ -657,6 +709,7 @@ export function BrowserPanel({
         <BrowserContextMenu
           menu={contextMenu}
           panelId={panelId}
+          incognito={incognito}
           onOpenChange={(open) => setContextMenu((menu) => menu && { ...menu, open })}
         />
       )}

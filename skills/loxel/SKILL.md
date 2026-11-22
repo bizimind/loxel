@@ -29,7 +29,7 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 ## The `loxel` CLI
 
 ```
-loxel [open flags] <file | folder | url>...
+loxel [open flags] [--incognito] <file | folder | url>...
 loxel terminal [--cwd <dir>] [--title <name>] [open flags] [--] [command...]
 loxel                      # launch or focus Loxel
 loxel --version            # print the CLI's version
@@ -49,6 +49,7 @@ loxel terminal 'cd web && pnpm dev' # one argument = a shell command line, used 
 loxel --split right src/app.ts      # open beside the active tab instead of as a tab in its group
 loxel docs/*.md                     # open several targets, in order
 loxel --worktree ../other https://github.com/org/repo/pull/42  # open in another worktree
+loxel --incognito http://localhost:5173  # URLs only: a signed-out tab, its data in memory only
 ```
 
 There is no `--help`: `loxel --help` fails with `unknown option --help` and prints the usage. On success the CLI prints nothing (at most `loxel: waiting for a Loxel window...` while Loxel starts, or a `loxel: warning: ...` line about a flag it ignored) and exits 0. When no Loxel window is open it prints `loxel: no Loxel window is open; this will open in the next window to connect` and still exits 0: the open waits for the user's next window, which tells them what opened, and a terminal's command runs right away. Don't retry it. A folder is the exception: it is only shown in an open window, so with none the CLI fails with `No Loxel window is open to show the folder in`; open it again once the user has a window. Errors it can detect print `loxel: <message>` to stderr and exit 1. Some requests are accepted and then refused inside Loxel, which shows the user a message while the CLI still exits 0. That happens, for example, with a folder that belongs to a project but to none of its worktrees, such as a bare repo's root.

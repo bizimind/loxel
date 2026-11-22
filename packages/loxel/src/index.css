@@ -152,6 +152,8 @@
   --primary-foreground: #1e1f22;
   /* Accent text: links, check marks, active filters */
   --link: #2e62d9;
+  /* Incognito browser tabs' mark: their tab icon, toolbar tint and label */
+  --incognito: #7c3aed;
   /* Solid accent for primary buttons and on switches */
   --button-primary: #3574f0;
   --button-primary-foreground: #ffffff;
@@ -279,6 +281,7 @@
   /* Accent text: links, check marks, active filters. JetBrains' dark link blue: the selection navy
      is a fill color and too dark to read as text on the dark panels. */
   --link: #548af7;
+  --incognito: #a78bfa;
   /* Solid accent for primary buttons and on switches */
   --button-primary: #214283;
   --button-primary-foreground: #ffffff;
@@ -372,6 +375,7 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
   --color-link: var(--link);
+  --color-incognito: var(--incognito);
   --color-button-primary: var(--button-primary);
   --color-button-primary-foreground: var(--button-primary-foreground);
   --color-accent: var(--accent);

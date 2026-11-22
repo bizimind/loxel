@@ -8,6 +8,10 @@
  * panel closes or its worktree is removed. On the way it may be frozen and resumed, or unloaded and
  * loaded again the next time its panel is shown, to keep background pages within a budget
  * (`browser-page-budget.ts`).
+ *
+ * An incognito tab's panel keeps no URL, title or favicon in its params and title, which are saved
+ * with the layout: they live here in memory only (`useIncognitoTab`), and a placeholder panel
+ * without them (after a restart, or in another window's layout) is closed.
  */
 import type { DockviewPanelApi } from "dockview-react";
 import { create } from "zustand";
@@ -31,6 +35,8 @@ export interface BrowserPage {
   layoutKey: LayoutKey;
   /** The URL the page was loaded on. */
   initialUrl: string;
+  /** Whether it is an incognito tab's: in the incognito session, its tab state in memory only. */
+  incognito: boolean;
   /** Where the page is shown. Null while it runs in the background. */
   slot: PageSlot | null;
   /** When the page went to the background (`Date.now()`), or null while it is shown. */
@@ -77,7 +83,12 @@ function setPages(update: (pages: Record<string, BrowserPage>) => void): void {
  */
 export function attachBrowserPage(
   id: string,
-  { layoutKey, url, slot }: { layoutKey: LayoutKey; url: string; slot: PageSlot },
+  {
+    layoutKey,
+    url,
+    incognito = false,
+    slot,
+  }: { layoutKey: LayoutKey; url: string; incognito?: boolean; slot: PageSlot },
 ): void {
   const previous = useBrowserPages.getState().pages[id];
   setPages((pages) => {
@@ -85,6 +96,7 @@ export function attachBrowserPage(
       id,
       layoutKey,
       initialUrl: pageUrls.get(id)?.url ?? url,
+      incognito,
       slot: null,
       hiddenSince: null,
       webContentsId: null,
@@ -179,9 +191,71 @@ export function setBrowserPageUrl(id: string, url: string): void {
   if (page) pageUrls.set(id, { layoutKey: page.layoutKey, url });
 }
 
+/** The title an incognito tab's panel saves with the layout, in place of its page's. */
+export const INCOGNITO_TAB_TITLE = "Incognito";
+
+/**
+ * What an incognito tab shows in its tab and loads, which its panel leaves out of the layout: in
+ * memory only, from the moment the tab opens until it closes.
+ */
+export interface IncognitoTab {
+  /** The layout its panel is in. */
+  layoutKey: LayoutKey;
+  /** The URL its page is on, or opens on. */
+  url: string;
+  title: string;
+  faviconUrl?: string;
+}
+
+const useIncognitoTabs = create<{ tabs: Readonly<Record<string, IncognitoTab>> }>()(() => ({
+  tabs: {},
+}));
+
+/** Panel `id` is a new incognito tab in `layoutKey`'s layout, to load `url`. */
+export function openIncognitoTab(id: string, layoutKey: LayoutKey, url: string): void {
+  const { tabs } = useIncognitoTabs.getState();
+  useIncognitoTabs.setState({ tabs: { ...tabs, [id]: { layoutKey, url, title: "" } } });
+}
+
+/** Record what incognito tab `id`'s page is on now. */
+export function updateIncognitoTab(
+  id: string,
+  update: Partial<Pick<IncognitoTab, "url" | "title" | "faviconUrl">>,
+): void {
+  const { tabs } = useIncognitoTabs.getState();
+  const tab = tabs[id];
+  if (!tab) return;
+  useIncognitoTabs.setState({ tabs: { ...tabs, [id]: { ...tab, ...update } } });
+}
+
+/** Incognito tab `id`'s page, or undefined once it is gone (or it never was this window's). */
+export function useIncognitoTab(id: string): IncognitoTab | undefined {
+  return useIncognitoTabs((state) => state.tabs[id]);
+}
+
+/** Incognito tab `id`'s page, read outside React. */
+export function getIncognitoTab(id: string): IncognitoTab | undefined {
+  return useIncognitoTabs.getState().tabs[id];
+}
+
+function closeIncognitoTabs(close: (id: string, tab: IncognitoTab) => boolean): void {
+  const { tabs } = useIncognitoTabs.getState();
+  const left = Object.fromEntries(Object.entries(tabs).filter(([id, tab]) => !close(id, tab)));
+  if (Object.keys(left).length !== Object.keys(tabs).length) {
+    useIncognitoTabs.setState({ tabs: left });
+  }
+}
+
+// Main keeps the incognito session while any window has incognito tabs, and ends it after the last.
+useIncognitoTabs.subscribe(({ tabs }, previous) => {
+  const has = Object.keys(tabs).length > 0;
+  if (has !== Object.keys(previous.tabs).length > 0) window.electronAPI?.setHasIncognitoTabs(has);
+});
+
 /** Unload panel `id`'s page for good: its panel closed. */
 export function closeBrowserPage(id: string): void {
   pageUrls.delete(id);
+  closeIncognitoTabs((tabId) => tabId === id);
   if (!useBrowserPages.getState().pages[id]) return;
   setPages((pages) => {
     delete pages[id];
@@ -193,6 +267,7 @@ export function closeLayoutBrowserPages(layoutKey: LayoutKey): void {
   for (const [id, { layoutKey: key }] of pageUrls) {
     if (key === layoutKey) pageUrls.delete(id);
   }
+  closeIncognitoTabs((_id, tab) => tab.layoutKey === layoutKey);
   const { pages } = useBrowserPages.getState();
   if (!Object.values(pages).some((page) => page.layoutKey === layoutKey)) return;
   setPages((next) => {
@@ -216,6 +291,8 @@ function originOf(url: string): string | null {
  * notification in the notification center.
  */
 export function canNotify(page: BrowserPage): boolean {
+  // Incognito tabs get no notifications.
+  if (page.incognito) return false;
   const server = layoutServer(page.layoutKey);
   if (hasPanelNotification(usePanelNotificationStore.getState(), server, page.id)) return true;
   const origin = originOf(browserPageUrl(page));

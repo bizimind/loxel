@@ -7,7 +7,9 @@
  * and request here. A request from a site without a decision is forwarded to the window hosting
  * the page, whose browser panel asks Allow / Allow this time / Block; Allow and Block are saved
  * per site and device in Loxel's settings, which window renderers send here on load and on every
- * change. "Allow this time" lasts while the panel stays on the site.
+ * change. "Allow this time" lasts while the panel stays on the site. An incognito tab's Allow and
+ * Block are kept here for its incognito session instead, never saved, over the Blocks saved in
+ * settings, which it inherits.
  *
  * On macOS an allowed request also needs the system to let Loxel use the device: the first one
  * shows the system prompt, and when the user turned it off, the page is refused and the panel
@@ -23,6 +25,7 @@
 import {
   type IpcMainEvent,
   type MediaAccessPermissionRequest,
+  type Session,
   type WebContents,
   ipcMain,
   shell,
@@ -43,6 +46,7 @@ import {
   withMediaDecision,
 } from "./browser-media-protocol";
 import { isSecureWebOrigin } from "./browser-notifications";
+import { isIncognitoSession } from "./browser-partition";
 import {
   BROWSER_MEDIA_LISTEN,
   BROWSER_MEDIA_OPEN_SYSTEM_SETTINGS,
@@ -98,10 +102,40 @@ export function devicesOf(mediaTypes: readonly ("video" | "audio")[]): MediaDevi
 
 const sites = createSettingsMirror<MediaSites>({});
 
+/** Each incognito session's own Allow and Block answers, in memory only. */
+const incognitoSites = new WeakMap<Session, MediaSites>();
+
+/**
+ * What an incognito session decides from: its own answers over the Blocks saved in settings. A
+ * saved Allow doesn't carry over, as in Chrome's incognito windows.
+ */
+export function incognitoMediaSites(saved: MediaSites, own: MediaSites): MediaSites {
+  let view: MediaSites = {};
+  for (const [origin, decisions] of Object.entries(saved)) {
+    const blocked = MEDIA_DEVICES.filter((device) => decisions[device] === "block");
+    view = withMediaDecision(view, origin, blocked, "block");
+  }
+  for (const [origin, decisions] of Object.entries(own)) {
+    for (const device of MEDIA_DEVICES) {
+      const decision = decisions[device];
+      if (decision) view = withMediaDecision(view, origin, [device], decision);
+    }
+  }
+  return view;
+}
+
+/** The decisions pages of `browserSession` get. */
+function sitesFor(browserSession: Session): MediaSites {
+  if (!isIncognitoSession(browserSession)) return sites.get();
+  return incognitoMediaSites(sites.get(), incognitoSites.get(browserSession) ?? {});
+}
+
 const listeningHosts = createListeningRenderers();
 
 interface PendingRequest {
   guestId: number;
+  /** The guest's session, whose decisions apply. */
+  session: Session;
   host: WebContents;
   origin: string;
   devices: MediaDevice[];
@@ -121,12 +155,20 @@ const prompts = createPermissionPrompts<PendingRequest>(
 /** "Allow this time" grants by guest webContents id, dropped when the panel leaves the site. */
 const onceGrants = new Map<number, OnceGrant>();
 
-function stateFor(guestId: number, origin: string, device: MediaDevice): DeviceState {
-  return deviceState(sites.get(), onceGrants.get(guestId), origin, device);
+/** A page's guest: its webContents id, and the session whose decisions apply to it. */
+type Guest = Pick<PendingRequest, "guestId" | "session">;
+
+const guestOf = (contents: WebContents): Guest => ({
+  guestId: contents.id,
+  session: contents.session,
+});
+
+function stateFor({ guestId, session }: Guest, origin: string, device: MediaDevice): DeviceState {
+  return deviceState(sitesFor(session), onceGrants.get(guestId), origin, device);
 }
 
-function statesFor(guestId: number, origin: string, devices: readonly MediaDevice[]) {
-  return devices.map((device) => stateFor(guestId, origin, device));
+function statesFor(guest: Guest, origin: string, devices: readonly MediaDevice[]) {
+  return devices.map((device) => stateFor(guest, origin, device));
 }
 
 /** The site deciding for a guest's pages, or null when its page gets no camera or microphone. */
@@ -178,7 +220,7 @@ export function checkMediaPermission(
   if (!guest || !site || normalizeOrigin(requestingOrigin) !== site) return false;
   // Device labels are checked with no type: they are the page's once it may use either device.
   const devices = mediaType === "video" || mediaType === "audio" ? devicesOf([mediaType]) : null;
-  const states = statesFor(guest.id, site, devices ?? MEDIA_DEVICES);
+  const states = statesFor(guestOf(guest), site, devices ?? MEDIA_DEVICES);
   return devices ? states.every((s) => s === "allow") : states.includes("allow");
 }
 
@@ -188,10 +230,10 @@ function withdraw(id: number, allowed: boolean): void {
 }
 
 /** The devices of `waiters` the site has no decision for: what their prompt asks about. */
-function undecided(pending: Pick<PendingRequest, "guestId" | "origin" | "waiters">) {
+function undecided(pending: Pick<PendingRequest, "guestId" | "session" | "origin" | "waiters">) {
   const devices = new Set(pending.waiters.flatMap((waiter) => waiter.devices));
   return MEDIA_DEVICES.filter(
-    (device) => devices.has(device) && stateFor(pending.guestId, pending.origin, device) === "ask",
+    (device) => devices.has(device) && stateFor(pending, pending.origin, device) === "ask",
   );
 }
 
@@ -203,7 +245,7 @@ function undecided(pending: Pick<PendingRequest, "guestId" | "origin" | "waiters
 function settleDecidedRequests(): void {
   for (const [id, pending] of prompts.entries()) {
     const waiting = pending.waiters.filter((waiter) => {
-      const state = requestState(statesFor(pending.guestId, pending.origin, waiter.devices));
+      const state = requestState(statesFor(pending, pending.origin, waiter.devices));
       if (state !== "ask") waiter.resolve(state === "allow");
       return state === "ask";
     });
@@ -224,7 +266,7 @@ function settleDecidedRequests(): void {
  * whether the request may use all of them.
  */
 function ask(
-  guestId: number,
+  { guestId, session }: Guest,
   host: WebContents,
   site: string,
   devices: readonly MediaDevice[],
@@ -242,7 +284,14 @@ function ask(
       prompts.reprompt(id, pending);
       return;
     }
-    const pending: PendingRequest = { guestId, host, origin: site, devices: [], waiters: [waiter] };
+    const pending: PendingRequest = {
+      guestId,
+      session,
+      host,
+      origin: site,
+      devices: [],
+      waiters: [waiter],
+    };
     pending.devices = undecided(pending);
     prompts.show(pending);
   });
@@ -304,9 +353,9 @@ async function decideRequest(
   if (siteOfGuest(guest) !== site) return false;
   const host = listeningHost(guest);
   if (!host) return false;
-  const state = requestState(statesFor(guest.id, site, devices));
+  const state = requestState(statesFor(guestOf(guest), site, devices));
   if (state === "block") return false;
-  if (state === "ask" && !(await ask(guest.id, host, site, devices))) return false;
+  if (state === "ask" && !(await ask(guestOf(guest), host, site, devices))) return false;
   if (siteOfGuest(guest) !== site) return false;
   if (!(await systemAllowsAll(guest, host, site, devices))) return false;
   // macOS's prompt waits on the user too.
@@ -409,6 +458,13 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
       origin: pending.origin,
       devices: new Set([...kept, ...pending.devices]),
     });
+  } else if (isIncognitoSession(pending.session)) {
+    // Kept for the incognito session only; the renderer saves nothing.
+    const own = incognitoSites.get(pending.session) ?? {};
+    incognitoSites.set(
+      pending.session,
+      withMediaDecision(own, pending.origin, pending.devices, answer),
+    );
   } else {
     // The renderer also saves the decision in settings, which sends it back here; applying it now
     // answers the page without waiting for that round trip.
@@ -433,7 +489,7 @@ function pageStates(event: IpcMainEvent): MediaPermissionStates | null {
   // With no window to ask in, a request for an undecided device is refused without asking.
   const undecidedState = listeningHost(guest) ? "prompt" : "denied";
   for (const device of MEDIA_DEVICES) {
-    const state = stateFor(guest.id, site, device);
+    const state = stateFor(guestOf(guest), site, device);
     states[device] = state === "allow" ? "granted" : state === "block" ? "denied" : undecidedState;
   }
   return states;

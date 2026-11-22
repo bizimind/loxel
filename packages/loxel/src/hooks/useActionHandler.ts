@@ -169,6 +169,10 @@ export function useActionHandler(): (actionId: ActionId) => void {
         reopenClosedTab();
         break;
 
+      case "panel.new.incognitoBrowser":
+        dispatchLoxelEvent("loxel-create-browser", { incognito: true });
+        break;
+
       case "panel.rename":
         renameActiveTab();
         break;

@@ -55,13 +55,20 @@ interface Window {
      * It loads through the browser panels' session as `pageUrl`, the page it is shown for, would:
      * with cookies only if it has that page's origin, and reaching this machine or the local
      * network only as far as that page may. A `blob:` favicon is read in the page of webview
-     * `webContentsId`, which must be one of this window's.
+     * `webContentsId`, which must be one of this window's. An incognito tab's page's favicon
+     * (`incognito`) loads through the incognito session instead.
      */
     loadFavicon: (
       url: string,
       pageUrl: string | undefined,
       webContentsId?: number,
+      incognito?: boolean,
     ) => Promise<string | null>;
+    /**
+     * Tell main whether this window has incognito browser tabs, whenever that changes. The
+     * incognito session ends once no window has any.
+     */
+    setHasIncognitoTabs: (hasTabs: boolean) => void;
     /**
      * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
      * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).

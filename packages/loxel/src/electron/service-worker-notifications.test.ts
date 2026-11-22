@@ -148,6 +148,7 @@ function fakeGuest(host: WebContents, origin = SITE) {
     getType: () => "webview",
     isDestroyed: () => false,
     hostWebContents: host,
+    session: { storagePath: "/browser" },
     mainFrame: { origin, detached: false },
   } as unknown as WebContents;
   guests.push(guest);

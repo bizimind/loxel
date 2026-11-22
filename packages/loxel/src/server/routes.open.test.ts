@@ -489,6 +489,36 @@ describe("POST /api/open terminals and placement", () => {
     expect((await open({ url: "https://example.com" })).status).toBe(503);
   });
 
+  test("an incognito URL goes to the window in use only, and never waits in the inbox", async () => {
+    const worktreeWindows: WsMessage[] = [];
+    ctx.sendToWorktreeWindows = (_wtPath, _windowId, msg) => {
+      worktreeWindows.push(msg);
+      return true;
+    };
+    registerRootAsProject();
+    const page = { url: "https://example.com", wtPath: root, windowId: "w1", incognito: true };
+
+    expect((await open(page)).status).toBe(200);
+    expect(worktreeWindows).toEqual([]);
+    expect(sent).toEqual([
+      {
+        windowId: "w1",
+        msg: {
+          type: "open_url",
+          wtPath: root,
+          data: { url: "https://example.com", incognito: true },
+        },
+      },
+    ]);
+
+    window = null;
+    // Waits for a window while one may be coming, but is refused where a file would queue.
+    expect((await open(page)).status).toBe(503);
+    expect((await open({ ...page, queue: true })).status).toBe(409);
+    expect(queued).toEqual([]);
+    expect((await open({ ...page, incognito: "yes" })).status).toBe(400);
+  });
+
   test("--worktree pins a file and a terminal, and any path in the worktree names it", async () => {
     registerRootAsProject();
     await mkdir(join(root, "sub"));

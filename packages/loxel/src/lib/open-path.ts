@@ -254,12 +254,12 @@ export function openTerminal(
 /**
  * Open a page sent from outside the window in a browser panel: of `server`'s `worktreePath`
  * (`loxel <url>`), switching to it if the open has focus, or, for a link opened with Loxel as the
- * browser (no worktree), of the active worktree, else of Home.
+ * browser (no worktree), of the active worktree, else of Home. `incognito` opens an incognito tab.
  */
 export function openUrl(
   server: ServerId,
   worktreePath: string | null,
-  { url, ...options }: { url: string } & PanelOpenOptions,
+  { url, ...options }: { url: string; incognito?: true } & PanelOpenOptions,
   inboxId?: string,
 ): Promise<boolean | undefined> {
   return inOrder(async () => {
@@ -333,6 +333,7 @@ export function dispatchPendingOpen(open: PendingOpen): void {
         url: open.url,
         placement: open.placement,
         focus: open.focus,
+        ...(open.incognito ? { incognito: true } : {}),
       });
       break;
     case "terminal":

@@ -49,6 +49,7 @@ import {
   siteOf,
   withinRateLimit,
 } from "./browser-notifications";
+import { isIncognitoSession } from "./browser-partition";
 import {
   BROWSER_NOTIFICATION_CLICK,
   BROWSER_NOTIFICATION_PERMISSION,
@@ -423,9 +424,12 @@ export function installServiceWorkerNotifications(session: Session): void {
   });
 }
 
-/** Track which browser panel had focus last (from `web-contents-created`). */
+/**
+ * Track which browser panel had focus last (from `web-contents-created`). Not incognito ones: a
+ * worker of the browser session must never reach a page of the incognito one.
+ */
 export function trackWebviewFocus(contents: WebContents): void {
-  if (contents.getType() !== "webview") return;
+  if (contents.getType() !== "webview" || isIncognitoSession(contents.session)) return;
   const guestId = contents.id;
   // A new panel counts as the most recent until another one gets focus.
   focusOrder.set(guestId, nextFocus++);

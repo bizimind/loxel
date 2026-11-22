@@ -232,7 +232,13 @@ function VirtualDocumentPanelComponent(
 
 /** Browser panel in the center group: a slot that the window's page pool shows its page over. */
 function BrowserPanelComponent(props: IDockviewPanelProps<BrowserPanelParams>) {
-  return <BrowserPageSlot url={props.params.url} panelApi={props.api} />;
+  return (
+    <BrowserPageSlot
+      url={props.params.url}
+      incognito={props.params.incognito === true}
+      panelApi={props.api}
+    />
+  );
 }
 
 /** Media viewer panel in the center group. */

@@ -81,14 +81,14 @@ describe.if(process.platform === "darwin")("quarantineFile", () => {
       const session = new EventEmitter();
       const { shown, saveAs } = fakeSaveAs();
       const { calls, quarantine, untilCalls } = fakeQuarantine();
-      installBrowserDownloads(session as unknown as Session, {
+      installBrowserDownloads({
         quarantine: async (path, like) => {
           await quarantineFile(path, like);
           await quarantine(path);
         },
         saveAs,
         downloadsFolder: () => dir,
-      });
+      })(session as unknown as Session);
       const item = new FakeDownload();
       session.emit("will-download", { preventDefault: () => {} }, item, page());
       // Chromium writes the whole file and marks it itself before Loxel hears of it.
@@ -183,11 +183,11 @@ function setup(folder = "/nonexistent/Downloads") {
   const session = new EventEmitter();
   const fake = fakeQuarantine();
   const dialogs = fakeSaveAs();
-  installBrowserDownloads(session as unknown as Session, {
+  installBrowserDownloads({
     quarantine: fake.quarantine,
     saveAs: dialogs.saveAs,
     downloadsFolder: () => folder,
-  });
+  })(session as unknown as Session);
   /** Start a download in `page`; whether it went ahead (was not cancelled). */
   const download = (page: WebContents | null, filename = "tool.sh") => {
     const item = new FakeDownload();

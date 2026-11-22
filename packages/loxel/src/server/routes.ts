@@ -3436,6 +3436,24 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!isHttpUrl(body.url)) {
       return error("Invalid URL — only http and https URLs are supported", 400);
     }
+    if (body.incognito !== undefined && body.incognito !== true) {
+      return error("incognito must be true", 400);
+    }
+
+    // An incognito tab opens in the window in use only, never in the other windows showing the
+    // worktree, and never waits in the inbox, which is saved on disk: its URL stays in memory.
+    if (body.incognito === true) {
+      const wtPath = body.wtPath === undefined ? null : await namedWorktree(ctx, body.wtPath);
+      if (body.wtPath !== undefined && !wtPath) return error("No project found for worktree", 404);
+      const message: InboxMessage = {
+        type: "open_url",
+        wtPath,
+        data: { url: body.url, incognito: true, ...placed },
+      };
+      if (ctx.sendToActiveWindow(windowId, message)) return json({ ok: true });
+      // 409, not 503: waiting for a window ends in the inbox, which an incognito tab never enters.
+      return queue ? error(`${NO_WINDOW} to open an incognito tab in`, 409) : error(NO_WINDOW, 503);
+    }
 
     // A link opened with Loxel as the browser names no worktree: the window in use opens it in the
     // worktree it shows, or in Home.

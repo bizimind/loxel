@@ -19,6 +19,7 @@ import {
   type BrowserPage,
   attachBrowserPage,
   detachBrowserPage,
+  getIncognitoTab,
   useBrowserPages,
 } from "@/store/browser-pages";
 import { activateEditorArea } from "@/store/tools-bar";
@@ -105,6 +106,7 @@ const BrowserPageHost = memo(function BrowserPageHost({ page }: { page: BrowserP
       <PanelErrorBoundary panelName="browser" Icon={GlobeIcon} center>
         <BrowserPanel
           url={page.initialUrl}
+          incognito={page.incognito}
           panelId={page.id}
           panelApi={slot?.api ?? null}
           resumes={page.resumes}
@@ -118,9 +120,19 @@ const BrowserPageHost = memo(function BrowserPageHost({ page }: { page: BrowserP
 
 /**
  * A browser panel's content in dockview: the slot its page is shown over. The page loads on `url`
- * the first time the panel is shown.
+ * the first time the panel is shown; an incognito tab's on the URL kept in memory for it, and one
+ * with none kept (a placeholder from before a restart, or another window's) is closed: incognito
+ * tabs don't come back, as in Chrome.
  */
-export function BrowserPageSlot({ url, panelApi }: { url: string; panelApi: DockviewPanelApi }) {
+export function BrowserPageSlot({
+  url,
+  incognito,
+  panelApi,
+}: {
+  url: string;
+  incognito: boolean;
+  panelApi: DockviewPanelApi;
+}) {
   const slotRef = useRef<HTMLDivElement>(null);
   // The layout the panel is in, the one shown when it mounts.
   const [layoutKey] = useState(activeLayoutKey);
@@ -136,13 +148,20 @@ export function BrowserPageSlot({ url, panelApi }: { url: string; panelApi: Dock
   useLayoutEffect(() => {
     const element = slotRef.current;
     if (!element) return;
+    const pageUrl = incognito ? getIncognitoTab(panelApi.id)?.url : urlRef.current;
+    if (pageUrl === undefined) {
+      // After this commit: dockview is still mounting the layout.
+      queueMicrotask(() => panelApi.close());
+      return;
+    }
     attachBrowserPage(panelApi.id, {
       layoutKey,
-      url: urlRef.current,
+      url: pageUrl,
+      incognito,
       slot: { element, api: panelApi },
     });
     return () => detachBrowserPage(panelApi.id, element);
-  }, [panelApi, layoutKey]);
+  }, [panelApi, layoutKey, incognito]);
 
   return <div ref={slotRef} className="min-h-0 flex-1" />;
 }

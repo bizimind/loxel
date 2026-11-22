@@ -226,6 +226,7 @@ export default defineConfig(({ mode }) => {
                         "preload.cjs",
                         "webview-preload.cjs",
                         "service-worker-preload.cjs",
+                        "incognito-preload.cjs",
                       ]) {
                         const src = path.join(import.meta.dirname, "src/electron", file);
                         copyFileSync(src, path.join(outDir, file));

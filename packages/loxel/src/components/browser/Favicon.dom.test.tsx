@@ -10,7 +10,7 @@ import { Favicon } from "./Favicon";
 function controlledLoads() {
   const settle = new Map<string, ((src: string | null) => void)[]>();
   const loadFavicon = mock(
-    (url: string, _pageUrl?: string) =>
+    (url: string, _pageUrl?: string, _webContentsId?: number, _incognito?: boolean) =>
       new Promise<string | null>((resolve) => {
         settle.set(url, [...(settle.get(url) ?? []), resolve]);
       }),
@@ -82,14 +82,16 @@ describe("Favicon in the desktop app", () => {
     await resolve(url, null);
   });
 
-  test("names the page each favicon is for, so main decides cookies and reach by it", async () => {
+  test("names the page each favicon is for, so main decides cookies, session and reach by it", async () => {
     const { loadFavicon, resolve } = controlledLoads();
     const url = "https://e.example/favicon.ico";
     render(<Favicon url={url} pageUrl="https://e.example/inbox" />);
     render(<Favicon url={url} pageUrl="https://other.example/" />);
+    render(<Favicon url={url} pageUrl="https://e.example/inbox" incognito />);
     expect(loadFavicon.mock.calls).toEqual([
-      [url, "https://e.example/inbox"],
-      [url, "https://other.example/"],
+      [url, "https://e.example/inbox", undefined, false],
+      [url, "https://other.example/", undefined, false],
+      [url, "https://e.example/inbox", undefined, true],
     ]);
     await resolve(url, null);
   });
