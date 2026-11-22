@@ -2055,10 +2055,17 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
       } catch {
         // detached HEAD
       }
+      // Loxel's own status read, not wt's: the folder is not trusted yet, and this read runs with
+      // the environment Loxel gives every read of an untrusted repository (no fsmonitor).
       try {
-        dirty = await hasUncommittedChanges(gitRoot);
-      } catch {
-        // ignore
+        const status = await git.getStatus(gitRoot);
+        dirty = [status.staged, status.unstaged, status.untracked, status.conflicted].some(
+          (files) => files.length > 0,
+        );
+      } catch (err) {
+        // A status git cannot read counts as dirty, so the wizard does not offer to convert it.
+        wtLog.warn("Failed to read the repository's status", { path: gitRoot, error: err });
+        dirty = true;
       }
       const result: DetectPathResult = {
         type: "git-repo-regular",

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -334,6 +334,28 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(regular.setup).toMatchObject({ checks: expect.any(Array), actions: expect.any(Array) });
     expect(worktree.type).toBe("git-repo-regular");
     expect(worktree.setup).toBeUndefined();
+  });
+
+  test("detect reports uncommitted changes without starting the repository's fsmonitor", async () => {
+    const { url, dest } = await makeRemote();
+    const checkout = join(dest, "checkout");
+    await Bun.$`git clone -q -- ${url} ${checkout}`;
+    const monitorRan = join(dest, "monitor-ran");
+    const monitor = join(dest, "monitor");
+    await Bun.write(monitor, `#!/bin/sh\ntouch "${monitorRan}"\n`);
+    await chmod(monitor, 0o755);
+    await Bun.$`git -C ${checkout} config core.fsmonitor ${monitor}`;
+    const detect = async () =>
+      (
+        await post<{ hasUncommittedChanges?: boolean }>(projectCtx, "/api/projects/detect", {
+          path: checkout,
+        })
+      )[1];
+
+    expect(await detect()).toMatchObject({ hasUncommittedChanges: false });
+    await Bun.write(join(checkout, "notes.txt"), "draft\n");
+    expect(await detect()).toMatchObject({ hasUncommittedChanges: true });
+    expect(existsSync(monitorRan)).toBe(false);
   });
 
   test("adding refuses setup actions that are not a list, or turn metadata on and off", async () => {
