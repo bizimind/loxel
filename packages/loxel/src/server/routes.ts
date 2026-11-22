@@ -2023,6 +2023,8 @@ function failedInitActions(results: InitResult[]): string | null {
 
 const EXISTING_GIT_ENTRY =
   "This folder already has a .git entry, but git cannot open it as a repository, so Loxel will not initialize git here. Run `git status` in the folder to see why.";
+const INIT_OVER_GIT_ENTRY =
+  "This folder already has a .git entry, so Loxel will not initialize git over it. Add the folder as an existing repository instead.";
 
 /**
  * Whether `dirPath` holds a `.git` entry of any kind, a dangling symlink included. `git init`
@@ -2277,7 +2279,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   if (!existsSync(dirPath)) {
     return error("Path does not exist", 400);
   }
-  if (hasGitEntry(dirPath)) return error(EXISTING_GIT_ENTRY, 400);
+  if (hasGitEntry(dirPath)) return error(INIT_OVER_GIT_ENTRY, 400);
 
   let firstWorktree: AddResult | undefined;
   const setupResults: InitResult[] = [];

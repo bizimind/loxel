@@ -191,9 +191,18 @@ describe("initializing git in an existing folder", () => {
     for (const setup of ["single", "multi"] as const) {
       const [status, body] = await init(folder, setup);
       expect(status).toBe(400);
-      expect(body.error).toBe(detected.error);
+      expect(body.error).toContain(".git");
     }
     expect(await readdir(join(folder, ".git"))).toEqual([]);
+  });
+
+  test("init refuses a folder that is already a repository", async () => {
+    const folder = await makeFolder();
+    await Bun.$`git init -q --initial-branch=main ${folder}`;
+
+    const [status, body] = await init(folder, "multi");
+    expect(status).toBe(400);
+    expect(body.error).toContain("existing repository");
   });
 
   test("init refuses a folder whose .git is a file", async () => {
