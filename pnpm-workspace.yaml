@@ -16,9 +16,9 @@ minimumReleaseAge: 10080
 # A version whose registry metadata has no publish time fails the check instead of passing it.
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeExclude:
-  # Loxel ships a patched build of this Electron release (packages/loxel/electron/); 45.3.0 carries
-  # Chromium security fixes and was published 2026-11-10. Drop once it is a week old.
-  - "electron@45.3.0"
+  # Loxel ships a patched build of this Electron release (packages/loxel/electron/); 45.4.1 carries
+  # Chromium security fixes and was published 2026-11-19. Drop once it is a week old.
+  - "electron@45.4.1"
   # Loxel ships this nightly's tsc as its TypeScript language server: built with Go 1.27.4 and
   # golang.org/x/text 0.43.0, it carries the Go standard library fixes 7.0.2's tsc (Go 1.26.4) lacks.
   # Published 2026-11-17. Drop once it is a week old.

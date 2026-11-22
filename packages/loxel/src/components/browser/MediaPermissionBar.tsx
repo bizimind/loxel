@@ -29,6 +29,7 @@ export function MediaPermissionBar({
 }) {
   return (
     <SitePermissionBar
+      requestKey={JSON.stringify(request)}
       icon={deviceIcon(request.devices)}
       onAllow={() => onAnswer("allow")}
       onAllowOnce={() => onAnswer("allow-once")}

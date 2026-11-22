@@ -51,12 +51,32 @@ export interface Patch {
   contents: Uint8Array;
 }
 
-/** The patches in application order (their numeric file-name prefix). */
+/** `<nnnn>-<name>.patch`: the zero-padded number sets the order the patches apply in. */
+const PATCH_NAME = /^\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.patch$/;
+
+/** The doc each patch has beside it: `0001-name.patch` is described in `0001-name-patch.md`. */
+export function patchDocName(patchName: string): string {
+  return patchName.replace(/\.patch$/, "-patch.md");
+}
+
+/**
+ * The patches in application order (their numeric file-name prefix). Only `.patch` files are
+ * patches, so editing a patch's doc changes no build.
+ */
 export function readPatches(dir = PATCHES_DIR): Patch[] {
-  return readdirSync(dir)
-    .filter((name) => name.endsWith(".patch"))
-    .sort()
-    .map((name) => ({ name, contents: readFileSync(path.join(dir, name)) }));
+  const names = readdirSync(dir).filter((name) => name.endsWith(".patch"));
+  const misnamed = names.filter((name) => !PATCH_NAME.test(name));
+  if (misnamed.length > 0) {
+    throw new Error(`Name each patch <nnnn>-<name>.patch, not ${misnamed.join(", ")}`);
+  }
+  const sorted = names.toSorted();
+  const shared = sorted.filter((name, i) =>
+    sorted.some((other, j) => j !== i && other.slice(0, 4) === name.slice(0, 4)),
+  );
+  if (shared.length > 0) {
+    throw new Error(`Each patch needs its own number: ${shared.join(", ")}`);
+  }
+  return sorted.map((name) => ({ name, contents: readFileSync(path.join(dir, name)) }));
 }
 
 /**

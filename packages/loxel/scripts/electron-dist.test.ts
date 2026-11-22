@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
+  PATCHES_DIR,
   buildId,
   currentBuild,
   distZipName,
   electronVersion,
   objectKey,
   parseArch,
+  patchDocName,
   r2Client,
+  readPatches,
 } from "./electron-dist";
 
 const patch = (name: string, text: string) => ({ name, contents: new TextEncoder().encode(text) });
@@ -59,6 +65,59 @@ test("this checkout pins an exact Electron and has patches to apply", () => {
   const build = currentBuild();
   expect(build.patches.length).toBeGreaterThan(0);
   expect(build.id.startsWith(`${build.version}-`)).toBe(true);
+});
+
+test("every patch in this checkout has its doc", () => {
+  const undocumented = readPatches()
+    .map(({ name }) => patchDocName(name))
+    .filter((doc) => !existsSync(path.join(PATCHES_DIR, doc)));
+  expect(undocumented).toEqual([]);
+});
+
+describe("readPatches", () => {
+  const withDir = (files: Record<string, string>, run: (dir: string) => void) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "loxel-patches-"));
+    try {
+      for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+      run(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("reads only the patches, in numeric order, so a doc changes no build ID", () => {
+    withDir(
+      {
+        "0010-c.patch": "ten",
+        "0002-b.patch": "two",
+        "0002-b-patch.md": "doc",
+        "0001-a.patch": "one",
+      },
+      (dir) => {
+        expect(readPatches(dir).map(({ name }) => name)).toEqual([
+          "0001-a.patch",
+          "0002-b.patch",
+          "0010-c.patch",
+        ]);
+      },
+    );
+  });
+
+  test("refuses two patches with the same number", () => {
+    withDir({ "0001-a.patch": "one", "0001-b.patch": "two" }, (dir) =>
+      expect(() => readPatches(dir)).toThrow("0001-a.patch, 0001-b.patch"),
+    );
+  });
+
+  test("refuses a patch without a four-digit number", () => {
+    withDir({ "1-a.patch": "one" }, (dir) => expect(() => readPatches(dir)).toThrow(/1-a\.patch/));
+  });
+});
+
+test("patchDocName names the doc beside a patch", () => {
+  expect(patchDocName("0005-file-system-access-grants.patch")).toBe(
+    "0005-file-system-access-grants-patch.md",
+  );
 });
 
 test("r2Client names the credentials it is missing", () => {

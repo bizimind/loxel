@@ -98,7 +98,8 @@ import { installClientCertificatePicker } from "./browser-client-certificates";
 import { installBrowserDownloads } from "./browser-downloads";
 import { requestExternalApp } from "./browser-external-apps";
 import { installBrowserFavicons } from "./browser-favicons";
-import { installLocalNetworkAccess } from "./browser-local-network";
+import { requestFileAccess } from "./browser-file-access";
+import { installLocalNetworkAccess, localNetworkPermitted } from "./browser-local-network";
 import {
   checkMediaPermission,
   installBrowserMedia,
@@ -1050,6 +1051,16 @@ if (IS_DEMO)
     "userData",
     `${app.getPath("userData")} Demo${DEMO_INSTANCE ? ` ${DEMO_INSTANCE}` : ""}`,
   );
+// Chromium's Local Network Access checks, which only the patched Electron lets an app turn on
+// (PATCHED_ELECTRON.md): a public page's request to this machine or the local network then also
+// waits on the browser session's permission check (browser-local-network.ts). Read when the main
+// script has run, so it must be set before then.
+app.commandLine.appendSwitch(
+  "enable-features",
+  [app.commandLine.getSwitchValue("enable-features"), "LocalNetworkAccessChecks"]
+    .filter(Boolean)
+    .join(","),
+);
 // A hidden demo is a background app: no Dock icon, no menu bar, never activated.
 if (IS_DEMO_HIDDEN) app.setActivationPolicy("accessory");
 const isPrimaryInstance = !app.isPackaged || app.requestSingleInstanceLock();
@@ -1119,6 +1130,8 @@ app.whenReady().then(async () => {
       {
         media: { check: checkMediaPermission, request: requestMediaPermission },
         openExternal: requestExternalApp,
+        fileSystem: requestFileAccess,
+        localNetwork: localNetworkPermitted,
       },
       noteExclusiveAccessGrant,
     );
