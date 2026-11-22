@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, symlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -266,6 +266,25 @@ describe("executeRemove", () => {
     expect(result.removed).toBe(true);
     expect(result.hookRan).toBe(false);
     expect(warnings.join("\n")).toContain("clean.wt.sh failed to run");
+  });
+
+  test("refuses a worktree whose path resolves outside the worktrees directory", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeAdd({ name: "feat/foo", repoPath: repo.root });
+    // The worktree's parent folder now lives elsewhere, linked back by a symlink.
+    const elsewhere = join(repo.root, "elsewhere");
+    await rename(join(repo.root, ".worktrees", "feat"), elsewhere);
+    await symlink(elsewhere, join(repo.root, ".worktrees", "feat"));
+
+    const removal = executeRemove({
+      name: "feat/foo",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: true,
+    });
+
+    await expect(removal).rejects.toThrow("outside");
+    expect(await Bun.file(join(elsewhere, "foo", "README.md")).exists()).toBe(true);
   });
 
   test("deleting an unmerged branch without force warns instead of failing", async () => {
