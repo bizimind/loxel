@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { localServerId } from "@/api/local-server";
 import type { AddProjectRequest, DetectPathResult, ProjectSetupResult } from "@/api/project-model";
+import type { RepoTrustTarget } from "@/api/repo-trust-client";
+import type { RepoTrustDecision } from "@/api/repo-trust-model";
 
 const fetchRefspec: InitAction = {
   id: "fetch-refspec",
@@ -69,7 +71,24 @@ mock.module("@/api/client", () => ({
   addProject,
 }));
 
+let trust: RepoTrustDecision = "undecided";
+const setRepoTrust = jest.fn(
+  async (_target: RepoTrustTarget, choice: { decision: RepoTrustDecision }) => {
+    trust = choice.decision;
+    return { repository: "/repos/shop.git", decision: trust, restrictions: [] };
+  },
+);
+mock.module("@/api/repo-trust-client", () => ({
+  getRepoTrust: jest.fn(async () => ({
+    repository: "/repos/shop.git",
+    decision: trust,
+    restrictions: [],
+  })),
+  setRepoTrust,
+}));
+
 const { AddProjectWizard } = await import("./AddProjectWizard");
+const { ConfirmDialogHost } = await import("@/components/ui/confirm-dialog-host");
 const { openAddProjectWizard, useAddProjectWizardStore } =
   await import("@/store/add-project-wizard");
 const { useProjectStore } = await import("@/store/projects");
@@ -77,6 +96,8 @@ const { useProjectStore } = await import("@/store/projects");
 const showAddedProject = jest.fn(async () => {});
 
 beforeEach(() => {
+  trust = "undecided";
+  setRepoTrust.mockClear();
   addProject.mockClear();
   showAddedProject.mockClear();
   useProjectStore.setState({ showAddedProject });
@@ -111,6 +132,42 @@ describe("AddProjectWizard", () => {
       apply: ["worktree-metadata-on"],
     });
     expect(useAddProjectWizardStore.getState().isOpen).toBe(false);
+    expect(setRepoTrust).not.toHaveBeenCalled();
+  });
+
+  test("asks to trust the repository first when a fix contacts its remote", async () => {
+    render(
+      <>
+        <AddProjectWizard />
+        <ConfirmDialogHost />
+      </>,
+    );
+    await detectBareRepo();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Trust and Add" }));
+
+    await waitFor(() => expect(showAddedProject).toHaveBeenCalledWith(added));
+    expect(setRepoTrust).toHaveBeenCalledWith(
+      { server: localServerId(), repository: "/repos/shop.git" },
+      { decision: "trusted" },
+    );
+    expect(addProject.mock.calls[0]?.[1].apply).toEqual(["fetch-refspec", "worktree-metadata-on"]);
+  });
+
+  test("not trusted, adds the project with the same fixes for the server to skip", async () => {
+    render(
+      <>
+        <AddProjectWizard />
+        <ConfirmDialogHost />
+      </>,
+    );
+    await detectBareRepo();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Not Now" }));
+
+    await waitFor(() => expect(showAddedProject).toHaveBeenCalledWith(added));
+    expect(trust).toBe("declined");
+    expect(addProject.mock.calls[0]?.[1].apply).toEqual(["fetch-refspec", "worktree-metadata-on"]);
   });
 
   test("opens fresh each time, without the last opening's detection", async () => {

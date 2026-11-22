@@ -1280,7 +1280,24 @@ const toolchainPostRoutes = Object.fromEntries(
     ]),
 );
 
+/**
+ * A repository folder the Add Project wizard asks about before it is a project: an absolute path
+ * (or one under `~`) to a folder that exists.
+ */
+async function repositoryFolder(folder: string): Promise<string | Response> {
+  if (!isAbsolute(folder) && !/^~(\/|$)/.test(folder)) return error("Not an absolute path", 400);
+  const path = expandTilde(folder);
+  const isFolder = (await stat(path).catch(() => null))?.isDirectory() === true;
+  return isFolder ? path : error("Not a folder", 400);
+}
+
+/** The trust of a worktree's repository (`wt`), or of a folder not added as a project (`repo`). */
 async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const repository = new URL(req.url).searchParams.get("repo");
+  if (repository !== null) {
+    const folder = await repositoryFolder(repository);
+    return folder instanceof Response ? folder : json(getRepoTrustStatus(folder));
+  }
   const wtPath = await worktreeFromQuery(req, ctx);
   return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
 }
@@ -1292,8 +1309,9 @@ function isRepoTrustDecision(value: unknown): value is RepoTrustDecision {
 }
 
 /**
- * Answer for a worktree's repository, or forget an answer by repository id: a repository no project
- * uses has no worktree to name, and forgetting can only take trust away.
+ * Answer for a worktree's repository or a folder not added as a project yet, or forget an answer by
+ * repository id: a repository no project uses has no worktree to name, and forgetting can only take
+ * trust away.
  */
 async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -1304,11 +1322,18 @@ async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Resp
     forgetRepoTrust(body.repositoryId);
     return json({ success: true });
   }
+  const unlessTrusted = body.unlessTrusted === true;
+  if (typeof body.repositoryPath === "string") {
+    const folder = await repositoryFolder(body.repositoryPath);
+    if (folder instanceof Response) return folder;
+    setRepoTrustDecision(folder, decision, { unlessTrusted });
+    return json(getRepoTrustStatus(folder));
+  }
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
   const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
   if (wtPath instanceof Response) return wtPath;
-  setRepoTrustDecision(wtPath, decision, { unlessTrusted: body.unlessTrusted === true });
+  setRepoTrustDecision(wtPath, decision, { unlessTrusted });
   return json(getRepoTrustStatus(wtPath));
 }
 

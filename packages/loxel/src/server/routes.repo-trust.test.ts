@@ -10,6 +10,7 @@ const { handleRequest } = await import("./routes");
 const { getRepoTrustStatus, isRepoTrusted, repoTrustId, setRepoTrusted } =
   await import("./repo-trust");
 const projectStore = await import("./project-store");
+const { isRepositoryTrusted } = await import("./worktree-hooks");
 type RouteContext = import("./routes").RouteContext;
 type ProjectState = import("./server-state").ProjectState;
 type RepoTrustListResponse = import("@/api/repo-trust-model").RepoTrustListResponse;
@@ -110,6 +111,31 @@ describe("/api/repo-trust", () => {
     const unknown = await setTrust({ worktreePath: join(root, "other"), decision: "trusted" });
     expect(unknown.status).toBe(404);
     expect(isRepoTrusted(wt)).toBe(false);
+  });
+
+  test("answers for a repository folder before it is added as a project", async () => {
+    const adding = join(root, "adding");
+    await mkdir(adding);
+    await Bun.$`git init -q ${adding}`;
+    const read = await handleRequest(
+      new Request(`http://x/api/repo-trust?repo=${encodeURIComponent(adding)}`),
+      ctx,
+    );
+    expect(await read.json()).toEqual({
+      repository: adding,
+      decision: "undecided",
+      restrictions: [],
+    });
+
+    const trusted = await setTrust({ repositoryPath: adding, decision: "trusted" });
+    expect(((await trusted.json()) as { decision: string }).decision).toBe("trusted");
+    // What adding the project with its setup fixes checks.
+    expect(await isRepositoryTrusted(adding)).toBe(true);
+
+    for (const repositoryPath of [join(root, "missing"), "adding", ""]) {
+      expect((await setTrust({ repositoryPath, decision: "trusted" })).status).toBe(400);
+    }
+    setRepoTrusted(adding, false);
   });
 
   test("forgets by repository id, which can only clear an answer", async () => {

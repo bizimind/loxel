@@ -26,6 +26,8 @@ import {
   withGitEnv,
 } from "@bizimind/wt/lib";
 
+import { ORIGIN_SETUP_FIXES } from "@/api/project-model";
+
 import { gitText, readOnlyGitEnv, untrustedChangeGitEnv } from "./git-commands";
 import {
   isRepoGitDirTrusted,
@@ -37,9 +39,6 @@ import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
 export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.sh) don't run.";
-
-/** The `wt init` fixes that contact origin, with the repository's own transport settings. */
-const ORIGIN_FIXES: readonly InitActionId[] = ["fetch-refspec", "origin-head"];
 
 type HookOptions = "hookEnv" | "allowHook";
 
@@ -105,7 +104,7 @@ export async function applyInitActions(
   progress: ProgressHandler,
 ): Promise<InitResult> {
   const trusted = await isRepositoryTrusted(repoPath);
-  const held = trusted ? [] : apply.filter((id) => ORIGIN_FIXES.includes(id));
+  const held = trusted ? [] : apply.filter((id) => ORIGIN_SETUP_FIXES.includes(id));
   const result = await withRepoGitEnv(repoPath, () =>
     executeInit(
       repoPath,

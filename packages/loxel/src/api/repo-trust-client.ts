@@ -7,10 +7,15 @@ import type {
 import { connectionOf } from "./server-connection";
 import type { ServerId, WorktreeRef } from "./worktree-ref";
 
-export async function getRepoTrust(wt: WorktreeRef): Promise<RepoTrustStatus> {
-  return connectionOf(wt.server).fetchJson<RepoTrustStatus>(
-    withScope("/repo-trust", { wt: wt.path }),
-  );
+/** What to answer for: a worktree's repository, or a repository folder not added as a project yet. */
+export type RepoTrustTarget = WorktreeRef | { server: ServerId; repository: string };
+
+export async function getRepoTrust(target: RepoTrustTarget): Promise<RepoTrustStatus> {
+  const path =
+    "path" in target
+      ? withScope("/repo-trust", { wt: target.path })
+      : `/repo-trust?${new URLSearchParams({ repo: target.repository })}`;
+  return connectionOf(target.server).fetchJson<RepoTrustStatus>(path);
 }
 
 /** Every project's repository on `server` and every answer it stores, for Settings > Security. */
@@ -19,11 +24,14 @@ export async function listRepoTrust(server: ServerId): Promise<RepoTrustListResp
 }
 
 export async function setRepoTrust(
-  wt: WorktreeRef,
+  target: RepoTrustTarget,
   choice: Omit<Extract<SetRepoTrustRequest, { worktreePath: string }>, "worktreePath">,
 ): Promise<RepoTrustStatus> {
-  const request: SetRepoTrustRequest = { worktreePath: wt.path, ...choice };
-  return connectionOf(wt.server).fetchJson<RepoTrustStatus>("/repo-trust", {
+  const request: SetRepoTrustRequest =
+    "path" in target
+      ? { worktreePath: target.path, ...choice }
+      : { repositoryPath: target.repository, ...choice };
+  return connectionOf(target.server).fetchJson<RepoTrustStatus>("/repo-trust", {
     method: "POST",
     body: JSON.stringify(request),
   });
