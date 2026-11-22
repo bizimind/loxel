@@ -169,6 +169,15 @@ export class SchemaService {
     try {
       const realPath = await realpath(absPath);
       const fileStat = await stat(realPath);
+      // Only a regular file of bounded size: a device, pipe or huge file would be read into memory whole.
+      if (!fileStat.isFile()) {
+        log.warn("Schema path is not a regular file, skipping", { path: absPath });
+        return null;
+      }
+      if (fileStat.size > MAX_INLINE_BYTES) {
+        log.warn("Schema file too large, skipping", { path: absPath, bytes: fileStat.size });
+        return null;
+      }
       const mtimeMs = fileStat.mtimeMs;
 
       const cached = this.cache.get(realPath);

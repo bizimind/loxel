@@ -1,4 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -99,5 +102,41 @@ describe("SchemaService download errors say why", () => {
     await expect(service.fetchText(`${base}/schema.json`)).rejects.toThrow(
       `${host} refused the connection`,
     );
+  });
+});
+
+describe("SchemaService local schemas", () => {
+  let dir: string;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "schema-service-"));
+    await writeFile(join(dir, "schema.json"), JSON.stringify(SCHEMA));
+    await symlink(join(dir, "schema.json"), join(dir, "linked.json"));
+    await Bun.$`mkfifo ${join(dir, "pipe.json")}`;
+    // Valid JSON just over the 5 MB inline limit.
+    await writeFile(join(dir, "huge.json"), JSON.stringify({ pad: "x".repeat(5 * 1024 * 1024) }));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("reads a schema file by relative or absolute path", async () => {
+    const service = new SchemaService(() => false);
+    expect(await service.resolve("./schema.json", dir)).toEqual(SCHEMA);
+    expect(await service.resolve(join(dir, "schema.json"))).toEqual(SCHEMA);
+  });
+
+  test("follows a symlink to a schema file", async () => {
+    const service = new SchemaService(() => false);
+    expect(await service.resolve("linked.json", dir)).toEqual(SCHEMA);
+  });
+
+  test("skips a path that is not a regular file, without opening it", async () => {
+    const service = new SchemaService(() => false);
+    expect(await service.resolve("pipe.json", dir)).toBeNull();
+  });
+
+  test("skips a file larger than the inline limit", async () => {
+    const service = new SchemaService(() => false);
+    expect(await service.resolve("huge.json", dir)).toBeNull();
   });
 });
