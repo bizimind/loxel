@@ -182,9 +182,16 @@ export async function addWorktree(
     await git([...add, "--detach", path], root);
   }
   if (!separately) return;
-  await inNewCheckout(path, () =>
-    git(["reset", "--hard", "--quiet", "--no-recurse-submodules"], path),
-  );
+  try {
+    await inNewCheckout(path, () =>
+      git(["reset", "--hard", "--quiet", "--no-recurse-submodules"], path),
+    );
+  } catch (error) {
+    // `git worktree add` undoes a checkout that fails; keep that for the split form. Best effort:
+    // the checkout's own failure is the one to report.
+    await runGit(["worktree", "remove", "--force", path], root);
+    throw error;
+  }
 }
 
 /**

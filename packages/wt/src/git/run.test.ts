@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createTestDirectory, createTestRepo } from "../test-repo.ts";
 import { git, runGit, withGitEnv } from "./run.ts";
-import { addWorktree, isWorktreeDirty, worktreeStatus } from "./worktree.ts";
+import { addWorktree, isWorktreeDirty, pathExists, worktreeStatus } from "./worktree.ts";
 
 describe("runGit", () => {
   test("returns a failed result when the working directory no longer exists", async () => {
@@ -95,6 +95,24 @@ describe("runGit", () => {
       expect(asked).toEqual([path]);
       expect(await worktreeStatus(path)).toEqual({ ok: true, value: [] });
       expect(await git(["ls-files"], path)).toBe(await git(["ls-files"], repo.root));
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("undoes the add when the new checkout cannot be filled in", async () => {
+    const repo = await createTestRepo();
+    try {
+      const path = join(repo.root, "..", "staged");
+      const add = withGitEnv(
+        {},
+        () => addWorktree(repo.root, path, { newBranch: "staged" }),
+        () => Promise.reject(new Error("no env")),
+      );
+
+      await expect(add).rejects.toThrow("no env");
+      expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(path);
+      expect(await pathExists(path)).toBe(false);
     } finally {
       await repo.cleanup();
     }
