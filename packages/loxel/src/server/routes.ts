@@ -1292,7 +1292,6 @@ async function repositoryFolder(folder: string): Promise<string | Response> {
 }
 
 /** The trust of a worktree's repository (`wt`), or of a folder not added as a project (`repo`). */
-
 async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
   const repository = new URL(req.url).searchParams.get("repo");
   if (repository !== null) {
