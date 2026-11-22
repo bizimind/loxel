@@ -131,7 +131,8 @@ describe("/api/repo-trust", () => {
     // A project trusted once and removed since: its answer stays listed, with no worktree.
     setRepoTrusted(elsewhere, true);
     await projectStore.addProject(wt);
-    // A bare project answers through its worktree, whose identity its root does not share.
+    // A bare project answers through its worktree, since its root is not a worktree the trust route
+    // accepts.
     const bare = join(root, "bare");
     const bareWorktree = join(bare, ".worktrees", "main");
     await Bun.$`git -C ${wt} -c user.name=t -c user.email=t@t commit -q --allow-empty -m init`;
