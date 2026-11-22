@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  ELECTRON_ARCHES,
   PATCHES_DIR,
   buildId,
   currentBuild,
@@ -12,6 +13,8 @@ import {
   objectKey,
   parseArch,
   patchDocName,
+  pinSha256,
+  pinnedSha256,
   r2Client,
   readPatches,
 } from "./electron-dist";
@@ -118,6 +121,52 @@ test("patchDocName names the doc beside a patch", () => {
   expect(patchDocName("0005-file-system-access-grants.patch")).toBe(
     "0005-file-system-access-grants-patch.md",
   );
+});
+
+test("this checkout pins the SHA-256 of its build for every architecture", () => {
+  const { id } = currentBuild();
+  for (const arch of ELECTRON_ARCHES) expect(pinnedSha256(id, arch)).toMatch(/^[0-9a-f]{64}$/);
+});
+
+describe("pinnedSha256", () => {
+  const sha = (char: string) => char.repeat(64);
+  const withFile = (run: (file: string) => void) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "loxel-builds-"));
+    try {
+      run(path.join(dir, "builds.json"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("returns what pinSha256 recorded for the build", () => {
+    withFile((file) => {
+      pinSha256("45.3.0-abc", "arm64", sha("a"), file);
+      pinSha256("45.3.0-abc", "x64", sha("b"), file);
+      expect(pinnedSha256("45.3.0-abc", "arm64", file)).toBe(sha("a"));
+      expect(pinnedSha256("45.3.0-abc", "x64", file)).toBe(sha("b"));
+    });
+  });
+
+  test("refuses another build, a missing architecture or no file", () => {
+    withFile((file) => {
+      expect(() => pinnedSha256("45.3.0-abc", "arm64", file)).toThrow(/pins no SHA-256/);
+      pinSha256("45.3.0-abc", "arm64", sha("a"), file);
+      expect(() => pinnedSha256("45.3.0-def", "arm64", file)).toThrow(/pins no SHA-256/);
+      expect(() => pinnedSha256("45.3.0-abc", "x64", file)).toThrow(/pins no SHA-256/);
+    });
+  });
+
+  test("a new build replaces the pins of the old one", () => {
+    withFile((file) => {
+      pinSha256("45.3.0-abc", "arm64", sha("a"), file);
+      pinSha256("45.3.0-abc", "x64", sha("b"), file);
+      pinSha256("45.3.1-def", "arm64", sha("c"), file);
+      expect(pinnedSha256("45.3.1-def", "arm64", file)).toBe(sha("c"));
+      expect(() => pinnedSha256("45.3.1-def", "x64", file)).toThrow(/pins no SHA-256/);
+      expect(() => pinnedSha256("45.3.0-abc", "arm64", file)).toThrow(/pins no SHA-256/);
+    });
+  });
 });
 
 test("r2Client names the credentials it is missing", () => {

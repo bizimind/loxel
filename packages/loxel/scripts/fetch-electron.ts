@@ -6,13 +6,14 @@
  *   bun scripts/fetch-electron.ts --check
  *
  * Needs R2_PRIVATE_ACCESS_KEY_ID, R2_PRIVATE_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID (the
- * private CI bucket's token). Fails when the build
- * this checkout pins was never uploaded, so a release can't fall back to stock Electron. The
- * release workflow runs `--check` before it bumps the version, so a missing build stops it before
- * it leaves a release commit or tag behind.
+ * private CI bucket's token). Fails when the build this checkout pins was never uploaded or has no
+ * SHA-256 committed in electron/builds.json, so a release can't fall back to stock Electron. The
+ * zip must match that committed SHA-256: the bucket is only storage, never the source of truth.
+ * The release workflow runs `--check` before it bumps the version, so a missing build stops it
+ * before it leaves a release commit or tag behind.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -24,6 +25,7 @@ import {
   isUploaded,
   objectKey,
   parseArch,
+  pinnedSha256,
   r2Client,
   sha256File,
 } from "./electron-dist";
@@ -40,6 +42,7 @@ const howToUpload =
 if (arg === "--check") {
   const missing = [];
   for (const arch of ELECTRON_ARCHES) {
+    pinnedSha256(id, arch);
     if (!(await isUploaded(client, id, version, arch))) missing.push(`darwin-${arch}`);
   }
   if (missing.length > 0) {
@@ -52,6 +55,7 @@ if (arg === "--check") {
 }
 
 const arch = parseArch(arg);
+const expected = pinnedSha256(id, arch);
 if (!(await isUploaded(client, id, version, arch))) {
   throw new Error(`No patched Electron ${id} for darwin-${arch} in R2. ${howToUpload}`);
 }
@@ -60,10 +64,9 @@ const zipName = distZipName(version, arch);
 mkdirSync(DIST_DIR, { recursive: true });
 const destination = path.join(DIST_DIR, zipName);
 await Bun.write(destination, client.file(objectKey(id, zipName)));
-
-const expected = (await client.file(objectKey(id, `${zipName}.sha256`)).text()).trim();
 const actual = await sha256File(destination);
 if (actual !== expected) {
+  rmSync(destination, { force: true });
   throw new Error(`Checksum mismatch for ${zipName}: expected ${expected}, got ${actual}`);
 }
 await Bun.write(buildIdMarker(destination), `${id}\n`);

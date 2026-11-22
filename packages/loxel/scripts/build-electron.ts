@@ -7,9 +7,10 @@
  * Checks out the Electron release package.json pins, applies the `.patch` files in
  * `electron/patches/` in numeric order, and builds Electron's release configuration for each
  * architecture (x64 is cross-compiled on Apple silicon). Each zip is checked for the right version
- * and architecture, kept under its build ID, copied to build/electron-dist for local packaging, and
- * uploaded. A build already in R2 is skipped, and one already built for this ID (e.g. by a
- * --no-upload run) is only uploaded, unless --force.
+ * and architecture, kept under its build ID, copied to build/electron-dist for local packaging,
+ * pinned by its SHA-256 in electron/builds.json (commit that file with the change it builds), and
+ * uploaded. A build already in R2 and pinned is skipped, and one already built for this ID (e.g.
+ * by a --no-upload run) is only pinned and uploaded, unless --force.
  *
  * `--testing` builds Electron's `testing` configuration for this Mac's architecture only, into its
  * own output directory, incrementally and without uploading, and prints the
@@ -39,6 +40,8 @@ import {
   isUploaded,
   objectKey,
   parseArch,
+  pinSha256,
+  pinnedSha256,
   r2Client,
   readPatches,
   sha256File,
@@ -255,14 +258,29 @@ async function buildArch(arch: ElectronArch): Promise<string> {
 const keptZip = (arch: ElectronArch) =>
   path.join(root, "loxel-dist", id, distZipName(version, arch));
 
-/** Build, check, keep and upload the release zips for `arches`. */
+/** Whether electron/builds.json pins this build's zip for `arch`. */
+function isPinned(arch: ElectronArch): boolean {
+  try {
+    pinnedSha256(id, arch);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Build, check, keep, pin and upload the release zips for `arches`. */
 async function buildRelease(): Promise<void> {
   const client = upload ? r2Client() : undefined;
   const toUpload: ElectronArch[] = [];
   const toBuild: ElectronArch[] = [];
   for (const arch of arches) {
-    if (client && !values.force && (await isUploaded(client, id, version, arch))) {
-      log(`${id} darwin-${arch} is already in R2; skipping (--force rebuilds it)`);
+    if (
+      client &&
+      !values.force &&
+      isPinned(arch) &&
+      (await isUploaded(client, id, version, arch))
+    ) {
+      log(`${id} darwin-${arch} is already in R2 and pinned; skipping (--force rebuilds it)`);
       continue;
     }
     toUpload.push(arch);
@@ -286,6 +304,7 @@ async function buildRelease(): Promise<void> {
     }
     const checksum = (await Bun.file(`${kept}.sha256`).text()).trim();
     log(`${path.basename(kept)} sha256 ${checksum} -> ${kept}`);
+    pinSha256(id, arch, checksum);
 
     // Also where build-app.ts packages it from, marked with its build ID.
     const local = path.join(DIST_DIR, path.basename(kept));
@@ -300,7 +319,7 @@ async function buildRelease(): Promise<void> {
     await client.file(objectKey(id, `${zipName}.sha256`)).write(`${checksum}\n`);
     log(`uploaded ${objectKey(id, zipName)}`);
   }
-  log(`done: Electron ${id}`);
+  log(`done: Electron ${id}; commit electron/builds.json with the change it builds`);
 }
 
 await checkPrerequisites();
