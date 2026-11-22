@@ -229,10 +229,15 @@ describe("worktree hooks in an untrusted repository", () => {
 });
 
 describe("a partial clone in an untrusted repository", () => {
-  // Without file contents, or without trees, which git fails on before it would fetch them.
-  test.each(["blob:none", "tree:0"])(
-    "creating a worktree from content a %s clone hasn't downloaded waits for trust",
-    async (filter) => {
+  // Without file contents, or without trees, which git fails on before it would fetch them, also
+  // recorded as a clone from git before 2.24 records it.
+  test.each([
+    ["blob:none", false],
+    ["tree:0", false],
+    ["tree:0", true],
+  ])(
+    "creating a worktree from content a %s clone hasn't downloaded waits for trust (older config: %p)",
+    async (filter, olderConfig) => {
       const commit = "-c user.email=t@example.com -c user.name=T commit -qm".split(" ");
       await Bun.$`git -C ${repo} switch -qc feature`;
       await Bun.write(join(repo, "a.txt"), "a\n");
@@ -245,6 +250,11 @@ describe("a partial clone in an untrusted repository", () => {
       await Bun.$`git clone -q --filter=${filter} -- ${`file://${repo}`} ${clone}`;
       // The branch, but not its content, which only checking it out would download.
       await Bun.$`git -C ${clone} branch -q feature origin/feature`;
+      if (olderConfig) {
+        await Bun.$`git -C ${clone} config --unset remote.origin.promisor`;
+        await Bun.$`git -C ${clone} config core.repositoryFormatVersion 1`;
+        await Bun.$`git -C ${clone} config extensions.partialClone origin`;
+      }
       const cloneCtx = projectContext(clone);
       const create = { projectPath: clone, name: "feat", branch: "feature" };
 

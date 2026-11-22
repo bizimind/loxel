@@ -71,13 +71,29 @@ async function awaitsTrust(repoPath: string, message: string): Promise<boolean> 
   return refused;
 }
 
-/** Whether the repository's own config names a promisor remote, as a partial clone's does. */
+/**
+ * Whether the repository's own config makes a remote a promisor, as a partial clone's does: a
+ * remote's `promisor` (a boolean) or `partialclonefilter`, or `extensions.partialclone`, which a
+ * clone from git before 2.24 carries instead.
+ */
 async function isPartialClone(repoPath: string): Promise<boolean> {
-  const promisors = await gitText(
-    ["config", "--local", "--get-regexp", String.raw`^remote\..*\.promisor$`],
-    { cwd: repoPath, env: readOnlyGitEnv(repoPath), nothrow: true },
-  );
-  return /\strue$/m.test(promisors);
+  // `--list` rather than `--get-regexp`, whose exit code for "no match" is also a failed start's.
+  const config = await gitText(["config", "--local", "--list", "-z"], {
+    cwd: repoPath,
+    env: readOnlyGitEnv(repoPath),
+    nothrow: true,
+  });
+  // `-z`: each entry is `key\nvalue`, or a bare key for a valueless (true) boolean.
+  return config.split("\0").some((entry) => {
+    const [key = "", value] = entry.split("\n", 2);
+    if (key === "extensions.partialclone" || /^remote\..+\.partialclonefilter$/.test(key)) {
+      return true;
+    }
+    return (
+      /^remote\..+\.promisor$/.test(key) &&
+      (value === undefined || /^(true|yes|on|1)$/i.test(value))
+    );
+  });
 }
 
 /** The `wt init` fixes that contact origin, with the repository's own transport settings. */
