@@ -94,6 +94,9 @@ describe("Others folders routes", () => {
           const tree = worktreeTree(wt, resources);
           return { type: "tree", wtPath: wt, resources, tree, relativePath: relative(wt, path) };
         }
+        if (resources.externalFilesService.hasFile(path)) {
+          return { type: "external", wtPath: wt, resources, absolutePath: path };
+        }
         const owner = externalFoldersService.find(path);
         if (!owner) return null;
         const relativePath = relative(owner.root, path);
@@ -303,6 +306,22 @@ describe("Others folders routes", () => {
       // A file in an Others folder is the worktree's.
       await post("/api/external-folders/add", { wt, path: folder });
       expect((await get(rawUrl(join(folder, "a.md")))).status).toBe(200);
+    });
+
+    test("loads the media viewer's file from outside every tree", async () => {
+      const file = join(root, "clip.mp4");
+      await writeFile(file, "mp4");
+      const query = `path=${encodeURIComponent(file)}&wt=${encodeURIComponent(wt)}`;
+
+      // The viewer's frame adds the file to Others, then its <video> loads it.
+      const frame = await get(`/api/media-frame?${query}`);
+      expect(frame.status).toBe(200);
+      expect(await frame.text()).toContain(`src="/api/file-raw?${query}"`);
+      expect((await get(`/api/file-raw?${query}`)).status).toBe(200);
+      const range = new Request(`http://localhost/api/file-raw?${query}`, {
+        headers: { Range: "bytes=0-1" },
+      });
+      expect((await handleRequest(range, ctx)).status).toBe(206);
     });
   });
 
