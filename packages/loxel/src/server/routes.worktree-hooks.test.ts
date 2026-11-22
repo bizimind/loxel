@@ -138,6 +138,33 @@ describe("worktree hooks in an untrusted repository", () => {
     expect(existsSync(join(repo, "reference-transaction-ran"))).toBe(false);
   });
 
+  test("creating a worktree runs no filter that config for only its branch defines, until trusted", async () => {
+    const smudge = `${repo}-smudge`;
+    roots.push(smudge);
+    await Bun.write(smudge, `#!/bin/sh\ntouch "${repo}/smudge-ran-$1"\ncat\n`);
+    await chmod(smudge, 0o755);
+    await Bun.write(join(repo, ".git", "branch-only"), `[filter "x"]\n\tsmudge = ${smudge} %f\n`);
+    for (const branch of ["feat", "trusted"]) {
+      await Bun.$`git -C ${repo} config ${`includeIf.onbranch:${branch}.path`} branch-only`;
+    }
+    await Bun.write(join(repo, ".gitattributes"), "a.txt filter=x\n");
+    await Bun.write(join(repo, "a.txt"), "a\n");
+    await Bun.$`git -C ${repo} add .gitattributes a.txt`;
+    await Bun.$`git -C ${repo} -c core.hooksPath=/dev/null -c user.email=t@example.com -c user.name=T commit -qm attrs`;
+
+    const [status, created] = await post<{ path: string }>(ctx, "/api/worktree/create", {
+      projectPath: repo,
+      name: "feat",
+    });
+    expect(status).toBe(200);
+    expect(await Bun.file(join(created.path, "a.txt")).text()).toBe("a\n");
+    expect(existsSync(join(repo, "smudge-ran-a.txt"))).toBe(false);
+
+    setRepoTrusted(repo, true);
+    await post(ctx, "/api/worktree/create", { projectPath: repo, name: "trusted" });
+    expect(existsSync(join(repo, "smudge-ran-a.txt"))).toBe(true);
+  });
+
   test("removes a worktree whose folder is already gone", async () => {
     const [, created] = await post<{ path: string }>(ctx, "/api/worktree/create", {
       projectPath: repo,

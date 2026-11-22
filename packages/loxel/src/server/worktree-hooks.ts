@@ -67,7 +67,9 @@ export async function isRepositoryTrusted(repoPath: string): Promise<boolean> {
  * Run `fn`, wt operations on the repository at `repoPath`, with every git command they run kept
  * from running the repository's own programs unless it is trusted (`untrustedChangeGitEnv`).
  * `checkout` is the worktree whose submodules a check for uncommitted changes looks into, when it
- * is another one than `repoPath` and still exists.
+ * is another one than `repoPath` and still exists. A checkout wt creates is filled in under the
+ * env worked out from inside it, so config that applies only there (a conditional include on the
+ * new worktree or branch) is covered too.
  */
 export async function withRepoGitEnv<T>(
   repoPath: string,
@@ -76,7 +78,7 @@ export async function withRepoGitEnv<T>(
 ): Promise<T> {
   if (await isRepositoryTrusted(repoPath)) return fn();
   const env = await untrustedChangeGitEnv(existsSync(checkout) ? checkout : repoPath);
-  return withGitEnv(env, fn);
+  return withGitEnv(env, fn, untrustedChangeGitEnv);
 }
 
 /** Add a worktree, running `init.wt.sh` and the repository's git hooks only if it is trusted. */

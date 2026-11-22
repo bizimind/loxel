@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createTestDirectory, createTestRepo } from "../test-repo.ts";
 import { git, runGit, withGitEnv } from "./run.ts";
-import { isWorktreeDirty } from "./worktree.ts";
+import { addWorktree, isWorktreeDirty, worktreeStatus } from "./worktree.ts";
 
 describe("runGit", () => {
   test("returns a failed result when the working directory no longer exists", async () => {
@@ -73,6 +73,28 @@ describe("runGit", () => {
         withGitEnv({ WT_SCOPED_MARKER: "inner" }, () => git(["print-both"], repo.root)),
       );
       expect(nested).toBe("inner|kept");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("fills in a new checkout under the env checkoutEnv gives for it", async () => {
+    const repo = await createTestRepo();
+    try {
+      const path = join(repo.root, "..", "staged");
+      const asked: string[] = [];
+      await withGitEnv(
+        {},
+        () => addWorktree(repo.root, path, { newBranch: "staged" }),
+        async (worktreePath) => {
+          asked.push(worktreePath);
+          return { GIT_CONFIG_PARAMETERS: "'core.fsmonitor=false'" };
+        },
+      );
+
+      expect(asked).toEqual([path]);
+      expect(await worktreeStatus(path)).toEqual({ ok: true, value: [] });
+      expect(await git(["ls-files"], path)).toBe(await git(["ls-files"], repo.root));
     } finally {
       await repo.cleanup();
     }

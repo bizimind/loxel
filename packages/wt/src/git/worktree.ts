@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
-import { git, gitFailure, runGit } from "./run.ts";
+import { checksOutSeparately, git, gitFailure, inNewCheckout, runGit } from "./run.ts";
 
 /** Branch label used for a detached HEAD in human output and hook env. */
 export const DETACHED = "(detached)";
@@ -168,17 +168,23 @@ export async function addWorktree(
   path: string,
   options: { newBranch?: string; branch?: string; startPoint?: string },
 ): Promise<void> {
+  // Checked out in a step of its own when the caller asks (`withGitEnv`), the way `git worktree
+  // add` does it itself.
+  const separately = checksOutSeparately();
+  const add = ["worktree", "add", ...(separately ? ["--no-checkout"] : [])];
   if (options.newBranch) {
     // `--` keeps a start point that begins with `-` from being read as an option.
     const start = options.startPoint ? ["--", options.startPoint] : [];
-    await git(["worktree", "add", "--no-track", "-b", options.newBranch, path, ...start], root);
-    return;
+    await git([...add, "--no-track", "-b", options.newBranch, path, ...start], root);
+  } else if (options.branch) {
+    await git([...add, path, options.branch], root);
+  } else {
+    await git([...add, "--detach", path], root);
   }
-  if (options.branch) {
-    await git(["worktree", "add", path, options.branch], root);
-    return;
-  }
-  await git(["worktree", "add", "--detach", path], root);
+  if (!separately) return;
+  await inNewCheckout(path, () =>
+    git(["reset", "--hard", "--quiet", "--no-recurse-submodules"], path),
+  );
 }
 
 /**

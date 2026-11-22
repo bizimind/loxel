@@ -8,15 +8,46 @@ export interface GitResult {
   stderr: string;
 }
 
-const scopedGitEnv = new AsyncLocalStorage<Record<string, string>>();
+type GitEnv = Record<string, string>;
+
+interface GitEnvScope {
+  env: GitEnv;
+  checkoutEnv?: (worktreePath: string) => Promise<GitEnv>;
+}
+
+const gitEnvScope = new AsyncLocalStorage<GitEnvScope>();
 
 /**
  * Run `fn` with `env` added to the environment of every git command wt runs on its behalf, however
  * deep, for an app that runs git in a repository with settings of its own (for example config that
  * keeps the repository's hooks from running). Outside such a scope git gets wt's usual environment.
+ *
+ * Repository config can depend on the worktree and branch git runs in (conditional includes), so
+ * an env worked out beforehand may not fit a checkout wt creates. With `checkoutEnv`, wt creates
+ * such a checkout empty, asks `checkoutEnv` for the env from inside it, and fills it in under that
+ * env added as well (`inNewCheckout`).
  */
-export function withGitEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
-  return scopedGitEnv.run({ ...scopedGitEnv.getStore(), ...env }, fn);
+export function withGitEnv<T>(
+  env: GitEnv,
+  fn: () => Promise<T>,
+  checkoutEnv?: (worktreePath: string) => Promise<GitEnv>,
+): Promise<T> {
+  const outer = gitEnvScope.getStore();
+  return gitEnvScope.run(
+    { env: { ...outer?.env, ...env }, checkoutEnv: checkoutEnv ?? outer?.checkoutEnv },
+    fn,
+  );
+}
+
+/** Whether the scope fills in a new checkout in a step of its own (`withGitEnv`'s `checkoutEnv`). */
+export function checksOutSeparately(): boolean {
+  return gitEnvScope.getStore()?.checkoutEnv !== undefined;
+}
+
+/** Run `fn`, which fills in the checkout wt just created at `worktreePath`, under its checkout env. */
+export async function inNewCheckout<T>(worktreePath: string, fn: () => Promise<T>): Promise<T> {
+  const checkoutEnv = gitEnvScope.getStore()?.checkoutEnv;
+  return checkoutEnv ? withGitEnv(await checkoutEnv(worktreePath), fn) : fn();
 }
 
 /**
@@ -27,7 +58,7 @@ export async function runGit(args: string[], cwd?: string): Promise<GitResult> {
   try {
     const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
     const result = await shell
-      .env({ ...process.env, ...scopedGitEnv.getStore(), LANG: "C", LC_ALL: "C" })
+      .env({ ...process.env, ...gitEnvScope.getStore()?.env, LANG: "C", LC_ALL: "C" })
       .quiet()
       .nothrow();
 

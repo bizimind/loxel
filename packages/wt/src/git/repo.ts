@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { wrapError } from "@bizimind/cli-common";
 
 import { getCurrentBranch } from "./branch.ts";
-import { git, gitSucceeds, runGit } from "./run.ts";
+import { git, gitSucceeds, inNewCheckout, runGit } from "./run.ts";
 import { readWorktreeConfigState } from "./worktree-config.ts";
 import { reownMeta } from "./worktree-meta.ts";
 import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
@@ -205,7 +205,7 @@ async function registerWorktree(cwd: string, worktreePath: string, branch: strin
 
   await git(["worktree", "repair", worktreePath], cwd);
   // Both callers guarantee a clean tree at this point, so resetting the index to HEAD is safe.
-  await git(["reset", "--quiet"], worktreePath);
+  await inNewCheckout(worktreePath, () => git(["reset", "--quiet"], worktreePath));
 }
 
 /** Pick the same flat, collision-safe shape Git uses for worktree admin directories. */
