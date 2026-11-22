@@ -1,6 +1,5 @@
 import { gitExecClient } from "../git-exec-client";
 import { recordWorkerSpawn } from "../spawn-metrics";
-import { inheritedGitEnv } from "./git-env";
 import { gitCommandLabel } from "./git-exec";
 
 export interface RunGitOptions {
@@ -34,6 +33,15 @@ export class GitCommandError extends Error {
     this.stdout = stdout;
     this.stderr = stderr;
   }
+}
+
+/** The server's current environment, for commands with no special needs. */
+export function inheritedGitEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 function decode(bytes: Uint8Array): string {

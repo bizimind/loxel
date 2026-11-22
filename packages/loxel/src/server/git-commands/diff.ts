@@ -134,6 +134,8 @@ export async function getWorkingTreeDiff(
     validateCommitHash(base);
   }
   const ref = base ?? "HEAD";
+  // The worktree's own config and trust: it is the working tree being read.
+  const readEnv = await worktreeReadEnv(worktreePath);
 
   const [tracked, untrackedFiles] = await Promise.all([
     (async () => {
@@ -147,14 +149,10 @@ export async function getWorkingTreeDiff(
         ...untrustedSubmoduleArgs(worktreePath),
         baseRef ?? ref,
       ];
-      // The worktree's own config and trust: it is the working tree being read.
-      const result = await gitText(args, {
-        cwd: worktreePath,
-        env: await worktreeReadEnv(worktreePath),
-      });
+      const result = await gitText(args, { cwd: worktreePath, env: readEnv });
       return { baseRef, files: parseDiffOutput(result) };
     })(),
-    getUntrackedDiff(worktreePath),
+    getUntrackedDiff(worktreePath, readEnv),
   ]);
 
   return { files: [...tracked.files, ...untrackedFiles], baseRef: tracked.baseRef };
@@ -192,11 +190,13 @@ const FALLBACK_DIFF_CONCURRENCY = 8;
  * as a status/refs/log refresh — which would refetch this diff, forever. The throwaway index and
  * object directory live in a temp dir, so the real repository is only ever read.
  */
-async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
+async function getUntrackedDiff(
+  worktreePath: string,
+  readEnv: Record<string, string>,
+): Promise<FileDiff[]> {
   let files = await listUntrackedFiles(worktreePath);
   if (files.length === 0) return [];
 
-  const readEnv = await worktreeReadEnv(worktreePath);
   const scratch = await mkdtemp(path.join(tmpdir(), "loxel-untracked-"));
   try {
     const objects = path.join(scratch, "objects");

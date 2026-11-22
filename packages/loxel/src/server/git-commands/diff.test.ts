@@ -558,3 +558,27 @@ describe("resolved diff bases", () => {
     }
   });
 });
+
+describe("submodule changes", () => {
+  test("are a gitlink patch whatever the repository's diff.submodule says", async () => {
+    const sub = await createRepo();
+    const repo = await createRepo();
+    try {
+      await commit(sub.path, "sub init", { "s.txt": "s\n" });
+      await commit(repo.path, "init", { "a.txt": "a\n" });
+      await $`git -C ${repo.path} -c protocol.file.allow=always submodule add -q ${sub.path} sub`.quiet();
+      await commit(repo.path, "add submodule");
+      await commit(path.join(repo.path, "sub"), "move", { "s.txt": "moved\n" });
+      await $`git -C ${repo.path} config diff.submodule diff`.quiet();
+
+      const diff = await getUnstagedDiff(repo.path);
+
+      expect(diff.files.map((file) => file.newPath)).toEqual(["sub"]);
+      const lines = diff.files[0]?.hunks.flatMap((hunk) => hunk.lines.map((line) => line.content));
+      expect(lines?.every((content) => content.startsWith("Subproject commit"))).toBe(true);
+    } finally {
+      await repo.cleanup();
+      await sub.cleanup();
+    }
+  });
+});

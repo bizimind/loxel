@@ -1,5 +1,5 @@
 import { isRepoTrusted } from "../repo-trust";
-import { GitCommandError, runGit } from "./run-git";
+import { GitCommandError, inheritedGitEnv, runGit } from "./run-git";
 
 /**
  * Environment and shared arguments for git invocations.
@@ -121,11 +121,14 @@ async function repoFilterDrivers(cwd: string, env: Record<string, string>): Prom
 
 /**
  * Flags for the reads that print a diff, whose output Loxel parses as git's own patch format: never
- * an external diff program, and in an untrusted repository no `textconv` program either. (Git fails
- * on an empty textconv command, so these are flags rather than config.)
+ * an external diff program, submodule changes as a plain gitlink patch (a `diff.submodule` setting
+ * would instead run a log or a diff inside the submodule), and in an untrusted repository no
+ * `textconv` program either. (Git fails on an empty textconv command, so these are flags rather
+ * than config.)
  */
 export function diffProgramArgs(cwd: string): string[] {
-  return isRepoTrusted(cwd) ? ["--no-ext-diff"] : ["--no-ext-diff", "--no-textconv"];
+  const always = ["--no-ext-diff", "--submodule=short"];
+  return isRepoTrusted(cwd) ? always : [...always, "--no-textconv"];
 }
 
 /**
@@ -155,13 +158,4 @@ function configParameter(key: string, value: string): string {
 /** Single-quoted the way git's `sq_quote` writes and its `sq_dequote` reads. */
 function shellQuote(text: string): string {
   return `'${text.replaceAll("'", String.raw`'\''`)}'`;
-}
-
-/** The server's current environment, for commands with no special needs. */
-export function inheritedGitEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
 }
