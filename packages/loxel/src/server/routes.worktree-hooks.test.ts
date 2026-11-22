@@ -229,42 +229,46 @@ describe("worktree hooks in an untrusted repository", () => {
 });
 
 describe("a partial clone in an untrusted repository", () => {
-  test("creating a worktree from content the clone hasn't downloaded waits for trust", async () => {
-    const commit = "-c user.email=t@example.com -c user.name=T commit -qm".split(" ");
-    await Bun.$`git -C ${repo} switch -qc feature`;
-    await Bun.write(join(repo, "a.txt"), "a\n");
-    await Bun.$`git -C ${repo} add a.txt`;
-    await Bun.$`git -C ${repo} -c core.hooksPath=/dev/null ${commit} feature`;
-    await Bun.$`git -C ${repo} switch -q main`;
-    await Bun.$`git -C ${repo} config uploadpack.allowFilter true`;
-    const clone = `${repo}-clone`;
-    roots.push(clone);
-    await Bun.$`git clone -q --filter=blob:none -- ${`file://${repo}`} ${clone}`;
-    // The branch, but not its file, which only checking it out would download.
-    await Bun.$`git -C ${clone} branch -q feature origin/feature`;
-    const cloneCtx = projectContext(clone);
-    const create = { projectPath: clone, name: "feat", branch: "feature" };
+  // Without file contents, or without trees, which git fails on before it would fetch them.
+  test.each(["blob:none", "tree:0"])(
+    "creating a worktree from content a %s clone hasn't downloaded waits for trust",
+    async (filter) => {
+      const commit = "-c user.email=t@example.com -c user.name=T commit -qm".split(" ");
+      await Bun.$`git -C ${repo} switch -qc feature`;
+      await Bun.write(join(repo, "a.txt"), "a\n");
+      await Bun.$`git -C ${repo} add a.txt`;
+      await Bun.$`git -C ${repo} -c core.hooksPath=/dev/null ${commit} feature`;
+      await Bun.$`git -C ${repo} switch -q main`;
+      await Bun.$`git -C ${repo} config uploadpack.allowFilter true`;
+      const clone = `${repo}-clone`;
+      roots.push(clone);
+      await Bun.$`git clone -q --filter=${filter} -- ${`file://${repo}`} ${clone}`;
+      // The branch, but not its content, which only checking it out would download.
+      await Bun.$`git -C ${clone} branch -q feature origin/feature`;
+      const cloneCtx = projectContext(clone);
+      const create = { projectPath: clone, name: "feat", branch: "feature" };
 
-    const [status, refused] = await post<{ error: string }>(
-      cloneCtx,
-      "/api/worktree/create",
-      create,
-    );
-    expect(status).toBe(400);
-    expect(refused.error).toContain("once you trust the repository");
-    expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
-    expect(await Bun.$`git -C ${clone} worktree list --porcelain`.text()).not.toContain("feat\n");
-    expect(existsSync(join(clone, ".worktrees", "feat"))).toBe(false);
+      const [status, refused] = await post<{ error: string }>(
+        cloneCtx,
+        "/api/worktree/create",
+        create,
+      );
+      expect(status).toBe(400);
+      expect(refused.error).toContain("once you trust the repository");
+      expect(getRepoTrustStatus(clone).restrictions).toHaveLength(1);
+      expect(await Bun.$`git -C ${clone} worktree list --porcelain`.text()).not.toContain("feat\n");
+      expect(existsSync(join(clone, ".worktrees", "feat"))).toBe(false);
 
-    setRepoTrusted(clone, true);
-    const [trustedStatus, created] = await post<{ path: string }>(
-      cloneCtx,
-      "/api/worktree/create",
-      create,
-    );
-    expect(trustedStatus).toBe(200);
-    expect(await Bun.file(join(created.path, "a.txt")).text()).toBe("a\n");
-  });
+      setRepoTrusted(clone, true);
+      const [trustedStatus, created] = await post<{ path: string }>(
+        cloneCtx,
+        "/api/worktree/create",
+        create,
+      );
+      expect(trustedStatus).toBe(200);
+      expect(await Bun.file(join(created.path, "a.txt")).text()).toBe("a\n");
+    },
+  );
 });
 
 describe("worktree hooks in a trusted repository", () => {
