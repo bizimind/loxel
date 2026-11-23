@@ -50,7 +50,12 @@ mac:
   # Alternate rank, as for the documents above, ranks it below any browser that claims more.
   # The camera and microphone usage texts are what macOS shows when it first asks for them, which
   # it does when a site the user allowed in a browser panel uses one (src/electron/browser-media.ts).
+  # ElectronSquirrelPreventDowngrades makes Squirrel.Mac refuse an update whose bundle has a lower
+  # version than the running app, whatever version the update manifest claims. It is read from
+  # the running app, so it guards the updates after the release that adds it. Squirrel then accepts
+  # only plain x.y.z versions: a pre-release suffix would make it refuse every update.
   extendInfo:
+    ElectronSquirrelPreventDowngrades: true
     NSCameraUsageDescription: Sites you allow in Loxel's browser can use your camera, such as for video calls.
     NSMicrophoneUsageDescription: Sites you allow in Loxel's browser can use your microphone, such as for video calls.
     CFBundleURLTypes:
