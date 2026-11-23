@@ -1,8 +1,8 @@
 /**
- * Clicks and key presses in browser panel pages and their popups, as main sees them: Chromium's
- * transient user activation. What a page may only do right after the user acted in it (open a
- * tab or popup, launch another app) checks it here, and consumes it, so one click can't open a
- * flood of tabs or apps.
+ * Clicks and key presses in browser panel pages, their popups and Loxel's windows, as main sees
+ * them: Chromium's transient user activation. What a page may only do right after the user acted
+ * in it (open a tab, popup or window, launch another app) checks it here, and consumes it, so one
+ * click can't open a flood of tabs, windows or apps.
  */
 import type { WebContents } from "electron";
 
@@ -21,8 +21,8 @@ export interface UserActivation {
 const tracked = new WeakMap<WebContents, UserActivation>();
 
 /**
- * Track the user's clicks and key presses in `contents` (a webview, or a popup it opened), once
- * per webContents; later calls return the same tracker.
+ * Track the user's clicks and key presses in `contents` (a webview, a popup it opened, or a Loxel
+ * window), once per webContents; later calls return the same tracker.
  */
 export function trackUserActivation(contents: WebContents, now = Date.now): UserActivation {
   const existing = tracked.get(contents);
@@ -46,7 +46,7 @@ export function trackUserActivation(contents: WebContents, now = Date.now): User
   return activation;
 }
 
-/** The tracker of `contents`, or null when its clicks aren't tracked (it is no browser page). */
+/** The tracker of `contents`, or null when its clicks aren't tracked. */
 export function userActivationOf(contents: WebContents): UserActivation | null {
   return tracked.get(contents) ?? null;
 }
