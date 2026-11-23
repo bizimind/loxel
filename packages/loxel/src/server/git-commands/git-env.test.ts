@@ -4,11 +4,12 @@ import { chmod, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 
+import { hasUncommittedChanges, withGitEnv } from "@bizimind/wt/lib";
 import { $ } from "bun";
 
 import { setRepoTrusted } from "../repo-trust";
 import { getUnstagedDiff, getWorkingTreeDiff } from "./diff";
-import { readOnlyGitEnv, worktreeReadEnv } from "./git-env";
+import { readOnlyGitEnv, untrustedChangeGitEnv, worktreeReadEnv } from "./git-env";
 import { getStatus } from "./status";
 import { commit, createRepo, writeFile } from "./test-utils";
 
@@ -150,6 +151,47 @@ describe("working-tree reads in an untrusted repository", () => {
     } finally {
       await rm(global, { force: true });
       await cleanup();
+    }
+  });
+});
+
+describe("untrustedChangeGitEnv", () => {
+  test("turns off hooks, fsmonitor and the filter drivers of the repository and its submodules", async () => {
+    const sub = await createRepo();
+    const repo = await createRepo();
+    const ran = `${repo.path}-ran`;
+    try {
+      await commit(sub.path, "init", { ".gitattributes": "b.txt filter=g\n", "b.txt": "b\n" });
+      await commit(repo.path, "init", { ".gitattributes": "a.txt filter=f\n", "a.txt": "a\n" });
+      await $`git -C ${repo.path} -c protocol.file.allow=always submodule add -q ${sub.path} sub`.quiet();
+      await $`git -C ${repo.path} -c user.email=t@example.com -c user.name=T commit -qm sub`.quiet();
+      const recordRun = `sh -c 'echo ran >> "${ran}"; cat'`;
+      await $`git -C ${repo.path} config filter.f.clean ${recordRun}`.quiet();
+      await $`git -C ${join(repo.path, "sub")} config filter.g.clean ${recordRun}`.quiet();
+      // Same size, new mtime: git has to hash the file again, through its filter.
+      const past = new Date("2020-01-01T00:00:00Z");
+      await writeFile(join(repo.path, "sub"), "b.txt", "c\n");
+      await utimes(join(repo.path, "sub", "b.txt"), past, past);
+
+      const env = await untrustedChangeGitEnv(repo.path);
+      for (const entry of [
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=false",
+        "filter.f.clean=",
+        "filter.g.clean=",
+      ]) {
+        expect(env.GIT_CONFIG_PARAMETERS).toContain(`'${entry}'`);
+      }
+      // Still strict about an edit inside a submodule.
+      expect(await withGitEnv(env, () => hasUncommittedChanges(repo.path))).toBe(true);
+      expect(await Bun.file(ran).exists()).toBe(false);
+      // Without it, the same check runs the submodule's filter.
+      await hasUncommittedChanges(repo.path);
+      expect(await Bun.file(ran).exists()).toBe(true);
+    } finally {
+      await rm(ran, { force: true });
+      await repo.cleanup();
+      await sub.cleanup();
     }
   });
 });

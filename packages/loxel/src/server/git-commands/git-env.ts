@@ -1,3 +1,6 @@
+import { existsSync, lstatSync } from "node:fs";
+import path from "node:path";
+
 import { shellQuote } from "@bizimind/wt/lib";
 
 import { isRepoTrusted } from "../repo-trust";
@@ -80,17 +83,69 @@ const UNTRUSTED_READ_CONFIG = [
 export async function worktreeReadEnv(cwd: string): Promise<Record<string, string>> {
   const env = readOnlyGitEnv(cwd);
   if (isRepoTrusted(cwd)) return env;
-  const overrides = (await repoFilterDrivers(cwd, env)).flatMap((name) => [
+  const overrides = filterDriverOverrides(await repoFilterDrivers(cwd, env));
+  return {
+    ...env,
+    GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, overrides),
+  };
+}
+
+/** Empty commands for each filter driver named, so git stores and checks out its files as they are. */
+function filterDriverOverrides(names: string[]): string[] {
+  return names.flatMap((name) => [
     configParameter(`filter.${name}.clean`, ""),
     configParameter(`filter.${name}.smudge`, ""),
     configParameter(`filter.${name}.process`, ""),
     // Otherwise git fails on a required filter with no command instead of passing content through.
     configParameter(`filter.${name}.required`, "false"),
   ]);
-  return {
-    ...env,
-    GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, overrides),
-  };
+}
+
+/**
+ * The variables to add to the environment of the git commands that change an untrusted repository
+ * on Loxel's own initiative (creating, removing and converting worktrees, setting up a project),
+ * which wt runs with this added (`withGitEnv`). Git then runs none of the repository's hooks, no
+ * fsmonitor and none of the filter drivers its config defines, nor those that the config of a
+ * submodule checked out under `dir` defines: these commands check for uncommitted changes inside
+ * submodules too, and the settings here reach the git commands run inside them.
+ */
+export async function untrustedChangeGitEnv(dir: string): Promise<Record<string, string>> {
+  const env = readOnlyGitEnv();
+  const entries = [
+    configParameter("core.hooksPath", "/dev/null"),
+    configParameter("core.fsmonitor", "false"),
+    ...filterDriverOverrides(await checkoutFilterDrivers(dir, env)),
+  ];
+  return { GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, entries) };
+}
+
+/** {@link repoFilterDrivers} of `dir` and of every submodule checked out under it, recursively. */
+async function checkoutFilterDrivers(dir: string, env: Record<string, string>): Promise<string[]> {
+  const names = new Set(await repoFilterDrivers(dir, env));
+  // A bare repository has no checkout, so no submodules either.
+  if (!existsSync(path.join(dir, ".git"))) return [...names];
+  const entries = (await gitText(["ls-files", "--stage", "-z"], { cwd: dir, env })).split("\0");
+  // `<mode> <object> <stage>\t<path>`; a submodule is a gitlink, mode 160000, listed once per
+  // stage while it is conflicted.
+  const gitlinks = new Set(
+    entries
+      .filter((entry) => entry.startsWith("160000 "))
+      .map((entry) => path.join(dir, entry.slice(entry.indexOf("\t") + 1))),
+  );
+  for (const submodule of gitlinks) {
+    // Git looks inside a submodule only where it is checked out, and never through a link.
+    if (!isDirectory(submodule) || !existsSync(path.join(submodule, ".git"))) continue;
+    for (const name of await checkoutFilterDrivers(submodule, env)) names.add(name);
+  }
+  return [...names];
+}
+
+function isDirectory(target: string): boolean {
+  try {
+    return lstatSync(target).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**

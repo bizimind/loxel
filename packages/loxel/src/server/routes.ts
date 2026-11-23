@@ -106,6 +106,7 @@ import {
   getRepoTrustStatus,
   isRepoTrustStoreKey,
   listRepoTrust,
+  reportRepoRestriction,
   setRepoTrustDecision,
   setRepoTrusted,
 } from "./repo-trust";
@@ -122,7 +123,11 @@ import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { getCurrentVersion } from "./version";
-import { fetchRemoteDefault, planWorktreeBase } from "./worktree-base";
+import {
+  DEFAULT_BRANCH_FETCH_RESTRICTION,
+  fetchRemoteDefault,
+  planWorktreeBase,
+} from "./worktree-base";
 import {
   addFirstWorktreeOfNewRepo,
   addWorktree,
@@ -131,6 +136,7 @@ import {
   isCleanHookHeld,
   removeWorktree,
   runHeldInitHook,
+  withRepoGitEnv,
 } from "./worktree-hooks";
 import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
 import { findWorkspacePackages } from "./worktree-utils";
@@ -2056,7 +2062,7 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         // detached HEAD
       }
       try {
-        dirty = await hasUncommittedChanges(gitRoot);
+        dirty = await withRepoGitEnv(gitRoot, () => hasUncommittedChanges(gitRoot));
       } catch {
         // ignore
       }
@@ -2336,7 +2342,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
     return error("Path is not a regular git repository", 400);
   }
 
-  const dirty = await hasUncommittedChanges(dirPath);
+  const dirty = await withRepoGitEnv(dirPath, () => hasUncommittedChanges(dirPath));
   if (dirty) {
     return error("Repository has uncommitted changes. Commit or stash them first.", 400);
   }
@@ -2362,7 +2368,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
 
   let metadata: InitResult;
   try {
-    await transformToBare(dirPath, currentBranch);
+    await withRepoGitEnv(dirPath, () => transformToBare(dirPath, currentBranch));
     await writeInitHook(dirPath, copyFiles, setupCommands);
     metadata = await turnOnWorktreeMetadata(dirPath);
   } catch (err) {
@@ -2647,7 +2653,7 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
       : undefined;
     // A new branch from the remote default starts from it as it is now, not as last fetched.
     const checksOutExisting = branch !== undefined || branchResolution === "use-existing";
-    if (!child?.base && !checksOutExisting) await fetchRemoteDefault(project.cwd);
+    const fetchHeld = !child?.base && !checksOutExisting && (await fetchRemoteDefault(project.cwd));
     const meta = { ...child?.meta, ...titleMeta(title) };
     const result = await addWorktree(
       {
@@ -2660,6 +2666,7 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
       },
       wtProgress,
     );
+    if (fetchHeld) reportRepoRestriction(result.path, DEFAULT_BRANCH_FETCH_RESTRICTION);
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
     ctx.broadcastAll(worktreesChangedMessage(project.cwd));
     return json(result);
@@ -2774,7 +2781,11 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
   const name = getWorktreeName(wtPath, project.worktreesDir);
 
   try {
-    const plan: RemovePlan = await planRemove({ name, repoPath: project.cwd });
+    const plan: RemovePlan = await withRepoGitEnv(
+      project.cwd,
+      () => planRemove({ name, repoPath: project.cwd }),
+      wtPath,
+    );
     if (resolve(plan.worktreePath) !== resolve(wtPath)) {
       return error("Worktree path did not resolve to the requested worktree", 400);
     }
@@ -2782,7 +2793,13 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
     const nested: NestedWorktreePlan[] = await Promise.all(
       descendants.map(async (wt) => ({
         path: wt.path,
-        dirty: (await planRemove({ name: wt.wtName, repoPath: project.cwd })).dirty,
+        dirty: (
+          await withRepoGitEnv(
+            project.cwd,
+            () => planRemove({ name: wt.wtName, repoPath: project.cwd }),
+            wt.path,
+          )
+        ).dirty,
       })),
     );
     const response: WorktreeRemovePlan = {

@@ -1,6 +1,14 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +18,11 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
 const { getRepoTrustStatus, isRepoTrusted, setRepoTrusted } = await import("./repo-trust");
 const { WORKTREE_HOOKS_RESTRICTION } = await import("./worktree-hooks");
+const { DEFAULT_BRANCH_FETCH_RESTRICTION } = await import("./worktree-base");
 type RouteContext = import("./routes").RouteContext;
+
+// Each test runs many git commands, which a loaded machine (the parallel suite) slows down.
+setDefaultTimeout(30_000);
 
 const roots: string[] = [];
 
@@ -20,8 +32,8 @@ afterAll(async () => {
 });
 
 /**
- * A regular repository whose main checkout holds hooks that leave a marker at the repo root when
- * they run, as a cloned repository could commit them.
+ * A regular repository whose main checkout holds worktree hooks that leave a marker at the repo
+ * root when they run, as a cloned repository could commit them, and git hooks that do the same.
  */
 async function makeRepo(): Promise<{ repo: string; ctx: RouteContext }> {
   const repo = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-")));
@@ -30,6 +42,11 @@ async function makeRepo(): Promise<{ repo: string; ctx: RouteContext }> {
   await Bun.$`git -C ${repo} -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m init`;
   await Bun.write(join(repo, "init.wt.sh"), 'touch "$WT_ROOT/init-ran-$WT_NAME"\n');
   await Bun.write(join(repo, "clean.wt.sh"), 'touch "$WT_ROOT/clean-ran-$WT_NAME"\n');
+  for (const hook of ["post-checkout", "reference-transaction"]) {
+    const file = join(repo, ".git", "hooks", hook);
+    await Bun.write(file, `#!/bin/sh\ntouch "${repo}/${hook}-ran"\n`);
+    await chmod(file, 0o755);
+  }
 
   const project = { cwd: repo, isBare: false, worktreesDir: join(repo, ".worktrees") };
   const ctx = {
@@ -67,6 +84,8 @@ describe("worktree hooks in an untrusted repository", () => {
     expect(status).toBe(200);
     expect(created).toMatchObject({ hookRan: false, hookSkipped: true });
     expect(existsSync(join(repo, "init-ran-feat"))).toBe(false);
+    expect(existsSync(join(repo, "post-checkout-ran"))).toBe(false);
+    expect(existsSync(join(repo, "reference-transaction-ran"))).toBe(false);
     expect(getRepoTrustStatus(created.path).restrictions).toEqual([WORKTREE_HOOKS_RESTRICTION]);
 
     const body = { projectPath: repo, path: created.path };
@@ -112,10 +131,86 @@ describe("worktree hooks in an untrusted repository", () => {
     );
     expect(plan).toMatchObject({ hasHook: true, cleanHookHeld: true });
 
-    const [status] = await post(ctx, "/api/worktree/remove", target);
+    const [status] = await post(ctx, "/api/worktree/remove", { ...target, deleteBranch: true });
     expect(status).toBe(200);
     expect(existsSync(created.path)).toBe(false);
     expect(existsSync(join(repo, "clean-ran-feat"))).toBe(false);
+    expect(existsSync(join(repo, "reference-transaction-ran"))).toBe(false);
+  });
+
+  test("creating a worktree runs no filter that config for only its branch defines, until trusted", async () => {
+    const smudge = `${repo}-smudge`;
+    roots.push(smudge);
+    await Bun.write(smudge, `#!/bin/sh\ntouch "${repo}/smudge-ran-$1"\ncat\n`);
+    await chmod(smudge, 0o755);
+    await Bun.write(join(repo, ".git", "branch-only"), `[filter "x"]\n\tsmudge = ${smudge} %f\n`);
+    for (const branch of ["feat", "trusted"]) {
+      await Bun.$`git -C ${repo} config ${`includeIf.onbranch:${branch}.path`} branch-only`;
+    }
+    await Bun.write(join(repo, ".gitattributes"), "a.txt filter=x\n");
+    await Bun.write(join(repo, "a.txt"), "a\n");
+    await Bun.$`git -C ${repo} add .gitattributes a.txt`;
+    await Bun.$`git -C ${repo} -c core.hooksPath=/dev/null -c user.email=t@example.com -c user.name=T commit -qm attrs`;
+
+    const [status, created] = await post<{ path: string }>(ctx, "/api/worktree/create", {
+      projectPath: repo,
+      name: "feat",
+    });
+    expect(status).toBe(200);
+    expect(await Bun.file(join(created.path, "a.txt")).text()).toBe("a\n");
+    expect(existsSync(join(repo, "smudge-ran-a.txt"))).toBe(false);
+
+    setRepoTrusted(repo, true);
+    await post(ctx, "/api/worktree/create", { projectPath: repo, name: "trusted" });
+    expect(existsSync(join(repo, "smudge-ran-a.txt"))).toBe(true);
+  });
+
+  test("removes a worktree whose folder is already gone", async () => {
+    const [, created] = await post<{ path: string }>(ctx, "/api/worktree/create", {
+      projectPath: repo,
+      name: "feat",
+    });
+    await rm(created.path, { recursive: true, force: true });
+    const target = { projectPath: repo, path: created.path };
+
+    const [planStatus, plan] = await post<{ dirty: boolean }>(
+      ctx,
+      "/api/worktree/plan-remove",
+      target,
+    );
+    expect(planStatus).toBe(200);
+    expect(plan.dirty).toBe(false);
+    const [status] = await post(ctx, "/api/worktree/remove", target);
+    expect(status).toBe(200);
+  });
+
+  test("creating a worktree from origin's default branch does not fetch it first, and says so", async () => {
+    const upstream = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-up-")));
+    roots.push(upstream);
+    await Bun.$`git clone -q --bare -- ${repo} ${upstream}`;
+    await Bun.$`git -C ${repo} remote add origin ${upstream}`;
+    await Bun.$`git -C ${repo} fetch -q origin`;
+    await Bun.$`git -C ${repo} remote set-head origin main`;
+    const fetched = await Bun.$`git -C ${repo} rev-parse origin/main`.text();
+    // A new commit on origin's main that only a fetch would bring.
+    const next =
+      await Bun.$`git -C ${upstream} -c user.email=t@example.com -c user.name=T commit-tree main^{tree} -p main -m next`.text();
+    await Bun.$`git -C ${upstream} update-ref refs/heads/main ${next.trim()}`;
+
+    const [status, created] = await post<{ path: string }>(ctx, "/api/worktree/create", {
+      projectPath: repo,
+      name: "feat",
+    });
+
+    expect(status).toBe(200);
+    expect(await Bun.$`git -C ${repo} rev-parse origin/main`.text()).toBe(fetched);
+    expect(getRepoTrustStatus(created.path).restrictions).toContain(
+      DEFAULT_BRANCH_FETCH_RESTRICTION,
+    );
+
+    setRepoTrusted(repo, true);
+    await post(ctx, "/api/worktree/create", { projectPath: repo, name: "after-trust" });
+    expect(await Bun.$`git -C ${repo} rev-parse origin/main`.text()).toBe(next);
   });
 });
 
@@ -131,6 +226,7 @@ describe("worktree hooks in a trusted repository", () => {
     expect(created.hookRan).toBe(true);
     expect(created.hookSkipped).toBeUndefined();
     expect(existsSync(join(repo, "init-ran-feat"))).toBe(true);
+    expect(existsSync(join(repo, "post-checkout-ran"))).toBe(true);
 
     const target = { projectPath: repo, path: created.path };
     const [, plan] = await post<{ cleanHookHeld: boolean }>(
@@ -279,18 +375,38 @@ describe("setting up an existing or cloned repository like wt init", () => {
     await Bun.$`git clone -q --bare -- ${url} ${bareDir}`;
     await Bun.write(join(bareDir, "init.wt.sh"), 'touch "$WT_ROOT/init-ran"\n');
 
-    const [status, project] = await post<{ path: string; initHookSkippedAt?: string }>(
-      projectCtx,
-      "/api/projects",
-      { path: bareDir, apply: ["fetch-refspec", "main-worktree"] },
-    );
+    const [status, project] = await post<{
+      path: string;
+      initHookSkippedAt?: string;
+      setupFailures?: string;
+    }>(projectCtx, "/api/projects", { path: bareDir, apply: ["fetch-refspec", "main-worktree"] });
 
     const main = join(bareDir, ".worktrees", "main");
     expect(status).toBe(200);
     expect(project).toMatchObject({ path: bareDir, initHookSkippedAt: main });
-    expect(await gitConfig(bareDir, "remote.origin.fetch")).not.toBe("");
     expect(existsSync(main)).toBe(true);
     expect(existsSync(join(bareDir, "init-ran"))).toBe(false);
+    // Contacting origin is skipped before trust.
+    expect(project.setupFailures).toStartWith(
+      "fetch-refspec: skipped because the repository is not trusted",
+    );
+    expect(await gitConfig(bareDir, "remote.origin.fetch")).toBe("");
+  });
+
+  test("adding a trusted repository applies the fixes that contact origin", async () => {
+    const { url, dest } = await makeRemote();
+    const bareDir = join(dest, "plain.git");
+    await Bun.$`git clone -q --bare -- ${url} ${bareDir}`;
+    setRepoTrusted(bareDir, true);
+
+    const [status, project] = await post<{ setupFailures?: string }>(projectCtx, "/api/projects", {
+      path: bareDir,
+      apply: ["fetch-refspec"],
+    });
+
+    expect(status).toBe(200);
+    expect(project.setupFailures).toBeUndefined();
+    expect(await gitConfig(bareDir, "remote.origin.fetch")).not.toBe("");
   });
 
   test("adding a repository whose fix fails still adds it, set up as far as the fixes got", async () => {
@@ -299,6 +415,7 @@ describe("setting up an existing or cloned repository like wt init", () => {
     await Bun.$`git clone -q --bare -- ${url} ${bareDir}`;
     // As when origin can't be reached: the fetch fails, the default branch's worktree does not.
     await Bun.$`git -C ${bareDir} remote set-url origin ${join(dest, "gone")}`;
+    setRepoTrusted(bareDir, true);
 
     const [status, project] = await post<{ path: string; setupFailures?: string }>(
       projectCtx,
@@ -309,6 +426,7 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(status).toBe(200);
     expect(project.path).toBe(bareDir);
     expect(project.setupFailures).toStartWith("fetch-refspec: ");
+    expect(project.setupFailures).not.toContain("trusted");
     expect(existsSync(join(bareDir, ".worktrees", "main"))).toBe(true);
   });
 

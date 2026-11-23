@@ -56,6 +56,7 @@ export {
   initBareRepo,
   resolveRemoteDefault,
   transformToBare,
+  withGitEnv,
 } from "../git/index.ts";
 export type { RepoType, WorktreeMeta } from "../git/index.ts";
 export { WORKTREE_ID_KEY } from "../git/index.ts";
