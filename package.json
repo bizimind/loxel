@@ -3,7 +3,7 @@
   "private": true,
   "license": "FSL-1.1-ALv2",
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks",
+    "prepare": "hooks=\"$(git rev-parse --path-format=absolute --git-common-dir)/hooks\" && mkdir -p \"$hooks\" && cp .githooks/* \"$hooks\" && git config core.hooksPath \"$hooks\"",
     "lint": "oxlint --ignore-pattern '**/deps/**'",
     "lint:fix": "oxlint --fix --ignore-pattern '**/deps/**'",
     "fmt": "oxfmt --write .",

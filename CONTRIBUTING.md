@@ -6,7 +6,7 @@
 # Install dependencies
 pnpm install
 
-# Set up git hooks (runs automatically via prepare script)
+# Install git hooks (runs automatically via prepare script; rerun after a hook changes)
 pnpm run prepare
 ```
 
