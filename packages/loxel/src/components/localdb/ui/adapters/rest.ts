@@ -7,6 +7,7 @@ import type {
   UpdateResult,
   ViewMeta,
 } from "@bizimind/localdb-sdk";
+import { identifierSchema } from "@bizimind/localdb-sdk/validation";
 
 import { localConnection } from "@/api/local-server";
 import { connectionOf } from "@/api/server-connection";
@@ -22,6 +23,17 @@ import type { DataAdapter } from "./data-adapter.ts";
 export function localDbApiUrl(project: WorktreeRef | null | undefined): string {
   const connection = project ? connectionOf(project.server) : localConnection();
   return connection.apiUrl("/localdb");
+}
+
+/**
+ * The path of table `name`'s routes, followed by `rest`. Names come from documents (a `:::localdb`
+ * block's `table:`) and from server responses, so a name must pass the SDK's identifier rule.
+ */
+function tablePath(name: string, rest = ""): string {
+  if (!identifierSchema.safeParse(name).success) {
+    throw new Error(`Invalid table name: ${JSON.stringify(name)}`);
+  }
+  return `/tables/${encodeURIComponent(name)}${rest}`;
 }
 
 /**
@@ -79,33 +91,36 @@ export function makeRestAdapter(baseUrl: string, projectRef?: WorktreeRef | null
     if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
   }
 
+  // Table methods are async so an invalid table name rejects like a failed request.
   return {
     queryKey: queryKeys.localdb(projectRef ?? null),
     listTables: () => get<TableMeta[]>("/tables"),
-    getSchema: (tableName) => get<TableSchema>(`/tables/${tableName}/schema`),
+    getSchema: async (tableName) => get<TableSchema>(tablePath(tableName, "/schema")),
 
-    query: <T extends Record<string, unknown>>(tableName: string, opts?: QueryOptions) =>
-      post<Page<T>>(`/tables/${tableName}/query`, opts ?? {}),
+    query: async <T extends Record<string, unknown>>(tableName: string, opts?: QueryOptions) =>
+      post<Page<T>>(tablePath(tableName, "/query"), opts ?? {}),
 
-    get: <T extends Record<string, unknown>>(tableName: string, id: number) =>
-      get<T | null>(`/tables/${tableName}/rows/${id}`),
+    get: async <T extends Record<string, unknown>>(tableName: string, id: number) =>
+      get<T | null>(tablePath(tableName, `/rows/${encodeURIComponent(id)}`)),
 
-    insert: <T extends Record<string, unknown>>(tableName: string, row: Partial<T>) =>
-      post<InsertResult<T>>(`/tables/${tableName}/rows`, row),
+    insert: async <T extends Record<string, unknown>>(tableName: string, row: Partial<T>) =>
+      post<InsertResult<T>>(tablePath(tableName, "/rows"), row),
 
-    update: <T extends Record<string, unknown>>(
+    update: async <T extends Record<string, unknown>>(
       tableName: string,
       id: number,
       patchData: Partial<T>,
-    ) => patch<UpdateResult<T>>(`/tables/${tableName}/rows/${id}`, patchData),
+    ) => patch<UpdateResult<T>>(tablePath(tableName, `/rows/${encodeURIComponent(id)}`), patchData),
 
-    delete: (tableName, id) => del(`/tables/${tableName}/rows/${id}`),
+    delete: async (tableName, id) => del(tablePath(tableName, `/rows/${encodeURIComponent(id)}`)),
 
-    listViews: (tableId) => get<ViewMeta[]>(`/views?tableId=${tableId}`),
+    listViews: (tableId) => get<ViewMeta[]>(`/views?tableId=${encodeURIComponent(tableId)}`),
 
     upsertView: (view) =>
-      view.id ? patch<ViewMeta>(`/views/${view.id}`, view) : post<ViewMeta>("/views", view),
+      view.id
+        ? patch<ViewMeta>(`/views/${encodeURIComponent(view.id)}`, view)
+        : post<ViewMeta>("/views", view),
 
-    deleteView: (id) => del(`/views/${id}`),
+    deleteView: (id) => del(`/views/${encodeURIComponent(id)}`),
   };
 }
