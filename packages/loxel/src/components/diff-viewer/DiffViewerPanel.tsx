@@ -50,7 +50,7 @@ export function DiffViewerPanel({ source }: { source: DiffViewerSource }) {
 /** The worktree's selected changes, fetched from the server, with review comments placed. */
 function GitDiffViewer() {
   const diffSource = useRepositoryStore((s) => s.diffSource);
-  const { data: diff, isLoading } = useDiffQuery(diffSource);
+  const { data: diff, isLoading, error } = useDiffQuery(diffSource);
   const diffViewMode = useUIStore((s) => s.diffViewMode);
   const { commitHash, worktreePath } = useReviewContext();
   // A file edited here stays open after its edits leave nothing to diff.
@@ -63,6 +63,10 @@ function GitDiffViewer() {
       {isLoading ? (
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
           Loading diff...
+        </div>
+      ) : error && !diff ? (
+        <div className="text-muted-foreground flex flex-1 items-center justify-center px-4 text-center text-xs">
+          {error.message}
         </div>
       ) : !diff || (diff.files.length === 0 && !keepsEditedFile) ? (
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">

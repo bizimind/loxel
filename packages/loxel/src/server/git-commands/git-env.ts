@@ -51,6 +51,14 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * precedence, and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited
  * value is kept.
  *
+ * Outside a trusted repository `GIT_NO_LAZY_FETCH=1` (git 2.45.1 and later, and the May 2024
+ * security releases 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4 and 2.44.1 of older lines; other
+ * versions ignore it) also keeps git from downloading an object a partial clone doesn't have yet,
+ * which would run the transport the repository's own config sets up. An empty `GIT_ALLOW_PROTOCOL`
+ * allows no transport at all, over any `protocol.*.allow` config, so a git that ignores the
+ * variable refuses that download too: no read here needs one. Such a read fails instead, and
+ * `runGit` reports it as content that waits for trust.
+ *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
  * that no unit test observes.
@@ -61,6 +69,10 @@ export function readOnlyGitEnv(cwd?: string): Record<string, string> {
   return {
     ...env,
     GIT_OPTIONAL_LOCKS: "0",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_ALLOW_PROTOCOL: "",
+    // Git's messages untranslated, so `runGit` recognizes that refusal whatever the user's locale.
+    LANGUAGE: "C",
     GIT_CONFIG_PARAMETERS: withConfigParameters(env.GIT_CONFIG_PARAMETERS, UNTRUSTED_READ_CONFIG),
   };
 }

@@ -1,4 +1,5 @@
 import { gitExecClient } from "../git-exec-client";
+import { isRepoTrusted, reportRepoRestriction } from "../repo-trust";
 import { recordWorkerSpawn } from "../spawn-metrics";
 import { gitCommandLabel } from "./git-exec";
 
@@ -8,7 +9,10 @@ export interface RunGitOptions {
   /** The child's complete environment. Defaults to a copy of `process.env`. */
   env?: Record<string, string>;
   stdin?: string | Uint8Array;
-  /** Return a non-zero exit as a result instead of throwing {@link GitCommandError}. */
+  /**
+   * Return a non-zero exit as a result instead of throwing {@link GitCommandError}, except for
+   * {@link ContentAwaitsTrustError}.
+   */
   nothrow?: boolean;
   /** Kill git if it runs longer than this, as for a command that needs the network. */
   timeoutMs?: number;
@@ -32,6 +36,29 @@ export class GitCommandError extends Error {
     this.exitCode = exitCode;
     this.stdout = stdout;
     this.stderr = stderr;
+  }
+}
+
+/**
+ * Git's message, untranslated under untrusted reads' `LANGUAGE=C` (git-env.ts), when it needed an
+ * object the partial clone left to its promisor remote and could not download it, because
+ * `GIT_NO_LAZY_FETCH` or, on an older git, `GIT_ALLOW_PROTOCOL` held the download back. Git prints
+ * it only for an object a promisor remote is known to have, so a revision that doesn't exist never
+ * produces it (the lazy-fetch warning alone does, on git 2.39.4 to 2.46). Any other failure on a
+ * missing object, such as `git show <rev>:<path>`'s, fails as usual.
+ */
+const PROMISED_OBJECT_REFUSED = /could not fetch [0-9a-f]+ from promisor remote/;
+
+const AWAITS_TRUST_RESTRICTION =
+  "Git doesn't download content this partial clone doesn't have yet.";
+
+/** A read that needs content an untrusted partial clone hasn't downloaded yet. */
+export class ContentAwaitsTrustError extends GitCommandError {
+  constructor(result: GitResult) {
+    super(result);
+    this.name = "ContentAwaitsTrustError";
+    this.message =
+      "This content isn't downloaded yet. The repository is a partial clone, and Git downloads what it is missing once you trust the repository. Click Restricted in the status bar to choose.";
   }
 }
 
@@ -69,7 +96,19 @@ export async function runGit(
     stdout: decode(executed.stdout),
     stderr: decode(executed.stderr),
   };
-  if (result.exitCode !== 0 && !nothrow) throw new GitCommandError(result);
+  if (result.exitCode === 0) return result;
+  // Thrown even with `nothrow`: a caller that expects some failures still never expects this one,
+  // and would show it as an empty file or diff.
+  if (
+    cwd !== undefined &&
+    env?.GIT_ALLOW_PROTOCOL === "" &&
+    PROMISED_OBJECT_REFUSED.test(result.stderr) &&
+    !isRepoTrusted(cwd)
+  ) {
+    reportRepoRestriction(cwd, AWAITS_TRUST_RESTRICTION);
+    throw new ContentAwaitsTrustError(result);
+  }
+  if (!nothrow) throw new GitCommandError(result);
   return result;
 }
 
