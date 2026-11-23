@@ -43,6 +43,28 @@ const ExcalidrawWithMenu = lazy(() =>
   ),
 );
 
+/**
+ * Open the link on a drawing's element. Excalidraw's own way (a blank window it then sends to the
+ * link) never gets past Loxel's windows, so a link to an element of this drawing scrolls to it, and
+ * any other link opens the way every link in the app does: in the system browser, or a browser
+ * panel with Cmd held.
+ */
+function openElementLink(
+  api: ExcalidrawImperativeAPI | null,
+  link: string | null,
+  event: CustomEvent,
+): void {
+  if (!link) return;
+  event.preventDefault();
+  // Excalidraw names the element in an `element` query parameter on the page's own URL.
+  const url = URL.parse(link, location.href);
+  if (url?.origin === location.origin && url.searchParams.has("element")) {
+    api?.scrollToContent(url.href);
+  } else {
+    window.open(link);
+  }
+}
+
 /** Sum of element versions — equivalent to excalidraw's getSceneVersion, inlined to avoid static import. */
 function sceneVersion(elements: readonly { version: number }[]): number {
   let v = 0;
@@ -444,6 +466,9 @@ export function ExcalidrawEditor({
               files: initialData.files,
             }}
             onChange={handleChange}
+            onLinkOpen={(element, event) =>
+              openElementLink(excalidrawApiRef.current, element.link, event)
+            }
             theme={darkMode ? "dark" : "light"}
           />
         </Suspense>
