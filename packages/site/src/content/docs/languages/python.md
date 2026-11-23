@@ -39,7 +39,7 @@ The Python server checks your code against the project's own Python environment,
 
 Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
 
-An environment holds the packages your project installed, so until you [trust the repository](/docs/repository-trust), Loxel runs nothing from it. The type checker still reads its installed packages, so imports resolve. Poetry and Pipenv aren't asked for their environments, Ruff and format on save use the Ruff that ships with Loxel, Black doesn't run on save, and new terminals don't activate the environment. The status bar shows no version for a conda or Pixi environment until then.
+An environment holds the packages your project installed, so until you [trust the repository](/docs/repository-trust), Loxel runs nothing from it. The type checker still reads its installed packages, so imports resolve. Poetry and Pipenv aren't asked for their environments, Ruff and format on save use the Ruff that ships with Loxel, Black doesn't run on save, and new terminals don't activate the environment. The status bar shows no version for a conda or Pixi environment until then. A version manager's shim, such as asdf's, pyenv's or mise's `python3`, picks its Python from files in the folder it runs in, so until then the type checker uses the Python the shim selects outside any project, your global one.
 
 Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
 

@@ -1,12 +1,4 @@
-import {
-  accessSync,
-  constants,
-  readlinkSync,
-  realpathSync,
-  statSync,
-  watch,
-  type FSWatcher,
-} from "node:fs";
+import { accessSync, constants, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 
 import type { GoEnv, GoEnvSource, GoProjectVersion } from "@/api/go-env-model";
@@ -19,6 +11,7 @@ import { isInside, pathOutsideWorktree } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
 import { isShippedByRepo } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
+import { isShim } from "./version-manager-link";
 
 const log = logger.child("server");
 
@@ -38,7 +31,6 @@ export const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
  * version or environment: a wait is better. Terminals and saves cap it themselves.
  */
 const GO_ENV_TIMEOUT_MS = 30_000;
-const MAX_LINK_HOPS = 16;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `go.mod`; the repository decides what this file is. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
@@ -211,22 +203,6 @@ export function goToolPath(wtPath: string): string {
     .split(path.delimiter)
     .filter((dir) => path.isAbsolute(dir) && !isInside(realpathOr(dir), realRoot))
     .join(path.delimiter);
-}
-
-/** A version manager's shim: asdf, mise and goenv all keep theirs in a directory of this name. */
-export function isShim(binary: string): boolean {
-  const inShims = (file: string) => path.basename(path.dirname(file)) === "shims";
-  // Each link on the way counts: mise's shims are themselves links to the `mise` binary.
-  let current = binary;
-  for (let hops = 0; hops < MAX_LINK_HOPS; hops++) {
-    if (inShims(current)) return true;
-    try {
-      current = path.resolve(path.dirname(current), readlinkSync(current));
-    } catch {
-      break;
-    }
-  }
-  return inShims(realpathOr(binary));
 }
 
 /**

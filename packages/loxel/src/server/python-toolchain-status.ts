@@ -73,7 +73,7 @@ async function handlePythonOverride(
     ) {
       const shimHint = isRepoTrusted(wtPath)
         ? ""
-        : " A version manager's shim, or an environment's own interpreter, may need the repository to be trusted first.";
+        : " An environment's own interpreter, or a version manager's shim with no global version, may need the repository to be trusted first.";
       return error(
         `${chosen} did not report a Python version; is it a Python interpreter?${shimHint}`,
         400,
