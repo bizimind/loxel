@@ -29,7 +29,7 @@ jobs:
     steps:
       # Not a blobless clone (filter: blob:none): the fetch shrinks, but checkout then lazily
       # fetches every file of HEAD in a second request, which took 29s on its own when tried.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Find affected packages
@@ -186,12 +186,12 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
@@ -213,12 +213,12 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.test) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
@@ -227,11 +227,11 @@ jobs:
       # The ESLint server's bundle runs under Node, and its build fetches the server's source, which
       # the cache keeps; the others take a few seconds.
       - if: matrix.package.name == 'loxel'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       - if: matrix.package.name == 'loxel'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/loxel/build/eslint-language-server-source
           key: eslint-language-server-source-${{ hashFiles('packages/loxel/scripts/build-eslint-language-server.ts', 'packages/loxel/scripts/language-servers/eslint-language-server.json') }}
@@ -240,7 +240,7 @@ jobs:
       # changed, and their build skips a binary the cache restored (its `.source` record matches).
       - if: matrix.package.name == 'loxel'
         id: go-servers
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: &go-servers-path |
             packages/loxel/build/gopls
@@ -253,7 +253,7 @@ jobs:
       # recompiles only what it changed.
       - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
         id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: &go-build-path |
             packages/loxel/build/go-*.*
@@ -267,12 +267,12 @@ jobs:
       # Saved once built, so a failing test does not throw the compile away. The Go caches, over a
       # gigabyte, are saved from main only; a pull request starts from main's.
       - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: *go-servers-path
           key: ${{ steps.go-servers.outputs.cache-primary-key }}
       - if: matrix.package.name == 'loxel' && steps.go-servers.outputs.cache-hit != 'true' && steps.go-build.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: *go-build-path
           key: ${{ steps.go-build.outputs.cache-primary-key }}
@@ -290,15 +290,15 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.build) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
@@ -318,15 +318,15 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.typecheck) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
           cache: true
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
