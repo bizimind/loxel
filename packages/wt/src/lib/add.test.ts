@@ -340,6 +340,79 @@ describe("executeAdd", () => {
     );
   });
 
+  test("refuses a .worktrees symlink, pointing to WT_DIR instead", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, ".worktrees"));
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
+  test("refuses a WT_DIR inside the repository that a symlink leads out of", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, "trees"));
+    process.env.WT_DIR = "trees";
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
+  test("refuses an in-repo WT_DIR spelled through a symlink to the repository", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    const alias = join(outside, "alias");
+    await symlink(repo.root, alias);
+    await symlink(outside, join(repo.root, "trees"));
+    process.env.WT_DIR = join(alias, "trees");
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+  });
+
+  test("refuses an in-repo WT_DIR spelled through a symlink to a repository folder", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    const alias = join(outside, "alias");
+    await Bun.write(join(repo.root, "sub", ".keep"), "");
+    await symlink(join(repo.root, "sub"), alias);
+    await symlink(outside, join(repo.root, "sub", "trees"));
+    process.env.WT_DIR = join(alias, "trees");
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      `set WT_DIR=${outside}`,
+    );
+  });
+
+  test("refuses a WT_DIR whose parent inside the repository is a symlink", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await symlink(outside, join(repo.root, "sub"));
+    process.env.WT_DIR = join(repo.root, "sub", "trees");
+
+    await expect(executeAdd({ name: "away", repoPath: repo.root })).rejects.toThrow(
+      "is a symlink inside the repository",
+    );
+  });
+
+  test("refuses a symlink inside .worktrees that leads out of it", async () => {
+    repo = await createTestRepo();
+    const outside = await realpath(join(repo.root, ".."));
+    await Bun.write(join(repo.root, ".worktrees", ".keep"), "");
+    await symlink(outside, join(repo.root, ".worktrees", "feat"));
+
+    await expect(executeAdd({ name: "feat/away", repoPath: repo.root })).rejects.toThrow(
+      "a symlink along it",
+    );
+    expect(await pathExists(join(outside, "away"))).toBe(false);
+  });
+
   test("checks out an existing branch with an explicit branch", async () => {
     repo = await createTestRepo({ bare: true });
     await git(["branch", "existing"], repo.root);

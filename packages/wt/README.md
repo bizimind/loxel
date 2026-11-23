@@ -203,6 +203,8 @@ New worktrees are created at `<repoRoot>/.worktrees/<name>`. The repo root is th
 WT_DIR=~/wt/myrepo wt add feature-x
 ```
 
+A worktrees directory inside the repo, `.worktrees` or a `WT_DIR` pointing into the checkout, must be a real directory: since a repository could ship a symlink there, `wt add`, `wt mv` and converting a repo to the bare layout refuse one reached through a symlink, and any destination a symlink leads out of the worktrees directory. To keep worktrees somewhere else, point `WT_DIR` there instead of linking to it from inside the repo.
+
 A worktree's name is its path under the worktrees directory, so nested names work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch `feat/voice-input`.
 
 `wt add <name>` creates a branch named after the worktree, started from the remote default branch as of your last fetch (`origin/main`, read from `origin/HEAD` or by name) rather than from local `main`, which in a bare setup only moves when someone pulls inside the `main` worktree. wt never fetches for you; run `git fetch` when you want a newer base. A repository with no `origin` default (local-only, a bare clone that never fetched with a refspec, or a remote with another name) starts from `HEAD` like git does. Pass `--base <ref>` to start from any ref or commit instead (`--base HEAD` gives plain `git worktree add` behaviour), or `-b <branch>` to check out an existing branch. A new branch never tracks its start point, even with `--base origin/foo`; set an upstream yourself if you want one. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.

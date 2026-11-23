@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import {
   addWorktree,
   assertValidWorktreeName,
+  assertWorktreePathContained,
   branchExists,
   canonicalWorktreesDir,
   deleteBranch,
@@ -318,6 +319,7 @@ async function inspectAdd({
 
   const dir = await canonicalWorktreesDir(root);
   const worktreePath = join(dir, name);
+  await assertWorktreePathContained(root, dir, worktreePath);
   const worktrees = await listWorktrees(root);
 
   const taken = getManagedWorktrees(worktrees, dir).find(
