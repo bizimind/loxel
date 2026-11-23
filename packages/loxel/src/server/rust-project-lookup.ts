@@ -1,10 +1,12 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
 import { isInside } from "./path-containment";
 import { isRepoTrusted } from "./repo-trust";
+import { buildSpawnEnv } from "./shell-env";
 import { parseToml, recordAt } from "./toml-file";
 
 export const RUST_MANIFEST = "Cargo.toml";
@@ -62,6 +64,49 @@ export function isReadableRustManifest(manifest: string, wtPath: string): boolea
 export function untrustedNestedRepo(manifest: string, wtPath: string): string | null {
   const nested = dirsUpToRoot(path.dirname(manifest), path.resolve(wtPath)).slice(0, -1);
   return nested.find((dir) => existsSync(path.join(dir, ".git")) && !isRepoTrusted(dir)) ?? null;
+}
+
+/** The files Cargo reads a folder's configuration from, under its `.cargo` directory. */
+const CARGO_CONFIG_NAMES: ReadonlySet<string> = new Set(["config.toml", "config"]);
+
+/** Whether `file` is a Cargo configuration file by its place: `.cargo/config.toml` or `.cargo/config`. */
+export function isCargoConfigPath(file: string): boolean {
+  return (
+    CARGO_CONFIG_NAMES.has(path.basename(file)) && path.basename(path.dirname(file)) === ".cargo"
+  );
+}
+
+/**
+ * The first Cargo configuration file cargo would read for the project of `manifest`, or null: cargo
+ * reads one from the folder it runs in, which for a project is its manifest's folder, and every folder
+ * above it up to the filesystem root, by the real path. The user's own Cargo home is not counted.
+ * Any entry counts, a link that leads nowhere included, so whether cargo can read it never decides.
+ */
+export function cargoConfigFor(manifest: string): string | null {
+  const env = buildSpawnEnv();
+  // Both sides by real path, so a home reached through a link is still recognized.
+  const cargoHomePath = env.CARGO_HOME || path.join(env.HOME || homedir(), ".cargo");
+  const cargoHome = realPathOf(cargoHomePath) ?? path.resolve(cargoHomePath);
+  const start = path.dirname(manifest);
+  for (let dir = realPathOf(start) ?? path.resolve(start); ; dir = path.dirname(dir)) {
+    const cargoDir = path.join(dir, ".cargo");
+    if ((realPathOf(cargoDir) ?? cargoDir) !== cargoHome) {
+      for (const name of CARGO_CONFIG_NAMES) {
+        const config = path.join(dir, ".cargo", name);
+        if (entryExists(config)) return config;
+      }
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+function entryExists(file: string): boolean {
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isLinkedWorktree(dir: string): boolean {

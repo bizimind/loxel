@@ -45,7 +45,7 @@ const { MAX_OPENED_RUST_PROJECTS, RustLspManager } = await import("./rust-lsp-ma
 const { CHECK_QUIET_MS } = await import("./rust-check-on-change");
 const { refreshRustToolchain } = await import("./rust-toolchain");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
-const { untrustedNestedRepo } = await import("./rust-project-lookup");
+const { cargoConfigFor, untrustedNestedRepo } = await import("./rust-project-lookup");
 
 const roots: string[] = [];
 let manager: InstanceType<typeof RustLspManager> | undefined;
@@ -516,6 +516,42 @@ describe("rustAnalyzerSettings", () => {
     expect(linkedProjects).toEqual([
       { sysroot: null, crates: [{ root_module: "/wt/a.rs", edition: "2024", deps: [] }] },
     ]);
+  });
+});
+
+describe("cargoConfigFor", () => {
+  test("finds Cargo configuration in the project's folder or any above it", async () => {
+    const wt = await makeDir("rust-wt-");
+    const manifest = join(wt, "a/b/Cargo.toml");
+    await mkdir(join(wt, "a/b"), { recursive: true });
+    expect(cargoConfigFor(manifest)).toBeNull();
+    await mkdir(join(wt, "a/.cargo"));
+    await writeFile(join(wt, "a/.cargo/config"), "");
+    expect(cargoConfigFor(manifest)).toBe(join(wt, "a/.cargo/config"));
+    await mkdir(join(wt, "a/b/.cargo"));
+    await symlink(join(wt, "nowhere"), join(wt, "a/b/.cargo/config.toml"));
+    expect(cargoConfigFor(manifest)).toBe(join(wt, "a/b/.cargo/config.toml"));
+  });
+
+  test("leaves out the user's Cargo home", async () => {
+    const home = await makeDir("rust-home-");
+    await mkdir(join(home, ".cargo"));
+    await writeFile(join(home, ".cargo/config.toml"), "");
+    await mkdir(join(home, "crate"));
+    const { CARGO_HOME } = process.env;
+    process.env.CARGO_HOME = join(home, ".cargo");
+    try {
+      expect(cargoConfigFor(join(home, "crate/Cargo.toml"))).toBeNull();
+      // Named through a link, as a home on another volume often is.
+      const link = join(await makeDir("rust-link-"), "home");
+      await symlink(home, link);
+      process.env.CARGO_HOME = join(link, ".cargo");
+      expect(cargoConfigFor(join(link, "crate/Cargo.toml"))).toBeNull();
+      expect(cargoConfigFor(join(home, "crate/Cargo.toml"))).toBeNull();
+    } finally {
+      if (CARGO_HOME === undefined) delete process.env.CARGO_HOME;
+      else process.env.CARGO_HOME = CARGO_HOME;
+    }
   });
 });
 
@@ -1301,6 +1337,59 @@ fi
     refreshRustToolchain(wt);
     const closed = await socket.untilClosed();
     expect(closed.code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  describe("a project with its own Cargo configuration", () => {
+    async function withConfig() {
+      const { bin } = await installFakeRust();
+      // Notes each run of cargo in the folder it ran in.
+      await writeExecutable(join(bin, "cargo"), '#!/bin/sh\necho "$PWD" >> "$PWD/cargo-ran"\n');
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "");
+      await mkdir(join(wt, ".cargo"));
+      await writeFile(join(wt, ".cargo/config.toml"), "");
+      return { wt, file };
+    }
+
+    test("waits for trust: not linked, never checked, and the notice names the file", async () => {
+      const { wt, file } = await withConfig();
+      const socket = await start(wt);
+      const { result } = await socket.untilFrame((message) => message.id === 1);
+      expect(result.settings).toMatchObject({ linkedProjects: [{ sysroot: null, crates: [] }] });
+      manager?.handleMessage(socket.ws, INITIALIZED);
+      open(socket, file);
+      const { params } = await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" &&
+          message.params.message.includes("loads once you trust"),
+      );
+      expect(params.message).toContain(join(wt, ".cargo/config.toml"));
+      expect(getRepoTrustStatus(wt).restrictions).toContain(
+        "Rust projects with their own Cargo configuration load once you trust the repository.",
+      );
+      expect(await Bun.file(join(wt, "cargo-ran")).exists()).toBe(false);
+    });
+
+    test("loads as usual once the repository is trusted", async () => {
+      const { wt } = await withConfig();
+      setRepoTrusted(wt, true);
+      const socket = await start(wt);
+      const { result } = await socket.untilFrame((message) => message.id === 1);
+      expect(result.settings).toMatchObject({ linkedProjects: [join(wt, "Cargo.toml")] });
+    });
+
+    test("a restricted server restarts when Cargo configuration appears", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await makeCrate(wt, "");
+      const socket = await start(wt);
+      const { result } = await socket.untilFrame((message) => message.id === 1);
+      expect(result.settings).toMatchObject({ linkedProjects: [join(wt, "Cargo.toml")] });
+      await mkdir(join(wt, ".cargo"));
+      await writeFile(join(wt, ".cargo/config.toml"), "");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, ".cargo/config.toml")]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
   });
 
   describe("in a trusted repository", () => {

@@ -25,6 +25,8 @@ import { RustCheckOnChange } from "./rust-check-on-change";
 import {
   findRustProject,
   isReadableRustManifest,
+  cargoConfigFor,
+  isCargoConfigPath,
   RUST_MANIFEST,
   untrustedNestedRepo,
 } from "./rust-project-lookup";
@@ -78,6 +80,10 @@ const METHOD_NOT_FOUND = -32601;
 export const MAX_OPENED_RUST_PROJECTS = 10;
 
 const SETTINGS_SECTION = "rust-analyzer";
+
+/** Reported for a project whose Cargo configuration keeps it from loading until trusted. */
+const CARGO_CONFIG_RESTRICTION =
+  "Rust projects with their own Cargo configuration load once you trust the repository.";
 
 const TRUST_RESTRICTION =
   "Rust build scripts, proc macros and cargo check don't run, so generated code is unknown and many errors show no marker.";
@@ -220,7 +226,18 @@ export class RustLspManager extends WorktreeLspManager {
 
   private linkedManifests(state: SessionState): string[] {
     const manifests = new Set([...state.manifests, ...state.openedManifests]);
-    return [...manifests].filter((manifest) => !state.refusedManifests.has(manifest));
+    return [...manifests].filter(
+      (manifest) => !state.refusedManifests.has(manifest) && !this.isHeld(state, manifest),
+    );
+  }
+
+  /**
+   * Whether a project waits for trust: cargo applies the Cargo configuration it finds from the
+   * project's folder up, whose `[env]` reaches the compiler cargo starts to load the project, and
+   * nothing can turn that off. A restricted server neither links it nor checks it.
+   */
+  private isHeld(state: SessionState, manifest: string): boolean {
+    return state.plan?.repoTrusted === false && cargoConfigFor(manifest) !== null;
   }
 
   /**
@@ -326,6 +343,9 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
+    // Before the server hears of it: a restricted server must not reload a project under it.
+    if (paths.some(isCargoConfigPath))
+      this.restartRestricted(wtPath, "Cargo configuration changed");
     super.notifyWatchedFilesChanged(wtPath, paths);
     const manifestChanged = paths.some((changed) => path.basename(changed) === RUST_MANIFEST);
     const root = path.resolve(wtPath);
@@ -355,7 +375,7 @@ export class RustLspManager extends WorktreeLspManager {
     const parts = relPath.split("/");
     if (parts.includes("target")) return;
     const absolute = path.join(wtPath, relPath);
-    if (parts.at(-1) === RUST_MANIFEST) {
+    if (parts.at(-1) === RUST_MANIFEST || isCargoConfigPath(absolute)) {
       this.notifyWatchedFilesChanged(wtPath, [absolute]);
       return;
     }
@@ -460,6 +480,10 @@ export class RustLspManager extends WorktreeLspManager {
         );
         continue;
       }
+      if (this.isHeld(state, project.manifest)) {
+        state.openedManifests.add(project.manifest);
+        continue;
+      }
       const problem = await rustManifestProblem(plan, project.manifest);
       if (!this.isSessionLive(session)) return;
       if (problem === null) {
@@ -472,6 +496,7 @@ export class RustLspManager extends WorktreeLspManager {
     if (!session.repoTrusted && this.linkedManifests(state).length > 0) {
       reportRepoRestriction(wtPath, TRUST_RESTRICTION);
     }
+    this.reportHeldProjects(session, state);
     // The answer can have changed during the checks above, which only this catches.
     if (this.holdsUntrustedRepo(session, state)) {
       this.restart(session, "a project is now in an untrusted repository");
@@ -504,6 +529,7 @@ export class RustLspManager extends WorktreeLspManager {
     const refuseFailures = state.neverChecked;
     state.neverChecked = false;
     for (const manifest of new Set([...linked, ...refused])) {
+      if (this.isHeld(state, manifest)) continue;
       const problem = await rustManifestProblem(plan, manifest);
       if (!this.isSessionLive(session)) return false;
       if (problem === null) {
@@ -560,6 +586,30 @@ export class RustLspManager extends WorktreeLspManager {
     if (!this.isSessionLive(session)) return;
     if (next.kind === "run" && next.key === state.plan?.key) return;
     this.restart(session, "rust toolchain changed");
+  }
+
+  /** Tell the user about each project held for its Cargo configuration, naming the file. */
+  private reportHeldProjects(session: WtLspSession, state: SessionState): void {
+    if (session.repoTrusted) return;
+    for (const manifest of new Set([...state.manifests, ...state.openedManifests])) {
+      const config = cargoConfigFor(manifest);
+      if (config === null) continue;
+      reportRepoRestriction(session.wtPath, CARGO_CONFIG_RESTRICTION);
+      const folder = path.relative(session.wtPath, path.dirname(manifest)) || "the worktree root";
+      this.report(
+        session,
+        `cargo-config:${manifest}`,
+        `The Rust project in ${folder} loads once you trust the repository: Cargo would apply ${config}, which can set what the compiler runs with.`,
+      );
+    }
+  }
+
+  /** Restart the restricted servers of `wtPath`, so they start over with what is held now. */
+  private restartRestricted(wtPath: string, why: string): void {
+    const root = path.resolve(wtPath);
+    for (const session of [...this.sessions.values()]) {
+      if (path.resolve(session.wtPath) === root && !session.repoTrusted) this.restart(session, why);
+    }
   }
 
   private restart({ ws, wtPath }: WtLspSession, why: string): void {

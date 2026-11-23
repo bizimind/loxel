@@ -35,6 +35,7 @@ Language features run without building your project:
 - **Build scripts and proc macros don't run**, so macros they generate aren't expanded and items that only exist after a build, such as `include!` of generated code, are unknown.
 - **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's. **No marker doesn't mean no error.** You see syntax errors, wrong argument counts, missing struct fields, non-exhaustive matches and, in recent versions of rust-analyzer, mismatched types. Only `cargo check` in a terminal reports unknown names, types, methods, fields and macros, unimported items (the Import quick fix is still offered), unresolved `use` and `mod`, unmet trait bounds, and borrow checker errors such as use after move.
 - **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target.
+- **A project with a `.cargo/config.toml` or `.cargo/config` in its folder or a folder above it doesn't load**, since Cargo would apply that configuration to the compiler it runs. A notification names the file, and the project loads once you trust the repository. Your own configuration in your Cargo home doesn't count.
 
 ### In every repository
 
