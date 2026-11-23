@@ -7,6 +7,8 @@ import {
   createInlineChangeBudget,
   rangesByLine,
 } from "@/components/diff/inline-changes";
+import { RevealedRuns, revealUnseenInHtml } from "@/components/ui/revealed-text";
+import { revealUnseen, sliceRuns } from "@/lib/unseen-chars";
 
 /** A line of a hunk as rendered by the hunk-based diff views, optionally syntax-highlighted */
 export type HunkLine = DiffLine & { html?: string };
@@ -91,7 +93,9 @@ interface HunkLineContentProps {
  *
  * The highlights are drawn by a transparent copy of the line positioned underneath the real
  * (possibly syntax-highlighted) text. Both layers share the same font and whitespace handling,
- * so span positions match exactly without touching the highlighter's HTML.
+ * so span positions match exactly, and no highlight markup enters the highlighter's HTML; it is
+ * rewritten only to put in the source line's escapes for unseen characters, which the copy spells
+ * from the same runs.
  *
  * Tab alignment constraint: the absolutely positioned ghost is its own block container, so its
  * tab stops are measured from its own left edge, while the real text's tab stops are measured
@@ -99,12 +103,17 @@ interface HunkLineContentProps {
  * of its cell; markers or gutters belong in a separate cell.
  */
 export function HunkLineContent({ line, highlighted, segments }: HunkLineContentProps) {
-  const text =
-    highlighted && line.html ? (
-      <span dangerouslySetInnerHTML={{ __html: line.html }} />
-    ) : (
-      line.content
-    );
+  // Characters that would not show (bidirectional controls, zero-width characters) are spelled as
+  // escapes in both layers, so the line reads as its bytes and the layers stay aligned. Both take
+  // them from the source line's runs: the highlighted markup gets them by source offset, and the
+  // ghost slices them, so neither a token nor a span boundary can change what is revealed.
+  const runs = revealUnseen(line.content, { as: "code" });
+  const html = highlighted ? line.html : undefined;
+  const text = html ? (
+    <span dangerouslySetInnerHTML={{ __html: revealUnseenInHtml(html, runs) }} />
+  ) : (
+    <RevealedRuns runs={runs} />
+  );
 
   if (!segments || segments.length === 0) return text;
 
@@ -112,15 +121,22 @@ export function HunkLineContent({ line, highlighted, segments }: HunkLineContent
   const ghost: React.ReactNode[] = [];
   let cursor = 1;
   for (const [i, span] of segments.entries()) {
-    if (span.startColumn > cursor) ghost.push(line.content.slice(cursor - 1, span.startColumn - 1));
+    if (span.startColumn > cursor) {
+      ghost.push(
+        <RevealedRuns
+          key={`${i}-before`}
+          runs={sliceRuns(runs, cursor - 1, span.startColumn - 1)}
+        />,
+      );
+    }
     ghost.push(
       <span key={i} className={className}>
-        {line.content.slice(span.startColumn - 1, span.endColumn - 1)}
+        <RevealedRuns runs={sliceRuns(runs, span.startColumn - 1, span.endColumn - 1)} />
       </span>,
     );
     cursor = span.endColumn;
   }
-  ghost.push(line.content.slice(cursor - 1));
+  ghost.push(<RevealedRuns key="rest" runs={sliceRuns(runs, cursor - 1, line.content.length)} />);
 
   return (
     <span className="relative">

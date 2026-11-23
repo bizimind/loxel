@@ -16,6 +16,7 @@ import {
   useEditableSide,
 } from "@/components/diff/use-editable-side";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { RevealedText } from "@/components/ui/revealed-text";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { relativeTo } from "@/lib/project-file-helpers";
@@ -90,7 +91,8 @@ export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPan
 
     const title = (
       <>
-        {getDisplayFilename(oldPath)} ↔ {getDisplayFilename(newPath)}
+        <RevealedText text={getDisplayFilename(oldPath)} as="name" /> ↔{" "}
+        <RevealedText text={getDisplayFilename(newPath)} as="name" />
         {diff.hunks.length === 0 && (
           <span className="text-muted-foreground ml-2 font-normal">Files are identical</span>
         )}
@@ -172,7 +174,7 @@ function toDiffSide(
     modelUri,
     label: (
       <span className="text-foreground ml-1" title={side.filePath}>
-        {label}
+        <RevealedText text={label} as="name" />
       </span>
     ),
     ...editableDiffSideProps(side),
