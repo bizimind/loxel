@@ -13,12 +13,15 @@ import { repeatUntil } from "@/test/repeat-until";
 import { GO_ENV, GOPLS, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {
   GO_NOT_FOUND_REASON,
+  GO_REPO_TRUST_RESTRICTION,
   GoLspManager,
   GOPLS_SETTINGS,
   goSetupProblem,
+  trustedOnlyCommand,
   withoutHiddenActions,
 } from "./go-lsp-manager";
 import { setGoChoice } from "./go-toolchain-store";
+import { getRepoTrustStatus, setRepoTrusted } from "./repo-trust";
 
 const roots: string[] = [];
 let manager: GoLspManager | undefined;
@@ -77,6 +80,8 @@ process.stdin.on("data", (chunk) => {
         method: "workspace/configuration",
         params: { items: [{ section: "gopls" }, { section: "other" }] },
       });
+    } else if (msg.method === "workspace/executeCommand") {
+      send({ jsonrpc: "2.0", id: msg.id, result: { ran: msg.params.command } });
     } else if (msg.id === 900) {
       send({ jsonrpc: "2.0", method: "test/configuration", params: msg.result });
       for (let i = 0; i < 2; i++) {
@@ -273,6 +278,90 @@ describe("GoLspManager", () => {
         executeCommandProvider: { commands: ["gopls.tidy"] },
       },
     });
+  });
+});
+
+describe("commands that need a trusted repository", () => {
+  const executeCommand = (id: number, command: string) =>
+    JSON.stringify({ jsonrpc: "2.0", id, method: "workspace/executeCommand", params: { command } });
+
+  test("are refused with the restriction until the repository is trusted, and others pass", async () => {
+    const wt = await makeDir("go-wt-");
+    const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
+    const gopls = join(await makeDir("gopls-"), "gopls");
+    await writeExecutable(gopls, FAKE_GOPLS);
+    await restrictPath(bin);
+    manager = new TestGoLspManager(gopls);
+
+    const client = fakeSocket();
+    manager.createSession(client.ws, wt);
+    manager.handleMessage(client.ws, INITIALIZE);
+    await client.untilFrame((frame) => frame.id === 1);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+
+    manager.handleMessage(client.ws, executeCommand(2, "gopls.generate"));
+    const refused = await client.untilFrame((frame) => frame.id === 2);
+    expect(refused.result).toBeUndefined();
+    expect(refused.error).toMatchObject({ message: expect.stringContaining("trusted") });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([GO_REPO_TRUST_RESTRICTION]);
+
+    // A notification has no answer, and does not reach gopls either.
+    manager.handleMessage(
+      client.ws,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workspace/executeCommand",
+        params: { command: "gopls.run_tests" },
+      }),
+    );
+    manager.handleMessage(client.ws, executeCommand(3, "gopls.tidy"));
+    expect((await client.untilFrame((frame) => frame.id === 3)).result).toEqual({
+      ran: "gopls.tidy",
+    });
+    // gopls answers in order, so anything it ran before the tidy has been answered by now.
+    expect(client.frames.filter((frame) => frame.id === 2)).toHaveLength(1);
+    const ran = client.frames.map((frame) => (frame.result as { ran?: string } | undefined)?.ran);
+    expect(ran).not.toContain("gopls.generate");
+    expect(ran).not.toContain("gopls.run_tests");
+
+    setRepoTrusted(wt, true);
+    manager.handleMessage(client.ws, executeCommand(4, "gopls.generate"));
+    expect((await client.untilFrame((frame) => frame.id === 4)).result).toEqual({
+      ran: "gopls.generate",
+    });
+  });
+
+  test("are the ones that run project code, start the debug server or call any method", () => {
+    for (const command of [
+      "gopls.generate",
+      "gopls.run_tests",
+      "gopls.start_debugging",
+      "gopls.lsp",
+    ]) {
+      expect(trustedOnlyCommand(executeCommand(1, command))).toEqual({ id: 1, command });
+    }
+    for (const command of ["gopls.tidy", "gopls.vendor", "gopls.gc_details", "gopls.add_import"]) {
+      expect(trustedOnlyCommand(executeCommand(1, command))).toBeNull();
+    }
+    expect(
+      trustedOnlyCommand(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, result: "workspace/executeCommand" }),
+      ),
+    ).toBeNull();
+    // Read as gopls reads JSON: escapes decoded, keys in any letter case.
+    expect(trustedOnlyCommand(executeCommand(1, "gopls.generate").replace("/", "\\u002f"))).toEqual(
+      { id: 1, command: "gopls.generate" },
+    );
+    expect(
+      trustedOnlyCommand(
+        JSON.stringify({
+          id: 1,
+          Method: "workspace/executeCommand",
+          PARAMS: { Command: "gopls.lsp" },
+        }),
+      ),
+    ).toEqual({ id: 1, command: "gopls.lsp" });
   });
 });
 
