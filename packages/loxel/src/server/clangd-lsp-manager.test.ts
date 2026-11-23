@@ -991,6 +991,35 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
       );
 
       test(
+        "passes none of the project's spec files to the compiler",
+        async () => {
+          const compilers = await makeDir();
+          const root = await makeDir();
+          const log = join(root, "args");
+          const compiler = join(compilers, "gcc");
+          await writeFile(compiler, `#!/bin/sh\necho "$*" >> "${log}"\n`);
+          await chmod(compiler, 0o755);
+          const specs = [
+            "--specs=a",
+            "-specs=b",
+            "--specs",
+            "c",
+            "-specs",
+            "d",
+            "-Xclang",
+            "--specs",
+            "-Ie",
+          ];
+          const file = await writeProject(root, compiler, specs);
+          await runWith(compilers, root, file);
+          const args = await readFile(log, "utf8");
+          expect(args).toContain("-E");
+          expect(args).not.toContain("specs");
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
         "does not run other programs in that directory or below it",
         async () => {
           const compilers = await makeDir();
