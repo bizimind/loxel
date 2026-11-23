@@ -12,6 +12,7 @@ import { TextSelection } from "@milkdown/kit/prose/state";
 
 import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 
+import { IMAGE_PARAGRAPH_CLASS, installMarkdownImages } from "./markdown-images";
 import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 import {
   applyBodyToEditor,
@@ -262,6 +263,90 @@ describe("serializeBody source preservation", () => {
       ctx.get(editorViewCtx).state.doc.forEach((node) => lists.push(node.type.name));
       expect(lists.filter((name) => name === "bullet_list")).toHaveLength(2);
     });
+  });
+
+  test("inline images survive the baseline and keep their bytes when untouched", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    // Non-canonical spacing and title quoting so the serializer alone would rewrite the block;
+    // `#`/space in the src exercise the `<...>` destination form the serializer would emit.
+    const withImage =
+      "Intro\n\n![A  shot](<./assets/Screenshot #1.png> 'title')\n\n* one\n* two\n\nlast paragraph\n";
+    const editor = new Crepe({
+      root: el,
+      defaultValue: withImage,
+      features: { [Crepe.Feature.ImageBlock]: false },
+    });
+    installMarkdownImages(editor.editor, { filePath: "/repo/wt/docs/plan.md" });
+    try {
+      await editor.create();
+      setSourceBaseline(editor, withImage);
+      expect(serializeBody(editor)).toBe(withImage);
+      // The image node view mounts asynchronously; its DOM src is proxied, the markdown is not.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      const img = el.querySelector("img.image-inline");
+      expect(img?.getAttribute("src")).toBe(
+        "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fassets%2FScreenshot+%231.png",
+      );
+      // Editing another block leaves the image block byte-identical.
+      editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let found = false;
+        view.state.doc.descendants((node, pos) => {
+          if (found || !node.isTextblock || node.textContent !== "last paragraph") return !found;
+          found = true;
+          view.dispatch(view.state.tr.insertText("last paragraph, edited", pos + 1, pos + 15));
+          return false;
+        });
+        expect(found).toBe(true);
+      });
+      expect(serializeBody(editor)).toBe(
+        withImage.replace("last paragraph", "last paragraph, edited"),
+      );
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
+  });
+
+  test("images without a title parse into image nodes and serialize back without one", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const untitled =
+      "Intro ![ok](./assets/ok.png) inline\n\n![Flow chart](./assets/flow.png)\n\n* ![bullet](./assets/b.png)\n";
+    const editor = new Crepe({
+      root: el,
+      defaultValue: untitled,
+      features: { [Crepe.Feature.ImageBlock]: false },
+    });
+    installMarkdownImages(editor.editor, { filePath: "/repo/wt/docs/plan.md" });
+    try {
+      await editor.create();
+      editor.editor.action((ctx) => {
+        const images: Record<string, unknown>[] = [];
+        ctx.get(editorViewCtx).state.doc.descendants((node) => {
+          if (node.type.name === "image") images.push(node.attrs);
+        });
+        expect(images).toEqual([
+          { src: "./assets/ok.png", alt: "ok", title: "" },
+          { src: "./assets/flow.png", alt: "Flow chart", title: "" },
+          { src: "./assets/b.png", alt: "bullet", title: "" },
+        ]);
+      });
+      // No source baseline: this is the serializer's own output, not preserved bytes.
+      expect(serializeBody(editor)).toBe(untitled);
+      // Only the top-level paragraph holding nothing but an image is tagged for block centering,
+      // not the image-only list item.
+      const tagged = [...el.querySelectorAll(`p.${IMAGE_PARAGRAPH_CLASS}`)];
+      expect(tagged).toHaveLength(1);
+      expect(tagged[0]?.textContent).toBe("");
+      expect(el.querySelector("p")?.classList.contains(IMAGE_PARAGRAPH_CLASS)).toBe(false);
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
   });
 
   test("an own echo of the preserved body is a no-op", () => {

@@ -1052,3 +1052,53 @@
     var(--card)
   );
 }
+
+/* ── Images ── */
+
+.milkdown .milkdown-image-inline {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.milkdown .milkdown-image-inline img.image-inline {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+/* An image that is the only content of its paragraph (tagged `image-paragraph` by
+   markdown-images.ts) is centered with a code block's gap around it. The wrapper stays inline:
+   ProseMirror's separator and trailing-break nodes around the image would each add an empty line
+   if it were a block. */
+.milkdown p.image-paragraph {
+  text-align: center;
+}
+
+.milkdown p.image-paragraph > .milkdown-image-inline {
+  margin-block: calc(var(--u) * 1.2);
+  vertical-align: top;
+}
+
+/* No baseline gap under a loaded block image; a broken one keeps its inline placeholder. */
+.milkdown p.image-paragraph > .milkdown-image-inline:not(.broken) img.image-inline {
+  display: block;
+}
+
+.milkdown .milkdown-image-inline.selected img.image-inline {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Broken image: keep a visible placeholder with the alt text instead of a blank gap. */
+.milkdown .milkdown-image-inline.broken img.image-inline {
+  display: inline-flex;
+  align-items: center;
+  min-width: 120px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px dashed var(--destructive, #e5484d);
+  color: var(--destructive, #e5484d);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--destructive, #e5484d), transparent 92%);
+}
