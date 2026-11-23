@@ -1318,7 +1318,7 @@ async function handleListRepoTrust(): Promise<Response> {
   const worktrees = await Promise.all(
     projects.map(async (project) => {
       // A project whose folder is gone has nothing to answer through; its stored answer is still
-      // listed. A bare root's identity is not its worktrees', so it answers through those.
+      // listed. A bare root is not a worktree the trust route accepts, so it answers through those.
       if (!existsSync(project.path)) return [];
       if (!project.isBare) return [project.path];
       try {

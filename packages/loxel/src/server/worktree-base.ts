@@ -11,8 +11,8 @@ import type { WorktreeBasePlan } from "@/api/project-model";
 
 import { gitText, readOnlyGitEnv, runGit } from "./git-commands";
 import { logger } from "./logger";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { isRepositoryTrusted } from "./worktree-hooks";
 
 const log = logger.child("worktrees");
 
@@ -52,7 +52,7 @@ async function runFetch(repoPath: string, timeoutMs: number): Promise<boolean> {
     const ref = await resolveRemoteDefault(repoPath);
     // An origin/HEAD pointed at another remote's ref is not origin's branch to fetch.
     if (!ref?.startsWith("origin/")) return false;
-    if (!(await isRepositoryTrusted(repoPath))) {
+    if (!isRepoTrusted(repoPath)) {
       log.info(
         `Not fetching ${ref} in an untrusted repository; creating the worktree from it as last fetched`,
       );

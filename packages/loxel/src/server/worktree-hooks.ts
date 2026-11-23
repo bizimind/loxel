@@ -6,7 +6,7 @@
  * act and runs them as it always does. A bare clone is not restricted: its git config and hooks
  * come from git itself, not from the repository.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 import {
   cloneBareRepo,
@@ -26,13 +26,8 @@ import {
   withGitEnv,
 } from "@bizimind/wt/lib";
 
-import { gitText, readOnlyGitEnv, untrustedChangeGitEnv } from "./git-commands";
-import {
-  isRepoGitDirTrusted,
-  isRepoTrusted,
-  reportRepoRestriction,
-  setRepoTrusted,
-} from "./repo-trust";
+import { untrustedChangeGitEnv } from "./git-commands";
+import { isRepoTrusted, reportRepoRestriction, setRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
@@ -42,26 +37,6 @@ export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.
 const ORIGIN_FIXES: readonly InitActionId[] = ["fetch-refspec", "origin-head"];
 
 type HookOptions = "hookEnv" | "allowHook";
-
-/**
- * Whether Loxel may run code from the repository at `repoPath`: one of its worktrees, or the root of
- * a bare repository, which stands for the repository when it is itself the git directory (never
- * through a `.git` file or link, which could name any repository's).
- */
-export async function isRepositoryTrusted(repoPath: string): Promise<boolean> {
-  if (isRepoTrusted(repoPath)) return true;
-  const dirs = await gitText(
-    ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
-    { cwd: repoPath, env: readOnlyGitEnv(repoPath), nothrow: true },
-  );
-  const [gitDir, commonDir] = dirs.trim().split("\n");
-  if (gitDir === undefined || gitDir !== commonDir) return false;
-  try {
-    return realpathSync(gitDir) === realpathSync(repoPath) && isRepoGitDirTrusted(gitDir);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Run `fn`, wt operations on the repository at `repoPath`, with every git command they run kept
@@ -76,7 +51,7 @@ export async function withRepoGitEnv<T>(
   fn: () => Promise<T>,
   checkout: string = repoPath,
 ): Promise<T> {
-  if (await isRepositoryTrusted(repoPath)) return fn();
+  if (isRepoTrusted(repoPath)) return fn();
   const env = await untrustedChangeGitEnv(existsSync(checkout) ? checkout : repoPath);
   return withGitEnv(env, fn, untrustedChangeGitEnv);
 }
@@ -104,7 +79,7 @@ export async function applyInitActions(
   apply: InitActionId[],
   progress: ProgressHandler,
 ): Promise<InitResult> {
-  const trusted = await isRepositoryTrusted(repoPath);
+  const trusted = isRepoTrusted(repoPath);
   const held = trusted ? [] : apply.filter((id) => ORIGIN_FIXES.includes(id));
   const result = await withRepoGitEnv(repoPath, () =>
     executeInit(
@@ -152,8 +127,8 @@ function reportHeldHooks(result: InitResult): InitResult {
 
 /**
  * Add the first worktree of a repository Loxel has just created from scratch, which starts trusted:
- * nothing in it came from anyone else. Trust is given on the new worktree, since a bare root does
- * not stand for the repository its worktrees belong to, and only then does `init.wt.sh` run.
+ * nothing in it came from anyone else. Trust is given on the new worktree, and only then does
+ * `init.wt.sh` run.
  */
 export async function addFirstWorktreeOfNewRepo(
   params: Omit<AddParams, HookOptions>,

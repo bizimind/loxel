@@ -17,7 +17,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "routes-worktree-hooks-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
 const { getRepoTrustStatus, isRepoTrusted, setRepoTrusted } = await import("./repo-trust");
-const { isRepositoryTrusted, WORKTREE_HOOKS_RESTRICTION } = await import("./worktree-hooks");
+const { WORKTREE_HOOKS_RESTRICTION } = await import("./worktree-hooks");
 const { DEFAULT_BRANCH_FETCH_RESTRICTION } = await import("./worktree-base");
 type RouteContext = import("./routes").RouteContext;
 
@@ -182,16 +182,6 @@ describe("worktree hooks in an untrusted repository", () => {
     expect(plan.dirty).toBe(false);
     const [status] = await post(ctx, "/api/worktree/remove", target);
     expect(status).toBe(200);
-  });
-
-  test("a folder whose .git names a trusted repository's git directory is not trusted", async () => {
-    setRepoTrusted(repo, true);
-    const other = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-gitfile-")));
-    roots.push(other);
-    await Bun.write(join(other, ".git"), `gitdir: ${join(repo, ".git")}\n`);
-
-    expect(await isRepositoryTrusted(repo)).toBe(true);
-    expect(await isRepositoryTrusted(other)).toBe(false);
   });
 
   test("creating a worktree from origin's default branch does not fetch it first, and says so", async () => {
@@ -379,14 +369,6 @@ describe("setting up an existing or cloned repository like wt init", () => {
     expect(recommended?.map((action) => action.id)).toEqual(["fetch-refspec", "main-worktree"]);
   });
 
-  /** Trust a bare repository, through a worktree of its own outside the worktrees directory. */
-  async function trustBareRepo(bareDir: string): Promise<void> {
-    const worktree = `${bareDir}-trusted`;
-    roots.push(worktree);
-    await Bun.$`git -C ${bareDir} worktree add -q --detach ${worktree}`;
-    setRepoTrusted(worktree, true);
-  }
-
   test("adding an existing repository applies the chosen fixes, its hook held back", async () => {
     const { url, dest } = await makeRemote();
     const bareDir = join(dest, "plain.git");
@@ -415,7 +397,7 @@ describe("setting up an existing or cloned repository like wt init", () => {
     const { url, dest } = await makeRemote();
     const bareDir = join(dest, "plain.git");
     await Bun.$`git clone -q --bare -- ${url} ${bareDir}`;
-    await trustBareRepo(bareDir);
+    setRepoTrusted(bareDir, true);
 
     const [status, project] = await post<{ setupFailures?: string }>(projectCtx, "/api/projects", {
       path: bareDir,
@@ -433,7 +415,7 @@ describe("setting up an existing or cloned repository like wt init", () => {
     await Bun.$`git clone -q --bare -- ${url} ${bareDir}`;
     // As when origin can't be reached: the fetch fails, the default branch's worktree does not.
     await Bun.$`git -C ${bareDir} remote set-url origin ${join(dest, "gone")}`;
-    await trustBareRepo(bareDir);
+    setRepoTrusted(bareDir, true);
 
     const [status, project] = await post<{ path: string; setupFailures?: string }>(
       projectCtx,
