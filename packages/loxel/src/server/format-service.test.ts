@@ -336,12 +336,15 @@ describe("FormatService Python detection", () => {
     const ruff = await service.format("x=1\n", ruffFile, wt, AUTO_DETECT);
     expect(ruff.content ?? "").not.toStartWith("ruff ");
     expect(await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).toEqual({ content: null });
-    const overridden = await service.format("x=1\n", ruffFile, wt, override);
-    expect(overridden.content ?? "").not.toStartWith("ruff ");
+    expect(await service.format("x=1\n", ruffFile, wt, override)).toEqual({ content: null });
     // Loxel's own ruff stands in for the project's only in a build that has it.
     const held = bundledRuff() ? [BUNDLED_RUFF_FORMAT_RESTRICTION] : [];
     expect(getRepoTrustStatus(wt).restrictions.toSorted()).toEqual(
-      [...held, BLACK_FORMAT_RESTRICTION].toSorted(),
+      [
+        ...held,
+        BLACK_FORMAT_RESTRICTION,
+        "Format on save doesn't run your override ruff format - until you trust this repository.",
+      ].toSorted(),
     );
 
     setRepoTrusted(wt, true);
@@ -465,6 +468,7 @@ describe("FormatService language modules", () => {
 
   test("spawn options apply to a manual override too", async () => {
     const wt = await makeWorktree({});
+    setRepoTrusted(wt, true);
     await installFormatter(join(wt, "tools"), "tools");
     const language = fakeLanguage({
       detect: () => null,
@@ -624,6 +628,7 @@ describe("FormatService language failure notices", () => {
 
   test("the hook also covers a manual override for its extensions", async () => {
     const wt = await makeWorktree({});
+    setRepoTrusted(wt, true);
     const language = languageWith(MISSING, { failureNotice: () => "explained" });
     const result = await format(language, wt, {
       ...AUTO_DETECT,
@@ -685,6 +690,7 @@ describe("FormatService language failure notices", () => {
 describe("FormatService failure notices", () => {
   test("reports a missing formatter binary", async () => {
     const wt = await makeWorktree({});
+    setRepoTrusted(wt, true);
     const settings: FormattingSettings = {
       ...AUTO_DETECT,
       overrides: [{ id: "o1", extensions: "py", command: "loxel-missing-formatter", args: "" }],
@@ -791,52 +797,27 @@ describe("a manual override in an untrusted repository", () => {
     return wt;
   }
 
-  test("holds back a relative path and reports it", async () => {
-    const wt = await worktreeWithScript();
-    const result = await newService([]).format("x", "a.fake", wt, overrideFor("scripts/fmt"));
-    expect(result).toEqual({ content: null });
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([
-      "Format on save doesn't run scripts/fmt from this repository.",
-    ]);
-  });
-
   test.each([
+    ["scripts/fmt", ""],
     ["sh", "scripts/fmt {file}"],
-    ["sh", "./scripts/fmt"],
-    ["sh", "a.fake"],
-    ["some-tool", "--config=conf/fmt.toml {file}"],
-  ])("holds back %s %s, which names a path in the repository", async (command, args) => {
+    ["cat", ""],
+    ["cat", "--stdin-filepath={file}"],
+  ])("holds back %s %s and reports it by name", async (command, args) => {
     const wt = await worktreeWithScript();
     const settings = overrideFor(command);
     settings.overrides[0]!.args = args;
     const result = await newService([]).format("x", "a.fake", wt, settings);
     expect(result).toEqual({ content: null });
     expect(getRepoTrustStatus(wt).restrictions).toEqual([
-      `Format on save doesn't run ${command} ${args} from this repository.`,
+      `Format on save doesn't run your override ${`${command} ${args}`.trim()} until you trust this repository.`,
     ]);
   });
 
-  test("runs a command by name whose arguments name no path in the repository", async () => {
+  test("holds back an absolute path", async () => {
     const wt = await worktreeWithScript();
-    const settings = overrideFor("sh");
-    settings.overrides[0]!.args = "-c true --stdin-filepath={file}";
-    const result = await newService([]).format("x", "a.fake", wt, settings);
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
-    expect(result.content).toBeNull();
-    expect(result.notice).toBeUndefined();
+    const settings = overrideFor(join(wt, "scripts/fmt"));
+    expect(await newService([]).format("x", "a.fake", wt, settings)).toEqual({ content: null });
   });
-
-  test.each(["--config /bin/sh {file}", "--config=/bin/sh {file}"])(
-    "runs a command by name with an absolute path outside the repository: %s",
-    async (args) => {
-      const wt = await worktreeWithScript();
-      const settings = overrideFor("loxel-missing-formatter");
-      settings.overrides[0]!.args = args;
-      const result = await newService([]).format("x", "a.fake", wt, settings);
-      expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
-      expect(result.notice).toContain("is not installed");
-    },
-  );
 
   test("runs a relative path once the repository is trusted", async () => {
     const wt = await worktreeWithScript();
@@ -845,15 +826,10 @@ describe("a manual override in an untrusted repository", () => {
     expect(result.content).toBe("ran\n");
   });
 
-  test("runs an absolute path", async () => {
+  test("runs a command by name once the repository is trusted", async () => {
     const wt = await worktreeWithScript();
-    const result = await newService([]).format(
-      "x",
-      "a.fake",
-      wt,
-      overrideFor(join(wt, "scripts/fmt")),
-    );
-    expect(result.content).toBe("ran\n");
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+    setRepoTrusted(wt, true);
+    const result = await newService([]).format("x", "a.fake", wt, overrideFor("cat"));
+    expect(result.content).toBe("x");
   });
 });

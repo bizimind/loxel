@@ -10,6 +10,7 @@ import { writeExecutable } from "@/test/executable";
 // The fakes here are scripts, which the lookup refuses; `rust-tool-shim.test.ts` covers that.
 mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false }));
 const { FormatService } = await import("./format-service");
+const { setRepoTrusted } = await import("./repo-trust");
 const { languageFormatters } = await import("./language-formatters");
 const { rustFormatter, rustFormatterWith } = await import("./rust-formatter");
 
@@ -372,6 +373,7 @@ describe("manual overrides", () => {
   });
 
   test("another command runs as written, on any toolchain, without installing", async () => {
+    setRepoTrusted(wt, true);
     await addFiles({ "a.rs": "" });
     const own = await install(join(temp, "own/my-rustfmt"));
     const unusable: RustToolchain = { status: "none", rustupPath: null, detail: null };
@@ -380,6 +382,7 @@ describe("manual overrides", () => {
   });
 
   test("rustfmt by name is the toolchain's", async () => {
+    setRepoTrusted(wt, true);
     await addFiles({ "a.rs": "" });
     const rustfmt = await install(join(temp, "toolchain/bin/rustfmt"));
     const { content } = await save("a.rs", active({ rustfmt }), overriding("rustfmt"));

@@ -7,8 +7,6 @@ import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
 import {
-  dotnetArgsRunProjectTool,
-  isVersionManagerShim,
   prepareDotnet,
   readDotnetToolManifests,
   resolveDotnet,
@@ -39,7 +37,6 @@ export const csharpFormatter: LanguageFormatter = {
   detect: detectCSharpFormatter,
   spawnOptions: csharpSpawnOptions,
   failureNotice: csharpFailureNotice,
-  overrideRunsProjectTool: dotnetArgsRunProjectTool,
 };
 
 /**
@@ -57,7 +54,6 @@ const MAX_PROJECT_FILE_BYTES = 1_024 * 1_024;
 /** In what `dotnet tool run` prints for a manifest's tool that is not in the local tool cache. */
 const NOT_RESTORED_HINT = "dotnet tool restore";
 const LOCAL_TOOL_RESTRICTION = "The project's own CSharpier doesn't format on save.";
-const SHIM_RESTRICTION = "A version manager's `dotnet` doesn't run for format on save.";
 const LOCAL_TOOL_DECLINE: FormatterDecline = {
   notice:
     "Format on save skipped: this project's CSharpier runs only once you trust the repository. Trust it, or install `csharpier` on your PATH with `dotnet tool install -g csharpier`.",
@@ -172,15 +168,6 @@ async function dotnetSpawnOptions(dir: string, wtRoot: string): Promise<Formatte
         skip: {
           notice:
             "Format on save skipped: this project uses CSharpier through dotnet, which is not on your PATH. Install the .NET SDK.",
-        },
-      };
-    }
-    if (await isVersionManagerShim(dotnet)) {
-      reportRepoRestriction(wtRoot, SHIM_RESTRICTION);
-      return {
-        skip: {
-          notice:
-            "Format on save skipped: \"dotnet\" on your PATH is a version manager's shim, which Loxel runs in a project only once you trust its repository. Trust it, or add the SDK's own directory to your PATH.",
         },
       };
     }

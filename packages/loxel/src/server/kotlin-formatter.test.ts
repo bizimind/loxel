@@ -14,6 +14,7 @@ import type { FileFormatter, FormatterDecline } from "./language-formatter";
 const stateDir = await mkdtemp(join(tmpdir(), "kotlin-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
+const { setRepoTrusted } = await import("./repo-trust");
 const { jdkToolEnv, kotlinFormatter } = await import("./kotlin-formatter");
 
 const originalPath = process.env.PATH;
@@ -550,6 +551,7 @@ describe("kotlinFormatter spawning", () => {
 
   test("a manual override keeps the worktree as its directory", async () => {
     const wt = await makeWorktree();
+    setRepoTrusted(wt, true);
     const bin = await machineBin(wt, "my-kotlin-fmt");
     const result = await new FormatService().format("x", "A.kt", wt, {
       ...DEFAULT_FORMATTING_SETTINGS,

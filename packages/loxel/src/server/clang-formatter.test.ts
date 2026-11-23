@@ -79,6 +79,7 @@ describe("clangFormatter selection", () => {
   });
 
   test("leaves .m and .i alone, and a manual override still formats them", async () => {
+    setRepoTrusted(wt, true);
     await addFiles({ ".clang-format": "", "node_modules/.keep": "" });
     await installFake();
     expect(await save("a.m")).toEqual({ content: null });
@@ -182,6 +183,7 @@ describe("clangFormatter spawning", () => {
   });
 
   test("a manual override of another command keeps the default directory", async () => {
+    setRepoTrusted(wt, true);
     await addFiles({ ".clang-format": "" });
     await writeExecutable(join(tools, "my-fmt"), '#!/bin/sh\necho "other cwd=$PWD"\n');
     const result = await new FormatService().format("x", join(wt, "a.c"), wt, {

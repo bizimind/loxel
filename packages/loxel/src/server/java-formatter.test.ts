@@ -9,6 +9,7 @@ import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 const stateDir = await mkdtemp(join(tmpdir(), "java-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
+const { setRepoTrusted } = await import("./repo-trust");
 
 const originalEnv = { ...process.env };
 let root: string | undefined;
@@ -217,6 +218,7 @@ describe("choosing what runs", () => {
 
   test("a manual override runs whatever the version", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
+    setRepoTrusted(wt, true);
     await installTool(GOOGLE, "1.37.0");
     const result = await service.format("class A{}", join(wt, "src/main/java/A.java"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
@@ -358,6 +360,7 @@ describe("the pinned jar from the build's cache", () => {
 
   test("a manual override with an absolute java keeps the worktree as its directory", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
+    setRepoTrusted(wt, true);
     const java = await write(join(root ?? "", "own", "java"), "#!/bin/sh\npwd\n", 0o755);
     const { content } = await service.format("class A{}", join(wt, "src/main/java/A.java"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
@@ -368,6 +371,7 @@ describe("the pinned jar from the build's cache", () => {
 
   test("the java that ran a cached jar stays an ordinary command for a manual override", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
+    setRepoTrusted(wt, true);
     process.env.PATH = "/usr/bin:/bin";
     const home = await installJdk("jdk", true);
     process.env.JAVA_HOME = home;

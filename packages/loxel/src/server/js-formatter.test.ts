@@ -369,34 +369,17 @@ describe("an untrusted repository", () => {
     overrides: [{ id: "o", extensions: "ts", command, args: "--stdin {file}" }],
   });
 
-  test("an override is the user's own setting and runs, from the worktree", async () => {
-    await write({ "src/.keep": "" });
-    await tool(join(userBin, "other-fmt"), "user-other");
-    expect((await save("src/a.ts", withOverride("other-fmt"))).content).toStartWith(
-      `user-other cwd=${wt} `,
-    );
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
-  });
-
-  test("an override of prettier runs the user's, not the worktree's", async () => {
+  test("an override waits for trust, then runs", async () => {
     await tool(bin(".", "prettier"), "project-prettier");
     await tool(join(userBin, "prettier"), "user-prettier");
-    expect((await save("a.ts", withOverride("prettier"))).content).toStartWith("user-prettier ");
+    expect(await save("a.ts", withOverride("prettier"))).toEqual({ content: null });
     expect(ran("project-prettier")).toBe(false);
-  });
-
-  test("an override through a link on PATH leading into the worktree does not run", async () => {
-    await tool(bin(".", "prettier"), "project-prettier");
-    await symlink(bin(".", "prettier"), join(userBin, "prettier"));
-    expect((await save("a.ts", withOverride("prettier"))).content).toBeNull();
-    expect(ran("project-prettier")).toBe(false);
-  });
-
-  test("another override by name never finds the worktree's node_modules/.bin", async () => {
-    await tool(bin(".", "other-fmt"), "project-other");
-    await tool(join(userBin, "other-fmt"), "user-other");
-    expect((await save("a.ts", withOverride("other-fmt"))).content).toStartWith("user-other ");
-    expect(ran("project-other")).toBe(false);
+    expect(ran("user-prettier")).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      "Format on save doesn't run your override prettier --stdin {file} until you trust this repository.",
+    ]);
+    setRepoTrusted(wt, true);
+    expect((await save("a.ts", withOverride("prettier"))).content).toStartWith("project-prettier ");
   });
 
   test("deno comes from the user's PATH, and a worktree one does not run", async () => {
@@ -442,15 +425,6 @@ describe("version manager shims", () => {
     await write({ ".prettierrc": "{}" });
     await shim("prettier", "shim");
     expect((await save("a.ts")).content).toBe(`shim cwd=/ args=--stdin-filepath ${inWt("a.ts")}\n`);
-  });
-
-  test("an untrusted repository's override through a shim runs from the root too", async () => {
-    await shim("other-fmt", "shim");
-    const settings = {
-      ...SETTINGS,
-      overrides: [{ id: "o", extensions: "ts", command: "other-fmt", args: "{file}" }],
-    };
-    expect((await save("a.ts", settings)).content).toBe(`shim cwd=/ args=${inWt("a.ts")}\n`);
   });
 
   test("a script whose interpreter is a shim runs from the root", async () => {
