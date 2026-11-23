@@ -224,23 +224,23 @@ describe("buildReverseLookup", () => {
     const template = TEMPLATES.loxel;
     const lookup = buildReverseLookup(template, {});
 
-    expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toEqual(["panel.new.markdown"]);
+    expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toEqual(["panel.new.browser"]);
     expect(lookup.get(normalizeKeyCombo("Cmd+W"))).toEqual(["panel.close"]);
     expect(lookup.get(normalizeKeyCombo("Cmd+Comma"))).toEqual(["app.settings"]);
   });
 
   test("user overrides replace template bindings", () => {
     const template = TEMPLATES.loxel;
-    const overrides = { "panel.new.markdown": [normalizeKeyCombo("Cmd+Shift+N")] } as Partial<
+    const overrides = { "panel.new.markdown": [normalizeKeyCombo("Ctrl+Alt+M")] } as Partial<
       Record<string, readonly KeyBinding[]>
     >;
 
     const lookup = buildReverseLookup(template, overrides);
 
     // New binding works
-    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+N"))).toEqual(["panel.new.markdown"]);
+    expect(lookup.get(normalizeKeyCombo("Ctrl+Alt+M"))).toEqual(["panel.new.markdown"]);
     // Old binding no longer maps to this action
-    expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toBeUndefined();
+    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+M"))).toBeUndefined();
   });
 
   test("handles multiple combos per action", () => {

@@ -62,7 +62,7 @@ loxel terminal --split right -- pnpm dev  # run a command in a new split
 
 - **Git** — an interactive commit graph with branch, author and date filters; cherry-pick, revert, reset and branch management, without leaving the task.
 - **Code review** — named review sessions with comments anchored to the code. When an agent rewrites it, comments move with it, or are marked outdated with the original lines kept for comparison.
-- **Drafts** — markdown notes (`Cmd+N`) and Excalidraw drawings (`Cmd+Shift+D`) that live outside the repo until you drag them in. Hand a draft to an agent as a spec, and keep it once it's worth keeping.
+- **Drafts** — markdown notes (`Cmd+Shift+M`) and Excalidraw drawings (`Cmd+Shift+D`) that live outside the repo until you drag them in. Hand a draft to an agent as a spec, and keep it once it's worth keeping.
 - **Data widgets** — a Table, Kanban, Calendar, Gantt, Graph or Form view right inside a markdown document, for task boards and decision logs (see [Data widgets](/docs/editor#data-widgets)).
 
 ---
