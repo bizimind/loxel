@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -142,6 +142,83 @@ describe("worktree hooks in a trusted repository", () => {
 
     await post(ctx, "/api/worktree/remove", target);
     expect(existsSync(join(repo, "clean-ran-feat"))).toBe(true);
+  });
+});
+
+describe("initializing git in an existing folder", () => {
+  const projectCtx = {
+    initializeProject: async () => ({}),
+    broadcastAll: () => {},
+  } as unknown as RouteContext;
+
+  async function makeFolder(): Promise<string> {
+    const folder = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-folder-")));
+    roots.push(folder);
+    await Bun.write(join(folder, "notes.txt"), "draft\n");
+    return folder;
+  }
+
+  const init = (path: string, setup: "single" | "multi") =>
+    post<{ error?: string }>(projectCtx, "/api/projects/init", {
+      path,
+      setup,
+      copyFiles: [],
+      setupCommands: [],
+    });
+
+  test("a folder without .git initializes as before", async () => {
+    const folder = await makeFolder();
+    expect((await post(projectCtx, "/api/projects/detect", { path: folder }))[1]).toMatchObject({
+      type: "non-repo-folder",
+    });
+
+    expect((await init(folder, "single"))[0]).toBe(200);
+    expect(existsSync(join(folder, ".git", "HEAD"))).toBe(true);
+  });
+
+  test("a .git directory git does not recognize is reported by detect and left alone by init", async () => {
+    const folder = await makeFolder();
+    await mkdir(join(folder, ".git"));
+
+    const [, detected] = await post<{ type: string; error?: string }>(
+      projectCtx,
+      "/api/projects/detect",
+      { path: folder },
+    );
+    expect(detected.type).toBe("invalid");
+    expect(detected.error).toContain(".git");
+
+    for (const setup of ["single", "multi"] as const) {
+      const [status, body] = await init(folder, setup);
+      expect(status).toBe(400);
+      expect(body.error).toContain(".git");
+    }
+    expect(await readdir(join(folder, ".git"))).toEqual([]);
+  });
+
+  test("init refuses a folder that is already a repository", async () => {
+    const folder = await makeFolder();
+    await Bun.$`git init -q --initial-branch=main ${folder}`;
+
+    const [status, body] = await init(folder, "multi");
+    expect(status).toBe(400);
+    expect(body.error).toContain("existing repository");
+  });
+
+  test("init refuses a folder whose .git is a file", async () => {
+    const folder = await makeFolder();
+    await Bun.write(join(folder, ".git"), "\n");
+
+    expect((await init(folder, "multi"))[0]).toBe(400);
+    expect(await Bun.file(join(folder, ".git")).text()).toBe("\n");
+  });
+
+  test("init refuses a folder whose .git is a symlink to nothing", async () => {
+    const folder = await makeFolder();
+    await symlink(join(folder, "missing"), join(folder, ".git"));
+
+    expect((await init(folder, "multi"))[0]).toBe(400);
+    expect(existsSync(join(folder, "missing"))).toBe(false);
   });
 });
 

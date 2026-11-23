@@ -141,7 +141,7 @@ function AddProjectDialog({ open, onClose }: { open: boolean; onClose: () => voi
         case "invalid":
         default:
           setImportStep("select-source");
-          setErrorMsg("Enter a local path or git URL");
+          setErrorMsg(result.error ?? "Enter a local path or git URL");
           break;
       }
     } catch {

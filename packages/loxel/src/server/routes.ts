@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -2021,6 +2021,19 @@ function failedInitActions(results: InitResult[]): string | null {
   return failed.map((outcome) => `${outcome.id}: ${outcome.error ?? "failed"}`).join("; ");
 }
 
+const EXISTING_GIT_ENTRY =
+  "This folder already has a .git entry, but git cannot open it as a repository, so Loxel will not initialize git here. Run `git status` in the folder to see why.";
+const INIT_OVER_GIT_ENTRY =
+  "This folder already has a .git entry, so Loxel will not initialize git over it. Add the folder as an existing repository instead.";
+
+/**
+ * Whether `dirPath` holds a `.git` entry of any kind, a dangling symlink included. `git init`
+ * reinitializes over one and keeps its config and hooks, so Loxel never initializes there.
+ */
+function hasGitEntry(dirPath: string): boolean {
+  return lstatSync(join(dirPath, ".git"), { throwIfNoEntry: false }) !== undefined;
+}
+
 // POST /api/projects/detect — detect what a path points to
 async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
@@ -2069,6 +2082,16 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
         // A linked worktree is added as a checkout of its own, while `wt init` fixes would apply
         // to the repository it belongs to, so it gets none.
         setup: repoType === "regular" ? await repoSetupPlan(gitRoot) : undefined,
+      };
+      return json(result);
+    }
+
+    if (hasGitEntry(dirPath)) {
+      const result: DetectPathResult = {
+        type: "invalid",
+        path: dirPath,
+        name: "",
+        error: EXISTING_GIT_ENTRY,
       };
       return json(result);
     }
@@ -2256,6 +2279,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   if (!existsSync(dirPath)) {
     return error("Path does not exist", 400);
   }
+  if (hasGitEntry(dirPath)) return error(INIT_OVER_GIT_ENTRY, 400);
 
   let firstWorktree: AddResult | undefined;
   const setupResults: InitResult[] = [];
