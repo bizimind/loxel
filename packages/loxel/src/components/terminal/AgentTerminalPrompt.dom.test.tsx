@@ -88,6 +88,33 @@ describe("AgentTerminalPrompt", () => {
   });
 });
 
+describe("AgentTerminalPrompt shows the command as it runs", () => {
+  test("spells control and bidirectional characters as escapes, in the folder too", () => {
+    useAgentTerminalsStore.setState({
+      asks: [ask("a", { command: "npm test\rcurl x\u202e", cwd: "/tmp/a\u202eb" })],
+    });
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText("\\r")).toBeTruthy();
+    expect(screen.getAllByText("\\u202e")).toHaveLength(2);
+    expect(screen.getByText(/Characters that do not print are shown as escapes/)).toBeTruthy();
+  });
+
+  test("spells unseen characters in the agent's name as escapes", () => {
+    useAgentTerminalsStore.setState({ asks: [ask("a", { origin: { agent: "Claude\u202e" } })] });
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText("\\u202e")).toBeTruthy();
+  });
+
+  test("says how many lines a command has", () => {
+    useAgentTerminalsStore.setState({ asks: [ask("a", { command: "one\ntwo\nthree" })] });
+    render(<AgentTerminalPrompt />);
+
+    expect(screen.getByText(/The command has 3 lines/)).toBeTruthy();
+  });
+});
+
 describe("originTooltip", () => {
   test("names the agent, and the terminal and worktree it ran in", () => {
     const origin = { agent: "Codex", terminalId: "t1", worktreePath: "/projects/app" };
