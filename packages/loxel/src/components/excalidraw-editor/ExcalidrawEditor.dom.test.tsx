@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type { ExcalidrawImperativeAPI, ExcalidrawProps } from "@excalidraw/excalidraw/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewPanelApi } from "dockview-react";
 
 import { localServerId } from "@/api/local-server";
@@ -38,12 +38,14 @@ const excalidraw = await import("@excalidraw/excalidraw");
 const RealExcalidraw = excalidraw.Excalidraw;
 let api: ExcalidrawImperativeAPI | null = null;
 let reportedChanges = 0;
+let validateEmbeddable: ExcalidrawProps["validateEmbeddable"];
 function ObservedExcalidraw(props: ExcalidrawProps) {
   return (
     <RealExcalidraw
       {...props}
       excalidrawAPI={(next) => {
         api = next;
+        validateEmbeddable = props.validateEmbeddable;
         props.excalidrawAPI?.(next);
       }}
       onChange={(...args) => {
@@ -210,5 +212,76 @@ describe("ExcalidrawEditor", () => {
       ["a", 10, "a0"],
       ["b", 80, "a1"],
     ]);
+  });
+});
+
+/** A drawing with one embed, `e`, of `link`. */
+function embedDrawing(link: string, version = 1): string {
+  return JSON.stringify({
+    type: "excalidraw",
+    version: 2,
+    elements: [
+      { id: "e", type: "embeddable", version, versionNonce: version, index: "a0", x: 0, y: 0 },
+    ].map((el) => ({ ...el, width: 400, height: 300, link })),
+    files: {},
+  });
+}
+
+const TWEET = "https://x.com/someone/status/123";
+const REDDIT_POST = "https://www.reddit.com/r/sub/comments/abc/title/";
+const YOUTUBE = "https://www.youtube.com/watch?v=abc";
+
+/** The frames Excalidraw rendered for embeds, as `[src, srcdoc, sandbox]`. */
+function embedFrames(): (string | null)[][] {
+  return [...document.querySelectorAll("iframe.excalidraw__embeddable")].map((frame) => [
+    frame.getAttribute("src"),
+    frame.getAttribute("srcdoc"),
+    frame.getAttribute("sandbox"),
+  ]);
+}
+
+describe("ExcalidrawEditor embeds", () => {
+  test("refuses X/Twitter and Reddit post links and leaves the rest to Excalidraw", async () => {
+    renderEditor();
+    await loadedApi();
+    const validate = validateEmbeddable;
+    if (typeof validate !== "function") throw new Error("Excalidraw got no embed validator");
+
+    expect(validate("https://twitter.com/someone/status/123")).toBe(false);
+    expect(validate(TWEET)).toBe(false);
+    expect(validate(REDDIT_POST)).toBe(false);
+    // `undefined` hands the link to Excalidraw's own allowlist, which accepts YouTube.
+    expect(validate(YOUTUBE)).toBeUndefined();
+  });
+
+  test("an X/Twitter or Reddit post in a drawing gets no frame", async () => {
+    for (const link of [TWEET, REDDIT_POST]) {
+      diskContent = embedDrawing(link);
+      renderEditor();
+      await loadedApi();
+      expect(embedFrames()).toEqual([]);
+      cleanup();
+    }
+  });
+
+  test("a YouTube embed keeps its frame", async () => {
+    diskContent = embedDrawing(YOUTUBE);
+    renderEditor();
+    await loadedApi();
+    await waitFor(() => expect(embedFrames()).toHaveLength(1));
+    expect(embedFrames()[0]?.[0]).toStartWith("https://www.youtube.com/embed/abc");
+  });
+
+  test("an embed rewritten on disk to a post shows its link, not a frame", async () => {
+    diskContent = embedDrawing(YOUTUBE);
+    const { client } = renderEditor();
+    await loadedApi();
+    await waitFor(() => expect(embedFrames()).toHaveLength(1));
+
+    diskContent = embedDrawing(TWEET, 2);
+    await act(() => client.invalidateQueries());
+    await waitFor(() => expect(api?.getSceneElements()[0]?.link).toBe(TWEET));
+    await waitFor(() => expect(screen.getByText(TWEET)).toBeInTheDocument());
+    expect(embedFrames()).toEqual([]);
   });
 });
