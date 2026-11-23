@@ -649,8 +649,10 @@ async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response>
   let fullPath: string;
 
   if (path.startsWith("/")) {
-    // Absolute path mode: resolve via ctx.resolveFilePath to validate ownership
-    const resolved = resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
+    // Absolute path mode: only a file the worktree owns or already lists in Others. Page elements
+    // load this route (request-origin.ts), so the hint adds no file: the media frame that links
+    // here already did.
+    const resolved = ctx.resolveFilePath(path, url.searchParams.get("wt") ?? undefined);
     if (!resolved) return error("File not found in any active worktree", 404);
     fullPath = path;
   } else {
@@ -700,6 +702,9 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
   const path = url.searchParams.get("path");
 
   if (!path) return error("Missing path parameter", 400);
+  // Checked first, since resolving can add the file to Others: only a file the frame shows.
+  const mediaType = getMediaType(path);
+  if (!mediaType) return error("Unsupported media type", 400);
 
   let fullPath: string;
   let rawUrl: string;
@@ -725,8 +730,6 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
     rawUrl = `/api/file-raw?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(worktree)}`;
   }
 
-  const mediaType = getMediaType(path);
-  if (!mediaType) return error("Unsupported media type", 400);
   let bodyContent: string;
   if (mediaType === "svg") {
     // SVGs are inlined so scripts can run (for WAAPI/JS-driven animations). The CSP below

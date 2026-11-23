@@ -6,7 +6,9 @@
  * requests and to its windows'. Without it only `GET /api/version` (how the app finds and waits
  * for its server) and the renderer's static files are served. The secret is what proves a request comes from the app; the
  * browser-header rules below stay as defense in depth, keeping web pages (browser tabs and pages
- * inside Loxel's own browser panels, which never get the header) from driving the server. Browsers
+ * inside Loxel's own browser panels, which never get the header) from driving the server. The
+ * `Sec-Fetch-Dest` rule also keeps elements of repository content the app window shows, which
+ * the window's session authorizes, to the few routes built for them. Browsers
  * attach `Origin` to WebSocket upgrades, CORS-mode fetches and non-GET/HEAD requests, but not to
  * no-cors GET loads or navigations, and native clients send none, so no single header is
  * conclusive: those rules combine `Host`, `Origin`, `Sec-Fetch-Site`, `Sec-Fetch-Mode`,
@@ -41,6 +43,26 @@ const ROUTE_PRINCIPALS: ReadonlyMap<string, readonly Principal[]> = new Map([
 ]);
 const ENDPOINT_PRINCIPALS: readonly Principal[] = ["app"];
 const STATIC_FILE_PRINCIPALS: readonly Principal[] = ["app", "anonymous"];
+
+/**
+ * The `Sec-Fetch-Dest` of the app's own requests to endpoints: `fetch` and XHR (`empty`), and
+ * WebSockets. Its windows never navigate to one.
+ */
+const REQUEST_DESTINATIONS: ReadonlySet<string> = new Set(["empty", "websocket"]);
+
+/**
+ * The endpoints a page element (`<img>`, `<video>`, `<iframe>`...) may load, by `METHOD /path`,
+ * with the destinations each serves. The app window also shows repository content (markdown,
+ * drawings, hovers) whose elements its session authorizes like the app's own, so every other
+ * endpoint refuses them.
+ */
+const ELEMENT_DESTINATIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  // The media viewer's frame, and the images and videos it shows.
+  ["GET /api/file-raw", new Set(["image", "video"])],
+  ["GET /api/media-frame", new Set(["iframe"])],
+  // Open In menu icons (src/api/client.ts).
+  ["GET /api/open-in/app-icon", new Set(["image"])],
+]);
 
 /** `/api` and `/ws` paths, matched by prefix as `server.ts` dispatches them. */
 function isEndpoint(pathname: string): boolean {
@@ -146,6 +168,9 @@ export interface AdmissionRequest {
  *     link into the app still opens it while cross-site fetches and subresource loads, including
  *     `<iframe>`, `<object>` and `<embed>` (navigations whose destination is not `document`),
  *     cannot reach endpoints.
+ *   - An endpoint request from a page element or a navigation (`Sec-Fetch-Dest` other than
+ *     `empty` or `websocket`) is admitted only on the routes built to be loaded that way
+ *     ({@link ELEMENT_DESTINATIONS}).
  * - For `cli`, over the Unix socket, none of those: no browser can connect to a Unix socket, so
  *   there is no page to tell apart, and `Host` names no address there.
  * - State-changing methods must declare `Content-Type: application/json`, which browsers only
@@ -201,5 +226,13 @@ function checkBrowserRules(
   if (fetchSite === "cross-site" && !topLevelNavigation) {
     return { status: 403, reason: "Cross-site request not allowed", details };
   }
-  return null;
+  if (!isEndpoint(req.pathname) || fetchDest === undefined) return null;
+  if (REQUEST_DESTINATIONS.has(fetchDest)) return null;
+  const route = `${req.method.toUpperCase()} ${req.pathname}`;
+  if (ELEMENT_DESTINATIONS.get(route)?.has(fetchDest)) return null;
+  return {
+    status: 403,
+    reason: "Not available to page elements",
+    details: { ...details, fetchDest },
+  };
 }
