@@ -39,11 +39,16 @@ export const BROWSER_PAGE_USAGE = "browser:page-usage";
 export const BROWSER_PAGE_SET_FROZEN = "browser:page-set-frozen";
 /**
  * Renderer → main (invoke): a browser page's favicon as a `data:` URL, or null. Args: the favicon's
- * URL, the URL of the page it is shown for (its own origin's favicons load with cookies), and, for a
- * `blob:` favicon, the webContents id of the webview whose page made it. See
- * `browser-favicons.ts`.
+ * URL, the URL of the page it is shown for (its own origin's favicons load with cookies), for a
+ * `blob:` favicon the webContents id of the webview whose page made it, and whether the page is in
+ * an incognito tab (it then loads through the incognito session). See `browser-favicons.ts`.
  */
 export const BROWSER_FAVICON_LOAD = "browser:favicon-load";
+/**
+ * Renderer → main: whether this window has incognito browser tabs (a boolean), sent whenever that
+ * changes. Once no window has any, main ends the incognito session. See `incognito-session.ts`.
+ */
+export const BROWSER_INCOGNITO_TABS = "browser:incognito-tabs";
 /**
  * Webview preload → main, synchronous: a page called `alert()` / `confirm()` / `prompt()`. The
  * page stays blocked until main sets the return value. See `javascript-dialogs.ts`.

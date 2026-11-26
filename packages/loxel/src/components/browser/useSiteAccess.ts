@@ -74,12 +74,13 @@ function listen(): void {
 /**
  * The site access requests of the webview with this guest webContents id (null until it is
  * ready). `request` is the oldest open one, for the panel's prompt, and `answer` replies to it:
- * Allow and Block are saved for the site (file access is never saved).
+ * Allow and Block are saved for the site (file access is never saved), except in an incognito tab
+ * (`incognito`), where main keeps them for the incognito session.
  */
-export function useSiteAccess(webContentsId: number | null): {
-  request: SiteAccessRequest | null;
-  answer: (answer: SitePermissionAnswer) => void;
-} {
+export function useSiteAccess(
+  webContentsId: number | null,
+  incognito: boolean,
+): { request: SiteAccessRequest | null; answer: (answer: SitePermissionAnswer) => void } {
   const { requests, add, remove } = useWebviewRequests<SiteAccessRequest>(webContentsId);
 
   useEffect(() => {
@@ -93,7 +94,7 @@ export function useSiteAccess(webContentsId: number | null): {
     (reply: SitePermissionAnswer) => {
       if (!request) return;
       window.electronAPI?.respondToSiteAccess({ id: request.id, answer: reply });
-      if (reply === "allow" || reply === "block") {
+      if (!incognito && (reply === "allow" || reply === "block")) {
         const { access } = request;
         const store = useSettingsStore.getState();
         if (access.kind === "external-app") {
@@ -104,7 +105,7 @@ export function useSiteAccess(webContentsId: number | null): {
       }
       remove(request.id);
     },
-    [request, remove],
+    [request, remove, incognito],
   );
 
   return { request, answer };

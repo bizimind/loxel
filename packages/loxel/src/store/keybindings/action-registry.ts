@@ -31,6 +31,7 @@ export type ActionId =
   | "panel.new.markdown"
   | "panel.new.drawing"
   | "panel.new.browser"
+  | "panel.new.incognitoBrowser"
   | "panel.open.localdb"
   | "panel.close"
   | "panel.reopenClosed"
@@ -235,6 +236,12 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: "panel.new.browser",
     label: "New Browser",
+    category: "panel",
+    isEnabled: () => canOpenPanelType("browser"),
+  },
+  {
+    id: "panel.new.incognitoBrowser",
+    label: "New Incognito Tab",
     category: "panel",
     isEnabled: () => canOpenPanelType("browser"),
   },

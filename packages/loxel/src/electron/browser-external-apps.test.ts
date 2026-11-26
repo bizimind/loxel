@@ -27,7 +27,7 @@ void mock.module("electron", () => ({
 }));
 
 const { windowOf } = await import("../test/fake-app-windows");
-const { afterMicrotasks, fakeGuest, fakeHost, sendSites } =
+const { afterMicrotasks, fakeGuest, fakeHost, fakeIncognitoSession, sendSites } =
   await import("../test/fake-browser-panels");
 const { installSiteAccess, trackWebviewSiteAccess } = await import("./browser-site-access");
 const { requestExternalApp, schemeOf } = await import("./browser-external-apps");
@@ -47,9 +47,13 @@ const SITE = "https://meet.example";
 const ZOOM_LINK = "zoommtg://meet.example/join?id=1";
 
 /** A browser panel on `SITE` whose page the user can click in. */
-function panel({ type = "webview", listening = true } = {}) {
+function panel({
+  type = "webview",
+  listening = true,
+  session = undefined as { storagePath: string | null } | undefined,
+} = {}) {
   const window = fakeHost(channels, { listening });
-  const page = fakeGuest(window.host, SITE, type);
+  const page = fakeGuest(window.host, SITE, type, session);
   trackWebviewSiteAccess(page.guest);
   trackUserActivation(page.guest);
   const click = () => page.emit("before-mouse-event", {}, { type: "mouseDown" });
@@ -90,6 +94,27 @@ describe("links to other apps", () => {
     page.click();
     expect(await openLink(page.guest)).toBe(true);
     expect(page.requests()).toHaveLength(1);
+  });
+
+  test("in an incognito tab, follow saved Blocks only, and keep its answers for its session", async () => {
+    sendSites(channels, { externalApps: { [SITE]: { zoommtg: "allow", mailto: "block" } } });
+    const session = fakeIncognitoSession();
+    const page = panel({ session });
+    page.click();
+    expect(await openLink(page.guest, "mailto:a@example.com")).toBe(false);
+    page.click();
+    const opened = openLink(page.guest);
+    await afterMicrotasks(() => page.requests().length === 1, "the prompt");
+    page.respond(page.requests()[0]!.id, "allow");
+    expect(await opened).toBe(true);
+    // Another tab of the session opens without asking, and a later incognito session asks again.
+    const sameSession = panel({ session });
+    sameSession.click();
+    expect(await openLink(sameSession.guest)).toBe(true);
+    const later = panel({ session: fakeIncognitoSession() });
+    later.click();
+    void openLink(later.guest);
+    await afterMicrotasks(() => later.requests().length === 1, "the prompt");
   });
 
   test("needs a click or key press in the page, even for an allowed site", async () => {

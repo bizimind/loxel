@@ -49,6 +49,7 @@ import {
   siteOf,
   withinRateLimit,
 } from "./browser-notifications";
+import { isIncognitoSession } from "./browser-partition";
 import {
   BROWSER_NOTIFICATION_CLICK,
   BROWSER_NOTIFICATION_PERMISSION,
@@ -134,11 +135,15 @@ function originOf(url: string): string | null {
   }
 }
 
-/** The loaded browser panel of `origin` that most recently had focus. */
+/**
+ * The loaded browser panel of `origin` that most recently had focus. Never an incognito tab: a
+ * worker of the browser session must not reach a page of the incognito one.
+ */
 function focusedPanel(origin: string): Panel | null {
   let best: (Panel & { order: number }) | null = null;
   for (const guest of webContents.getAllWebContents()) {
     if (guest.getType() !== "webview" || guest.isDestroyed()) continue;
+    if (isIncognitoSession(guest.session)) continue;
     if (guest.mainFrame.origin !== origin) continue;
     const host = listeningHost(guest);
     const order = focusOrder.get(guest.id) ?? 0;

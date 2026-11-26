@@ -54,6 +54,7 @@ const {
 } = await import("./browser-media");
 installBrowserMedia();
 const { installBrowserPermissions } = await import("./browser-permissions");
+const { markIncognitoSession } = await import("./browser-partition");
 
 const handler = (channel: string) => ipcHandlers.get(channel)!;
 
@@ -105,8 +106,20 @@ function fakeHost({ listening = true } = {}) {
   };
 }
 
+const browserSession = { storagePath: "/browser" };
+/** A new incognito session, as main makes one. */
+const incognitoSession = () => {
+  const session = { storagePath: null };
+  markIncognitoSession(session);
+  return session;
+};
+
 /** A webview guest hosted by `host`, whose page can navigate to another origin. */
-function fakeGuest(host: WebContents, origin = "https://meet.example") {
+function fakeGuest(
+  host: WebContents,
+  origin = "https://meet.example",
+  session: { storagePath: string | null } = browserSession,
+) {
   const emitter = fakeEmitter();
   const mainFrame = { origin, detached: false };
   const guest = {
@@ -115,6 +128,7 @@ function fakeGuest(host: WebContents, origin = "https://meet.example") {
     getType: () => "webview",
     isDestroyed: () => false,
     hostWebContents: host,
+    session,
     mainFrame,
   } as unknown as WebContents;
   trackWebviewMedia(guest);
@@ -435,6 +449,36 @@ const nextTask = () =>
   new Promise<void>((resolve) => {
     setImmediate(resolve);
   });
+
+describe("incognito tabs", () => {
+  test("inherit saved Blocks but not Allows", async () => {
+    setSites({ "https://meet.example": { camera: "allow", microphone: "block" } });
+    const window = fakeHost();
+    const { guest } = fakeGuest(window.host, "https://meet.example", incognitoSession());
+    expect(pageStates(guest)).toEqual({ camera: "prompt", microphone: "denied" });
+    expect(await getUserMedia(guest, ["audio"])).toBe(false);
+    expect(window.requests()).toEqual([]);
+  });
+
+  test("keep their answers for their session only, unsaved", async () => {
+    const window = fakeHost();
+    const session = incognitoSession();
+    const { guest } = fakeGuest(window.host, "https://meet.example", session);
+    const granted = getUserMedia(guest, ["video"]);
+    await nextRequest(window.requests, 1);
+    window.respond(window.requests()[0]!.id, "allow");
+    expect(await granted).toBe(true);
+    // Another tab of the session has it; the browser session and a later incognito one don't.
+    const other = fakeGuest(window.host, "https://meet.example", session).guest;
+    expect(pageStates(other)).toEqual({ camera: "granted", microphone: "prompt" });
+    expect(pageStates(fakeGuest(window.host).guest)).toEqual({
+      camera: "prompt",
+      microphone: "prompt",
+    });
+    const later = fakeGuest(window.host, "https://meet.example", incognitoSession()).guest;
+    expect(pageStates(later)).toEqual({ camera: "prompt", microphone: "prompt" });
+  });
+});
 
 describe("the <usermedia>, <camera> and <microphone> elements", () => {
   /**

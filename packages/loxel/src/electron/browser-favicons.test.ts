@@ -61,9 +61,28 @@ const fetchFavicon = mock(
   async (_url: string, _init?: RequestInit): Promise<Response> =>
     new Response(PNG, { headers: { "content-type": "image/png" } }),
 );
-installBrowserFavicons({ fetch: fetchFavicon } as unknown as Session);
-const load = (sender: WebContents, url: unknown, pageUrl?: unknown, webContentsId?: unknown) =>
-  ipcHandlers.get(BROWSER_FAVICON_LOAD)!(mainFrameEvent(sender), url, pageUrl, webContentsId);
+const fetchIncognitoFavicon = mock(
+  async (_url: string, _init?: RequestInit): Promise<Response> =>
+    new Response(PNG, { headers: { "content-type": "image/png" } }),
+);
+let incognitoSession: Session | null = null;
+installBrowserFavicons((incognito) =>
+  incognito ? incognitoSession : ({ fetch: fetchFavicon } as unknown as Session),
+);
+const load = (
+  sender: WebContents,
+  url: unknown,
+  pageUrl?: unknown,
+  webContentsId?: unknown,
+  incognito?: unknown,
+) =>
+  ipcHandlers.get(BROWSER_FAVICON_LOAD)!(
+    mainFrameEvent(sender),
+    url,
+    pageUrl,
+    webContentsId,
+    incognito,
+  );
 
 describe("loading a favicon", () => {
   test("loads a favicon of the page's own origin with its cookies, and never along a redirect", async () => {
@@ -102,6 +121,18 @@ describe("loading a favicon", () => {
       "include",
       "omit",
     ]);
+  });
+
+  test("loads an incognito tab's favicon through the incognito session only", async () => {
+    fetchFavicon.mockClear();
+    const page = "https://example.com/a";
+    expect(await load(appWindow(), "https://example.com/i.png", page, undefined, true)).toBeNull();
+    incognitoSession = { fetch: fetchIncognitoFavicon } as unknown as Session;
+    const result = await load(appWindow(), "https://example.com/i.png", page, undefined, true);
+    expect(result).toBe(`data:image/png;base64,${base64(PNG)}`);
+    expect(fetchIncognitoFavicon).toHaveBeenCalledTimes(1);
+    expect(fetchFavicon).not.toHaveBeenCalled();
+    incognitoSession = null;
   });
 
   test("answers only Loxel's own windows", async () => {

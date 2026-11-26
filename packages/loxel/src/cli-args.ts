@@ -26,7 +26,7 @@ const OPEN_FLAGS =
 
 const TERMINAL_SYNOPSIS = `loxel terminal [--cwd <dir>] [--title <name>] ${OPEN_FLAGS} [--] [command...]`;
 
-export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>...\n       ${TERMINAL_SYNOPSIS}\n       loxel --version`;
+export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} [--incognito] <file | folder | url>...\n       ${TERMINAL_SYNOPSIS}\n       loxel --version`;
 
 export const TERMINAL_USAGE = `usage: ${TERMINAL_SYNOPSIS}`;
 
@@ -155,22 +155,34 @@ function openFlags(baseDir: string, usage: string) {
 /** What `loxel <target>...` opens: files, folders and URLs as typed, and how. */
 export interface OpenArgs extends OpenFlags {
   targets: string[];
+  /** `--incognito`: the targets, all URLs, open in incognito tabs. */
+  incognito?: true;
 }
 
 /**
  * Parse the arguments of `loxel <target>...`: one or more files, folders or URLs, with open flags
  * before, between or after them. A target that starts with a dash goes after `--`. `--replace`
- * takes a single target: each would close the tab the one before it just opened.
+ * takes a single target: each would close the tab the one before it just opened. `--incognito`
+ * takes URLs only.
  */
 export function parseOpenArgs(args: string[], baseDir: string): OpenArgs {
   const flags = openFlags(baseDir, OPEN_USAGE);
-  const positional = scanArgs(args, OPEN_USAGE, false, (flag) => flags.read(flag));
+  let incognito = false;
+  const positional = scanArgs(args, OPEN_USAGE, false, (flag) => {
+    if (flag.name !== "--incognito") return flags.read(flag);
+    flag.noValue();
+    incognito = true;
+    return true;
+  });
   if (positional.length === 0) throw usageError("missing file, folder or URL", OPEN_USAGE);
   const result = flags.result();
   if (result.placement?.replace && positional.length > 1) {
     throw usageError(`--replace takes one target, got ${positional.length}`, OPEN_USAGE);
   }
-  return { targets: positional, ...result };
+  if (incognito && !positional.every((target) => isHttpUrl(target))) {
+    throw usageError("--incognito opens http and https URLs only", OPEN_USAGE);
+  }
+  return { targets: positional, ...result, ...(incognito ? { incognito: true } : {}) };
 }
 
 /** What `loxel terminal` opens, and how. */
@@ -238,7 +250,7 @@ export interface PlannedOpen {
  * targets with `--split` share one split, through a `batch` on their placement.
  */
 export function planOpens(
-  { targets, placement }: Pick<OpenArgs, "targets" | "placement">,
+  { targets, placement, incognito }: Pick<OpenArgs, "targets" | "placement" | "incognito">,
   {
     baseDir,
     pinnedWorktree,
@@ -261,6 +273,7 @@ export function planOpens(
         : {}),
     ...options,
   };
+  const page = { ...opened, ...(incognito ? { incognito } : {}) };
   const worktree = pinnedWorktree
     ? { pinWtPath: pinnedWorktree }
     : commandWorktree
@@ -272,7 +285,7 @@ export function planOpens(
       return { label, request: { filePath: resolve(baseDir, target), ...worktree, ...opened } };
     }
     if (commandWorktree)
-      return { label, request: { url: target, wtPath: commandWorktree, ...opened } };
-    return urlsToWindow ? { label, request: { url: target, ...opened } } : { label };
+      return { label, request: { url: target, wtPath: commandWorktree, ...page } };
+    return urlsToWindow ? { label, request: { url: target, ...page } } : { label };
   });
 }

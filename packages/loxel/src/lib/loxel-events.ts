@@ -16,7 +16,7 @@ export interface LoxelEventMap {
   "loxel-create-terminal": CreateTerminalOptions;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
-  "loxel-create-browser": { url?: string } & PanelOpenOptions;
+  "loxel-create-browser": { url?: string; incognito?: boolean } & PanelOpenOptions;
   "loxel-create-code-editor": { ext?: string; placement?: PanelPlacement };
   "loxel-create-editor-with-content": { content: string; title: string };
   "loxel-open-code-editor": OpenFileDetail & { line?: number; column?: number };

@@ -5,7 +5,12 @@ import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 
 import { localRef } from "@/api/local-server";
 import { layoutKeyOf } from "@/store/active-worktree";
-import { attachBrowserPage, useBrowserPages } from "@/store/browser-pages";
+import {
+  attachBrowserPage,
+  closeBrowserPage,
+  openIncognitoTab,
+  useBrowserPages,
+} from "@/store/browser-pages";
 import { setDockviewApi } from "@/store/tools-bar";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
@@ -24,7 +29,7 @@ window.electronAPI = stubElectronAPI({
   },
 });
 
-const { BrowserPagePool } = await import("./BrowserPagePool");
+const { BrowserPagePool, BrowserPageSlot } = await import("./BrowserPagePool");
 
 const disposable = { dispose: () => {} };
 
@@ -180,5 +185,32 @@ describe("BrowserPagePool focus", () => {
     await nextTick();
 
     expect(panel.setActive).not.toHaveBeenCalled();
+  });
+});
+
+describe("an incognito tab's slot", () => {
+  const slotApi = () => {
+    const close = mock(() => {});
+    const api = { ...fakePanelApi(false).api, id: "browser-incognito", close };
+    return { api: api as unknown as DockviewPanelApi, close };
+  };
+
+  test("loads the page kept in memory, not the placeholder's empty URL", () => {
+    openIncognitoTab("browser-incognito", layoutKeyOf(localRef("/repo")), "https://kept.test/");
+    const { api, close } = slotApi();
+    render(<BrowserPageSlot url="" incognito panelApi={api} />);
+    expect(useBrowserPages.getState().pages["browser-incognito"]).toMatchObject({
+      initialUrl: "https://kept.test/",
+      incognito: true,
+    });
+    expect(close).not.toHaveBeenCalled();
+    closeBrowserPage("browser-incognito");
+  });
+
+  test("closes a placeholder with no page kept in memory, as after a restart", async () => {
+    const { api, close } = slotApi();
+    render(<BrowserPageSlot url="" incognito panelApi={api} />);
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(useBrowserPages.getState().pages["browser-incognito"]).toBeUndefined();
   });
 });

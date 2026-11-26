@@ -30,7 +30,7 @@ Each [release](https://github.com/bizimind/loxel/releases) also lists the CLI on
 ## Usage
 
 ```
-loxel [open flags] <file-path | folder-path | url>...
+loxel [open flags] [--incognito] <file-path | folder-path | url>...
 loxel terminal [--cwd <dir>] [--title <name>] [open flags] [--] [command...]
 loxel --version
 
@@ -50,6 +50,7 @@ open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree
 | `loxel terminal --group server`         | Open a terminal in the same group as the `server` tab     |
 | `loxel --no-focus src/app.ts`           | Open a file in the background, leaving your view as it is |
 | `loxel --worktree ../other https://...` | Open a URL in another worktree                            |
+| `loxel --incognito https://...`         | Open a URL in an incognito tab                            |
 
 ---
 
@@ -76,6 +77,8 @@ An agent that runs its commands in a sandbox can use `loxel` only if the sandbox
 ## URLs
 
 `loxel <url>` opens in the worktree that contains the current directory. Inside a Loxel terminal, it falls back to `LOXEL_WORKTREE` when the current directory isn't in a git repository, and in a Home terminal, which has none, the page opens in what that terminal's window shows; otherwise that URL errors. It goes to the windows showing that worktree: layout flags and focus apply only in the window you are working in, and other windows showing it get the page as a background tab. If no window shows it, the page opens there in the window you are working in, switching to the worktree when the open takes focus. See [Browser](/docs/browser) for what you can do with the page once it's open.
+
+`--incognito` opens the URLs in [incognito tabs](/docs/browser#incognito-tabs), and takes only URLs. An incognito page opens only in the window you are working in, never in other windows showing the worktree, and only while a Loxel window is open: with none, the command fails instead of waiting for the next window, so the address is never saved.
 
 ---
 

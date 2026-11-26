@@ -436,19 +436,18 @@ export interface BrowserDownloadsOptions {
 }
 
 /**
- * Handle `browserSession`'s downloads. Each starts at once at a free name in the Downloads folder
- * while Loxel asks where to save it, and moves there once both are done; cancelling the dialog
- * cancels the download (or removes it, if complete). A page's download whose dialog is open keeps
- * its later downloads from asking too: they are cancelled, so a page can't stack Save dialogs.
+ * Handle browser sessions' downloads: returns the function that takes a session's. Each starts at
+ * once at a free name in the Downloads folder while Loxel asks where to save it, and moves there
+ * once both are done; cancelling the dialog cancels the download (or removes it, if complete). A
+ * page's download whose dialog is open keeps its later downloads from asking too: they are
+ * cancelled, so a page can't stack Save dialogs. The sessions share their save paths, so downloads
+ * of the browser and incognito sessions never take the same one.
  */
-export function installBrowserDownloads(
-  browserSession: Session,
-  {
-    quarantine = quarantineFile,
-    saveAs = showSaveAs,
-    downloadsFolder = () => app.getPath("downloads"),
-  }: BrowserDownloadsOptions = {},
-): void {
+export function installBrowserDownloads({
+  quarantine = quarantineFile,
+  saveAs = showSaveAs,
+  downloadsFolder = () => app.getPath("downloads"),
+}: BrowserDownloadsOptions = {}): (browserSession: Session) => void {
   /** Each page's download whose Save dialog is open. */
   const asking = new Map<WebContents, DownloadItem>();
   /** Save paths of downloads not yet moved or deleted, which a file may not be at yet. */
@@ -458,7 +457,11 @@ export function installBrowserDownloads(
 
   // Electron passes no webContents (despite its types) when the page that started the download is
   // gone, so there is no page to limit.
-  browserSession.on("will-download", (event, item, contents: WebContents | null) => {
+  const onWillDownload = (
+    event: Electron.Event,
+    item: DownloadItem,
+    contents: WebContents | null,
+  ) => {
     if (contents && asking.has(contents)) {
       event.preventDefault();
       return;
@@ -534,5 +537,8 @@ export function installBrowserDownloads(
         console.warn("[electron] Could not finish a download:", err);
       })
       .finally(release);
-  });
+  };
+  return (browserSession) => {
+    browserSession.on("will-download", onWillDownload);
+  };
 }

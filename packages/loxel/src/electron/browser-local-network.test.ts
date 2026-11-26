@@ -26,7 +26,7 @@ void mock.module("electron", () => ({
 }));
 
 const { windowOf } = await import("../test/fake-app-windows");
-const { afterMicrotasks, fakeGuest, fakeHost, sendSites } =
+const { afterMicrotasks, fakeBrowserSession, fakeGuest, fakeHost, sendSites } =
   await import("../test/fake-browser-panels");
 const { installSiteAccess, trackWebviewSiteAccess } = await import("./browser-site-access");
 const { fetchForPage, installLocalNetworkAccess, localNetworkPermitted } =
@@ -50,6 +50,7 @@ const proxies = new Map<string, string>();
 let beforeRequest: Listener = () => {};
 let headersReceived: Listener = () => {};
 const browserSession = {
+  ...fakeBrowserSession,
   webRequest: {
     onBeforeRequest: (listener: Listener) => {
       beforeRequest = listener;
@@ -83,7 +84,7 @@ function decided(listener: Listener, details: object) {
 /** A browser panel on `origin`, its page loaded from `ip`. */
 async function panel(origin: string, ip = "93.184.216.34", { listening = true } = {}) {
   const window = fakeHost(channels, { listening });
-  const page = fakeGuest(window.host, origin);
+  const page = fakeGuest(window.host, origin, "webview", browserSession);
   guests.set(page.guest.id, page.guest);
   trackWebviewSiteAccess(page.guest);
   /** Navigate the page to `url`, its document coming from `address`, once main has noted it. */
@@ -265,7 +266,7 @@ describe("public sites", () => {
 
   test("a popup window, with no panel to ask in, is refused undecided access", async () => {
     const window = fakeHost(channels);
-    const popup = fakeGuest(window.host, "https://app.example", "window");
+    const popup = fakeGuest(window.host, "https://app.example", "window", browserSession);
     const fate = decided(beforeRequest, {
       id: nextRequestId++,
       url: "http://localhost:1/",
@@ -420,9 +421,9 @@ describe("requests of no page", () => {
     await afterMicrotasks(() => site.requests().length === 1, "the prompt");
     site.respond(site.requests()[0]!.id, "allow-once");
     expect(await settled(fromWorker)).toBe(true);
-    expect(localNetworkPermitted(null, "https://worker-once.example")).toBe(true);
+    expect(localNetworkPermitted(browserSession, null, "https://worker-once.example")).toBe(true);
     site.navigate("https://elsewhere.example");
-    expect(localNetworkPermitted(null, "https://worker-once.example")).toBe(false);
+    expect(localNetworkPermitted(browserSession, null, "https://worker-once.example")).toBe(false);
   });
 
   test("main's fetches for a page follow its decision without asking, redirects included", async () => {
@@ -466,16 +467,21 @@ describe("requests of no page", () => {
 describe("Chromium's own check", () => {
   test("follows the site's decision, never asking", async () => {
     const site = await panel("https://app.example");
-    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(false);
+    expect(localNetworkPermitted(browserSession, site.guest, "https://app.example")).toBe(false);
     expect(site.requests()).toEqual([]);
     sendSites(channels, { localNetwork: { "https://app.example": "allow" } });
-    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(true);
+    expect(localNetworkPermitted(browserSession, site.guest, "https://app.example")).toBe(true);
     // An embedded frame's check names its page's origin, which decides.
     expect(
-      localNetworkPermitted(site.guest, "https://widget.example", "https://app.example/"),
+      localNetworkPermitted(
+        browserSession,
+        site.guest,
+        "https://widget.example",
+        "https://app.example/",
+      ),
     ).toBe(true);
     sendSites(channels, { localNetwork: { "https://app.example": "block" } });
-    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(false);
+    expect(localNetworkPermitted(browserSession, site.guest, "https://app.example")).toBe(false);
   });
 
   test("lets Allow this time through for the panel that was answered", async () => {
@@ -483,20 +489,20 @@ describe("Chromium's own check", () => {
     void site.request("http://localhost:1/");
     await afterMicrotasks(() => site.requests().length === 1, "the prompt");
     site.respond(site.requests()[0]!.id, "allow-once");
-    expect(localNetworkPermitted(site.guest, "https://app.example")).toBe(true);
+    expect(localNetworkPermitted(browserSession, site.guest, "https://app.example")).toBe(true);
     const other = await panel("https://app.example");
-    expect(localNetworkPermitted(other.guest, "https://app.example")).toBe(false);
+    expect(localNetworkPermitted(browserSession, other.guest, "https://app.example")).toBe(false);
   });
 
   test("decides a worker's by its origin, and refuses a non-secure public site", () => {
     sendSites(channels, {
       localNetwork: { "https://app.example": "allow", "http://plain.example": "allow" },
     });
-    expect(localNetworkPermitted(null, "https://app.example/")).toBe(true);
-    expect(localNetworkPermitted(null, "https://other.example/")).toBe(false);
-    expect(localNetworkPermitted(null, "http://plain.example/")).toBe(false);
+    expect(localNetworkPermitted(browserSession, null, "https://app.example/")).toBe(true);
+    expect(localNetworkPermitted(browserSession, null, "https://other.example/")).toBe(false);
+    expect(localNetworkPermitted(browserSession, null, "http://plain.example/")).toBe(false);
     // `http://localhost` is a secure context, so what it embeds may be allowed.
     sendSites(channels, { localNetwork: { "http://localhost:3000": "allow" } });
-    expect(localNetworkPermitted(null, "http://localhost:3000/")).toBe(true);
+    expect(localNetworkPermitted(browserSession, null, "http://localhost:3000/")).toBe(true);
   });
 });

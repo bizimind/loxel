@@ -125,6 +125,21 @@ describe("parseOpenArgs", () => {
     expect(() => parseOpenArgs(["--help"], BASE)).toThrow("unknown option --help\nusage: loxel");
   });
 
+  test("--incognito takes URLs only", () => {
+    expect(parseOpenArgs(["--incognito", "https://x.dev"], BASE)).toEqual({
+      targets: ["https://x.dev"],
+      incognito: true,
+    });
+    expect(parseOpenArgs(["https://x.dev"], BASE).incognito).toBeUndefined();
+    expect(() => parseOpenArgs(["--incognito", "https://x.dev", "a.md"], BASE)).toThrow(
+      "--incognito opens http and https URLs only",
+    );
+    expect(() => parseOpenArgs(["--incognito=1", "https://x.dev"], BASE)).toThrow(
+      "--incognito takes no value",
+    );
+    expect(() => parseTerminalArgs(["--incognito"], BASE)).toThrow("unknown option --incognito");
+  });
+
   test("focus is unset unless a flag names it", () => {
     expect(parseOpenArgs(["a.ts"], BASE).focus).toBeUndefined();
     expect(parseOpenArgs(["a.ts", "--focus"], BASE)).toEqual({ targets: ["a.ts"], focus: true });
@@ -247,6 +262,16 @@ describe("planOpens", () => {
     );
     expect(planned).toEqual([
       { label: "", request: { url: "https://x.dev", focus: true, windowId: "w1" } },
+    ]);
+  });
+
+  test("--incognito marks the URLs' requests", () => {
+    const planned = planOpens(
+      { targets: ["https://x.dev"], incognito: true },
+      { baseDir: BASE, pinnedWorktree: null, commandWorktree: "/wt", options: { focus: true } },
+    );
+    expect(planned.map((o) => o.request)).toEqual([
+      { url: "https://x.dev", wtPath: "/wt", focus: true, incognito: true },
     ]);
   });
 

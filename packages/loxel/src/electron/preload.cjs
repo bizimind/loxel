@@ -16,6 +16,7 @@ const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
 const BROWSER_PAGE_USAGE = "browser:page-usage";
 const BROWSER_PAGE_SET_FROZEN = "browser:page-set-frozen";
 const BROWSER_FAVICON_LOAD = "browser:favicon-load";
+const BROWSER_INCOGNITO_TABS = "browser:incognito-tabs";
 const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
@@ -115,8 +116,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getBrowserPageUsage: (webContentsIds) => ipcRenderer.invoke(BROWSER_PAGE_USAGE, webContentsIds),
   setBrowserPageFrozen: (webContentsId, frozen) =>
     ipcRenderer.invoke(BROWSER_PAGE_SET_FROZEN, webContentsId, frozen),
-  loadFavicon: (url, pageUrl, webContentsId) =>
-    ipcRenderer.invoke(BROWSER_FAVICON_LOAD, url, pageUrl, webContentsId),
+  loadFavicon: (url, pageUrl, webContentsId, incognito) =>
+    ipcRenderer.invoke(BROWSER_FAVICON_LOAD, url, pageUrl, webContentsId, incognito),
+  setHasIncognitoTabs: (hasTabs) => ipcRenderer.send(BROWSER_INCOGNITO_TABS, hasTabs),
   onJavaScriptDialog: (onOpen, onClosed) => {
     const openHandler = (_event, request) => onOpen(request);
     const closedHandler = (_event, closed) => onClosed(closed);

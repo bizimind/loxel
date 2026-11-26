@@ -46,7 +46,7 @@ const NO_EDIT: Params["editFlags"] = {
   canEditRichly: false,
 };
 
-function renderMenu(overrides: Partial<Params> = {}) {
+function renderMenu(overrides: Partial<Params> = {}, { incognito = false } = {}) {
   const webview = fakeWebview();
   const params = {
     x: 120,
@@ -73,6 +73,7 @@ function renderMenu(overrides: Partial<Params> = {}) {
         canGoForward: false,
       }}
       panelId="browser-1"
+      incognito={incognito}
       onOpenChange={onOpenChange}
     />,
   );
@@ -126,6 +127,7 @@ describe("BrowserContextMenu", () => {
     expect(openBrowserTab).toHaveBeenCalledWith("view-source:https://example.com/page", {
       sourcePanelId: "browser-1",
       activate: true,
+      incognito: false,
     });
   });
 
@@ -142,6 +144,7 @@ describe("BrowserContextMenu", () => {
 
     expect(itemLabels()).toEqual([
       "Open Link in New Tab",
+      "Open Link in Incognito Tab",
       "Open Link in External Browser",
       "Copy Link Address",
       "Inspect Element",
@@ -151,6 +154,25 @@ describe("BrowserContextMenu", () => {
     expect(openBrowserTab).toHaveBeenCalledWith("https://example.com/next", {
       sourcePanelId: "browser-1",
       activate: false,
+      incognito: false,
+    });
+    fireEvent.click(screen.getByText("Open Link in Incognito Tab"));
+    expect(openBrowserTab).toHaveBeenLastCalledWith("https://example.com/next", {
+      sourcePanelId: "browser-1",
+      activate: false,
+      incognito: true,
+    });
+  });
+
+  test("opens an incognito tab's links in incognito tabs", () => {
+    renderMenu({ linkURL: "https://example.com/next" }, { incognito: true });
+
+    expect(itemLabels()).not.toContain("Open Link in Incognito Tab");
+    fireEvent.click(screen.getByText("Open Link in New Tab"));
+    expect(openBrowserTab).toHaveBeenCalledWith("https://example.com/next", {
+      sourcePanelId: "browser-1",
+      activate: false,
+      incognito: true,
     });
   });
 
@@ -232,7 +254,7 @@ describe("BrowserContextMenu", () => {
     fireEvent.click(screen.getByText(/^Search the Web/));
     expect(openBrowserTab).toHaveBeenCalledWith(
       "https://www.google.com/search?q=a%20selection%20that%20is%20long%20enough%20to%20be%20cut%20off",
-      { sourcePanelId: "browser-1", activate: true },
+      { sourcePanelId: "browser-1", activate: true, incognito: false },
     );
   });
 

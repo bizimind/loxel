@@ -10,11 +10,13 @@
  * reach the local network while the panel stays on the site. File access is never saved: the answer
  * lasts as long as the page holds the file or folder (Chromium keeps it), and a later visit asks
  * again, as in Chrome. Requests from the same page for the same access
- * share one prompt and one answer.
+ * share one prompt and one answer. An incognito tab's Allow and Block are kept here for its
+ * incognito session instead, never saved, over the Blocks saved in settings, which it inherits.
  */
-import type { IpcMainEvent, WebContents } from "electron";
+import type { IpcMainEvent, Session, WebContents } from "electron";
 
 import { onAppWindowMessage } from "./app-windows";
+import { isIncognitoSession } from "./browser-partition";
 import {
   SITE_ACCESS_LISTEN,
   SITE_ACCESS_REQUEST,
@@ -34,12 +36,17 @@ import {
   withExternalAppDecision,
 } from "./site-permission-protocol";
 
-const sites = createSettingsMirror<SiteAccessSites>({ externalApps: {}, localNetwork: {} });
+const NO_SITES: SiteAccessSites = { externalApps: {}, localNetwork: {} };
+const sites = createSettingsMirror<SiteAccessSites>(NO_SITES);
+/** Each incognito session's own Allow and Block answers, in memory only. */
+const incognitoSites = new WeakMap<Session, SiteAccessSites>();
 
 const listeningHosts = createListeningRenderers();
 
 interface PendingRequest {
   guestId: number;
+  /** The guest's session, whose decisions apply. */
+  session: Session;
   host: WebContents;
   origin: string;
   access: SiteAccess;
@@ -56,16 +63,16 @@ const prompts = createPermissionPrompts<PendingRequest>(
 );
 
 /** Local network access granted with "Allow this time": the site each guest's panel was on. */
-const localNetworkOnce = new Map<number, string>();
+const localNetworkOnce = new Map<number, { origin: string; session: Session }>();
 /**
  * Guests whose page closed its local network prompt: its requests are refused without asking
  * until it navigates, since every request would put the prompt straight back up.
  */
 const dismissedLocalNetwork = new Set<number>();
 
-/** The saved decision for `access`, if the user made one. File access has none. */
-function savedDecision(access: SiteAccess): SiteDecision | undefined {
-  const { externalApps, localNetwork } = sites.get();
+/** The decision in `decisions` for `access`, if the user made one. File access has none. */
+function decisionIn(decisions: SiteAccessSites, access: SiteAccess): SiteDecision | undefined {
+  const { externalApps, localNetwork } = decisions;
   switch (access.kind) {
     case "local-network":
       return localNetwork[access.origin];
@@ -81,19 +88,37 @@ function savedDecision(access: SiteAccess): SiteDecision | undefined {
 }
 
 /**
- * `access`'s state for the page of guest `guestId` (null for requests of no page, such as a
- * worker's): its saved decision, or the panel's (for no page, any panel's) Allow this time, or
- * still to ask.
+ * The decision for `access` in `browserSession`: the one saved in settings, or in an incognito
+ * session its own answer, else a saved Block (a saved Allow doesn't carry over, as in Chrome).
  */
-export function siteAccessState(guestId: number | null, access: SiteAccess): SiteDecision | "ask" {
-  const saved = savedDecision(access);
+function savedDecision(browserSession: Session, access: SiteAccess): SiteDecision | undefined {
+  const saved = decisionIn(sites.get(), access);
+  if (!isIncognitoSession(browserSession)) return saved;
+  const own = decisionIn(incognitoSites.get(browserSession) ?? NO_SITES, access);
+  return own ?? (saved === "block" ? saved : undefined);
+}
+
+/**
+ * `access`'s state for the page of guest `guestId` in `browserSession` (null for requests of no
+ * page, such as a worker's): its decision, or the panel's (for no page, any panel's) Allow this
+ * time, or still to ask.
+ */
+export function siteAccessState(
+  browserSession: Session,
+  guestId: number | null,
+  access: SiteAccess,
+): SiteDecision | "ask" {
+  const saved = savedDecision(browserSession, access);
   if (saved) return saved;
   if (access.kind !== "local-network") return "ask";
-  // A request of no page (a worker's) counts Allow this time given in any panel on its site.
+  // A request of no page (a worker's) counts Allow this time given in any panel of its session on
+  // its site.
   const once =
     guestId === null
-      ? [...localNetworkOnce.values()].includes(access.origin)
-      : localNetworkOnce.get(guestId) === access.origin;
+      ? [...localNetworkOnce.values()].some(
+          (grant) => grant.origin === access.origin && grant.session === browserSession,
+        )
+      : localNetworkOnce.get(guestId)?.origin === access.origin;
   return once ? "allow" : "ask";
 }
 
@@ -139,9 +164,10 @@ export function canAskLocalNetwork(guest: WebContents): boolean {
   return listeningHost(guest) !== null && !dismissedLocalNetwork.has(guest.id);
 }
 
-/** The webview with an open local network prompt for `origin`, if one has. */
-export function askingLocalNetwork(origin: string): number | null {
+/** The webview of `browserSession` with an open local network prompt for `origin`, if one has. */
+export function askingLocalNetwork(browserSession: Session, origin: string): number | null {
   for (const [, pending] of prompts.entries()) {
+    if (pending.session !== browserSession) continue;
     if (pending.access.kind === "local-network" && pending.origin === origin) {
       return pending.guestId;
     }
@@ -155,7 +181,8 @@ export function askingLocalNetwork(origin: string): number | null {
  * ask (no window shows prompts, or the page closed its local network prompt).
  */
 export function askSiteAccess(guest: WebContents, access: SiteAccess): Promise<boolean> {
-  const state = siteAccessState(guest.id, access);
+  const { session } = guest;
+  const state = siteAccessState(session, guest.id, access);
   if (state !== "ask") return Promise.resolve(state === "allow");
   const host = listeningHost(guest);
   if (!host || (access.kind === "local-network" && dismissedLocalNetwork.has(guest.id))) {
@@ -177,7 +204,14 @@ export function askSiteAccess(guest: WebContents, access: SiteAccess): Promise<b
         return;
       }
     }
-    prompts.show({ guestId: guest.id, host, origin: access.origin, access, waiters: [resolve] });
+    prompts.show({
+      guestId: guest.id,
+      session,
+      host,
+      origin: access.origin,
+      access,
+      waiters: [resolve],
+    });
   });
 }
 
@@ -189,7 +223,7 @@ function withdraw(id: number, allowed: boolean): void {
 /** Answer and take down the prompts whose access now has a decision. */
 function settleDecidedRequests(): void {
   for (const [id, pending] of prompts.entries()) {
-    const state = siteAccessState(pending.guestId, pending.access);
+    const state = siteAccessState(pending.session, pending.guestId, pending.access);
     if (state !== "ask") withdraw(id, state === "allow");
   }
 }
@@ -218,7 +252,7 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   const { id, answer } = parsed.data;
   const pending = prompts.answered(event, id);
   if (!pending) return;
-  const { access, guestId } = pending;
+  const { access, guestId, session } = pending;
   // File access answers only this request; Chromium keeps the grant while the page is on the site.
   if (access.kind === "file-system") {
     withdraw(id, answer === "allow" || answer === "allow-once");
@@ -232,7 +266,13 @@ function respondToRequest(event: IpcMainEvent, value: unknown): void {
   if (answer === "allow-once") {
     // A link opens this once; the local network stays reachable while the panel is on the site.
     if (access.kind === "external-app") withdraw(id, true);
-    else localNetworkOnce.set(guestId, access.origin);
+    else localNetworkOnce.set(guestId, { origin: access.origin, session });
+  } else if (isIncognitoSession(session)) {
+    // Kept for the incognito session only; the renderer saves nothing.
+    incognitoSites.set(
+      session,
+      withDecision(incognitoSites.get(session) ?? NO_SITES, access, answer),
+    );
   } else {
     // The renderer also saves the decision in settings, which sends it back here; applying it now
     // answers the page without waiting for that round trip.
@@ -272,7 +312,7 @@ export function trackWebviewSiteAccess(contents: WebContents): void {
   // A new document may ask again after its page closed the prompt.
   contents.on("did-navigate", () => {
     const origin = contents.mainFrame.origin;
-    if (localNetworkOnce.get(guestId) !== origin) localNetworkOnce.delete(guestId);
+    if (localNetworkOnce.get(guestId)?.origin !== origin) localNetworkOnce.delete(guestId);
     dismissedLocalNetwork.delete(guestId);
     for (const [id, pending] of prompts.entries()) {
       if (pending.guestId === guestId && pending.origin !== origin) withdraw(id, false);

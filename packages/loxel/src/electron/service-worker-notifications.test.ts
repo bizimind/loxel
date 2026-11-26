@@ -56,6 +56,7 @@ void mock.module("electron", () => ({
 }));
 
 const { fakeWindow, mainFrameEvent, windowOf } = await import("../test/fake-app-windows");
+const { fakeIncognitoSession } = await import("../test/fake-browser-panels");
 const { installBrowserNotifications, trackWebviewNotifications } =
   await import("./browser-notifications");
 const { installServiceWorkerNotifications, trackWebviewFocus } =
@@ -140,7 +141,7 @@ function fakeHost() {
   };
 }
 
-function fakeGuest(host: WebContents, origin = SITE) {
+function fakeGuest(host: WebContents, origin = SITE, { incognito = false } = {}) {
   const emitter = fakeEmitter();
   const guest = {
     ...emitter,
@@ -148,6 +149,7 @@ function fakeGuest(host: WebContents, origin = SITE) {
     getType: () => "webview",
     isDestroyed: () => false,
     hostWebContents: host,
+    session: incognito ? fakeIncognitoSession() : { storagePath: "/browser" },
     mainFrame: { origin, detached: false },
   } as unknown as WebContents;
   guests.push(guest);
@@ -231,6 +233,14 @@ describe("service worker notifications", () => {
       [first.guest.id, SITE, "Build"],
       [second.guest.id, SITE, "Deploy"],
     ]);
+  });
+
+  test("never go to an incognito tab, even the only one on the worker's origin", async () => {
+    const { host, opened } = fakeHost();
+    fakeGuest(host, SITE, { incognito: true }).focus();
+    const worker = startWorker(SCOPE);
+    expect(await worker.ask(REGISTRATION_NOTIFICATION_SHOW, notification())).toBe("shown");
+    expect(opened()).toEqual([]);
   });
 
   test("of a muted site are dropped quietly, the site keeping its permission", async () => {

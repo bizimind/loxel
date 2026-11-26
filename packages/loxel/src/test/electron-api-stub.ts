@@ -19,6 +19,7 @@ export function stubElectronAPI(overrides: Partial<ElectronAPI> = {}): ElectronA
     getBrowserPageUsage: async () => ({ totalMemoryKB: 0, pages: [] }),
     setBrowserPageFrozen: async () => true,
     loadFavicon: async () => null,
+    setHasIncognitoTabs: () => {},
     onJavaScriptDialog: () => () => {},
     respondToJavaScriptDialog: () => {},
     onPasskeyQrCode: () => () => {},

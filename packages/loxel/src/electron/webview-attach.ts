@@ -1,14 +1,14 @@
 /**
  * What a browser panel `<webview>` gets when it attaches (`will-attach-webview`), whatever its
- * element asks for: the browser panels' partition, Loxel's own sandboxed preload, and Chromium's
- * secure defaults. Only Loxel's window renderer can create a webview; this holds even if that
+ * element asks for: the browser panels' partition (or the incognito session, the one other
+ * choice), Loxel's own sandboxed preload, and Chromium's secure defaults. Only Loxel's window renderer can create a webview; this holds even if that
  * renderer were made to ask for less.
  * See: https://www.electronjs.org/docs/latest/tutorial/security#12-verify-webview-options-before-creation
  */
 import type { WebPreferences } from "electron";
 
 import { isHttpUrl } from "../url-utils";
-import { BROWSER_PARTITION } from "./browser-partition";
+import { BROWSER_PARTITION, INCOGNITO_PARTITION } from "./browser-partition";
 import { configureWebviewDialogs } from "./javascript-dialogs";
 
 const VIEW_SOURCE = "view-source:";
@@ -27,14 +27,18 @@ function isAllowedSource(src: string | undefined): boolean {
 /**
  * Lock down an attaching webview's preferences in place. Returns whether it may attach: only one
  * that starts on `about:blank`, a web page or its source, so none starts on a `file:` or `data:` URL.
+ * A webview whose `partition` attribute is `INCOGNITO_PARTITION` goes in `incognitoPartition()`,
+ * every other one in the browser partition, whatever its element names.
  */
 export function secureWebviewAttach(
   webPreferences: WebPreferences,
   params: Record<string, string | undefined>,
+  incognitoPartition: () => string,
 ): boolean {
   if (!isAllowedSource(params.src)) return false;
   // Never the windows' session, whose requests to the server carry the app's secret.
-  webPreferences.partition = BROWSER_PARTITION;
+  webPreferences.partition =
+    params.partition === INCOGNITO_PARTITION ? incognitoPartition() : BROWSER_PARTITION;
   delete webPreferences.preload;
   webPreferences.nodeIntegration = false;
   webPreferences.nodeIntegrationInWorker = false;

@@ -45,18 +45,37 @@ export interface ServerIdentity {
   bootEpoch: string;
 }
 
+/**
+ * A page to open in an incognito tab (`loxel --incognito`). Never an inbox message: the inbox is
+ * saved on disk, and an incognito tab's URL never is.
+ */
+export interface IncognitoUrlMessage {
+  type: "open_url";
+  wtPath: string | null;
+  data: { url: string; incognito: true } & PanelOpenOptions;
+}
+
 /** What `POST /api/open` (`loxel <path>`, `loxel terminal`) sends a window. */
 export type OpenRequestMessage =
   // Worktree-scoped, or for the window in use when no window shows the worktree. A null `wtPath`
-  // (a link opened with Loxel as the browser) is for the window in use, in what it shows.
-  | { type: "open_url"; wtPath: string | null; data: { url: string } & PanelOpenOptions }
+  // (a link opened with Loxel as the browser) is for the window in use, in what it shows. An
+  // incognito tab's is for the window in use only.
+  | {
+      type: "open_url";
+      wtPath: string | null;
+      data: { url: string; incognito?: never } & PanelOpenOptions;
+    }
+  | IncognitoUrlMessage
   // Window-scoped (sent to the window the user is working in)
   | { type: "open_file"; data: OpenFilePanel }
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel };
 
 /** What the open inbox keeps for a window to come: any open request but a folder's. */
-export type InboxOpenMessage = Exclude<OpenRequestMessage, { type: "open_folder" }>;
+export type InboxOpenMessage = Exclude<
+  OpenRequestMessage,
+  { type: "open_folder" } | IncognitoUrlMessage
+>;
 
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =

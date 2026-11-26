@@ -11,6 +11,7 @@ import {
   BrowserWindow,
   dialog,
   powerMonitor,
+  type Session,
   session,
   shell,
   type WebFrameMain,
@@ -108,7 +109,7 @@ import {
 } from "./browser-media";
 import { installBrowserNotifications, trackWebviewNotifications } from "./browser-notifications";
 import { installBrowserPageLifecycle } from "./browser-page-lifecycle";
-import { BROWSER_PARTITION } from "./browser-partition";
+import { BROWSER_PARTITION, isIncognitoSession } from "./browser-partition";
 import { installBrowserPermissions } from "./browser-permissions";
 import { installSiteAccess, trackWebviewSiteAccess } from "./browser-site-access";
 import { installDefaultBrowser } from "./default-browser";
@@ -118,6 +119,11 @@ import {
   noteWindowFocused,
   trackWebviewExclusiveAccess,
 } from "./exclusive-access";
+import {
+  currentIncognitoSession,
+  incognitoPartition,
+  installIncognitoSessions,
+} from "./incognito-session";
 import {
   APP_QUIT_ENDING_TERMINALS,
   APP_QUIT_KEEPING_TERMINALS,
@@ -665,7 +671,8 @@ function buildAppMenu(): void {
       submenu: [
         {
           label: "New Window",
-          accelerator: "CmdOrCtrl+Shift+N",
+          // ⇧⌘N is New Incognito Tab, in the renderer: macOS menus take their keys before the page.
+          accelerator: "Alt+CmdOrCtrl+N",
           click: () => {
             openNewWindow();
           },
@@ -788,7 +795,7 @@ app.on("web-contents-created", (_, contents) => {
 
   // Lock down every webview's preferences, whatever its element asks for.
   contents.on("will-attach-webview", (event, webPreferences, params) => {
-    if (!secureWebviewAttach(webPreferences, params)) event.preventDefault();
+    if (!secureWebviewAttach(webPreferences, params, incognitoPartition)) event.preventDefault();
   });
 });
 
@@ -1120,25 +1127,36 @@ app.whenReady().then(async () => {
     });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
     const browserSession = session.fromPartition(BROWSER_PARTITION);
-    installAccountChooser(browserSession, promptForAccount);
-    installHybridQrCode(browserSession, browserPanelFrame);
     // Installed fonts are for Loxel's own window (the font pickers); browser panels never get
     // them, nor any permission outside their short allowlist.
     session.defaultSession.setPermissionCheckHandler(localFontsCheckHandler(isLocal));
-    installBrowserPermissions(
-      browserSession,
-      {
-        media: { check: checkMediaPermission, request: requestMediaPermission },
-        openExternal: requestExternalApp,
-        fileSystem: requestFileAccess,
-        localNetwork: localNetworkPermitted,
-      },
-      noteExclusiveAccessGrant,
+    const handleDownloads = installBrowserDownloads();
+    // What every browser session gets: the browser partition's now, each incognito one's when an
+    // incognito tab first needs it.
+    const setUpBrowserSession = (pages: Session) => {
+      installAccountChooser(pages, promptForAccount);
+      installHybridQrCode(pages, browserPanelFrame);
+      installBrowserPermissions(
+        pages,
+        {
+          media: { check: checkMediaPermission, request: requestMediaPermission },
+          openExternal: requestExternalApp,
+          fileSystem: requestFileAccess,
+          localNetwork: (contents, requestingOrigin, embeddingOrigin) =>
+            localNetworkPermitted(pages, contents, requestingOrigin, embeddingOrigin),
+        },
+        noteExclusiveAccessGrant,
+      );
+      installLocalNetworkAccess(pages);
+      handleDownloads(pages);
+    };
+    setUpBrowserSession(browserSession);
+    installIncognitoSessions(setUpBrowserSession);
+    installBrowserFavicons((incognito) => (incognito ? currentIncognitoSession() : browserSession));
+    installClientCertificatePicker(
+      (pages) => pages === browserSession || isIncognitoSession(pages),
     );
-    installBrowserFavicons(browserSession);
-    installLocalNetworkAccess(browserSession);
-    installBrowserDownloads(browserSession);
-    installClientCertificatePicker(browserSession);
+    // Not for incognito sessions, whose pages get no notifications.
     installServiceWorkerNotifications(browserSession);
 
     buildAppMenu();

@@ -287,7 +287,7 @@ describe("createClientCertificatePicker", () => {
 
 describe("installClientCertificatePicker", () => {
   const browserSession = {} as Session;
-  installClientCertificatePicker(browserSession);
+  installClientCertificatePicker((candidate) => candidate === browserSession);
   const select = appListeners.get("select-client-certificate")!;
   const created = appListeners.get("web-contents-created")!;
 

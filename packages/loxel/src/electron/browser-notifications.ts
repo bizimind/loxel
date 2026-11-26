@@ -41,6 +41,7 @@ import {
   parseNotificationMutes,
   parseNotificationSites,
 } from "./browser-notification-protocol";
+import { isIncognitoSession } from "./browser-partition";
 import {
   BROWSER_NOTIFICATION_CLICK,
   BROWSER_NOTIFICATION_CLOSE,
@@ -140,10 +141,13 @@ export function isSecureWebOrigin(origin: string): boolean {
   }
 }
 
-/** The site deciding for the calling frame, or null when the frame gets no notifications. */
+/**
+ * The site deciding for the calling frame, or null when the frame gets no notifications. Incognito
+ * tabs get none, as in Chrome: the notification center keeps them on the server.
+ */
 export function siteOf(event: IpcMainEvent | IpcMainInvokeEvent): string | null {
   const frame = webviewSenderFrame(event);
-  if (!frame) return null;
+  if (!frame || isIncognitoSession(event.sender.session)) return null;
   const top = event.sender.mainFrame.origin;
   // Cross-origin frames get no notifications, like in browsers: the user decides for the page.
   if (frame.origin !== top || !isSecureWebOrigin(top)) return null;

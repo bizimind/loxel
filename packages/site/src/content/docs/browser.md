@@ -1,6 +1,6 @@
 ---
 title: Browser
-description: A full browser in every task and in Home, for the dev server, the PR and the docs, with bookmarks, DevTools, one sign-in shared by every task, and the option to be your default browser.
+description: A full browser in every task and in Home, for the dev server, the PR and the docs, with bookmarks, DevTools, one sign-in shared by every task, incognito tabs, and the option to be your default browser.
 section: "In the code"
 order: 5
 ---
@@ -64,6 +64,20 @@ Windows a page tries to open without you clicking or typing are blocked, and eac
 
 ---
 
+## Incognito tabs
+
+Press `Cmd+Shift+N`, or run **New Incognito Tab** from the command palette, to open an incognito tab: a browser tab that forgets. Its cookies, sign-ins, site data and cache live only in memory, its address and title are never saved, and it doesn't appear in **Reopen Closed Tab** after you close it. Right-click a link and choose **Open Link in Incognito Tab** to open it in one, and from a terminal, `loxel --incognito <url>` does the same (see [Loxel CLI](/docs/cli#urls)).
+
+An incognito tab is marked with a hat-and-glasses icon on its tab and a tinted toolbar labeled **Incognito**. Links, new tabs and popups it opens are incognito too.
+
+All incognito tabs share one session, as Chrome's incognito windows do, so a site you sign in to in one incognito tab is signed in in the others, and never in your regular tabs. When you close the last incognito tab, in any window, that session and everything in it is gone, and the next incognito tab starts empty.
+
+Like any browser tab, an incognito tab keeps its page when you switch tasks and come back. It doesn't survive quitting Loxel or reloading the window: incognito tabs don't come back.
+
+An incognito tab follows the sites you **Block** in Settings, but not the ones you allowed. What you answer in its permission bars lasts until the incognito session ends, and is never saved to Settings. Incognito tabs don't send notifications, can't be bookmarked, and can't create passkeys, since a passkey made there couldn't be found again; signing in with a passkey you already have works. Files you download from an incognito tab stay in your Downloads folder.
+
+---
+
 ## Loxel as your default browser
 
 Loxel can be your Mac's default web browser, so links you open in other apps, such as Slack, Mail or a terminal outside Loxel, open in a browser panel. Click **Set as default browser** in **Settings > General > Default Browser**, or choose Loxel under **System Settings > Desktop & Dock > Default web browser**; macOS asks you to confirm. Settings shows whether Loxel already is the default.
@@ -78,7 +92,7 @@ While Loxel is your default browser, what Loxel itself sends to your default bro
 
 Right-click in a page for a menu that matches what you clicked:
 
-- **Link** — open it in a new tab (next to the current one, in the background), open it in your default browser, or copy its address.
+- **Link** — open it in a new tab (next to the current one, in the background), open it in an [incognito tab](#incognito-tabs), open it in your default browser, or copy its address.
 - **Image** — open it in a new tab, save it, copy it, or copy its address.
 - **Selected text** — copy it or search the web for it. In a text field you can also cut, paste and select all.
 - **Page** — back, forward, reload, or view the page source in a new tab.
@@ -89,7 +103,7 @@ Every menu ends with **Inspect Element**, which opens DevTools on the element yo
 
 ## Logins and passkeys
 
-All browser panels share one persistent session, so cookies and logins carry across panels, tasks and restarts: sign in to GitHub once and every task's tabs are signed in. In the signed macOS app, sites can create and use passkeys with Touch ID.
+All browser panels except [incognito tabs](#incognito-tabs) share one persistent session, so cookies and logins carry across panels, tasks and restarts: sign in to GitHub once and every task's tabs are signed in. In the signed macOS app, sites can create and use passkeys with Touch ID.
 
 You can also sign in with a passkey saved on your phone. When a site asks for a passkey your phone can provide, the browser panel that asked shows a QR code: scan it with your phone's camera and confirm on the phone. Bluetooth has to be on for both your Mac and your phone, because the phone checks that it is nearby, and the first time macOS asks to let Loxel use Bluetooth. **Hide QR code** only hides the code: the site still waits, so you can answer with Touch ID or a security key instead. When a site asks for a passkey that only a single device holds, such as one kept in this Mac's iCloud Keychain, no code appears and the site's other sign-in options still work.
 
