@@ -25,7 +25,7 @@
     "@excalidraw/element": "0.18.0-9036812b6",
     "@excalidraw/mermaid-to-excalidraw": "^3.6.0",
     "@excalidraw/utils": "^0.1.8",
-    "@napi-rs/canvas": "^1.1.0",
+    "@napi-rs/canvas": "^1.1.1",
     "commander": "^15.1.0",
     "linkedom": "^0.18.15",
     "roughjs": "^4.6.6",
