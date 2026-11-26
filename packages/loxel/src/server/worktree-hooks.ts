@@ -84,8 +84,8 @@ function reportHeldHooks(result: InitResult): InitResult {
 
 /**
  * Add the first worktree of a repository Loxel has just created from scratch, which starts trusted:
- * nothing in it came from anyone else. Trust is given on the new worktree, since a bare root does
- * not stand for the repository its worktrees belong to, and only then does `init.wt.sh` run.
+ * nothing in it came from anyone else. Trust is given on the new worktree, and only then does
+ * `init.wt.sh` run.
  */
 export async function addFirstWorktreeOfNewRepo(
   params: Omit<AddParams, HookOptions>,

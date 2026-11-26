@@ -26,10 +26,10 @@ Both autosave on the same schedule as the code editor.
 
 ## Creating a draft
 
-| Action                 | Shortcut                 |
-| ---------------------- | ------------------------ |
-| New markdown draft     | `Cmd+N` or `Cmd+Shift+M` |
-| New Excalidraw drawing | `Cmd+Shift+D`            |
+| Action                 | Shortcut      |
+| ---------------------- | ------------- |
+| New markdown draft     | `Cmd+Shift+M` |
+| New Excalidraw drawing | `Cmd+Shift+D` |
 
 New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab (or `Cmd+Shift+R` while it is the active tab).
 
@@ -67,7 +67,7 @@ Loxel moves the file and any open editor for it keeps working — no need to reo
 
 A common pattern when working with a coding agent:
 
-1. `Cmd+N` — open a markdown draft and outline the approach
+1. `Cmd+Shift+M` — open a markdown draft and outline the approach
 2. Point the agent at the draft — paste its contents or its path into the prompt
 3. When the design is settled, drag the doc into `docs/` in the project tree
 4. Commit it alongside the implementation
